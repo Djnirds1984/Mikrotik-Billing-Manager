@@ -82,18 +82,19 @@ These commands will run your application as a background service.
 
 Nginx will listen on the public port 80 and forward traffic to the correct Node.js server.
 
-1.  **Create a New Nginx Configuration File:**
+1.  **Edit the Default Configuration File:**
+    Instead of creating a new file, edit the `default` Nginx configuration file.
     ```bash
-    sudo nano /etc/nginx/sites-available/mikrotik-panel
+    sudo nano /etc/nginx/sites-available/default
     ```
 
 2.  **Paste the Following Configuration:**
-    This configuration tells Nginx how to route traffic for the main app, the API, and the WebSocket terminal. It includes important headers to ensure the application works correctly behind a proxy.
+    Ensure the **entire contents** of the file are replaced with this structure. This configuration routes traffic for the main app, the API, and the WebSocket terminal, and includes important headers to ensure the application works correctly behind a proxy.
 
     ```nginx
     server {
         listen 80;
-        server_name 192.168.200.13; # IMPORTANT: Replace with your server's IP or domain name
+        server_name <your_server_ip_or_domain>; # IMPORTANT: Replace with your server's IP or domain name
 
         # Main application UI and its APIs (port 3001)
         location / {
@@ -112,7 +113,7 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
             proxy_cache_bypass $http_upgrade;
         }
 
-        # MikroTik API Backend (port 3002)
+        # MikroTik API Backend (port 3002) - REMOVED TRAILING SLASH
         location /mt-api/ {
             proxy_pass http://localhost:3002; # <-- No trailing slash here
             proxy_http_version 1.1;
@@ -123,7 +124,7 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
             proxy_cache_bypass $http_upgrade;
         }
 
-        # WebSocket for the Terminal (port 3002)
+        # WebSocket for the Terminal (port 3002) - REMOVED TRAILING SLASH
         location /ws/ {
             proxy_pass http://localhost:3002; # <-- No trailing slash here
             proxy_http_version 1.1;
@@ -140,19 +141,17 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
     This is a crucial three-step verification process.
 
     ```bash
-    # 1. Remove the default Nginx config to prevent conflicts.
-    sudo rm /etc/nginx/sites-enabled/default
+    # 1. Ensure the site configuration is enabled by creating a symbolic link.
+    # If this command says "File exists", that is okay and you can ignore it.
+    sudo ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
 
-    # 2. Create a symbolic link to enable your new site configuration.
-    sudo ln -s /etc/nginx/sites-available/mikrotik-panel /etc/nginx/sites-enabled/
-
-    # 3. Test configuration syntax and logic.
+    # 2. Test configuration syntax and logic.
     sudo nginx -t
 
-    # 4. Restart Nginx to apply the new configuration.
+    # 3. Restart Nginx to apply the new configuration.
     sudo systemctl restart nginx
 
-    # 5. Verify that Nginx is now listening on port 80.
+    # 4. Verify that Nginx is now listening on port 80.
     # The output of this command MUST show 'nginx' listening on ':::80' or '0.0.0.0:80'.
     sudo ss -tulpn | grep :80
     ```
@@ -168,4 +167,4 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
 You can now access your application directly by navigating to your Orange Pi's IP address in your browser:
 
 `http://<your_orange_pi_ip>`
-(e.g., `http://192.168.200.13`)
+(e.g., `http://192.168.1.10`)
