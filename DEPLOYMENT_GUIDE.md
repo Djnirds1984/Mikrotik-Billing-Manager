@@ -26,7 +26,7 @@ This guide details how to set up the MikroTik Orange Pi Manager in a standard pr
     Change the ownership of the directory to your current user. This is **crucial** as it allows you to clone the repository and run `npm install` without needing `sudo` for every command.
     ```bash
     # Replace $USER with your actual username if it's not detected correctly
-    sudo chown -R root:root /var/www/html
+    sudo chown -R $USER:$USER /var/www/html
     ```
 
 ## Step 2: Clone and Install the Application
@@ -88,54 +88,79 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
     ```
 
 2.  **Paste the Following Configuration:**
-    This configuration tells Nginx how to route traffic for the main app, the API, and the WebSocket terminal.
+    This configuration tells Nginx how to route traffic for the main app, the API, and the WebSocket terminal. It includes important headers to ensure the application works correctly behind a proxy.
+
     ```nginx
     server {
         listen 80;
-        server_name your_domain_or_ip; # Replace with your server's IP or domain
+        server_name 192.168.200.13; # IMPORTANT: Replace with your server's IP or domain name
 
         # Main application UI and its APIs (port 3001)
         location / {
             proxy_pass http://localhost:3001;
             proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection 'upgrade';
+            
+            # Add Standard Proxy Headers
             proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            
+            # WebSockets/Keep-Alive Headers
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
             proxy_cache_bypass $http_upgrade;
         }
 
         # MikroTik API Backend (port 3002)
         location /mt-api/ {
-            proxy_pass http://localhost:3002/mt-api/;
+            proxy_pass http://localhost:3002; # <-- No trailing slash here
             proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection 'upgrade';
             proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
             proxy_cache_bypass $http_upgrade;
         }
 
         # WebSocket for the Terminal (port 3002)
         location /ws/ {
-            proxy_pass http://localhost:3002/ws/;
+            proxy_pass http://localhost:3002; # <-- No trailing slash here
             proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
         }
     }
     ```
     Save and exit the file (`Ctrl+X`, then `Y`, then `Enter`).
 
-3.  **Enable the New Site and Restart Nginx:**
+3.  **Enable the Site and Restart Nginx:**
+    This is a crucial three-step verification process.
+
     ```bash
-    # Create a symbolic link to enable the site
+    # 1. Remove the default Nginx config to prevent conflicts.
+    sudo rm /etc/nginx/sites-enabled/default
+
+    # 2. Create a symbolic link to enable your new site configuration.
     sudo ln -s /etc/nginx/sites-available/mikrotik-panel /etc/nginx/sites-enabled/
 
-    # Test the configuration for errors
+    # 3. Test configuration syntax and logic.
     sudo nginx -t
 
-    # If the test is successful, restart Nginx to apply the changes
+    # 4. Restart Nginx to apply the new configuration.
     sudo systemctl restart nginx
+
+    # 5. Verify that Nginx is now listening on port 80.
+    # The output of this command MUST show 'nginx' listening on ':::80' or '0.0.0.0:80'.
+    sudo ss -tulpn | grep :80
+    ```
+
+4.  **Restart PM2 Applications:**
+    The final step is to restart your backend applications so they recognize and use the new proxy headers you configured in Nginx.
+    ```bash
+    pm2 restart all
     ```
 
 ## Step 5: Access Your Panel
@@ -143,3 +168,4 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
 You can now access your application directly by navigating to your Orange Pi's IP address in your browser:
 
 `http://<your_orange_pi_ip>`
+(e.g., `http://192.168.200.13`)
