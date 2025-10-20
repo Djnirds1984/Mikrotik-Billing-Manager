@@ -26,7 +26,7 @@ This guide details how to set up the MikroTik Orange Pi Manager in a standard pr
     Change the ownership of the directory to your current user. This is **crucial** as it allows you to clone the repository and run `npm install` without needing `sudo` for every command.
     ```bash
     # Replace $USER with your actual username if it's not detected correctly
-    sudo chown -R $USER:$USER /var/www/html
+    sudo chown -R root:root /var/www/html
     ```
 
 ## Step 2: Clone and Install the Application
