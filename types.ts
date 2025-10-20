@@ -462,6 +462,7 @@ export interface VersionInfo {
     title: string;
     description: string;
     hash?: string;
+    remoteUrl?: string;
 }
 
 export interface NewVersionInfo {

@@ -1689,20 +1689,28 @@ app.use('/api/ngrok', ngrokApi);
 app.get('/api/current-version', protect, async (req, res) => {
     try {
         await runCommand("git rev-parse --is-inside-work-tree");
-        const stdout = await runCommand("git log -1 --pretty=format:'%h%x00%s%x00%b'");
-        if (!stdout.trim()) {
+
+        // Fetch version info and remote URL in parallel
+        const [logOutput, remoteUrl] = await Promise.all([
+            runCommand("git log -1 --pretty=format:'%h%x00%s%x00%b'"),
+            runCommand("git config --get remote.origin.url").catch(() => 'N/A') // Default to 'N/A' if it fails
+        ]);
+
+        if (!logOutput.trim()) {
             return res.json({ 
                 hash: 'N/A', 
                 title: 'No Commits Found', 
-                description: 'This repository does not have any commits yet.' 
+                description: 'This repository does not have any commits yet.',
+                remoteUrl: remoteUrl.trim()
             });
         }
         
-        const parts = stdout.split('\0');
+        const parts = logOutput.split('\0');
         const versionInfo = {
             hash: parts[0] || '',
             title: parts[1] || '',
             description: (parts[2] || '').trim(),
+            remoteUrl: remoteUrl.trim()
         };
 
         res.json(versionInfo);

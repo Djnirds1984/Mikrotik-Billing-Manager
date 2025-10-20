@@ -39,9 +39,17 @@ const LogViewer: React.FC<{ logs: LogEntry[] }> = ({ logs }) => {
 const VersionInfoDisplay: React.FC<{ title: string; info: VersionInfo }> = ({ title, info }) => (
     <div>
         <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2">{title}</h3>
-        <div className="bg-slate-100 dark:bg-slate-900/50 p-4 rounded-lg">
-            <p className="text-lg font-semibold text-[--color-primary-500] dark:text-[--color-primary-400]">{info.title} <span className="text-xs font-mono text-slate-500 ml-2">{info.hash}</span></p>
-            {info.description && <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{info.description}</p>}
+        <div className="bg-slate-100 dark:bg-slate-900/50 p-4 rounded-lg space-y-3">
+            <div>
+                <p className="text-lg font-semibold text-[--color-primary-500] dark:text-[--color-primary-400]">{info.title} <span className="text-xs font-mono text-slate-500 ml-2">{info.hash}</span></p>
+                {info.description && <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{info.description}</p>}
+            </div>
+            {info.remoteUrl && (
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-700">
+                     <p className="text-xs text-slate-500 dark:text-slate-400">Update Source Repository:</p>
+                     <a href={info.remoteUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-sky-600 dark:text-sky-400 hover:underline break-all">{info.remoteUrl}</a>
+                </div>
+            )}
         </div>
     </div>
 );
