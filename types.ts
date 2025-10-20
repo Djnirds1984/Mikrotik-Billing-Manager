@@ -41,6 +41,7 @@ export interface RouterConfig {
   user: string;
   password?: string;
   port: number;
+  api_type?: 'rest' | 'legacy';
 }
 
 export interface RouterConfigWithId extends RouterConfig {

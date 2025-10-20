@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import type { RouterConfig, RouterConfigWithId } from '../types.ts';
 import { testRouterConnection } from '../services/mikrotikService.ts';
@@ -17,6 +18,7 @@ const RouterForm: React.FC<RouterFormProps> = ({ onSave, onCancel, initialData }
         user: 'admin',
         password: '',
         port: 80, // Default MikroTik REST API port
+        api_type: 'rest',
     });
     const [isTesting, setIsTesting] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -33,14 +35,24 @@ const RouterForm: React.FC<RouterFormProps> = ({ onSave, onCancel, initialData }
                 user: 'admin',
                 password: '',
                 port: 80,
+                api_type: 'rest',
             });
         }
     }, [initialData]);
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
         setRouter(prev => ({ ...prev, [name]: name === 'port' ? parseInt(value, 10) || 0 : value }));
         setTestResult(null); // Clear test result on change
+    };
+
+    const handleApiTypeChange = (apiType: 'rest' | 'legacy') => {
+        setRouter(prev => ({
+            ...prev,
+            api_type: apiType,
+            port: apiType === 'legacy' ? 8728 : 80
+        }));
+        setTestResult(null);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -81,6 +93,13 @@ const RouterForm: React.FC<RouterFormProps> = ({ onSave, onCancel, initialData }
                  <div>
                     <label htmlFor="host" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Host / IP Address</label>
                     <input type="text" name="host" id="host" value={router.host} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder="e.g., 192.168.88.1" />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">API Type</label>
+                    <div className="mt-1 grid grid-cols-2 gap-2 rounded-lg bg-slate-100 dark:bg-slate-700 p-1">
+                        <button type="button" onClick={() => handleApiTypeChange('rest')} className={`w-full rounded-md py-2 px-3 text-sm font-medium ${router.api_type === 'rest' ? 'bg-white dark:bg-slate-900 text-[--color-primary-600]' : 'text-slate-600 dark:text-slate-300'}`}>REST API (v7+)</button>
+                        <button type="button" onClick={() => handleApiTypeChange('legacy')} className={`w-full rounded-md py-2 px-3 text-sm font-medium ${router.api_type === 'legacy' ? 'bg-white dark:bg-slate-900 text-[--color-primary-600]' : 'text-slate-600 dark:text-slate-300'}`}>Legacy API (v6)</button>
+                    </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>

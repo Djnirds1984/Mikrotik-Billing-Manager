@@ -9,6 +9,7 @@ const os = require('os');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
+const { RouterOSClient } = require('node-routeros');
 
 const app = express();
 const PORT = 3002;
@@ -100,6 +101,17 @@ const createRouterInstance = (config) => {
     if (!config || !config.host || !config.user) {
         throw new Error('Invalid router configuration: host and user are required.');
     }
+    
+    if (config.api_type === 'legacy') {
+        return new RouterOSClient({
+            host: config.host,
+            user: config.user,
+            password: config.password || '',
+            port: config.port || 8728,
+        });
+    }
+
+    // Default to REST API
     const protocol = config.port === 443 ? 'https' : 'http';
     const baseURL = `${protocol}://${config.host}:${config.port}/rest`;
     const auth = { username: config.user, password: config.password || '' };
@@ -129,8 +141,8 @@ const createRouterInstance = (config) => {
 
 // Middleware to fetch and cache router config from the main panel server
 const getRouterConfig = async (req, res, next) => {
-    const { routerId } = req.params;
-
+    const routerId = req.params.routerId || req.body.id;
+    
     // Grab the Authorization header from the incoming request from the frontend
     const authHeader = req.headers.authorization;
     
@@ -141,7 +153,8 @@ const getRouterConfig = async (req, res, next) => {
     }
 
     if (routerConfigCache.has(routerId)) {
-        req.routerInstance = createRouterInstance(routerConfigCache.get(routerId));
+        req.routerConfig = routerConfigCache.get(routerId);
+        req.routerInstance = createRouterInstance(req.routerConfig);
         return next();
     }
     try {
@@ -160,6 +173,7 @@ const getRouterConfig = async (req, res, next) => {
 
         // Cache the found config
         routerConfigCache.set(routerId, config);
+        req.routerConfig = config;
         req.routerInstance = createRouterInstance(config);
         next();
     } catch (error) {
@@ -234,8 +248,12 @@ app.get('/api/license/status', async (req, res) => {
 app.post('/mt-api/test-connection', async (req, res) => {
     await handleApiRequest(req, res, async () => {
         const instance = createRouterInstance(req.body);
-        // Use a simple, universal endpoint for testing
-        await instance.get('/system/resource');
+        if (req.body.api_type === 'legacy') {
+            await instance.connect();
+            await instance.close();
+        } else {
+            await instance.get('/system/resource');
+        }
         return { success: true, message: 'Connection successful!' };
     });
 });

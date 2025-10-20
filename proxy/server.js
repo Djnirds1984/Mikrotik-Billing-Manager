@@ -423,6 +423,20 @@ async function initDb() {
             user_version = 14;
         }
 
+        if (user_version < 15) {
+            console.log('Applying migration v15 (Add api_type to routers)...');
+            try {
+                await db.exec('ALTER TABLE routers ADD COLUMN api_type TEXT NOT NULL DEFAULT "rest";');
+            } catch (e) {
+                if (!e.message.includes('duplicate column name')) {
+                    throw e;
+                }
+                console.log('Column "api_type" already exists.');
+            }
+            await db.exec('PRAGMA user_version = 15;');
+            user_version = 15;
+        }
+
 
     } catch (err) {
         console.error('Failed to initialize database:', err);
