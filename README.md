@@ -63,8 +63,8 @@ This is the recommended way to run the panel in a production environment.
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/Djnirds1984/MikroTik-Orange-Pi-Manager.git
-    cd MikroTik-Orange-Pi-Manager
+    git clone https://github.com/Djnirds1984/Mikrotik-Billing-Manager.git
+    cd Mikrotik-Billing-Manager
     ```
 
 2.  **Install Dependencies:**
@@ -108,7 +108,7 @@ To update the panel to the latest version from GitHub:
 
 1.  **Navigate to the project directory:**
     ```bash
-    cd /path/to/MikroTik-Orange-Pi-Manager
+    cd /path/to/Mikrotik-Billing-Manager
     ```
 2.  **Pull the latest changes:**
     ```bash
