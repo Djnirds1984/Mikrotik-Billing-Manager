@@ -1,0 +1,30 @@
+{
+  "name": "mikrotik-orange-pi-manager",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@google/genai": "^1.15.0",
+    "react": "^19.2.0",
+    "recharts": "^2.12.7",
+    "xterm": "5.3.0",
+    "xterm-addon-fit": "0.8.0",
+    "xterm-addon-web-links": "0.9.0",
+    "react-dom": "^19.2.0",
+    "path": "^0.12.7",
+    "url": "^0.11.4",
+    "react-chartjs-2": "^5.3.0",
+    "chart.js": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
