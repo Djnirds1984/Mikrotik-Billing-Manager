@@ -1,4 +1,5 @@
 
+
 import type {
     RouterConfig,
     RouterConfigWithId,
@@ -41,7 +42,8 @@ type RuleType = 'filter' | 'nat' | 'mangle';
 
 // A generic fetcher for MikroTik API calls
 const fetchMikrotikData = async <T>(router: RouterConfig, path: string, options: RequestInit = {}): Promise<T> => {
-    const apiBaseUrl = `http://${window.location.hostname}:3002/mt-api`;
+    // Use a relative URL to allow for reverse proxying (e.g., via Nginx)
+    const apiBaseUrl = `/mt-api`;
     
     const fullPath = 'id' in router ? `${apiBaseUrl}/${(router as RouterConfigWithId).id}${path}` : `${apiBaseUrl}${path}`;
 

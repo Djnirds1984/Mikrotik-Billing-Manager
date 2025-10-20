@@ -28,7 +28,7 @@ This two-process model provides a robust separation of concerns, ensuring the ap
 
 ## Deployment Guide (Orange Pi / Debian)
 
-This is the recommended way to run the panel in a production environment.
+This is the recommended way to run the panel in a production environment in your user's home directory.
 
 ### 1. Prerequisites
 
@@ -46,13 +46,10 @@ This is the recommended way to run the panel in a production environment.
 
 ### 2. MikroTik Router Configuration
 
--   **Enable REST API:** You must enable the **REST API** on your router. In the terminal, run:
-    ```routeros
-    /ip service enable www
-    # OR for HTTPS (recommended)
-    /ip service enable www-ssl
-    ```
-    The default port for `www` is 80 and for `www-ssl` is 443. Ensure you use the correct port when adding the router in the panel. It is also recommended to create a dedicated user group with appropriate permissions for the API user.
+-   **Enable API:** This panel supports both the modern **REST API** (RouterOS v7+) and the **legacy API** (RouterOS v6).
+    -   **REST API (v7+):** Enable the `www` or `www-ssl` service. The default port for `www` is 80 and for `www-ssl` is 443.
+    -   **Legacy API (v6):** Enable the `api` or `api-ssl` service. The default port for `api` is 8728 and for `api-ssl` is 8729.
+    -   It is recommended to create a dedicated user group with appropriate permissions for the API user.
 
 -   **Enable ZeroTier Package (Optional):** For the ZeroTier Management feature to work, ensure the `zerotier` package is installed and enabled on your router.
     ```routeros
@@ -102,9 +99,17 @@ This is the recommended way to run the panel in a production environment.
 
 ---
 
+## Advanced Deployment with Nginx
+
+For a more robust setup, you can run the panel on the standard web port 80 using Nginx as a reverse proxy. This is the recommended method for a production server.
+
+**[See the full Nginx Deployment Guide here](./DEPLOYMENT_GUIDE.md)**
+
+---
+
 ## Updating the Panel
 
-To update the panel to the latest version from GitHub:
+You can update the panel directly from the "Updater" page in the UI. If you need to update manually via the command line:
 
 1.  **Navigate to the project directory:**
     ```bash
@@ -133,8 +138,8 @@ To update the panel to the latest version from GitHub:
 If you can see the UI but data from the router isn't loading, it's likely an issue with the API backend server.
 
 -   **Check the logs:** Run `pm2 logs mikrotik-api-backend`. Look for connection errors or crashes.
--   **Verify Router Config:** In the "Routers" page, double-check that the IP address, username, password, and **port** for your router are correct. The default port for HTTP is 80 and HTTPS is 443.
--   **Firewall:** Ensure your router's firewall is not blocking access to the REST API port from the Orange Pi's IP address.
+-   **Verify Router Config:** In the "Routers" page, double-check that the IP address, username, password, and **port** for your router are correct.
+-   **Firewall:** Ensure your router's firewall is not blocking access to the API port from the Orange Pi's IP address.
 
 ### AI Features Not Working
 
