@@ -23,23 +23,33 @@ This guide details how to set up the MikroTik Orange Pi Manager in a standard pr
     ```
 
 2.  **Set Permissions:**
-    Change the ownership of the directory to your current user. This is **crucial** as it allows you to clone the repository and run `npm install` without needing `sudo` for every command.
+    Ensure the web root directory is owned by the `root` user, which is a common security practice.
     ```bash
-    # Replace $USER with your actual username if it's not detected correctly
-    sudo chown -R $USER:$USER /var/www/html
+    sudo chown -R root:root /var/www/html
     ```
 
 ## Step 2: Clone and Install the Application
 
-1.  **Navigate and Clone:**
+1.  **Navigate and Clone as Root:**
+    Clone the repository into the web root directory. You will need `sudo` because the directory is owned by root.
     ```bash
     cd /var/www/html
-    git clone https://github.com/Djnirds1984/Mikrotik-Billing-Manager.git
+    sudo git clone https://github.com/Djnirds1984/Mikrotik-Billing-Manager.git
+    ```
+
+2.  **Set Project Directory Permissions:**
+    Change the ownership of the newly cloned project directory to your current user. This is **crucial** as it allows you to manage the application (install dependencies, run PM2) without needing `sudo` for every command.
+    ```bash
+    # Replace $USER with your actual username if it's not detected correctly
+    sudo chown -R root:root /var/www/html/Mikrotik-Billing-Manager
+    ```
+
+3.  **Navigate into Project Directory:**
+    ```bash
     cd Mikrotik-Billing-Manager
     ```
-    Your project will now be located at `/var/www/html/Mikrotik-Billing-Manager`.
 
-2.  **Install Dependencies:**
+4.  **Install Dependencies:**
     Run these commands from the project's **root directory** (`/var/www/html/Mikrotik-Billing-Manager`).
     ```bash
     # Install for UI Server (proxy)
@@ -49,7 +59,7 @@ This guide details how to set up the MikroTik Orange Pi Manager in a standard pr
     npm install --prefix api-backend
     ```
 
-3.  **Configure Gemini API Key:**
+5.  **Configure Gemini API Key:**
     Edit the `env.js` file and paste your Gemini API key.
     ```bash
     nano env.js
