@@ -188,10 +188,11 @@ app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) =
             }
         } else {
             const response = await req.routerInstance.get('/system/resource');
-            resource = response.data.length > 0 ? response.data[0] : null;
+            // The REST API for /system/resource returns a single object, not an array.
+            resource = response.data;
         }
 
-        if (!resource) {
+        if (!resource || Object.keys(resource).length === 0) {
             throw new Error('Could not fetch system resource from router.');
         }
 
