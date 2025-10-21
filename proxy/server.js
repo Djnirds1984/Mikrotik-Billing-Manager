@@ -677,6 +677,14 @@ const protect = (req, res, next) => {
     }
 };
 
+const requireSuperadmin = (req, res, next) => {
+    const roleName = req.user?.role?.name?.toLowerCase();
+    if (req.user && roleName === 'superadmin') {
+        return next();
+    }
+    res.status(403).json({ message: 'Forbidden: Superadmin access required.' });
+};
+
 authRouter.post('/reset-all', protect, async (req, res) => {
     try {
         await db.exec('DELETE FROM users');
@@ -692,6 +700,22 @@ authRouter.get('/status', protect, (req, res) => {
 
 authRouter.post('/logout', (req, res) => {
     res.status(200).json({ message: 'Logged out successfully.' });
+});
+
+authRouter.post('/change-superadmin-password', protect, requireSuperadmin, async (req, res) => {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+    }
+    try {
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        // 'superadmin' is the fixed username for the superadmin account
+        await superadminDb.run('UPDATE superadmin SET password = ? WHERE username = ?', hashedPassword, 'superadmin');
+        res.json({ message: 'Superadmin password updated successfully.' });
+    } catch (e) {
+        console.error(`[SUPERADMIN] Password change error: ${e.message}`);
+        res.status(500).json({ message: `Failed to update password: ${e.message}` });
+    }
 });
 
 app.use('/api/auth', authRouter);
