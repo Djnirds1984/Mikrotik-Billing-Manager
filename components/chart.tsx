@@ -1,19 +1,32 @@
-
 import React from 'react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { TrafficHistoryPoint } from '../types.ts';
 
 interface ChartProps {
     trafficHistory: TrafficHistoryPoint[];
 }
 
+const formatBps = (bps: number): string => {
+    if (typeof bps !== 'number' || !isFinite(bps) || bps < 0) return '0 bps';
+    if (bps < 1000) return `${bps.toFixed(0)} bps`;
+    if (bps < 1000 * 1000) return `${(bps / 1000).toFixed(1)} Kbps`;
+    if (bps < 1000 * 1000 * 1000) return `${(bps / (1000 * 1000)).toFixed(1)} Mbps`;
+    return `${(bps / (1000 * 1000 * 1000)).toFixed(1)} Gbps`;
+};
+
+const CustomTooltip: React.FC<any> = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+        return (
+            <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm p-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-lg text-xs">
+                <p className="text-green-600 dark:text-green-400 font-semibold">{`RX: ${formatBps(payload[0].value)}`}</p>
+                <p className="text-sky-600 dark:text-sky-400 font-semibold">{`TX: ${formatBps(payload[1].value)}`}</p>
+            </div>
+        );
+    }
+    return null;
+};
+
 export const Chart: React.FC<ChartProps> = ({ trafficHistory }) => {
-    const width = 300;
-    const height = 150;
-    const margin = { top: 5, right: 0, bottom: 5, left: 0 };
-
-    const chartWidth = width - margin.left - margin.right;
-    const chartHeight = height - margin.top - margin.bottom;
-
     if (trafficHistory.length < 2) {
         return (
             <div className="flex items-center justify-center h-full text-slate-400 dark:text-slate-500 text-sm">
@@ -21,50 +34,61 @@ export const Chart: React.FC<ChartProps> = ({ trafficHistory }) => {
             </div>
         );
     }
-
-    const maxRx = Math.max(...trafficHistory.map(d => d.rx), 0);
-    const maxTx = Math.max(...trafficHistory.map(d => d.tx), 0);
-    const maxVal = Math.max(maxRx, maxTx, 1); // Ensure not zero to avoid division by zero
-
-    const xScale = (index: number) => (index / (trafficHistory.length - 1)) * chartWidth;
-    const yScale = (value: number) => chartHeight - (value / maxVal) * chartHeight;
-
-    const createPath = (dataKey: 'rx' | 'tx') => {
-        let path = `M ${xScale(0)},${yScale(trafficHistory[0][dataKey])}`;
-        for (let i = 1; i < trafficHistory.length; i++) {
-            path += ` L ${xScale(i)},${yScale(trafficHistory[i][dataKey])}`;
-        }
-        return path;
-    };
     
-    const rxPath = createPath('rx');
-    const txPath = createPath('tx');
-
-    const formatBps = (bps: number): string => {
-        if (bps < 1000) return `${bps.toFixed(0)} bps`;
-        if (bps < 1000 * 1000) return `${(bps / 1000).toFixed(1)}K`;
-        if (bps < 1000 * 1000 * 1000) return `${(bps / (1000 * 1000)).toFixed(1)}M`;
-        return `${(bps / (1000 * 1000 * 1000)).toFixed(1)}G`;
-    };
-
     return (
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
-            <g transform={`translate(${margin.left}, ${margin.top})`}>
-                {/* Y-axis labels */}
-                <text x={5} y={12} className="text-xs fill-current text-slate-400">{formatBps(maxVal)}</text>
-                <text x={5} y={chartHeight - 2} className="text-xs fill-current text-slate-400">0 bps</text>
-
-                {/* Grid lines */}
-                <line x1="0" y1={yScale(maxVal * 0.75)} x2={chartWidth} y2={yScale(maxVal * 0.75)} className="stroke-current text-slate-200 dark:text-slate-700" strokeWidth="0.5" strokeDasharray="2,2" />
-                <line x1="0" y1={yScale(maxVal * 0.5)} x2={chartWidth} y2={yScale(maxVal * 0.5)} className="stroke-current text-slate-200 dark:text-slate-700" strokeWidth="0.5" strokeDasharray="2,2" />
-                <line x1="0" y1={yScale(maxVal * 0.25)} x2={chartWidth} y2={yScale(maxVal * 0.25)} className="stroke-current text-slate-200 dark:text-slate-700" strokeWidth="0.5" strokeDasharray="2,2" />
-                
-                {/* TX Path (blue/sky) */}
-                <path d={txPath} fill="none" className="stroke-sky-500" strokeWidth="2" />
-                
-                {/* RX Path (green) */}
-                <path d={rxPath} fill="none" className="stroke-green-500" strokeWidth="2" />
-            </g>
-        </svg>
+        <ResponsiveContainer width="100%" height="100%">
+            <AreaChart
+                data={trafficHistory}
+                margin={{
+                    top: 5,
+                    right: 0,
+                    left: 0,
+                    bottom: 5,
+                }}
+            >
+                <defs>
+                    <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4}/>
+                        <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
+                    </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="opacity-10 dark:opacity-20" />
+                <XAxis dataKey="name" tick={false} axisLine={false} tickLine={false} />
+                <YAxis 
+                    tickFormatter={formatBps} 
+                    domain={[0, 'dataMax']}
+                    tick={{ fontSize: 10 }}
+                    stroke="currentColor"
+                    className="text-slate-500 dark:text-slate-400"
+                    axisLine={false}
+                    tickLine={false}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Area 
+                    isAnimationActive={true}
+                    animationDuration={300}
+                    type="monotone" 
+                    dataKey="rx" 
+                    stroke="#10b981" 
+                    fillOpacity={1} 
+                    fill="url(#colorRx)" 
+                    strokeWidth={2}
+                />
+                <Area 
+                    isAnimationActive={true}
+                    animationDuration={300}
+                    type="monotone" 
+                    dataKey="tx" 
+                    stroke="#0ea5e9" 
+                    fillOpacity={1} 
+                    fill="url(#colorTx)"
+                    strokeWidth={2}
+                />
+            </AreaChart>
+        </ResponsiveContainer>
     );
 };
