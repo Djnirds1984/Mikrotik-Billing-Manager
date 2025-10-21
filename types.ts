@@ -58,10 +58,13 @@ export interface SystemInfo {
 }
 
 export interface Interface {
+  id: string;
   name: string;
   type: string;
   rxRate: number;
   txRate: number;
+  'rx-byte'?: number;
+  'tx-byte'?: number;
 }
 
 export interface TrafficHistoryPoint {

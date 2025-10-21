@@ -143,6 +143,24 @@ const getRouterConfig = async (req, res, next) => {
 };
 
 // --- Special Endpoints ---
+
+const parseMemory = (memStr) => {
+    if (!memStr || typeof memStr !== 'string') return 0;
+    const value = parseFloat(memStr);
+    if (memStr.toLowerCase().includes('kib')) return value * 1024;
+    if (memStr.toLowerCase().includes('mib')) return value * 1024 * 1024;
+    if (memStr.toLowerCase().includes('gib')) return value * 1024 * 1024 * 1024;
+    return value;
+};
+
+const formatBytes = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+};
+
 app.post('/mt-api/test-connection', async (req, res) => {
     await handleApiRequest(req, res, async () => {
         const instance = createRouterInstance(req.body);
@@ -153,6 +171,116 @@ app.post('/mt-api/test-connection', async (req, res) => {
             await instance.get('/system/resource');
         }
         return { success: true, message: 'Connection successful!' };
+    });
+});
+
+app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        let resource;
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const result = await client.write('/system/resource/print');
+                resource = result.length > 0 ? normalizeLegacyObject(result[0]) : null;
+            } finally {
+                await client.close();
+            }
+        } else {
+            const response = await req.routerInstance.get('/system/resource');
+            resource = response.data.length > 0 ? response.data[0] : null;
+        }
+
+        if (!resource) {
+            throw new Error('Could not fetch system resource from router.');
+        }
+
+        const totalMemoryBytes = parseMemory(resource['total-memory']);
+        const freeMemoryBytes = parseMemory(resource['free-memory']);
+        const usedMemoryBytes = totalMemoryBytes - freeMemoryBytes;
+        const memoryUsage = totalMemoryBytes > 0 ? (usedMemoryBytes / totalMemoryBytes) * 100 : 0;
+        
+        return {
+            boardName: resource['board-name'],
+            version: resource.version,
+            cpuLoad: parseFloat(resource['cpu-load']),
+            uptime: resource.uptime,
+            memoryUsage: parseFloat(memoryUsage.toFixed(1)),
+            totalMemory: formatBytes(totalMemoryBytes),
+        };
+    });
+});
+
+app.get('/mt-api/:routerId/ip/wan-routes', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        let routes;
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                routes = await client.write('/ip/route/print');
+                routes = routes.map(normalizeLegacyObject);
+            } finally {
+                await client.close();
+            }
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            routes = response.data;
+        }
+        return routes.filter(r => r['check-gateway']);
+    });
+});
+
+app.get('/mt-api/:routerId/ip/wan-failover-status', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        let routes;
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                routes = await client.write('/ip/route/print');
+                routes = routes.map(normalizeLegacyObject);
+            } finally {
+                await client.close();
+            }
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            routes = response.data;
+        }
+        const wanRoutes = routes.filter(r => r['check-gateway']);
+        const enabled = wanRoutes.some(r => r.disabled === 'false' || r.disabled === false);
+        return { enabled };
+    });
+});
+
+app.post('/mt-api/:routerId/ip/wan-failover', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { enabled } = req.body; // true to enable, false to disable
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                let routes = await client.write('/ip/route/print');
+                routes = routes.map(normalizeLegacyObject);
+                const wanRoutes = routes.filter(r => r['check-gateway']);
+
+                const promises = wanRoutes.map(r => 
+                    client.write(['/ip/route/set', `=.id=${r.id}`, `=disabled=${enabled ? 'no' : 'yes'}`])
+                );
+                await Promise.all(promises);
+            } finally {
+                await client.close();
+            }
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            const wanRoutes = response.data.filter(r => r['check-gateway']);
+
+            const promises = wanRoutes.map(r => 
+                req.routerInstance.patch(`/ip/route/${r.id}`, { disabled: !enabled })
+            );
+            await Promise.all(promises);
+        }
+        return { message: `WAN failover routes have been ${enabled ? 'enabled' : 'disabled'}.` };
     });
 });
 
@@ -199,35 +327,6 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
 
             // Normalize and perform any custom logic
             let finalResult = Array.isArray(result) ? result.map(normalizeLegacyObject) : normalizeLegacyObject(result);
-
-            // Special handling for interface traffic calculation
-            if (apiPath === '/interface') {
-                const now = Date.now();
-                const previousStats = trafficStatsCache.get(req.params.routerId);
-                if (previousStats) {
-                    const timeDiffSeconds = (now - previousStats.timestamp) / 1000;
-                    finalResult.forEach(iface => {
-                        const prevIface = previousStats.interfaces[iface.name];
-                        if (prevIface && timeDiffSeconds > 0.1) {
-                            let rxByteDiff = iface['rx-byte'] - prevIface.rxByte;
-                            let txByteDiff = iface['tx-byte'] - prevIface.txByte;
-                            if (rxByteDiff < 0) rxByteDiff = iface['rx-byte'];
-                            if (txByteDiff < 0) txByteDiff = iface['tx-byte'];
-                            iface.rxRate = Math.round((rxByteDiff * 8) / timeDiffSeconds);
-                            iface.txRate = Math.round((txByteDiff * 8) / timeDiffSeconds);
-                        } else {
-                            iface.rxRate = 0;
-                            iface.txRate = 0;
-                        }
-                    });
-                }
-                const newInterfaceMap = {};
-                finalResult.forEach(iface => {
-                    newInterfaceMap[iface.name] = { rxByte: iface['rx-byte'], txByte: iface['tx-byte'] };
-                });
-                trafficStatsCache.set(req.params.routerId, { timestamp: now, interfaces: newInterfaceMap });
-            }
-            
             return finalResult;
         } 
         

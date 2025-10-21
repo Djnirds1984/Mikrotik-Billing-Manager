@@ -65,6 +65,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     const [showFixer, setShowFixer] = useState(false);
 
     const intervalRef = useRef<number | null>(null);
+    const previousInterfacesRef = useRef<{ timestamp: number; interfaces: Interface[] } | null>(null);
 
     // --- Data Fetching ---
 
@@ -102,35 +103,56 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
             setSelectedChartInterface1(null);
             setSelectedChartInterface2(null);
             setPppoeCount(0);
+            previousInterfacesRef.current = null;
         }
 
         try {
-            const [info, currentInterfaces, pppoeActive] = await Promise.all([
+            const [info, currentInterfacesData, pppoeActive] = await Promise.all([
                 getSystemInfo(selectedRouter),
                 getInterfaces(selectedRouter),
                 getPppActiveConnections(selectedRouter).catch(() => []), 
             ]);
             setSystemInfo(info);
             setPppoeCount(Array.isArray(pppoeActive) ? pppoeActive.length : 0);
-
+            
+            const now = Date.now();
             setInterfaces(prevInterfaces => {
-                const now = new Date().toLocaleTimeString();
-                
-                if (!Array.isArray(currentInterfaces)) {
-                    console.error("Received non-array data for interfaces:", currentInterfaces);
+                const previousState = previousInterfacesRef.current;
+                previousInterfacesRef.current = { timestamp: now, interfaces: currentInterfacesData };
+
+                if (!Array.isArray(currentInterfacesData)) {
+                    console.error("Received non-array data for interfaces:", currentInterfacesData);
                     return prevInterfaces;
                 }
 
-                const newInterfaces = currentInterfaces.map((iface: Interface) => {
+                const timeDiffSeconds = previousState ? (now - previousState.timestamp) / 1000 : 0;
+
+                const newInterfaces = currentInterfacesData.map((iface: Interface) => {
                     const existingIface = prevInterfaces.find(p => p.name === iface.name);
-                    const newHistoryPoint: TrafficHistoryPoint = { name: now, rx: iface.rxRate, tx: iface.txRate };
+                    const prevIfaceData = previousState?.interfaces.find(p => p.name === iface.name);
+
+                    let rxRate = 0;
+                    let txRate = 0;
+
+                    if (prevIfaceData && timeDiffSeconds > 0.1) {
+                        let rxByteDiff = (iface['rx-byte'] || 0) - (prevIfaceData['rx-byte'] || 0);
+                        let txByteDiff = (iface['tx-byte'] || 0) - (prevIfaceData['tx-byte'] || 0);
+
+                        if (rxByteDiff < 0) rxByteDiff = iface['rx-byte'] || 0;
+                        if (txByteDiff < 0) txByteDiff = iface['tx-byte'] || 0;
+                        
+                        rxRate = Math.round((rxByteDiff * 8) / timeDiffSeconds);
+                        txRate = Math.round((txByteDiff * 8) / timeDiffSeconds);
+                    }
+
+                    const newHistoryPoint: TrafficHistoryPoint = { name: new Date().toLocaleTimeString(), rx: rxRate, tx: txRate };
                     
                     let newHistory = existingIface ? [...existingIface.trafficHistory, newHistoryPoint] : [newHistoryPoint];
                     if (newHistory.length > MAX_HISTORY_POINTS) {
                         newHistory = newHistory.slice(newHistory.length - MAX_HISTORY_POINTS);
                     }
 
-                    return { ...iface, trafficHistory: newHistory };
+                    return { ...iface, rxRate, txRate, trafficHistory: newHistory };
                 });
                 return newInterfaces;
             });
