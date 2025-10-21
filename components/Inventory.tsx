@@ -131,6 +131,7 @@ const StockManager: React.FC<{
     updateItem: (item: InventoryItem) => void;
     deleteItem: (itemId: string) => void;
 }> = ({ items, addItem, updateItem, deleteItem }) => {
+    const { formatCurrency } = useLocalization();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -196,7 +197,7 @@ const StockManager: React.FC<{
                                 <tr key={item.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                     <td className="px-6 py-4 font-medium text-slate-900 dark:text-slate-200">{item.name}</td>
                                     <td className="px-6 py-4 text-center font-mono text-cyan-600 dark:text-cyan-400">{item.quantity}</td>
-                                    <td className="px-6 py-4 font-mono text-green-600 dark:text-green-400">{item.price ? `$${item.price.toFixed(2)}` : <span className="text-slate-500">N/A</span>}</td>
+                                    <td className="px-6 py-4 font-mono text-green-600 dark:text-green-400">{item.price ? formatCurrency(item.price) : <span className="text-slate-500">N/A</span>}</td>
                                     <td className="px-6 py-4 font-mono text-slate-600 dark:text-slate-300">{item.serialNumber || <span className="text-slate-500">N/A</span>}</td>
                                     <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{new Date(item.dateAdded).toLocaleDateString()}</td>
                                     <td className="px-6 py-4 text-right space-x-1">

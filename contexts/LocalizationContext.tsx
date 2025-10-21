@@ -104,10 +104,32 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
 
     const formatCurrency = (amount: number): string => {
-        const lang = settings.language === 'fil' ? 'en-PH' : 'en-US';
-        return new Intl.NumberFormat(lang, {
+        const { currency, language } = settings;
+        let locale;
+
+        // Determine best locale for currency formatting
+        switch (currency) {
+            case 'PHP':
+                locale = 'en-PH';
+                break;
+            case 'EUR':
+                // Use a locale based on language if possible, otherwise a default EUR locale
+                if (language === 'es') locale = 'es-ES';
+                else if (language === 'pt') locale = 'pt-PT';
+                else locale = 'de-DE'; // A common default for EUR
+                break;
+            case 'BRL':
+                locale = 'pt-BR';
+                break;
+            case 'USD':
+            default:
+                locale = 'en-US';
+                break;
+        }
+
+        return new Intl.NumberFormat(locale, {
             style: 'currency',
-            currency: settings.currency,
+            currency: currency,
         }).format(amount);
     };
 

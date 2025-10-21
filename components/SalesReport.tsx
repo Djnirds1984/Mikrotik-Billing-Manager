@@ -3,6 +3,7 @@ import type { SaleRecord, CompanySettings } from '../types.ts';
 import { CurrencyDollarIcon, TrashIcon, PrinterIcon } from '../constants.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { useLocalization } from '../contexts/LocalizationContext.tsx';
 
 interface SalesReportProps {
     salesData: SaleRecord[];
@@ -23,6 +24,7 @@ const StatCard: React.FC<{ title: string, value: string | number, icon: React.Re
 
 export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale, clearSales, companySettings }) => {
     const { hasPermission } = useAuth();
+    const { formatCurrency } = useLocalization();
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
@@ -80,12 +82,6 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         window.addEventListener('afterprint', handleAfterPrint);
         return () => window.removeEventListener('afterprint', handleAfterPrint);
     }, []);
-
-    const formatCurrency = (amount: number) => {
-        // Find a currency from the sales data, default to USD
-        const currency = salesData[0]?.currency || 'USD';
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
-    };
 
     return (
         <>
