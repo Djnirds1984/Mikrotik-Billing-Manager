@@ -9,8 +9,7 @@ const os = require('os');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
-const nodeRouterOS = require('node-routeros');
-const RouterOSClient = nodeRouterOS.RouterOSClient || nodeRouterOS;
+const RouterOSClient = require('node-routeros');
 
 const app = express();
 const PORT = 3002;
@@ -135,7 +134,7 @@ const getRouterConfig = async (req, res, next) => {
 
         routerConfigCache.set(routerId, config);
         req.routerConfig = config;
-        req.routerInstance = createRouterInstance(config);
+        req.routerInstance = createRouterInstance(req.routerConfig);
         next();
     } catch (error) {
         res.status(500).json({ message: `Failed to fetch router config: ${error.message}` });
