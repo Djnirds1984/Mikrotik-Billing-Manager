@@ -9,7 +9,8 @@ const os = require('os');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
-const { RouterOSClient } = require('node-routeros');
+const nodeRouterOS = require('node-routeros');
+const RouterOSClient = nodeRouterOS.RouterOSClient || nodeRouterOS;
 
 const app = express();
 const PORT = 3002;
