@@ -1,5 +1,4 @@
 
-
 import type {
     RouterConfig,
     RouterConfigWithId,
@@ -333,7 +332,13 @@ export const listFiles = (router: RouterConfigWithId): Promise<MikroTikFile[]> =
 };
 
 export const getFileContent = async (router: RouterConfigWithId, fileId: string): Promise<{ contents: string }> => {
-    const path = `/file?=.id=${encodeURIComponent(fileId)}&.proplist=contents`;
+    // The path needs to be different for legacy vs REST APIs.
+    // REST (v7+) uses `?=.id=...`
+    // Legacy (v6) via node-routeros needs `?.id=...` which is achieved by passing `.id` as a query parameter key.
+    const path = router.api_type === 'legacy'
+        ? `/file?.id=${encodeURIComponent(fileId)}&.proplist=contents`
+        : `/file?=.id=${encodeURIComponent(fileId)}&.proplist=contents`;
+        
     // The response can sometimes be a single object instead of an array when filtering by ID.
     const response = await fetchMikrotikData<any | any[]>(router, path, {
         method: 'GET',
