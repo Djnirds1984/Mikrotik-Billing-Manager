@@ -105,6 +105,7 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
     server {
         listen 80;
         server_name <your_server_ip_or_domain>; # IMPORTANT: Replace with your server's IP or domain name
+        client_max_body_size 10m; # Allow larger file uploads for logos, etc.
 
         # Main application UI and its APIs (port 3001)
         location / {

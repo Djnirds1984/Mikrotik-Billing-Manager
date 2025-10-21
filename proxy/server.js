@@ -26,8 +26,8 @@ const SECRET_KEY = process.env.JWT_SECRET || 'a-very-weak-secret-key-for-dev-onl
 const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret-string-for-licenses-!@#$%^&*()';
 
 
-app.use(express.json({ limit: '5mb' }));
-app.use(express.text({ limit: '5mb' })); // For AI fixer
+app.use(express.json({ limit: '10mb' }));
+app.use(express.text({ limit: '10mb' })); // For AI fixer
 
 // Ensure backup directory exists
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
