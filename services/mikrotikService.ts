@@ -333,9 +333,10 @@ export const listFiles = (router: RouterConfigWithId): Promise<MikroTikFile[]> =
 };
 
 export const getFileContent = async (router: RouterConfigWithId, fileId: string): Promise<{ contents: string }> => {
-    // Using GET with query parameters for wider RouterOS version compatibility, as requested by user.
-    // The fileId (e.g., "*1") must be URI encoded to be passed in a URL.
-    const path = `/file/print?=.id=${encodeURIComponent(fileId)}&.proplist=contents`;
+    // The /print command is specific to the legacy API and causes an error on the REST API.
+    // The correct REST endpoint is the resource path itself (/file) with query parameters for filtering.
+    // The backend's legacy handler will correctly re-add /print if the router's api_type is 'legacy'.
+    const path = `/file?=.id=${encodeURIComponent(fileId)}&.proplist=contents`;
     const response = await fetchMikrotikData<any[]>(router, path, {
         method: 'GET',
     });
