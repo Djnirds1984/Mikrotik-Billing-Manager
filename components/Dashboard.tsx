@@ -8,7 +8,7 @@ import { RouterIcon, ExclamationTriangleIcon, UsersIcon, ChipIcon } from '../con
 import { AIFixer } from './AIFixer.tsx';
 
 const StatCard: React.FC<{ title: string; children: React.ReactNode; className?: string }> = ({ title, children, className }) => (
-    <div className={`bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700 ${className}`}>
+    <div className={`bg-white dark:bg-slate-800/50 p-6 rounded-lg border border-slate-200/80 dark:border-slate-800 shadow-sm ${className}`}>
         <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-4">{title}</h3>
         <div className="space-y-4">
             {children}
@@ -289,7 +289,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
             {selectedRouter && selectableInterfaces.length > 0 && (
                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {chartData1 && (
-                        <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700">
+                        <div className="bg-white dark:bg-slate-800/50 p-6 rounded-lg border border-slate-200/80 dark:border-slate-800 shadow-sm">
                             <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4">
                                 <h4 className="font-bold text-slate-800 dark:text-slate-100 text-lg">Live Interface Traffic 1</h4>
                                 <select
@@ -315,7 +315,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         </div>
                     )}
                      {chartData2 && (
-                        <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700">
+                        <div className="bg-white dark:bg-slate-800/50 p-6 rounded-lg border border-slate-200/80 dark:border-slate-800 shadow-sm">
                             <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4">
                                 <h4 className="font-bold text-slate-800 dark:text-slate-100 text-lg">Live Interface Traffic 2</h4>
                                 <select

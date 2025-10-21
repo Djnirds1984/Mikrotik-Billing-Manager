@@ -88,11 +88,11 @@ const RouterForm: React.FC<RouterFormProps> = ({ onSave, onCancel, initialData }
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                     <label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Router Name</label>
-                    <input type="text" name="name" id="name" value={router.name} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder="e.g., Home Router" />
+                    <input type="text" name="name" id="name" value={router.name} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder="e.g., Home Router" />
                 </div>
                  <div>
                     <label htmlFor="host" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Host / IP Address</label>
-                    <input type="text" name="host" id="host" value={router.host} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder="e.g., 192.168.88.1" />
+                    <input type="text" name="host" id="host" value={router.host} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder="e.g., 192.168.88.1" />
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">API Type</label>
@@ -104,16 +104,16 @@ const RouterForm: React.FC<RouterFormProps> = ({ onSave, onCancel, initialData }
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label htmlFor="user" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Username</label>
-                        <input type="text" name="user" id="user" value={router.user} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" />
+                        <input type="text" name="user" id="user" value={router.user} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" />
                     </div>
                     <div>
                         <label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
-                        <input type="password" name="password" id="password" value={router.password || ''} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder={initialData ? "Leave blank to keep existing" : ""} />
+                        <input type="password" name="password" id="password" value={router.password || ''} onChange={handleChange} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder={initialData ? "Leave blank to keep existing" : ""} />
                     </div>
                 </div>
                  <div>
                     <label htmlFor="port" className="block text-sm font-medium text-slate-700 dark:text-slate-300">API Port</label>
-                    <input type="number" name="port" id="port" value={router.port} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" />
+                    <input type="number" name="port" id="port" value={router.port} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" />
                 </div>
                 
                 {testResult && (
@@ -123,15 +123,15 @@ const RouterForm: React.FC<RouterFormProps> = ({ onSave, onCancel, initialData }
                 )}
 
                 <div className="flex flex-col-reverse sm:flex-row sm:justify-end sm:items-center gap-3 pt-4">
-                     <button type="submit" className="w-full sm:w-auto px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-[--color-primary-600] hover:bg-[--color-primary-500] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-800 focus:ring-[--color-primary-500]">
+                     <button type="submit" className="w-full sm:w-auto px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-800 focus:ring-[--color-primary-500]">
                         Save Router
                     </button>
-                    <button type="button" onClick={onCancel} className="w-full sm:w-auto px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none">Cancel</button>
+                    <button type="button" onClick={onCancel} className="w-full sm:w-auto px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-lg shadow-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none">Cancel</button>
                     <button
                         type="button"
                         onClick={handleTestConnection}
                         disabled={isTesting || !router.host || !router.user}
-                        className="w-full sm:w-auto px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-800 focus:ring-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full sm:w-auto px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-lg shadow-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-800 focus:ring-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isTesting ? 'Testing...' : 'Test Connection'}
                     </button>
@@ -190,7 +190,7 @@ export const Routers: React.FC<RoutersProps> = ({ routers, onAddRouter, onUpdate
                 {!isAdding && !editingRouter && (
                      <button
                         onClick={handleAddNew}
-                        className="bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-bold py-2 px-4 rounded-lg transition-colors self-start md:self-auto"
+                        className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-sm hover:shadow-md self-start md:self-auto"
                     >
                         Add New Router
                     </button>

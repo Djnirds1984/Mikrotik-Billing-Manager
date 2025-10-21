@@ -49,11 +49,11 @@ const PlanForm: React.FC<{
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.plan_name')}</label>
-                        <input type="text" name="name" value={plan.name} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500]" placeholder={t('billing.plan_name_placeholder')} />
+                        <input type="text" name="name" value={plan.name} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]" placeholder={t('billing.plan_name_placeholder')} />
                     </div>
                     <div>
                         <label htmlFor="pppoeProfile" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.pppoe_profile')}</label>
-                        <select name="pppoeProfile" value={plan.pppoeProfile} onChange={handleChange} required disabled={isLoadingProfiles || profiles.length === 0} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] disabled:opacity-50">
+                        <select name="pppoeProfile" value={plan.pppoeProfile} onChange={handleChange} required disabled={isLoadingProfiles || profiles.length === 0} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] disabled:opacity-50">
                             {isLoadingProfiles ? <option>{t('billing.loading_profiles')}</option> : profiles.length === 0 ? <option>{t('billing.no_profiles_found')}</option> : profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                         </select>
                     </div>
@@ -61,11 +61,11 @@ const PlanForm: React.FC<{
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label htmlFor="price" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.price')}</label>
-                        <input type="number" name="price" value={plan.price} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                        <input type="number" name="price" value={plan.price} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
                     </div>
                      <div>
                         <label htmlFor="cycle" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.cycle')}</label>
-                        <select name="cycle" value={plan.cycle} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500]">
+                        <select name="cycle" value={plan.cycle} onChange={handleChange} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]">
                             <option>{t('billing.monthly')}</option>
                             <option>{t('billing.quarterly')}</option>
                             <option>{t('billing.yearly')}</option>
@@ -74,11 +74,11 @@ const PlanForm: React.FC<{
                 </div>
                 <div>
                     <label htmlFor="description" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.description')}</label>
-                    <textarea name="description" value={plan.description} onChange={handleChange} rows={2} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500]" placeholder={t('billing.description_placeholder')}></textarea>
+                    <textarea name="description" value={plan.description} onChange={handleChange} rows={2} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]" placeholder={t('billing.description_placeholder')}></textarea>
                 </div>
                 <div className="flex items-center justify-end space-x-4 pt-4">
-                    <button type="button" onClick={onCancel} className="px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700">{t('common.cancel')}</button>
-                    <button type="submit" className="px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-[--color-primary-600] hover:bg-[--color-primary-500]">{t('common.save_plan')}</button>
+                    <button type="button" onClick={onCancel} className="px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-lg shadow-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700">{t('common.cancel')}</button>
+                    <button type="submit" className="px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] transition-all hover:shadow-md">{t('common.save_plan')}</button>
                 </div>
             </form>
         </div>
@@ -154,7 +154,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
              <div className="flex justify-between items-center mb-6">
                 <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">{t('titles.billing')}</h2>
                 {!isAdding && !editingPlan && (
-                     <button onClick={handleAddNew} className="bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-bold py-2 px-4 rounded-lg">
+                     <button onClick={handleAddNew} className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all">
                         {t('billing.add_new_plan')}
                     </button>
                 )}

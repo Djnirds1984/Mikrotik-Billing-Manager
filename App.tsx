@@ -2,6 +2,8 @@
 
 
 
+
+
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
@@ -202,7 +204,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   };
 
   return (
-    <div className="flex bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 min-h-screen">
+    <div className="flex bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 min-h-screen">
       <Sidebar 
         currentView={currentView} 
         setCurrentView={setCurrentView} 

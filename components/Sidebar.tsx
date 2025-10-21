@@ -24,12 +24,12 @@ const NavItem: React.FC<{
     <li>
       <button
         onClick={disabled ? undefined : onClick}
-        className={`flex items-center w-full p-3 text-base font-normal rounded-lg transition duration-75 group ${
+        className={`flex items-center w-full p-3 text-base rounded-lg transition duration-150 group ${
           isActive
-            ? 'bg-[--color-primary-600] text-white'
+            ? 'bg-[--color-primary-500]/10 text-[--color-primary-600] dark:text-[--color-primary-300] font-semibold'
             : disabled
             ? 'text-slate-400 dark:text-slate-600 cursor-not-allowed bg-slate-100 dark:bg-slate-800'
-            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700/50'
         }`}
         disabled={disabled}
       >

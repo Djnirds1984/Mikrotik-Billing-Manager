@@ -1,10 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="font-sans">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MikroTik AI Script Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script>
       // Apply themes from localStorage before page load to prevent FOUC
       // Dark/Light Mode
@@ -22,6 +25,13 @@
       // Configure Tailwind CSS for class-based dark mode
       tailwind.config = {
         darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+          },
+        },
       };
     </script>
   <script type="importmap">
@@ -46,38 +56,44 @@
 }
 </script>
 <style>
+  /* Base styles */
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
   /* Define CSS variables for color themes */
   .theme-orange {
-    --color-primary-300: #fdba74; /* orange-300 */
-    --color-primary-400: #fb923c; /* orange-400 */
-    --color-primary-500: #f97316; /* orange-500 */
-    --color-primary-600: #ea580c; /* orange-600 */
-    --color-primary-700: #c2410c; /* orange-700 */
-    --color-primary-800: #9a3412; /* orange-800 */
+    --color-primary-300: #fdba74;
+    --color-primary-400: #fb923c;
+    --color-primary-500: #f97316;
+    --color-primary-600: #ea580c;
+    --color-primary-700: #c2410c;
+    --color-primary-800: #9a3412;
   }
   .theme-sky {
-    --color-primary-300: #7dd3fc; /* sky-300 */
-    --color-primary-400: #38bdf8; /* sky-400 */
-    --color-primary-500: #0ea5e9; /* sky-500 */
-    --color-primary-600: #0284c7; /* sky-600 */
-    --color-primary-700: #0369a1; /* sky-700 */
-    --color-primary-800: #075985; /* sky-800 */
+    --color-primary-300: #7dd3fc;
+    --color-primary-400: #38bdf8;
+    --color-primary-500: #0ea5e9;
+    --color-primary-600: #0284c7;
+    --color-primary-700: #0369a1;
+    --color-primary-800: #075985;
   }
   .theme-emerald {
-    --color-primary-300: #6ee7b7; /* emerald-300 */
-    --color-primary-400: #34d399; /* emerald-400 */
-    --color-primary-500: #10b981; /* emerald-500 */
-    --color-primary-600: #059669; /* emerald-600 */
-    --color-primary-700: #047857; /* emerald-700 */
-    --color-primary-800: #065f46; /* emerald-800 */
+    --color-primary-300: #6ee7b7;
+    --color-primary-400: #34d399;
+    --color-primary-500: #10b981;
+    --color-primary-600: #059669;
+    --color-primary-700: #047857;
+    --color-primary-800: #065f46;
   }
   .theme-violet {
-    --color-primary-300: #c4b5fd; /* violet-300 */
-    --color-primary-400: #a78bfa; /* violet-400 */
-    --color-primary-500: #8b5cf6; /* violet-500 */
-    --color-primary-600: #7c3aed; /* violet-600 */
-    --color-primary-700: #6d28d9; /* violet-700 */
-    --color-primary-800: #5b21b6; /* violet-800 */
+    --color-primary-300: #c4b5fd;
+    --color-primary-400: #a78bfa;
+    --color-primary-500: #8b5cf6;
+    --color-primary-600: #7c3aed;
+    --color-primary-700: #6d28d9;
+    --color-primary-800: #5b21b6;
   }
 
   @media print {

@@ -128,7 +128,7 @@ const RouterSelector: React.FC<{
         <div className="relative" ref={dropdownRef}>
             <button 
                 onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-2 px-3 py-2 text-sm bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-md transition-colors"
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-md transition-colors shadow-sm"
             >
                 <span className="text-slate-500 dark:text-slate-300 hidden sm:inline">{t('topbar.router')}:</span>
                 <span className="font-semibold text-slate-800 dark:text-white max-w-[120px] sm:max-w-xs truncate">{selectedRouter?.name || t('topbar.select')}</span>
