@@ -296,30 +296,33 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
             let result;
             try {
                 const method = req.method.toLowerCase();
-                let command = apiPath;
+                const pathParts = apiPath.split('/').filter(Boolean);
+                const hasId = pathParts.length > 1;
+                const command = `/${pathParts[0]}`;
+                const id = hasId ? pathParts[1] : null;
+
                 let query = [];
 
                 if (method === 'get') {
                     query.push(command + '/print');
                     Object.entries(req.query).forEach(([key, value]) => query.push(`?${key}=${value}`));
-                } else if (method === 'post' || method === 'put') {
+                } else if (method === 'post' && hasId) { // POST to a resource ID implies an update ('set')
+                    query.push(command + '/set', `=.id=${id}`);
+                    Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
+                } else if (method === 'post' || method === 'put') { // POST/PUT to collection implies 'add'
                     query.push(command + '/add');
                     Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
                 } else if (method === 'patch') {
-                    command = apiPath.substring(0, apiPath.lastIndexOf('/'));
-                    const id = apiPath.substring(apiPath.lastIndexOf('/') + 1);
                     query.push(command + '/set', `=.id=${id}`);
                     Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
                 } else if (method === 'delete') {
-                    command = apiPath.substring(0, apiPath.lastIndexOf('/'));
-                    const id = apiPath.substring(apiPath.lastIndexOf('/') + 1);
                     query.push(command + '/remove', `=.id=${id}`);
                 }
 
                 if (query.length > 0) {
                     result = await client.write(query);
                 } else {
-                    throw new Error(`Unsupported legacy method: ${method.toUpperCase()}`);
+                    throw new Error(`Unsupported legacy method/path combination: ${method.toUpperCase()} ${apiPath}`);
                 }
             } finally {
                 await client.close();

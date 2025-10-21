@@ -333,32 +333,35 @@ export const listFiles = (router: RouterConfigWithId): Promise<MikroTikFile[]> =
 };
 
 export const getFileContent = async (router: RouterConfigWithId, fileId: string): Promise<{ contents: string }> => {
-    // The /print command is specific to the legacy API and causes an error on the REST API.
-    // The correct REST endpoint is the resource path itself (/file) with query parameters for filtering.
-    // The backend's legacy handler will correctly re-add /print if the router's api_type is 'legacy'.
     const path = `/file?=.id=${encodeURIComponent(fileId)}&.proplist=contents`;
-    const response = await fetchMikrotikData<any[]>(router, path, {
+    // The response can sometimes be a single object instead of an array when filtering by ID.
+    const response = await fetchMikrotikData<any | any[]>(router, path, {
         method: 'GET',
     });
 
-    if (response && response.length > 0 && typeof response[0].contents !== 'undefined') {
-        return { contents: response[0].contents };
+    const fileObject = Array.isArray(response) ? response[0] : response;
+
+    if (fileObject && typeof fileObject.contents !== 'undefined') {
+        return { contents: fileObject.contents };
     }
     // Handle cases where the file is empty or the property is missing
     return { contents: '' };
 };
 
 export const saveFileContent = (router: RouterConfigWithId, fileId: string, content: string): Promise<any> => {
+    // Some RouterOS versions handle POST better than PATCH for updating file contents.
+    // This uses POST as a more compatible "set" operation.
     return fetchMikrotikData(router, `/file/${encodeURIComponent(fileId)}`, {
-        method: 'PATCH', 
+        method: 'POST', 
         body: JSON.stringify({ contents: content }) 
     });
 };
 
 export const createFile = (router: RouterConfigWithId, name: string, content: string): Promise<any> => {
-    // Using PUT as requested, which is a valid method for file creation in RouterOS REST API.
+    // POST is the correct verb for creating a new resource where the server assigns the ID.
+    // For files, the 'name' property acts as the identifier on creation.
     return fetchMikrotikData(router, '/file', { 
-        method: 'PUT', 
+        method: 'POST', 
         body: JSON.stringify({ name, contents: content }) 
     });
 };
