@@ -55,8 +55,24 @@ async function initSuperadminDb() {
             console.log('Default superadmin created with username "superadmin" and password "superadmin".');
         }
     } catch (err) {
-        console.error('Failed to initialize superadmin database:', err);
-        process.exit(1);
+        if (err.code === 'SQLITE_CORRUPT') {
+            console.error('Superadmin database is corrupt. Deleting and recreating it.');
+            try {
+                if (superadminDb) {
+                    await superadminDb.close();
+                }
+                await fsPromises.unlink(SUPERADMIN_DB_PATH);
+                console.log('Corrupt superadmin database deleted. Retrying initialization...');
+                // Retry initialization
+                return initSuperadminDb();
+            } catch (deleteErr) {
+                console.error('CRITICAL: Failed to delete corrupt superadmin database. Please check file permissions.', deleteErr);
+                process.exit(1);
+            }
+        } else {
+            console.error('Failed to initialize superadmin database:', err);
+            process.exit(1);
+        }
     }
 }
 
