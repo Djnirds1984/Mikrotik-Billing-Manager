@@ -574,6 +574,81 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
     });
 });
 
+app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const scriptName = "dhcp-lease-add-to-pending";
+        const authorizedListName = "authorized-dhcp-users";
+        const pendingListName = "pending-dhcp-users";
+        const portalRedirectComment = "Redirect pending to portal";
+        const proxyRedirectComment = "Panel Captive Portal Redirect";
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const findAndRemove = async (path, query) => {
+                    const items = await client.write(path + '/print', query);
+                    for (const item of items) {
+                        await client.write(path + '/remove', [`=.id=${item['.id']}`]);
+                    }
+                };
+
+                await findAndRemove('/ip/firewall/nat', [`?comment=${portalRedirectComment}`]);
+                await findAndRemove('/ip/proxy/access', [`?comment=${proxyRedirectComment}`]);
+                await client.write('/ip/proxy/set', ['=enabled=no']);
+
+                const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
+                for (const comment of filterComments) {
+                    await findAndRemove('/ip/firewall/filter', [`?comment=${comment}`]);
+                }
+
+                const dhcpServers = await client.write('/ip/dhcp-server/print', [`?lease-script=${scriptName}`]);
+                for (const server of dhcpServers) {
+                    await client.write('/ip/dhcp-server/set', [`=.id=${server['.id']}`, '=lease-script=none']);
+                }
+                
+                await findAndRemove('/system/script', [`?name=${scriptName}`]);
+                
+                await findAndRemove('/ip/firewall/address-list', [`?list=${authorizedListName}`]);
+                await findAndRemove('/ip/firewall/address-list', [`?list=${pendingListName}`]);
+
+            } finally {
+                await client.close();
+            }
+        } else { // REST API
+            const findAndRemove = async (path, query) => {
+                try {
+                    const response = await req.routerInstance.get(`${path}?${query}`);
+                    for (const item of response.data) {
+                        await req.routerInstance.delete(`${path}/${item.id}`);
+                    }
+                } catch (e) { console.warn(`Could not remove items at ${path}:`, e.message); }
+            };
+
+            await findAndRemove('/ip/firewall/nat', `comment=${portalRedirectComment}`);
+            await findAndRemove('/ip/proxy/access', `comment=${proxyRedirectComment}`);
+            try { await req.routerInstance.patch('/ip/proxy/0', { enabled: false }); } catch(e) { console.warn('Could not disable proxy:', e.message); }
+
+            const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
+            for (const comment of filterComments) {
+                await findAndRemove('/ip/firewall/filter', `comment=${comment}`);
+            }
+
+            try {
+                const dhcpServers = await req.routerInstance.get(`/ip/dhcp-server?lease-script=${scriptName}`);
+                for (const server of dhcpServers.data) {
+                    await req.routerInstance.patch(`/ip/dhcp-server/${server.id}`, { 'lease-script': 'none' });
+                }
+            } catch(e) { console.warn('Could not unset DHCP script:', e.message); }
+            
+            await findAndRemove('/system/script', `name=${scriptName}`);
+            await findAndRemove('/ip/firewall/address-list', `list=${authorizedListName}`);
+            await findAndRemove('/ip/firewall/address-list', `list=${pendingListName}`);
+        }
+
+        return { message: 'DHCP Captive Portal components have been uninstalled.' };
+    });
+});
 
 // Generic proxy handler for all other requests
 app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {

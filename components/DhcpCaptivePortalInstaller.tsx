@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { RouterConfigWithId, Interface } from '../types.ts';
-import { getInterfaces, runDhcpCaptivePortalSetup } from '../services/mikrotikService.ts';
+import { getInterfaces, runDhcpCaptivePortalSetup, runDhcpCaptivePortalUninstall } from '../services/mikrotikService.ts';
 import { Loader } from './Loader.tsx';
-import { ServerIcon, CogIcon, ExclamationTriangleIcon, CheckCircleIcon } from '../constants.tsx';
+import { ServerIcon, CogIcon, ExclamationTriangleIcon, CheckCircleIcon, TrashIcon } from '../constants.tsx';
 
 export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
     const [panelIp, setPanelIp] = useState('');
@@ -10,6 +10,7 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
     const [availableInterfaces, setAvailableInterfaces] = useState<Interface[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isInstalling, setIsInstalling] = useState(false);
+    const [isUninstalling, setIsUninstalling] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -58,6 +59,24 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
             setError((err as Error).message);
         } finally {
             setIsInstalling(false);
+        }
+    };
+
+    const handleUninstall = async () => {
+        if (!window.confirm("This will forcefully remove all scripts, firewall rules, and address lists associated with the DHCP Captive Portal. This action cannot be undone. Are you sure?")) {
+            return;
+        }
+
+        setIsUninstalling(true);
+        setError(null);
+        setSuccessMessage(null);
+        try {
+            const result = await runDhcpCaptivePortalUninstall(selectedRouter);
+            setSuccessMessage(result.message);
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setIsUninstalling(false);
         }
     };
 
@@ -125,14 +144,22 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
                     {error && <div className="p-3 my-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-md text-sm">{error}</div>}
                     {successMessage && <div className="p-3 my-4 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-md text-sm flex items-center gap-2"><CheckCircleIcon className="w-5 h-5" />{successMessage}</div>}
 
-                    <div className="flex justify-center pt-4">
+                    <div className="flex flex-col sm:flex-row justify-center pt-4 gap-4">
                         <button 
                             onClick={handleInstall} 
-                            disabled={isInstalling || !panelIp || !lanInterface}
+                            disabled={isInstalling || isUninstalling || !panelIp || !lanInterface}
                             className="w-full sm:w-auto px-8 py-3 bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
                         >
                             {isInstalling ? <Loader /> : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>}
                             {isInstalling ? 'Installing...' : 'Install Portal System Components'}
+                        </button>
+                        <button 
+                            onClick={handleUninstall} 
+                            disabled={isInstalling || isUninstalling}
+                            className="w-full sm:w-auto px-8 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
+                        >
+                            {isUninstalling ? <Loader /> : <TrashIcon className="w-6 h-6" />}
+                            {isUninstalling ? 'Uninstalling...' : 'Uninstall Portal'}
                         </button>
                     </div>
                 </div>

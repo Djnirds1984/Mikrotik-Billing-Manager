@@ -347,6 +347,12 @@ export const runDhcpCaptivePortalSetup = (router: RouterConfigWithId, params: Dh
     });
 };
 
+export const runDhcpCaptivePortalUninstall = (router: RouterConfigWithId): Promise<{ message: string }> => {
+    return fetchMikrotikData(router, '/dhcp-captive-portal/uninstall', { 
+        method: 'POST', 
+    });
+};
+
 // FIX: Add functions for DHCP Captive Portal client management
 // --- DHCP Captive Portal Client Management ---
 
