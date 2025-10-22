@@ -7,6 +7,7 @@ import { ServerIcon, CogIcon, ExclamationTriangleIcon, CheckCircleIcon } from '.
 export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
     const [panelIp, setPanelIp] = useState('');
     const [lanInterface, setLanInterface] = useState('');
+    const [availableInterfaces, setAvailableInterfaces] = useState<Interface[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isInstalling, setIsInstalling] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -24,12 +25,14 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
 
                 // Fetch interfaces to find a default LAN bridge
                 const interfaces = await getInterfaces(selectedRouter);
-                const bridge = interfaces.find(i => i.name === 'bridge' || i.name.toLowerCase().includes('lan'));
-                if (bridge) {
-                    setLanInterface(bridge.name);
-                } else if (interfaces.length > 0) {
-                    setLanInterface(interfaces[0].name); // fallback
+                const suitableInterfaces = interfaces.filter(i => i.type === 'ether' || i.type === 'vlan' || i.type === 'bridge');
+                setAvailableInterfaces(suitableInterfaces);
+                
+                if (suitableInterfaces.length > 0) {
+                    const bridge = suitableInterfaces.find(i => i.name === 'bridge' || i.name.toLowerCase().includes('lan'));
+                    setLanInterface(bridge ? bridge.name : suitableInterfaces[0].name);
                 }
+
             } catch (err) {
                 setError(`Failed to load initial configuration data from the router: ${(err as Error).message}`);
             } finally {
@@ -79,7 +82,7 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
                 <div>
                     <h4 className="font-bold">Warning</h4>
                     <p className="text-sm text-amber-800 dark:text-amber-300">
-                        This is a powerful tool that will add multiple rules to your router. It is designed for a router with a basic configuration. Run on a production router with caution. It assumes a DHCP server is already running.
+                        This is a powerful tool that will add multiple rules to your router. It is designed for a router with a basic configuration. Run on a production router with caution. It assumes a DHCP server is already running on the selected interface.
                     </p>
                 </div>
             </div>
@@ -95,14 +98,28 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
                         <div className="mt-1 p-3 bg-slate-100 dark:bg-slate-700 rounded-md font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600">
                             {panelIp || 'Detecting...'}
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">The IP address of the server hosting this panel (e.g., your Orange Pi). The panel will try to auto-detect this.</p>
+                        <p className="mt-1 text-xs text-slate-500">The IP address of the server hosting this panel (e.g., your Orange Pi). This is auto-detected.</p>
                     </div>
                      <div>
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Primary LAN Interface</label>
-                        <div className="mt-1 p-3 bg-slate-100 dark:bg-slate-700 rounded-md font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600">
-                            {lanInterface || 'Detecting...'}
-                        </div>
-                        <p className="mt-1 text-xs text-slate-500">The name of the main LAN bridge where your DHCP server is running.</p>
+                        <label htmlFor="lanInterface" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Primary LAN Interface</label>
+                         <select
+                            id="lanInterface"
+                            value={lanInterface}
+                            onChange={(e) => setLanInterface(e.target.value)}
+                            disabled={availableInterfaces.length === 0}
+                            className="mt-1 block w-full p-3 bg-slate-100 dark:bg-slate-700 rounded-md font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-[--color-primary-500] focus:outline-none"
+                        >
+                            {availableInterfaces.length > 0 ? (
+                                availableInterfaces.map(iface => (
+                                    <option key={iface.id} value={iface.name}>
+                                        {iface.name} ({iface.type})
+                                    </option>
+                                ))
+                            ) : (
+                                <option>No suitable interfaces found</option>
+                            )}
+                        </select>
+                        <p className="mt-1 text-xs text-slate-500">Select the ethernet, VLAN, or bridge interface where your DHCP server is running.</p>
                     </div>
 
                     {error && <div className="p-3 my-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-md text-sm">{error}</div>}
