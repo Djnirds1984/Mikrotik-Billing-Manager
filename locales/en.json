@@ -62,7 +62,8 @@
     "dhcp-portal": {
         "client_management": "Client Management",
         "portal_server": "Portal Server",
-        "portal_installer": "Portal Installer"
+        "portal_installer": "Portal Installer",
+        "portal_page": "Portal Page"
     },
     "billing": {
         "add_new_plan": "Add New Plan",
