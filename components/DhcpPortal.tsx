@@ -40,9 +40,9 @@ export const DhcpPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }>
         <div className="space-y-6">
              <div className="border-b border-slate-200 dark:border-slate-700">
                 <nav className="flex space-x-2 -mb-px overflow-x-auto" aria-label="Tabs">
-                    <TabButton label={t('dhcp_portal.client_management')} icon={<UsersIcon className="w-5 h-5"/>} isActive={activeTab === 'clients'} onClick={() => setActiveTab('clients')} />
-                    <TabButton label={t('dhcp_portal.portal_server')} icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'server'} onClick={() => setActiveTab('server')} />
-                    <TabButton label={t('dhcp_portal.portal_installer')} icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'installer'} onClick={() => setActiveTab('installer')} />
+                    <TabButton label={t('dhcp-portal.client_management')} icon={<UsersIcon className="w-5 h-5"/>} isActive={activeTab === 'clients'} onClick={() => setActiveTab('clients')} />
+                    <TabButton label={t('dhcp-portal.portal_server')} icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'server'} onClick={() => setActiveTab('server')} />
+                    <TabButton label={t('dhcp-portal.portal_installer')} icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'installer'} onClick={() => setActiveTab('installer')} />
                 </nav>
             </div>
             <div>

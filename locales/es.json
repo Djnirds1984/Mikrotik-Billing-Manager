@@ -8,7 +8,7 @@
         "terminal": "Terminal",
         "routers": "Routers",
         "network": "Red",
-        "dhcp_portal": "Portal DHCP",
+        "dhcp-portal": "Portal DHCP",
         "pppoe": "Gestión PPPoE",
         "billing_plans": "Planes de Facturación",
         "sales_report": "Informe de Ventas",
@@ -31,7 +31,7 @@
         "terminal": "Terminal del Router",
         "routers": "Gestión de Routers",
         "network": "Gestión de Red",
-        "dhcp_portal": "Portal Cautivo DHCP",
+        "dhcp-portal": "Portal Cautivo DHCP",
         "pppoe": "Gestión PPPoE",
         "billing": "Planes de Facturación",
         "sales": "Informe de Ventas",
@@ -59,7 +59,7 @@
         "save": "Guardar",
         "save_plan": "Guardar Plan"
     },
-    "dhcp_portal": {
+    "dhcp-portal": {
         "client_management": "Gestión de Clientes",
         "portal_server": "Servidor del Portal",
         "portal_installer": "Instalador del Portal"

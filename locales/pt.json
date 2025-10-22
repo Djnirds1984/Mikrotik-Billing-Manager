@@ -8,7 +8,7 @@
         "terminal": "Terminal",
         "routers": "Roteadores",
         "network": "Rede",
-        "dhcp_portal": "Portal DHCP",
+        "dhcp-portal": "Portal DHCP",
         "pppoe": "Gerenciamento PPPoE",
         "billing_plans": "Planos de Cobrança",
         "sales_report": "Relatório de Vendas",
@@ -31,7 +31,7 @@
         "terminal": "Terminal do Roteador",
         "routers": "Gerenciamento de Roteadores",
         "network": "Gerenciamento de Rede",
-        "dhcp_portal": "Portal Cativo DHCP",
+        "dhcp-portal": "Portal Cativo DHCP",
         "pppoe": "Gerenciamento PPPoE",
         "billing": "Planos de Cobrança",
         "sales": "Relatório de Vendas",
@@ -59,7 +59,7 @@
         "save": "Salvar",
         "save_plan": "Salvar Plano"
     },
-    "dhcp_portal": {
+    "dhcp-portal": {
         "client_management": "Gerenciamento de Clientes",
         "portal_server": "Servidor do Portal",
         "portal_installer": "Instalador do Portal"
