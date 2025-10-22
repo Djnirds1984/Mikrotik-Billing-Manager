@@ -493,7 +493,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
         const scriptName = "dhcp-lease-add-to-pending";
         const authorizedListName = "authorized-dhcp-users";
         const pendingListName = "pending-dhcp-users";
-        const portalRedirectComment = "Redirect pending to portal";
+        const portalRedirectComment = "Redirect pending HTTP to portal";
 
         const scriptSource = `
 :local mac $"lease-mac-address";
@@ -506,8 +506,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
   :log info "DHCP lease script: $ip is already authorized";
 }`;
         const compactScriptSource = scriptSource.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-        const redirectUrl = `http://${panelIp}:3001/captive`;
-
+        
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
@@ -528,17 +527,19 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
                 await client.write('/ip/firewall/filter/add', ['=action=drop', '=chain=forward', `=src-address-list=${pendingListName}`, '=place-before=1', '=comment=Drop all other pending traffic']);
                 await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=src-address-list=${authorizedListName}`, '=place-before=0', '=comment=Allow authorized traffic']);
                 
-                // --- Web Proxy & Redirect Logic ---
-                await client.write('/ip/proxy/set', ['=enabled=yes', '=port=8080']);
-                // Remove old rule to prevent duplicates
-                const oldProxyRule = await client.write('/ip/proxy/access/print', ['?comment=Panel Captive Portal Redirect']);
-                if (oldProxyRule.length > 0) await client.write('/ip/proxy/access/remove', [`=.id=${oldProxyRule[0]['.id']}`]);
-                await client.write('/ip/proxy/access/add', [`=action=deny`, `=redirect-to=${redirectUrl}`, `=comment=Panel Captive Portal Redirect`]);
-
-                // --- NAT Rule to redirect to proxy ---
+                // --- NAT Rule to redirect HTTP traffic to the panel ---
                 const oldNatRule = await client.write('/ip/firewall/nat/print', [`?comment=${portalRedirectComment}`]);
                 if (oldNatRule.length > 0) await client.write('/ip/firewall/nat/remove', [`=.id=${oldNatRule[0]['.id']}`]);
-                await client.write('/ip/firewall/nat/add', ['=chain=dstnat', `=src-address-list=${pendingListName}`, '=protocol=tcp', '=dst-port=80', '=action=redirect', '=to-ports=8080', `=comment=${portalRedirectComment}`]);
+                await client.write('/ip/firewall/nat/add', [
+                    '=chain=dstnat',
+                    `=src-address-list=${pendingListName}`,
+                    '=protocol=tcp',
+                    '=dst-port=80',
+                    '=action=dst-nat',
+                    `=to-addresses=${panelIp}`,
+                    '=to-ports=3001',
+                    `=comment=${portalRedirectComment}`
+                ]);
 
             } finally {
                 await client.close();
@@ -560,30 +561,21 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'src-address-list': pendingListName, 'place-before': '1', comment: "Drop all other pending traffic" });
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized traffic" });
             
-            // --- Web Proxy & Redirect Logic ---
-            const proxyResponse = await req.routerInstance.get('/ip/proxy');
-            // The response can be an array for some versions or a single object for others.
-            const proxyConfig = Array.isArray(proxyResponse.data) ? proxyResponse.data[0] : proxyResponse.data;
-            
-            if (!proxyConfig || !proxyConfig.id) {
-                throw new Error("Could not find web proxy configuration or its ID. Please ensure the feature is available on your router under /ip/proxy.");
-            }
-            const proxyId = proxyConfig.id;
-            await req.routerInstance.patch(`/ip/proxy/${proxyId}`, { enabled: true, port: 8080 });
-            
-            // Remove old proxy rule to ensure idempotency
-            const oldProxyRules = await req.routerInstance.get(`/ip/proxy/access?comment=Panel Captive Portal Redirect`);
-            for (const rule of oldProxyRules.data) {
-                await req.routerInstance.delete(`/ip/proxy/access/${rule.id}`);
-            }
-            await req.routerInstance.put('/ip/proxy/access', { action: 'deny', 'redirect-to': redirectUrl, comment: "Panel Captive Portal Redirect" });
-
-            // --- NAT Rule to redirect to proxy ---
+            // --- NAT Rule to redirect HTTP traffic to the panel ---
             const oldNatRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${portalRedirectComment}`);
             for (const rule of oldNatRules.data) {
                 await req.routerInstance.delete(`/ip/firewall/nat/${rule.id}`);
             }
-            await req.routerInstance.put('/ip/firewall/nat', { chain: 'dstnat', 'src-address-list': pendingListName, protocol: 'tcp', 'dst-port': '80', action: 'redirect', 'to-ports': '8080', comment: portalRedirectComment });
+            await req.routerInstance.put('/ip/firewall/nat', {
+                chain: 'dstnat',
+                'src-address-list': pendingListName,
+                protocol: 'tcp',
+                'dst-port': '80',
+                action: 'dst-nat',
+                'to-addresses': panelIp,
+                'to-ports': '3001',
+                comment: portalRedirectComment
+            });
         }
         
         return { message: 'DHCP Captive Portal components installed successfully!' };
@@ -595,8 +587,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
         const scriptName = "dhcp-lease-add-to-pending";
         const authorizedListName = "authorized-dhcp-users";
         const pendingListName = "pending-dhcp-users";
-        const portalRedirectComment = "Redirect pending to portal";
-        const proxyRedirectComment = "Panel Captive Portal Redirect";
+        const portalRedirectComment = "Redirect pending HTTP to portal";
 
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
@@ -610,8 +601,6 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
                 };
 
                 await findAndRemove('/ip/firewall/nat', [`?comment=${portalRedirectComment}`]);
-                await findAndRemove('/ip/proxy/access', [`?comment=${proxyRedirectComment}`]);
-                await client.write('/ip/proxy/set', ['=enabled=no']);
 
                 const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
                 for (const comment of filterComments) {
@@ -642,19 +631,6 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
             };
 
             await findAndRemove('/ip/firewall/nat', `comment=${portalRedirectComment}`);
-            await findAndRemove('/ip/proxy/access', `comment=${proxyRedirectComment}`);
-            
-            // FIX: Dynamically find proxy ID to disable it reliably.
-            try {
-                const proxyResponse = await req.routerInstance.get('/ip/proxy');
-                const proxyConfig = Array.isArray(proxyResponse.data) ? proxyResponse.data[0] : proxyResponse.data;
-                
-                if (proxyConfig && proxyConfig.id) {
-                    await req.routerInstance.patch(`/ip/proxy/${proxyConfig.id}`, { enabled: false });
-                }
-            } catch (e) {
-                console.warn('Could not disable proxy:', e.message);
-            }
 
             const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
             for (const comment of filterComments) {

@@ -29,6 +29,33 @@ const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret
 app.use(express.json({ limit: '10mb' }));
 app.use(express.text({ limit: '10mb' })); // For AI fixer
 
+// --- Captive Portal Redirect Middleware ---
+app.use((req, res, next) => {
+    // This is a heuristic to distinguish between a user directly accessing the panel
+    // vs. a captive client being redirected. Direct access usually uses localhost or an IP.
+    const isDirectAccess = req.hostname === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(req.hostname);
+
+    // List of paths that should be ignored by this redirect logic.
+    const ignoredPaths = [
+        '/api/',
+        '/mt-api/',
+        '/ws/',
+        '/captive', // The destination page itself
+        '/env.js', // Critical environment script
+    ];
+
+    // Check if the request is for a static asset (e.g., .js, .css, .tsx)
+    const isStaticAsset = req.path.match(/\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/);
+
+    if (!isDirectAccess && !isStaticAsset && !ignoredPaths.some(p => req.path.startsWith(p))) {
+        console.log(`[Captive Portal] Redirecting request for Host "${req.hostname}" to /captive.`);
+        return res.redirect('/captive');
+    }
+
+    next();
+});
+
+
 // Ensure backup directory exists
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
