@@ -475,6 +475,73 @@ app.post('/mt-api/:routerId/ip/dhcp-server/setup', getRouterConfig, async (req, 
     });
 });
 
+app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { panelIp, lanInterface } = req.body;
+        if (!panelIp || !lanInterface) {
+            throw new Error('Panel IP and LAN Interface are required.');
+        }
+
+        const scriptName = "dhcp-lease-add-to-pending";
+        const authorizedListName = "authorized-dhcp-users";
+        const pendingListName = "pending-dhcp-users";
+
+        const scriptSource = `
+:local mac $"lease-mac-address";
+:local ip $"lease-address";
+:log info "DHCP lease script: New lease for $ip ($mac)";
+:if ([/ip firewall address-list find list="${authorizedListName}" address=$ip] = "") do={
+  :log info "DHCP lease script: Adding $ip to pending list";
+  /ip firewall address-list add address=$ip list="${pendingListName}" timeout=1d comment=$mac;
+} else={
+  :log info "DHCP lease script: $ip is already authorized";
+}`;
+        // Compact the script for the API
+        const compactScriptSource = scriptSource.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                await client.write('/ip/firewall/address-list/add', [`=list=${authorizedListName}`, `=comment=Users authorized by panel`]);
+                await client.write('/ip/firewall/address-list/add', [`=list=${pendingListName}`, `=comment=Users pending authorization`]);
+                
+                await client.write('/system/script/add', [`=name=${scriptName}`, `=source=${compactScriptSource}`]);
+
+                const dhcpServers = await client.write('/ip/dhcp-server/print', [`?interface=${lanInterface}`]);
+                if (dhcpServers.length === 0) throw new Error(`No DHCP server found on interface "${lanInterface}".`);
+                const serverId = dhcpServers[0]['.id'];
+                await client.write('/ip/dhcp-server/set', [`=.id=${serverId}`, `=lease-script=${scriptName}`]);
+                
+                await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', '=connection-state=new', `=dst-address=${panelIp}`, `=src-address-list=${pendingListName}`, '=place-before=0', '=comment=Allow pending to access portal']);
+                await client.write('/ip/firewall/filter/add', ['=action=drop', '=chain=forward', `=src-address-list=${pendingListName}`, '=place-before=1', '=comment=Drop pending traffic']);
+                await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=src-address-list=${authorizedListName}`, '=place-before=0', '=comment=Allow authorized traffic']);
+                await client.write('/ip/firewall/nat/add', ['=action=dst-nat', '=chain=dstnat', '=dst-port=80,443', '=protocol=tcp', `=src-address-list=${pendingListName}`, `=to-addresses=${panelIp}`, `=to-ports=3001`, '=place-before=0', '=comment=Redirect pending to portal']);
+
+            } finally {
+                await client.close();
+            }
+        } else { // REST API
+            await req.routerInstance.put('/ip/firewall/address-list', { list: authorizedListName, comment: "Users authorized by panel" });
+            await req.routerInstance.put('/ip/firewall/address-list', { list: pendingListName, comment: "Users pending authorization" });
+
+            await req.routerInstance.put('/system/script', { name: scriptName, source: compactScriptSource });
+            
+            const dhcpServers = await req.routerInstance.get(`/ip/dhcp-server?interface=${lanInterface}`);
+            if (dhcpServers.data.length === 0) throw new Error(`No DHCP server found on interface "${lanInterface}". Please set one up first.`);
+            const serverId = dhcpServers.data[0].id;
+            await req.routerInstance.patch(`/ip/dhcp-server/${serverId}`, { 'lease-script': scriptName });
+
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'connection-state': 'new', 'dst-address': panelIp, 'src-address-list': pendingListName, 'place-before': '0', comment: "Allow pending to access portal" });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'src-address-list': pendingListName, 'place-before': '1', comment: "Drop pending traffic" });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized traffic" });
+            await req.routerInstance.put('/ip/firewall/nat', { action: 'dst-nat', chain: 'dstnat', 'dst-port': '80,443', protocol: 'tcp', 'src-address-list': pendingListName, 'to-addresses': panelIp, 'to-ports': '3001', 'place-before': '0', comment: "Redirect pending to portal" });
+        }
+        
+        return { message: 'DHCP Captive Portal components installed successfully!' };
+    });
+});
+
 
 // Generic proxy handler for all other requests
 app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {

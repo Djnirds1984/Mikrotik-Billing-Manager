@@ -12,6 +12,8 @@ import { Loader } from './Loader.tsx';
 import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon, ServerIcon } from '../constants.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 import { Firewall } from './Firewall.tsx';
+import { DhcpCaptivePortalInstaller } from './DhcpCaptivePortalInstaller.tsx';
+
 
 // Reusable ToggleSwitch component
 const ToggleSwitch: React.FC<{ checked: boolean; onChange: () => void; disabled?: boolean; }> = ({ checked, onChange, disabled }) => (
@@ -603,7 +605,7 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
 
 
 // --- Main Component ---
-type ActiveTab = 'wan' | 'routes' | 'firewall' | 'aiwan' | 'dhcp';
+type ActiveTab = 'wan' | 'routes' | 'firewall' | 'aiwan' | 'dhcp' | 'dhcp-portal';
 
 export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
     const [activeTab, setActiveTab] = useState<ActiveTab>('wan');
@@ -774,7 +776,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
         );
     }
     
-    if (isLoading && activeTab !== 'dhcp') { // Let DHCP manager handle its own loading
+    if (isLoading && activeTab !== 'dhcp' && activeTab !== 'dhcp-portal') { // Let DHCP manager handle its own loading
         return (
             <div className="flex flex-col items-center justify-center h-64">
                 <Loader />
@@ -783,7 +785,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
         );
     }
     
-    if (error && (activeTab !== 'wan' && activeTab !== 'dhcp')) { 
+    if (error && (activeTab !== 'wan' && activeTab !== 'dhcp' && activeTab !== 'dhcp-portal')) { 
          return (
             <div className="flex flex-col items-center justify-center h-64 bg-white dark:bg-slate-800 rounded-lg border border-red-300 dark:border-red-700 p-6 text-center">
                 <p className="text-xl font-semibold text-red-600 dark:text-red-400">Failed to load data.</p>
@@ -899,6 +901,8 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                 );
             case 'dhcp':
                 return <DhcpManager selectedRouter={selectedRouter} />;
+            case 'dhcp-portal':
+                return <DhcpCaptivePortalInstaller selectedRouter={selectedRouter} />;
             default:
                 return null;
         }
@@ -910,12 +914,13 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
             <RouteFormModal isOpen={isRouteModalOpen} onClose={() => setIsRouteModalOpen(false)} onSave={handleSaveRoute} initialData={editingRoute} isLoading={isSubmitting} />
             
             <div className="border-b border-slate-200 dark:border-slate-700">
-                <nav className="flex space-x-2" aria-label="Tabs">
+                <nav className="flex space-x-2 overflow-x-auto" aria-label="Tabs">
                     <TabButton label="WAN & Failover" icon={<ShareIcon className="w-5 h-5" />} isActive={activeTab === 'wan'} onClick={() => setActiveTab('wan')} />
                     <TabButton label="Firewall" icon={<ShieldCheckIcon className="w-5 h-5" />} isActive={activeTab === 'firewall'} onClick={() => setActiveTab('firewall')} />
                     <TabButton label="Routes & VLANs" icon={<VlanIcon className="w-5 h-5" />} isActive={activeTab === 'routes'} onClick={() => setActiveTab('routes')} />
                     <TabButton label="AI Multi-WAN" icon={<span className="font-bold text-lg">AI</span>} isActive={activeTab === 'aiwan'} onClick={() => setActiveTab('aiwan')} />
                     <TabButton label="DHCP" icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'dhcp'} onClick={() => setActiveTab('dhcp')} />
+                    <TabButton label="DHCP Portal" icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'dhcp-portal'} onClick={() => setActiveTab('dhcp-portal')} />
                 </nav>
             </div>
 

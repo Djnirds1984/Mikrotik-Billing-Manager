@@ -36,7 +36,8 @@ import type {
     DhcpServer,
     DhcpServerData,
     DhcpLease,
-    DhcpServerSetupParams
+    DhcpServerSetupParams,
+    DhcpCaptivePortalSetupParams
 } from '../types.ts';
 import { getAuthHeader } from './databaseService.ts';
 
@@ -335,6 +336,12 @@ export const deleteDhcpLease = (router: RouterConfigWithId, leaseId: string): Pr
 };
 export const runDhcpSetup = (router: RouterConfigWithId, params: DhcpServerSetupParams): Promise<{ message: string }> => {
     return fetchMikrotikData(router, '/ip/dhcp-server/setup', { method: 'POST', body: JSON.stringify(params) });
+};
+export const runDhcpCaptivePortalSetup = (router: RouterConfigWithId, params: DhcpCaptivePortalSetupParams): Promise<{ message: string }> => {
+    return fetchMikrotikData(router, '/dhcp-captive-portal/setup', { 
+        method: 'POST', 
+        body: JSON.stringify(params) 
+    });
 };
 
 

@@ -1,5 +1,3 @@
-
-
 import React from 'react';
 
 export type View =
@@ -551,4 +549,9 @@ export interface DhcpServerSetupParams {
     addressPool: string;
     dnsServers: string;
     leaseTime: string;
+}
+
+export interface DhcpCaptivePortalSetupParams {
+    panelIp: string;
+    lanInterface: string;
 }
