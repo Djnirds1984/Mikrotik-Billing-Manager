@@ -553,7 +553,13 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized traffic" });
             
             // --- Web Proxy & Redirect Logic ---
-            await req.routerInstance.patch('/ip/proxy/0', { enabled: true, port: 8080 }); // Assumes one proxy config at ID 0
+            // FIX: Dynamically find proxy ID instead of hardcoding '0'
+            const proxyConfigs = await req.routerInstance.get('/ip/proxy');
+            if (!proxyConfigs.data || proxyConfigs.data.length === 0) {
+                throw new Error("Could not find web proxy configuration. Please ensure it's available under /ip/proxy.");
+            }
+            const proxyId = proxyConfigs.data[0].id;
+            await req.routerInstance.patch(`/ip/proxy/${proxyId}`, { enabled: true, port: 8080 });
             
             // Remove old proxy rule to ensure idempotency
             const oldProxyRules = await req.routerInstance.get(`/ip/proxy/access?comment=Panel Captive Portal Redirect`);
@@ -627,7 +633,17 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
 
             await findAndRemove('/ip/firewall/nat', `comment=${portalRedirectComment}`);
             await findAndRemove('/ip/proxy/access', `comment=${proxyRedirectComment}`);
-            try { await req.routerInstance.patch('/ip/proxy/0', { enabled: false }); } catch(e) { console.warn('Could not disable proxy:', e.message); }
+            
+            // FIX: Dynamically find proxy ID to disable it reliably.
+            try {
+                const proxyConfigs = await req.routerInstance.get('/ip/proxy');
+                if (proxyConfigs.data && proxyConfigs.data.length > 0) {
+                    const proxyId = proxyConfigs.data[0].id;
+                    await req.routerInstance.patch(`/ip/proxy/${proxyId}`, { enabled: false });
+                }
+            } catch (e) {
+                console.warn('Could not disable proxy:', e.message);
+            }
 
             const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
             for (const comment of filterComments) {
