@@ -220,8 +220,6 @@ const DhcpManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selecte
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 5000); // Poll every 5 seconds
-        return () => clearInterval(interval);
     }, [fetchData]);
     
     const handleSaveServer = async (serverData: DhcpServerData, serverId?: string) => {
