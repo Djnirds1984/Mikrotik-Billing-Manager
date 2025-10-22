@@ -29,6 +29,7 @@ import { License } from './components/License.tsx';
 import { SuperAdmin } from './components/SuperAdmin.tsx';
 import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
 import { DhcpPortal } from './components/DhcpPortal.tsx';
+import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
 import { useRouters } from './hooks/useRouters.ts';
 import { useSalesData } from './hooks/useSalesData.ts';
 import { useInventoryData } from './hooks/useInventoryData.ts';
@@ -243,6 +244,17 @@ const AppRouter: React.FC = () => {
     const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
     const [isLicenseLoading, setIsLicenseLoading] = useState(true);
     let licenseCheckInterval = React.useRef<number | null>(null);
+
+    // This renders a dedicated, unauthenticated page for captive portal clients
+    if (window.location.pathname.startsWith('/captive')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <CaptivePortalPage />
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
 
     const checkLicense = useCallback(async () => {
         try {

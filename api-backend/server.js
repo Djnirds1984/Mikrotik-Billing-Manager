@@ -485,6 +485,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
         const scriptName = "dhcp-lease-add-to-pending";
         const authorizedListName = "authorized-dhcp-users";
         const pendingListName = "pending-dhcp-users";
+        const portalRedirectComment = "Redirect pending to portal";
 
         const scriptSource = `
 :local mac $"lease-mac-address";
@@ -496,46 +497,77 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
 } else={
   :log info "DHCP lease script: $ip is already authorized";
 }`;
-        // Compact the script for the API
         const compactScriptSource = scriptSource.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        const redirectUrl = `http://${panelIp}:3001/captive`;
 
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
+                // --- Base Setup (Address Lists, Script) ---
                 await client.write('/ip/firewall/address-list/add', [`=list=${authorizedListName}`, `=comment=Users authorized by panel`]);
                 await client.write('/ip/firewall/address-list/add', [`=list=${pendingListName}`, `=comment=Users pending authorization`]);
-                
                 await client.write('/system/script/add', [`=name=${scriptName}`, `=source=${compactScriptSource}`]);
 
+                // --- DHCP Server Script Integration ---
                 const dhcpServers = await client.write('/ip/dhcp-server/print', [`?interface=${lanInterface}`]);
                 if (dhcpServers.length === 0) throw new Error(`No DHCP server found on interface "${lanInterface}".`);
                 const serverId = dhcpServers[0]['.id'];
                 await client.write('/ip/dhcp-server/set', [`=.id=${serverId}`, `=lease-script=${scriptName}`]);
                 
-                await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', '=connection-state=new', `=dst-address=${panelIp}`, `=src-address-list=${pendingListName}`, '=place-before=0', '=comment=Allow pending to access portal']);
-                await client.write('/ip/firewall/filter/add', ['=action=drop', '=chain=forward', `=src-address-list=${pendingListName}`, '=place-before=1', '=comment=Drop pending traffic']);
+                // --- Firewall Filter Rules ---
+                await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=dst-address=${panelIp}`, `=src-address-list=${pendingListName}`, '=place-before=0', '=comment=Allow pending to access portal']);
+                await client.write('/ip/firewall/filter/add', ['=action=drop', '=chain=forward', `=src-address-list=${pendingListName}`, '=place-before=1', '=comment=Drop all other pending traffic']);
                 await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=src-address-list=${authorizedListName}`, '=place-before=0', '=comment=Allow authorized traffic']);
-                await client.write('/ip/firewall/nat/add', ['=action=dst-nat', '=chain=dstnat', '=dst-port=80,443', '=protocol=tcp', `=src-address-list=${pendingListName}`, `=to-addresses=${panelIp}`, `=to-ports=3001`, '=place-before=0', '=comment=Redirect pending to portal']);
+                
+                // --- Web Proxy & Redirect Logic ---
+                await client.write('/ip/proxy/set', ['=enabled=yes', '=port=8080']);
+                // Remove old rule to prevent duplicates
+                const oldProxyRule = await client.write('/ip/proxy/access/print', ['?comment=Panel Captive Portal Redirect']);
+                if (oldProxyRule.length > 0) await client.write('/ip/proxy/access/remove', [`=.id=${oldProxyRule[0]['.id']}`]);
+                await client.write('/ip/proxy/access/add', [`=action=deny`, `=redirect-to=${redirectUrl}`, `=comment=Panel Captive Portal Redirect`]);
+
+                // --- NAT Rule to redirect to proxy ---
+                const oldNatRule = await client.write('/ip/firewall/nat/print', [`?comment=${portalRedirectComment}`]);
+                if (oldNatRule.length > 0) await client.write('/ip/firewall/nat/remove', [`=.id=${oldNatRule[0]['.id']}`]);
+                await client.write('/ip/firewall/nat/add', ['=chain=dstnat', `=src-address-list=${pendingListName}`, '=protocol=tcp', '=dst-port=80', '=action=redirect', '=to-ports=8080', `=comment=${portalRedirectComment}`]);
 
             } finally {
                 await client.close();
             }
         } else { // REST API
+            // --- Base Setup ---
             await req.routerInstance.put('/ip/firewall/address-list', { list: authorizedListName, comment: "Users authorized by panel" });
             await req.routerInstance.put('/ip/firewall/address-list', { list: pendingListName, comment: "Users pending authorization" });
-
             await req.routerInstance.put('/system/script', { name: scriptName, source: compactScriptSource });
             
+            // --- DHCP Server Script ---
             const dhcpServers = await req.routerInstance.get(`/ip/dhcp-server?interface=${lanInterface}`);
             if (dhcpServers.data.length === 0) throw new Error(`No DHCP server found on interface "${lanInterface}". Please set one up first.`);
             const serverId = dhcpServers.data[0].id;
             await req.routerInstance.patch(`/ip/dhcp-server/${serverId}`, { 'lease-script': scriptName });
 
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'connection-state': 'new', 'dst-address': panelIp, 'src-address-list': pendingListName, 'place-before': '0', comment: "Allow pending to access portal" });
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'src-address-list': pendingListName, 'place-before': '1', comment: "Drop pending traffic" });
+            // --- Firewall Filter Rules ---
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'src-address-list': pendingListName, 'place-before': '0', comment: "Allow pending to access portal" });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'src-address-list': pendingListName, 'place-before': '1', comment: "Drop all other pending traffic" });
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized traffic" });
-            await req.routerInstance.put('/ip/firewall/nat', { action: 'dst-nat', chain: 'dstnat', 'dst-port': '80,443', protocol: 'tcp', 'src-address-list': pendingListName, 'to-addresses': panelIp, 'to-ports': '3001', 'place-before': '0', comment: "Redirect pending to portal" });
+            
+            // --- Web Proxy & Redirect Logic ---
+            await req.routerInstance.patch('/ip/proxy/0', { enabled: true, port: 8080 }); // Assumes one proxy config at ID 0
+            
+            // Remove old proxy rule to ensure idempotency
+            const oldProxyRules = await req.routerInstance.get(`/ip/proxy/access?comment=Panel Captive Portal Redirect`);
+            for (const rule of oldProxyRules.data) {
+                await req.routerInstance.delete(`/ip/proxy/access/${rule.id}`);
+            }
+            await req.routerInstance.put('/ip/proxy/access', { action: 'deny', 'redirect-to': redirectUrl, comment: "Panel Captive Portal Redirect" });
+
+            // --- NAT Rule to redirect to proxy ---
+            const oldNatRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${portalRedirectComment}`);
+            for (const rule of oldNatRules.data) {
+                await req.routerInstance.delete(`/ip/firewall/nat/${rule.id}`);
+            }
+            await req.routerInstance.put('/ip/firewall/nat', { chain: 'dstnat', 'src-address-list': pendingListName, protocol: 'tcp', 'dst-port': '80', action: 'redirect', 'to-ports': '8080', comment: portalRedirectComment });
         }
         
         return { message: 'DHCP Captive Portal components installed successfully!' };
