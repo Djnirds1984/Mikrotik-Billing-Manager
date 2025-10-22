@@ -67,13 +67,21 @@ const createRouterInstance = (config) => {
     });
 
     instance.interceptors.response.use(response => {
-        if (response.data && Array.isArray(response.data)) {
-            response.data = response.data.map(item => {
-                if (item && typeof item === 'object' && '.id' in item) {
-                    return { ...item, id: item['.id'] };
-                }
-                return item;
-            });
+        const mapId = (item) => {
+            if (item && typeof item === 'object' && '.id' in item) {
+                return { ...item, id: item['.id'] };
+            }
+            return item;
+        };
+
+        if (response.data && typeof response.data === 'object') {
+            if (Array.isArray(response.data)) {
+                // It's an array of objects
+                response.data = response.data.map(mapId);
+            } else {
+                // It's a single object
+                response.data = mapId(response.data);
+            }
         }
         return response;
     }, error => Promise.reject(error));
@@ -553,12 +561,14 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized traffic" });
             
             // --- Web Proxy & Redirect Logic ---
-            // FIX: Dynamically find proxy ID instead of hardcoding '0'
-            const proxyConfigs = await req.routerInstance.get('/ip/proxy');
-            if (!proxyConfigs.data || proxyConfigs.data.length === 0) {
-                throw new Error("Could not find web proxy configuration. Please ensure it's available under /ip/proxy.");
+            const proxyResponse = await req.routerInstance.get('/ip/proxy');
+            // The response can be an array for some versions or a single object for others.
+            const proxyConfig = Array.isArray(proxyResponse.data) ? proxyResponse.data[0] : proxyResponse.data;
+            
+            if (!proxyConfig || !proxyConfig.id) {
+                throw new Error("Could not find web proxy configuration or its ID. Please ensure the feature is available on your router under /ip/proxy.");
             }
-            const proxyId = proxyConfigs.data[0].id;
+            const proxyId = proxyConfig.id;
             await req.routerInstance.patch(`/ip/proxy/${proxyId}`, { enabled: true, port: 8080 });
             
             // Remove old proxy rule to ensure idempotency
@@ -636,10 +646,11 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
             
             // FIX: Dynamically find proxy ID to disable it reliably.
             try {
-                const proxyConfigs = await req.routerInstance.get('/ip/proxy');
-                if (proxyConfigs.data && proxyConfigs.data.length > 0) {
-                    const proxyId = proxyConfigs.data[0].id;
-                    await req.routerInstance.patch(`/ip/proxy/${proxyId}`, { enabled: false });
+                const proxyResponse = await req.routerInstance.get('/ip/proxy');
+                const proxyConfig = Array.isArray(proxyResponse.data) ? proxyResponse.data[0] : proxyResponse.data;
+                
+                if (proxyConfig && proxyConfig.id) {
+                    await req.routerInstance.patch(`/ip/proxy/${proxyConfig.id}`, { enabled: false });
                 }
             } catch (e) {
                 console.warn('Could not disable proxy:', e.message);
