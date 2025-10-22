@@ -23,7 +23,7 @@ export type View =
   | 'mikrotik_files'
   | 'license'
   | 'super_admin'
-  | 'dhcp';
+  | 'dhcp-portal';
 
 export interface LicenseStatus {
   licensed: boolean;
@@ -540,6 +540,7 @@ export interface DhcpLease {
     status: string; // e.g., 'waiting', 'bound'
     dynamic: 'true' | 'false';
     comment?: string;
+    'host-name'?: string;
 }
 
 export interface DhcpServerSetupParams {
@@ -554,4 +555,21 @@ export interface DhcpServerSetupParams {
 export interface DhcpCaptivePortalSetupParams {
     panelIp: string;
     lanInterface: string;
+}
+
+export interface DhcpClient {
+    id: string; // This will be the address list entry ID
+    status: 'pending' | 'active';
+    address: string;
+    macAddress: string;
+    hostName: string;
+    customerInfo: string;
+    timeout?: string; // e.g. 29d23h59m58s
+    creationTime?: string;
+}
+
+export interface DhcpClientActionParams {
+    addressListId: string;
+    customerInfo: string;
+    expiresAt: string; // ISO date string
 }

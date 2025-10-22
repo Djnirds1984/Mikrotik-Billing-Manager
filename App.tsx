@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
@@ -34,6 +28,7 @@ import { MikrotikFiles } from './components/MikrotikFiles.tsx';
 import { License } from './components/License.tsx';
 import { SuperAdmin } from './components/SuperAdmin.tsx';
 import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
+import { DhcpPortal } from './components/DhcpPortal.tsx';
 import { useRouters } from './hooks/useRouters.ts';
 import { useSalesData } from './hooks/useSalesData.ts';
 import { useInventoryData } from './hooks/useInventoryData.ts';
@@ -141,7 +136,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
 
     const licensedViews: View[] = [
         'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
-        'inventory', 'hotspot', 'mikrotik_files', 'zerotier', 'super_router', 'logs'
+        'inventory', 'hotspot', 'mikrotik_files', 'zerotier', 'super_router', 'logs', 'dhcp-portal'
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
@@ -159,6 +154,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           return <Network selectedRouter={selectedRouter} />;
       case 'terminal':
           return <Terminal selectedRouter={selectedRouter} />;
+      case 'dhcp-portal':
+          return <DhcpPortal selectedRouter={selectedRouter} />;
       case 'pppoe':
           return <Pppoe selectedRouter={selectedRouter} addSale={addSale} />;
       case 'billing':

@@ -37,7 +37,10 @@ import type {
     DhcpServerData,
     DhcpLease,
     DhcpServerSetupParams,
-    DhcpCaptivePortalSetupParams
+    DhcpCaptivePortalSetupParams,
+    // FIX: Add missing type imports for DHCP Captive Portal
+    DhcpClient,
+    DhcpClientActionParams
 } from '../types.ts';
 import { getAuthHeader } from './databaseService.ts';
 
@@ -341,6 +344,110 @@ export const runDhcpCaptivePortalSetup = (router: RouterConfigWithId, params: Dh
     return fetchMikrotikData(router, '/dhcp-captive-portal/setup', { 
         method: 'POST', 
         body: JSON.stringify(params) 
+    });
+};
+
+// FIX: Add functions for DHCP Captive Portal client management
+// --- DHCP Captive Portal Client Management ---
+
+const calculateTimeout = (expiresAt: string): string => {
+    const expiryDate = new Date(expiresAt);
+    const now = new Date();
+    const diffSeconds = Math.round((expiryDate.getTime() - now.getTime()) / 1000);
+    if (diffSeconds <= 0) return '1s'; // Expire almost immediately
+    
+    const days = Math.floor(diffSeconds / 86400);
+    const hours = Math.floor((diffSeconds % 86400) / 3600);
+    const minutes = Math.floor((diffSeconds % 3600) / 60);
+    const seconds = diffSeconds % 60;
+    
+    let timeoutStr = '';
+    if (days > 0) timeoutStr += `${days}d`;
+    if (hours > 0) timeoutStr += `${hours}h`;
+    if (minutes > 0) timeoutStr += `${minutes}m`;
+    if (seconds > 0) timeoutStr += `${seconds}s`;
+
+    return timeoutStr || '1s';
+};
+
+export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpClient[]> => {
+    // Fetch address lists and leases in parallel
+    const [addressLists, leases] = await Promise.all([
+        fetchMikrotikData<any[]>(router, '/ip/firewall/address-list'),
+        fetchMikrotikData<DhcpLease[]>(router, '/ip/dhcp-server/lease')
+    ]);
+
+    const authorizedListName = "authorized-dhcp-users";
+    const pendingListName = "pending-dhcp-users";
+
+    const leaseMapByIp = new Map<string, DhcpLease>(leases.map(lease => [lease.address, lease]));
+
+    const clients: DhcpClient[] = addressLists
+        .filter(item => item.list === authorizedListName || item.list === pendingListName)
+        .map(item => {
+            const status: 'active' | 'pending' = item.list === authorizedListName ? 'active' : 'pending';
+            let macAddress = '';
+            let customerInfo = '';
+            
+            const lease = leaseMapByIp.get(item.address);
+
+            if (status === 'pending') {
+                macAddress = item.comment || '';
+                customerInfo = '';
+            } else { // active
+                macAddress = lease?.['mac-address'] || '';
+                customerInfo = item.comment || '';
+            }
+            
+            return {
+                id: item.id,
+                status: status,
+                address: item.address,
+                macAddress: macAddress,
+                hostName: lease?.['host-name'] || '',
+                customerInfo: customerInfo,
+                timeout: item.timeout,
+                creationTime: item['creation-time']
+            };
+        });
+
+    return clients;
+};
+
+export const activateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
+    // 1. Get the details of the pending entry
+    const pendingEntry = await fetchMikrotikData<any>(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`);
+
+    // 2. Add to authorized list
+    await fetchMikrotikData(router, '/ip/firewall/address-list', {
+        method: 'PUT',
+        body: JSON.stringify({
+            list: 'authorized-dhcp-users',
+            address: pendingEntry.address,
+            comment: params.customerInfo,
+            timeout: calculateTimeout(params.expiresAt)
+        })
+    });
+    
+    // 3. Remove from pending list
+    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`, {
+        method: 'DELETE'
+    });
+};
+
+export const updateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
+    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+            comment: params.customerInfo,
+            timeout: calculateTimeout(params.expiresAt)
+        })
+    });
+};
+
+export const deleteDhcpClient = (router: RouterConfigWithId, addressListId: string): Promise<any> => {
+    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(addressListId)}`, {
+        method: 'DELETE'
     });
 };
 
