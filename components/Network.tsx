@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import type { RouterConfigWithId, VlanInterface, Interface, IpAddress, IpRoute, IpRouteData, WanRoute, FailoverStatus } from '../types.ts';
+import type { RouterConfigWithId, VlanInterface, Interface, IpAddress, IpRoute, IpRouteData, WanRoute, FailoverStatus, DhcpServer, DhcpLease, IpPool, DhcpServerData, DhcpServerSetupParams } from '../types.ts';
 import { 
     getVlans, addVlan, deleteVlan, getInterfaces, getIpAddresses, getIpRoutes, 
     addIpRoute, updateIpRoute, deleteIpRoute, getWanRoutes, getWanFailoverStatus,
-    setRouteProperty, configureWanFailover
+    setRouteProperty, configureWanFailover,
+    getDhcpServers, addDhcpServer, updateDhcpServer, deleteDhcpServer,
+    getDhcpLeases, makeLeaseStatic, deleteDhcpLease, runDhcpSetup, getIpPools
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
-import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon } from '../constants.tsx';
+import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon, ServerIcon } from '../constants.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 import { Firewall } from './Firewall.tsx';
 
@@ -24,6 +26,305 @@ const ToggleSwitch: React.FC<{ checked: boolean; onChange: () => void; disabled?
         <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-focus:ring-2 peer-focus:ring-[--color-primary-500] peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[--color-primary-600] disabled:opacity-50"></div>
     </label>
 );
+
+// --- DHCP Management Component & Sub-components ---
+type DhcpView = 'servers' | 'leases' | 'installer';
+
+const DhcpServerFormModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (serverData: DhcpServerData, serverId?: string) => void;
+    initialData: DhcpServer | null;
+    interfaces: Interface[];
+    pools: IpPool[];
+    isLoading: boolean;
+}> = ({ isOpen, onClose, onSave, initialData, interfaces, pools, isLoading }) => {
+    const [server, setServer] = useState<DhcpServerData>({});
+
+    useEffect(() => {
+        if (isOpen) {
+            const defaults = {
+                name: '',
+                interface: interfaces.length > 0 ? interfaces[0].name : '',
+                'address-pool': pools.length > 0 ? pools[0].name : 'none',
+                'lease-time': '00:10:00',
+                // FIX: Use 'as const' to ensure the type of 'disabled' is inferred as the literal 'false', not 'string'.
+                disabled: 'false' as const
+            };
+            setServer(initialData ? { ...initialData } : defaults);
+        }
+    }, [initialData, isOpen, interfaces, pools]);
+    
+    if (!isOpen) return null;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        const { name, value } = e.target;
+        setServer(s => ({...s, [name]: value}));
+    };
+    
+    const handleToggle = () => {
+        setServer(s => ({...s, disabled: s.disabled === 'true' ? 'false' : 'true'}));
+    }
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(server, initialData?.id);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold mb-4">{initialData ? 'Edit DHCP Server' : 'Add DHCP Server'}</h3>
+                        <div className="space-y-4">
+                            <div><label>Server Name</label><input name="name" value={server.name} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"/></div>
+                            <div><label>Interface</label><select name="interface" value={server.interface} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">{interfaces.map(i=><option key={i.id} value={i.name}>{i.name}</option>)}</select></div>
+                            <div><label>Address Pool</label><select name="address-pool" value={server['address-pool']} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"><option value="none">none</option>{pools.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
+                            <div><label>Lease Time</label><input name="lease-time" value={server['lease-time']} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"/></div>
+                            <div className="flex items-center gap-4"><label>Disabled</label><ToggleSwitch checked={server.disabled === 'true'} onChange={handleToggle}/></div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
+                        <button type="button" onClick={onClose} className="px-4 py-2 rounded-md">Cancel</button>
+                        <button type="submit" disabled={isLoading} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">{isLoading ? 'Saving...' : 'Save'}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+const DhcpSmartInstaller: React.FC<{
+    selectedRouter: RouterConfigWithId,
+    interfaces: Interface[],
+    onSuccess: () => void,
+}> = ({ selectedRouter, interfaces, onSuccess }) => {
+    const [params, setParams] = useState<DhcpServerSetupParams>({
+        dhcpInterface: interfaces.find(i => i.type === 'bridge')?.name || interfaces[0]?.name || '',
+        dhcpAddressSpace: '192.168.88.0/24',
+        gateway: '192.168.88.1',
+        addressPool: '192.168.88.2-192.168.88.254',
+        dnsServers: '8.8.8.8,1.1.1.1',
+        leaseTime: '00:10:00'
+    });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState('');
+
+    const getGatewayFromNetwork = (network: string): string => {
+        if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(network)) return '';
+        const ipParts = network.split('/')[0].split('.');
+        ipParts[3] = '1';
+        return ipParts.join('.');
+    };
+    
+    const getPoolFromNetwork = (network: string): string => {
+        if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(network)) return '';
+        const [ip, cidrStr] = network.split('/');
+        const ipParts = ip.split('.').map(Number);
+        const cidr = parseInt(cidrStr, 10);
+        if (cidr < 8 || cidr > 30) return '';
+        const startIp = [...ipParts];
+        startIp[3] = 2; 
+        const ipAsInt = (ipParts[0] << 24 | ipParts[1] << 16 | ipParts[2] << 8 | ipParts[3]) >>> 0;
+        const subnetMask = (0xffffffff << (32 - cidr)) >>> 0;
+        const networkAddress = ipAsInt & subnetMask;
+        const broadcastAddress = networkAddress | ~subnetMask;
+        const endIpParts = [(broadcastAddress >> 24) & 255, (broadcastAddress >> 16) & 255, (broadcastAddress >> 8) & 255, (broadcastAddress & 255) - 1];
+        return `${startIp.join('.')}-${endIpParts.join('.')}`;
+    };
+    
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        const { name, value } = e.target;
+        setParams(p => {
+            const newParams = { ...p, [name]: value };
+            if (name === 'dhcpAddressSpace') {
+                newParams.gateway = getGatewayFromNetwork(value);
+                newParams.addressPool = getPoolFromNetwork(value);
+            }
+            return newParams;
+        });
+    };
+    
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        setError('');
+        try {
+            await runDhcpSetup(selectedRouter, params);
+            alert('DHCP Server setup successful!');
+            onSuccess();
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="max-w-xl mx-auto">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+                    <h3 className="font-semibold">DHCP Smart Installer</h3>
+                </div>
+                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                    {error && <div className="p-3 bg-red-100 text-red-700 rounded-md">{error}</div>}
+                    <div><label className="text-sm font-medium">DHCP Server Interface</label><select name="dhcpInterface" value={params.dhcpInterface} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">{interfaces.map(i => <option key={i.id} value={i.name}>{i.name}</option>)}</select></div>
+                    <div><label className="text-sm font-medium">DHCP Address Space</label><input name="dhcpAddressSpace" value={params.dhcpAddressSpace} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                    <div><label className="text-sm font-medium">Gateway for DHCP Network</label><input name="gateway" value={params.gateway} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                    <div><label className="text-sm font-medium">Addresses to Give Out</label><input name="addressPool" value={params.addressPool} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                    <div><label className="text-sm font-medium">DNS Servers</label><input name="dnsServers" value={params.dnsServers} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                    <div><label className="text-sm font-medium">Lease Time</label><input name="leaseTime" value={params.leaseTime} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                    <div className="flex justify-end pt-4"><button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-[--color-primary-600] text-white font-bold rounded-lg disabled:opacity-50">{isSubmitting ? 'Working...' : 'Run Setup'}</button></div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+const DhcpManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
+    const [dhcpView, setDhcpView] = useState<DhcpView>('servers');
+    const [servers, setServers] = useState<DhcpServer[]>([]);
+    const [leases, setLeases] = useState<DhcpLease[]>([]);
+    const [interfaces, setInterfaces] = useState<Interface[]>([]);
+    const [pools, setPools] = useState<IpPool[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingServer, setEditingServer] = useState<DhcpServer | null>(null);
+
+    const fetchData = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const [serversData, leasesData, interfacesData, poolsData] = await Promise.all([
+                getDhcpServers(selectedRouter),
+                getDhcpLeases(selectedRouter),
+                getInterfaces(selectedRouter),
+                getIpPools(selectedRouter)
+            ]);
+            setServers(serversData);
+            setLeases(leasesData);
+            setInterfaces(interfacesData);
+            setPools(poolsData);
+        } catch (err) {
+            setError(`Failed to fetch DHCP data: ${(err as Error).message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [selectedRouter]);
+
+    useEffect(() => {
+        fetchData();
+        const interval = setInterval(fetchData, 5000); // Poll every 5 seconds
+        return () => clearInterval(interval);
+    }, [fetchData]);
+    
+    const handleSaveServer = async (serverData: DhcpServerData, serverId?: string) => {
+        setIsSubmitting(true);
+        try {
+            if (serverId) {
+                await updateDhcpServer(selectedRouter, serverId, serverData);
+            } else {
+                await addDhcpServer(selectedRouter, serverData as Required<DhcpServerData>);
+            }
+            setIsModalOpen(false);
+            await fetchData();
+        } catch (err) {
+            alert(`Failed to save server: ${(err as Error).message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    const handleDeleteServer = async (serverId: string) => {
+        if (!window.confirm("Are you sure?")) return;
+        try {
+            await deleteDhcpServer(selectedRouter, serverId);
+            await fetchData();
+        } catch (err) {
+            alert(`Failed to delete server: ${(err as Error).message}`);
+        }
+    };
+
+    const handleMakeStatic = async (leaseId: string) => {
+        try {
+            await makeLeaseStatic(selectedRouter, leaseId);
+            await fetchData();
+        } catch (err) {
+             alert(`Failed to make lease static: ${(err as Error).message}`);
+        }
+    };
+    
+    const handleDeleteLease = async (leaseId: string) => {
+        if (!window.confirm("Are you sure?")) return;
+        try {
+            await deleteDhcpLease(selectedRouter, leaseId);
+            await fetchData();
+        } catch (err) {
+            alert(`Failed to delete lease: ${(err as Error).message}`);
+        }
+    };
+
+    const getLeaseStatusChip = (status: string) => {
+        switch (status) {
+            case 'bound': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400">Bound</span>;
+            case 'waiting': return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400">Waiting</span>;
+            default: return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-slate-200 dark:bg-slate-600/50 text-slate-600 dark:text-slate-400">{status}</span>;
+        }
+    };
+    
+    const renderContent = () => {
+        if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>
+        if (error) return <div className="p-4 bg-red-100 text-red-700 rounded-md">{error}</div>
+
+        switch(dhcpView) {
+            case 'servers': return (
+                <div>
+                    <div className="flex justify-end mb-4"><button onClick={() => { setEditingServer(null); setIsModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add Server</button></div>
+                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden"><table className="w-full text-sm">
+                        <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50"><tr><th className="px-6 py-3">Name</th><th className="px-6 py-3">Interface</th><th className="px-6 py-3">Address Pool</th><th className="px-6 py-3">Lease Time</th><th className="px-6 py-3">Status</th><th className="px-6 py-3 text-right">Actions</th></tr></thead>
+                        <tbody>{servers.map(s => <tr key={s.id} className={`border-b dark:border-slate-700 ${s.disabled==='true' ? 'opacity-50':''}`}>
+                            <td className="px-6 py-4">{s.name}</td><td>{s.interface}</td><td>{s['address-pool']}</td><td>{s['lease-time']}</td>
+                            <td>{s.disabled==='true' ? <span className="text-red-500">Disabled</span> : <span className="text-green-500">Enabled</span>}</td>
+                            <td className="px-6 py-4 text-right space-x-2"><button onClick={() => { setEditingServer(s); setIsModalOpen(true); }}><EditIcon className="w-5 h-5"/></button><button onClick={()=>handleDeleteServer(s.id)}><TrashIcon className="w-5 h-5"/></button></td>
+                        </tr>)}</tbody>
+                    </table></div>
+                </div>
+            );
+            case 'leases': return (
+                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden"><table className="w-full text-sm">
+                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50"><tr><th className="px-6 py-3">IP Address</th><th className="px-6 py-3">MAC Address</th><th className="px-6 py-3">Server</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Type</th><th className="px-6 py-3 text-right">Actions</th></tr></thead>
+                    <tbody>{leases.map(l => <tr key={l.id} className="border-b dark:border-slate-700">
+                        <td className="px-6 py-4 font-mono">{l.address}</td><td className="font-mono">{l['mac-address']}</td><td>{l.server}</td><td>{getLeaseStatusChip(l.status)}</td>
+                        <td>{l.dynamic==='true' ? 'Dynamic' : 'Static'}</td>
+                        <td className="px-6 py-4 text-right space-x-2">
+                            {l.dynamic === 'true' && <button onClick={() => handleMakeStatic(l.id)} className="text-sm text-sky-600">Make Static</button>}
+                            <button onClick={()=>handleDeleteLease(l.id)}><TrashIcon className="w-5 h-5"/></button>
+                        </td>
+                    </tr>)}</tbody>
+                </table></div>
+            );
+            case 'installer': return <DhcpSmartInstaller selectedRouter={selectedRouter} interfaces={interfaces} onSuccess={fetchData} />;
+        }
+    };
+
+    return (
+        <div className="space-y-4">
+             <DhcpServerFormModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveServer} initialData={editingServer} interfaces={interfaces} pools={pools} isLoading={isSubmitting} />
+             <div className="flex border-b border-slate-200 dark:border-slate-700">
+                <button onClick={() => setDhcpView('servers')} className={`px-4 py-2 text-sm ${dhcpView === 'servers' ? 'border-b-2 border-[--color-primary-500]' : ''}`}>Servers</button>
+                <button onClick={() => setDhcpView('leases')} className={`px-4 py-2 text-sm ${dhcpView === 'leases' ? 'border-b-2 border-[--color-primary-500]' : ''}`}>Leases</button>
+                <button onClick={() => setDhcpView('installer')} className={`px-4 py-2 text-sm ${dhcpView === 'installer' ? 'border-b-2 border-[--color-primary-500]' : ''}`}>Smart Installer</button>
+            </div>
+            {renderContent()}
+        </div>
+    );
+};
 
 
 // --- VLAN Add/Edit Modal ---
@@ -215,6 +516,8 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
 
     useEffect(() => {
         fetchData();
+        const interval = setInterval(fetchData, 5000); // Poll for status updates
+        return () => clearInterval(interval);
     }, [fetchData]);
 
     const handleToggleRoute = async (routeId: string, isDisabled: boolean) => {
@@ -282,14 +585,12 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                                     <td className="px-6 py-4 font-mono">{route['check-gateway']}</td>
                                     <td className="px-6 py-4 font-mono">{route.distance}</td>
                                     <td className="px-6 py-4">
-                                        {/* FIX: Changed boolean check to string comparison for 'active' property. */}
                                         {route.active === 'true'
                                             ? <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">Active</span>
                                             : <span className="px-2 py-1 text-xs font-semibold rounded-full bg-slate-200 text-slate-600">Inactive</span>
                                         }
                                     </td>
                                     <td className="px-6 py-4 text-center">
-                                        {/* FIX: Comparisons will now be correct as the underlying type is changed to string. */}
                                         <ToggleSwitch checked={route.disabled === 'false'} onChange={() => handleToggleRoute(route.id, route.disabled === 'true')} />
                                     </td>
                                 </tr>
@@ -304,8 +605,10 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
 
 
 // --- Main Component ---
+type ActiveTab = 'wan' | 'routes' | 'firewall' | 'aiwan' | 'dhcp';
+
 export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
-    const [activeTab, setActiveTab] = useState<'wan' | 'routes' | 'firewall' | 'aiwan'>('wan');
+    const [activeTab, setActiveTab] = useState<ActiveTab>('wan');
     const [vlans, setVlans] = useState<VlanInterface[]>([]);
     const [interfaces, setInterfaces] = useState<Interface[]>([]);
     const [ipAddresses, setIpAddresses] = useState<IpAddress[]>([]);
@@ -348,7 +651,6 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
             setIpAddresses(ipData);
             setRoutes(routeData);
             
-            // Set default LAN interface for multi-WAN form
             if (interfaceData.length > 0) {
                 const defaultLan = interfaceData.find(i => i.type === 'bridge' && i.name.toLowerCase().includes('lan'))?.name || interfaceData.find(i => i.type === 'bridge')?.name || '';
                 setLanInterface(defaultLan);
@@ -420,7 +722,6 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
     };
 
     const handleDeleteRoute = async (route: IpRoute) => {
-        // FIX: Changed boolean checks to string comparisons for 'dynamic' and 'connected' properties.
         if (!selectedRouter || route.dynamic === 'true' || route.connected === 'true') return;
         if (window.confirm(`Are you sure you want to delete the route to "${route['dst-address']}"?`)) {
             setIsSubmitting(true);
@@ -475,7 +776,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
         );
     }
     
-    if (isLoading) {
+    if (isLoading && activeTab !== 'dhcp') { // Let DHCP manager handle its own loading
         return (
             <div className="flex flex-col items-center justify-center h-64">
                 <Loader />
@@ -484,7 +785,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
         );
     }
     
-    if (error && (activeTab !== 'wan')) { // Let WAN tab handle its own errors
+    if (error && (activeTab !== 'wan' && activeTab !== 'dhcp')) { 
          return (
             <div className="flex flex-col items-center justify-center h-64 bg-white dark:bg-slate-800 rounded-lg border border-red-300 dark:border-red-700 p-6 text-center">
                 <p className="text-xl font-semibold text-red-600 dark:text-red-400">Failed to load data.</p>
@@ -500,7 +801,6 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
             case 'routes':
                  return (
                     <div className="space-y-8">
-                        {/* IP Routes Card */}
                         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
                             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
                                 <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">IP Routes</h3>
@@ -521,7 +821,6 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                                                 <td className="px-6 py-4 font-mono text-slate-800 dark:text-slate-200">{route['dst-address']}</td>
                                                 <td className="px-6 py-4 font-mono text-cyan-600 dark:text-cyan-400">{route.gateway}</td>
                                                 <td className="px-6 py-4 font-mono">{route.distance}</td>
-                                                {/* FIX: Changed boolean checks to string comparisons for 'active' and 'disabled' properties. */}
                                                 <td className="px-6 py-4"><div className="flex items-center flex-wrap gap-1">
                                                     {route.active === 'true' && route.disabled === 'false' && <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400">Active</span>}
                                                     {route.active === 'false' && route.disabled === 'false' && <span className="px-2 py-1 text-xs font-semibold rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-400">Inactive</span>}
@@ -529,7 +828,6 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                                                 </div></td>
                                                 <td className="px-6 py-4 text-slate-500 italic">{route.comment}</td>
                                                 <td className="px-6 py-4 text-right">
-                                                    {/* FIX: Changed boolean checks to string comparisons for 'dynamic' and 'connected' properties. */}
                                                     <button onClick={() => { setEditingRoute(route); setIsRouteModalOpen(true); }} disabled={route.dynamic === 'true' || route.connected === 'true'} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 rounded-md disabled:opacity-50"><EditIcon className="h-5 w-5" /></button>
                                                     <button onClick={() => handleDeleteRoute(route)} disabled={isSubmitting || route.dynamic === 'true' || route.connected === 'true'} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md disabled:opacity-50"><TrashIcon className="h-5 w-5" /></button>
                                                 </td>
@@ -539,7 +837,6 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                                 </table>
                             </div>
                         </div>
-                        {/* VLAN Management Card */}
                         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
                             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
                                 <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">VLAN Interfaces</h3>
@@ -602,11 +899,12 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                         </div>
                     </div>
                 );
+            case 'dhcp':
+                return <DhcpManager selectedRouter={selectedRouter} />;
             default:
                 return null;
         }
     }
-
 
     return (
         <div className="max-w-7xl mx-auto space-y-8">
@@ -619,6 +917,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                     <TabButton label="Firewall" icon={<ShieldCheckIcon className="w-5 h-5" />} isActive={activeTab === 'firewall'} onClick={() => setActiveTab('firewall')} />
                     <TabButton label="Routes & VLANs" icon={<VlanIcon className="w-5 h-5" />} isActive={activeTab === 'routes'} onClick={() => setActiveTab('routes')} />
                     <TabButton label="AI Multi-WAN" icon={<span className="font-bold text-lg">AI</span>} isActive={activeTab === 'aiwan'} onClick={() => setActiveTab('aiwan')} />
+                    <TabButton label="DHCP" icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'dhcp'} onClick={() => setActiveTab('dhcp')} />
                 </nav>
             </div>
 
