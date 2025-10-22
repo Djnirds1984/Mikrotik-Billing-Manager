@@ -59,6 +59,11 @@
         "save": "Save",
         "save_plan": "Save Plan"
     },
+    "dhcp_portal": {
+        "client_management": "Client Management",
+        "portal_server": "Portal Server",
+        "portal_installer": "Portal Installer"
+    },
     "billing": {
         "add_new_plan": "Add New Plan",
         "select_router_alert": "Please select a router before managing plans.",

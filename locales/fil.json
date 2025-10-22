@@ -59,6 +59,11 @@
         "save": "I-save",
         "save_plan": "I-save ang Plano"
     },
+    "dhcp_portal": {
+        "client_management": "Pamamahala ng Kliyente",
+        "portal_server": "Portal Server",
+        "portal_installer": "Instalador ng Portal"
+    },
     "billing": {
         "add_new_plan": "Magdagdag ng Bagong Plano",
         "select_router_alert": "Mangyaring pumili ng router bago pamahalaan ang mga plano.",

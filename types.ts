@@ -527,6 +527,7 @@ export interface DhcpServer {
     'lease-time': string;
     disabled: 'true' | 'false';
     invalid: 'true' | 'false';
+    'lease-script'?: string;
 }
 
 export type DhcpServerData = Partial<Omit<DhcpServer, 'id' | 'invalid'>>;

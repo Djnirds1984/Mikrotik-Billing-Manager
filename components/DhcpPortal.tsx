@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import type { RouterConfigWithId } from '../types.ts';
 import { DhcpClientManagement } from './DhcpClientManagement.tsx';
 import { DhcpCaptivePortalInstaller } from './DhcpCaptivePortalInstaller.tsx';
+import { DhcpPortalServerManager } from './DhcpPortalServerManager.tsx';
 import { UsersIcon, ServerIcon, RouterIcon } from '../constants.tsx';
+import { useLocalization } from '../contexts/LocalizationContext.tsx';
 
 const TabButton: React.FC<{ label: string, icon: React.ReactNode, isActive: boolean, onClick: () => void }> = ({ label, icon, isActive, onClick }) => (
     <button
@@ -18,9 +20,10 @@ const TabButton: React.FC<{ label: string, icon: React.ReactNode, isActive: bool
     </button>
 );
 
-type ActiveTab = 'clients' | 'installer';
+type ActiveTab = 'clients' | 'server' | 'installer';
 
 export const DhcpPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
+    const { t } = useLocalization();
     const [activeTab, setActiveTab] = useState<ActiveTab>('clients');
 
     if (!selectedRouter) {
@@ -37,12 +40,14 @@ export const DhcpPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }>
         <div className="space-y-6">
              <div className="border-b border-slate-200 dark:border-slate-700">
                 <nav className="flex space-x-2 -mb-px overflow-x-auto" aria-label="Tabs">
-                    <TabButton label="Client Management" icon={<UsersIcon className="w-5 h-5"/>} isActive={activeTab === 'clients'} onClick={() => setActiveTab('clients')} />
-                    <TabButton label="Portal Installer" icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'installer'} onClick={() => setActiveTab('installer')} />
+                    <TabButton label={t('dhcp_portal.client_management')} icon={<UsersIcon className="w-5 h-5"/>} isActive={activeTab === 'clients'} onClick={() => setActiveTab('clients')} />
+                    <TabButton label={t('dhcp_portal.portal_server')} icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'server'} onClick={() => setActiveTab('server')} />
+                    <TabButton label={t('dhcp_portal.portal_installer')} icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'installer'} onClick={() => setActiveTab('installer')} />
                 </nav>
             </div>
             <div>
                 {activeTab === 'clients' && <DhcpClientManagement selectedRouter={selectedRouter} />}
+                {activeTab === 'server' && <DhcpPortalServerManager selectedRouter={selectedRouter} />}
                 {activeTab === 'installer' && <DhcpCaptivePortalInstaller selectedRouter={selectedRouter} />}
             </div>
         </div>
