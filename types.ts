@@ -24,7 +24,8 @@ export type View =
   | 'help'
   | 'mikrotik_files'
   | 'license'
-  | 'super_admin';
+  | 'super_admin'
+  | 'dhcp';
 
 export interface LicenseStatus {
   licensed: boolean;
@@ -518,4 +519,36 @@ export interface MikroTikFile {
     name: string;
     type: string;
     size: string;
+}
+
+export interface DhcpServer {
+    id: string;
+    name: string;
+    interface: string;
+    'address-pool': string;
+    'lease-time': string;
+    disabled: 'true' | 'false';
+    invalid: 'true' | 'false';
+}
+
+export type DhcpServerData = Partial<Omit<DhcpServer, 'id' | 'invalid'>>;
+
+export interface DhcpLease {
+    id: string;
+    address: string;
+    'mac-address': string;
+    'client-id'?: string;
+    server: string;
+    status: string; // e.g., 'waiting', 'bound'
+    dynamic: 'true' | 'false';
+    comment?: string;
+}
+
+export interface DhcpServerSetupParams {
+    dhcpInterface: string;
+    dhcpAddressSpace: string;
+    gateway: string;
+    addressPool: string;
+    dnsServers: string;
+    leaseTime: string;
 }

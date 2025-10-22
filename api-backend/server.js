@@ -284,6 +284,89 @@ app.post('/mt-api/:routerId/ip/wan-failover', getRouterConfig, async (req, res) 
     });
 });
 
+app.post('/mt-api/:routerId/ip/dhcp-server/lease/:leaseId/make-static', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { leaseId } = req.params;
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const result = await client.write('/ip/dhcp-server/lease/make-static', [`=.id=${leaseId}`]);
+                if (result && result.length > 0 && result[0].message) {
+                    throw new Error(result[0].message);
+                }
+            } finally {
+                await client.close();
+            }
+            return { message: 'Lease made static.' };
+        } else {
+            // REST API supports this directly
+            await req.routerInstance.post(`/ip/dhcp-server/lease/${encodeURIComponent(leaseId)}/make-static`);
+            return { message: 'Lease made static.' };
+        }
+    });
+});
+
+app.post('/mt-api/:routerId/ip/dhcp-server/setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { dhcpInterface, dhcpAddressSpace, gateway, addressPool, dnsServers, leaseTime } = req.body;
+        const poolName = `dhcp_pool_${dhcpInterface}`;
+        
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // 1. Create IP Pool
+                await client.write('/ip/pool/add', [`=name=${poolName}`, `=ranges=${addressPool}`]);
+                
+                // 2. Create DHCP Network
+                await client.write('/ip/dhcp-server/network/add', [
+                    `=address=${dhcpAddressSpace}`,
+                    `=gateway=${gateway}`,
+                    `=dns-server=${dnsServers}`
+                ]);
+
+                // 3. Create DHCP Server
+                await client.write('/ip/dhcp-server/add', [
+                    `=name=dhcp_${dhcpInterface}`,
+                    `=interface=${dhcpInterface}`,
+                    `=address-pool=${poolName}`,
+                    `=lease-time=${leaseTime}`,
+                    '=disabled=no'
+                ]);
+
+            } finally {
+                await client.close();
+            }
+        } else { // REST API
+             // 1. Create IP Pool
+            await req.routerInstance.put('/ip/pool', {
+                name: poolName,
+                ranges: addressPool,
+            });
+
+            // 2. Create DHCP Network
+            await req.routerInstance.put('/ip/dhcp-server/network', {
+                address: dhcpAddressSpace,
+                gateway: gateway,
+                'dns-server': dnsServers,
+            });
+            
+            // 3. Create DHCP Server
+            await req.routerInstance.put('/ip/dhcp-server', {
+                name: `dhcp_${dhcpInterface}`,
+                interface: dhcpInterface,
+                'address-pool': poolName,
+                'lease-time': leaseTime,
+                disabled: false,
+            });
+        }
+        
+        return { message: 'DHCP Server setup completed successfully.' };
+    });
+});
+
+
 // Generic proxy handler for all other requests
 app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
@@ -298,8 +381,10 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
                 const method = req.method.toLowerCase();
                 const pathParts = apiPath.split('/').filter(Boolean);
                 const hasId = pathParts.length > 1;
-                const command = `/${pathParts[0]}`;
-                const id = hasId ? pathParts[1] : null;
+                const command = `/${pathParts.join('/')}`; // Adjusted to handle nested paths
+                const id = hasId ? pathParts[pathParts.length - 1] : null;
+                const commandWithoutId = hasId ? command.substring(0, command.lastIndexOf('/')) : command;
+
 
                 let query = [];
 
@@ -307,16 +392,16 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
                     query.push(command + '/print');
                     Object.entries(req.query).forEach(([key, value]) => query.push(`?${key}=${value}`));
                 } else if (method === 'post' && hasId) { // POST to a resource ID implies an update ('set')
-                    query.push(command + '/set', `=.id=${id}`);
+                    query.push(commandWithoutId + '/set', `=.id=${id}`);
                     Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
                 } else if (method === 'post' || method === 'put') { // POST/PUT to collection implies 'add'
                     query.push(command + '/add');
                     Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
                 } else if (method === 'patch') {
-                    query.push(command + '/set', `=.id=${id}`);
+                    query.push(commandWithoutId + '/set', `=.id=${id}`);
                     Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
                 } else if (method === 'delete') {
-                    query.push(command + '/remove', `=.id=${id}`);
+                    query.push(commandWithoutId + '/remove', `=.id=${id}`);
                 }
 
                 if (query.length > 0) {

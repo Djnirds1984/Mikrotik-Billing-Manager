@@ -1,4 +1,5 @@
 
+
 import type {
     RouterConfig,
     RouterConfigWithId,
@@ -34,6 +35,10 @@ import type {
     FirewallRule,
     MikroTikLogEntry,
     MikroTikFile,
+    DhcpServer,
+    DhcpServerData,
+    DhcpLease,
+    DhcpServerSetupParams
 } from '../types.ts';
 import { getAuthHeader } from './databaseService.ts';
 
@@ -306,6 +311,32 @@ export const runPanelHotspotSetup = (router: RouterConfigWithId): Promise<{ mess
         method: 'POST',
         body: JSON.stringify({ panelHostname }),
     });
+};
+
+// --- DHCP ---
+export const getDhcpServers = (router: RouterConfigWithId): Promise<DhcpServer[]> => {
+    return fetchMikrotikData<DhcpServer[]>(router, '/ip/dhcp-server');
+};
+export const addDhcpServer = (router: RouterConfigWithId, serverData: DhcpServerData): Promise<any> => {
+    return fetchMikrotikData(router, '/ip/dhcp-server', { method: 'PUT', body: JSON.stringify(serverData) });
+};
+export const updateDhcpServer = (router: RouterConfigWithId, serverId: string, serverData: Partial<DhcpServerData>): Promise<any> => {
+    return fetchMikrotikData(router, `/ip/dhcp-server/${encodeURIComponent(serverId)}`, { method: 'PATCH', body: JSON.stringify(serverData) });
+};
+export const deleteDhcpServer = (router: RouterConfigWithId, serverId: string): Promise<any> => {
+    return fetchMikrotikData(router, `/ip/dhcp-server/${encodeURIComponent(serverId)}`, { method: 'DELETE' });
+};
+export const getDhcpLeases = (router: RouterConfigWithId): Promise<DhcpLease[]> => {
+    return fetchMikrotikData<DhcpLease[]>(router, '/ip/dhcp-server/lease');
+};
+export const makeLeaseStatic = (router: RouterConfigWithId, leaseId: string): Promise<any> => {
+    return fetchMikrotikData(router, `/ip/dhcp-server/lease/${encodeURIComponent(leaseId)}/make-static`, { method: 'POST' });
+};
+export const deleteDhcpLease = (router: RouterConfigWithId, leaseId: string): Promise<any> => {
+    return fetchMikrotikData(router, `/ip/dhcp-server/lease/${encodeURIComponent(leaseId)}`, { method: 'DELETE' });
+};
+export const runDhcpSetup = (router: RouterConfigWithId, params: DhcpServerSetupParams): Promise<{ message: string }> => {
+    return fetchMikrotikData(router, '/ip/dhcp-server/setup', { method: 'POST', body: JSON.stringify(params) });
 };
 
 
