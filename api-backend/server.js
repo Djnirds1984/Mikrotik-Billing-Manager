@@ -284,6 +284,115 @@ app.post('/mt-api/:routerId/ip/wan-failover', getRouterConfig, async (req, res) 
     });
 });
 
+app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { secret, plan, nonPaymentProfile, discountDays, paymentDate } = req.body;
+
+        if (!secret || !plan || !nonPaymentProfile || !paymentDate) {
+            throw new Error('Missing required payment data.');
+        }
+
+        // 1. Calculate new due date
+        const startDate = new Date(paymentDate);
+        let cycleDays = 30;
+        if (plan.cycle === 'Yearly') cycleDays = 365;
+        else if (plan.cycle === 'Quarterly') cycleDays = 90;
+        
+        const totalDays = cycleDays - (discountDays || 0);
+        const dueDate = new Date(startDate);
+        dueDate.setDate(dueDate.getDate() + totalDays);
+
+        // Format for MikroTik scheduler (mmm/dd/yyyy)
+        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
+        const schedulerTime = "23:59:59"; // Run at the end of the day
+
+        // 2. Create new comment
+        const newComment = JSON.stringify({
+            plan: plan.name,
+            price: plan.price,
+            currency: plan.currency,
+            dueDate: dueDate.toISOString().split('T')[0],
+            paidDate: paymentDate
+        });
+
+        // 3. Define script to run on scheduler
+        const scriptSource = `:log info "Subscription expired for ${secret.name}, changing profile."; /ppp secret set [find name="${secret.name}"] profile=${nonPaymentProfile};`;
+        const schedulerName = `disable-${secret.name.replace(/[^a-zA-Z0-9]/g, '_')}`; // Sanitize name for scheduler
+
+        // 4. Update secret and create/update scheduler
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // Update secret
+                await client.write('/ppp/secret/set', [
+                    `=.id=${secret.id}`,
+                    `=profile=${plan.pppoeProfile}`,
+                    `=comment=${newComment}`,
+                    '=disabled=no'
+                ]);
+
+                // Find existing scheduler
+                const existingScheduler = await client.write('/system/scheduler/print', [`?name=${schedulerName}`]);
+
+                if (existingScheduler.length > 0) {
+                    // Update existing scheduler
+                    await client.write('/system/scheduler/set', [
+                        `=.id=${existingScheduler[0]['.id']}`,
+                        `=start-date=${schedulerDate}`,
+                        `=start-time=${schedulerTime}`,
+                        `=on-event=${scriptSource}`
+                    ]);
+                } else {
+                    // Add new scheduler
+                    await client.write('/system/scheduler/add', [
+                        `=name=${schedulerName}`,
+                        `=start-date=${schedulerDate}`,
+                        `=start-time=${schedulerTime}`,
+                        `=interval=0`,
+                        `=on-event=${scriptSource}`
+                    ]);
+                }
+            } finally {
+                await client.close();
+            }
+        } else { // REST API
+            // Update secret
+            await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(secret.id)}`, {
+                profile: plan.pppoeProfile,
+                comment: newComment,
+                disabled: false
+            });
+
+            // Find existing scheduler
+            const schedulersResponse = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+            const existingScheduler = schedulersResponse.data;
+            
+            if (existingScheduler.length > 0) {
+                // Update existing
+                await req.routerInstance.patch(`/system/scheduler/${encodeURIComponent(existingScheduler[0].id)}`, {
+                    'start-date': schedulerDate,
+                    'start-time': schedulerTime,
+                    'on-event': scriptSource
+                });
+            } else {
+                // Add new
+                await req.routerInstance.put('/system/scheduler', {
+                    name: schedulerName,
+                    'start-date': schedulerDate,
+                    'start-time': schedulerTime,
+                    interval: '0',
+                    'on-event': scriptSource
+                });
+            }
+        }
+        
+        return { message: 'Payment processed and subscription updated successfully.' };
+    });
+});
+
+
 app.post('/mt-api/:routerId/ip/dhcp-server/lease/:leaseId/make-static', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
         const { leaseId } = req.params;

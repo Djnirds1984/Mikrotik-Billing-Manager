@@ -1,5 +1,3 @@
-
-
 import type {
     RouterConfig,
     RouterConfigWithId,
@@ -217,7 +215,7 @@ export const addPppSecret = (router: RouterConfigWithId, secretData: PppSecretDa
 };
 
 export const updatePppSecret = (router: RouterConfigWithId, secretData: PppSecret): Promise<any> => {
-    const { id, 'last-logged-out': lastLoggedOut, ...dataToSend } = secretData as any;
+    const { id, 'last-logged-out': lastLoggedOut, name, ...dataToSend } = secretData as any;
     delete dataToSend['.id'];
     delete dataToSend.isActive;
     delete dataToSend.activeInfo;
