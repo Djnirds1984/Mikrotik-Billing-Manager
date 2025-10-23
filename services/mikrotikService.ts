@@ -354,7 +354,7 @@ export const getDhcpLeases = (router: RouterConfigWithId): Promise<DhcpLease[]> 
     return fetchMikrotikData<DhcpLease[]>(router, '/ip/dhcp-server/lease');
 };
 export const makeLeaseStatic = (router: RouterConfigWithId, leaseId: string): Promise<any> => {
-    return fetchMikrotikData(router, `/ip/dhcp-server/lease/${encodeURIComponent(leaseId)}/make-static`, { method: 'POST' });
+    return fetchMikrotikData(router, `/ip/dhcp-server/lease/${encodeURIComponent(leaseId)}/make-static`, { method: 'POST', body: '{}' });
 };
 export const deleteDhcpLease = (router: RouterConfigWithId, leaseId: string): Promise<any> => {
     return fetchMikrotikData(router, `/ip/dhcp-server/lease/${encodeURIComponent(leaseId)}`, { method: 'DELETE' });
@@ -499,21 +499,40 @@ export const activateDhcpClient = async (router: RouterConfigWithId, params: Dhc
     const leases = await getDhcpLeases(router);
     const leaseToMakeStatic = leases.find(l => l['mac-address'] === params.macAddress && l.dynamic === 'true');
     if (leaseToMakeStatic) {
-        await makeLeaseStatic(router, leaseToMakeStatic.id);
+        try {
+            await makeLeaseStatic(router, leaseToMakeStatic.id);
+        } catch (e) {
+            console.warn(`Could not make lease static for ${params.macAddress}, but proceeding with activation. Error:`, (e as Error).message);
+        }
     }
 
-    // 2. Add simple queue if speed limit is provided
+    // 2. Add/update simple queue if speed limit is provided
     const speed = params.speedLimit && !isNaN(parseFloat(params.speedLimit)) ? parseFloat(params.speedLimit) : 0;
+    const queueName = `dhcp-${params.address}`;
+    const queues = await getSimpleQueues(router);
+    const existingQueue = queues.find(q => q.name === queueName);
+
     if (speed > 0) {
-        await addSimpleQueue(router, {
-            name: `dhcp-${params.address}`,
+        const queueData = {
             target: params.address,
             'max-limit': `${params.speedLimit}M/${params.speedLimit}M`,
             comment: `Managed by panel for ${params.customerInfo}`
-        });
+        };
+        if (existingQueue) {
+            await updateSimpleQueue(router, existingQueue.id, queueData);
+        } else {
+            await addSimpleQueue(router, { name: queueName, ...queueData });
+        }
+    } else if (existingQueue) {
+        // If speed is set to 0 or empty, remove the queue
+        await deleteSimpleQueue(router, existingQueue.id);
     }
 
-    // 3. Update address list entry
+    // 3. Robustly find the address list entry ID to modify.
+    // The MAC is stored in the comment of the pending list.
+    const addressLists = await fetchMikrotikData<any[]>(router, '/ip/firewall/address-list');
+    const pendingEntry = addressLists.find(item => item.list === 'pending-dhcp-users' && item.comment === params.macAddress);
+    
     const commentData = {
         customerInfo: params.customerInfo,
         contactNumber: params.contactNumber,
@@ -521,16 +540,27 @@ export const activateDhcpClient = async (router: RouterConfigWithId, params: Dhc
         speedLimit: params.speedLimit
     };
 
-    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-            list: 'authorized-dhcp-users',
-            comment: JSON.stringify(commentData),
-            timeout: calculateTimeout(params.expiresAt),
-            // Also update the address if it was 0.0.0.0
-            address: params.address
-        })
-    });
+    const payload = {
+        list: 'authorized-dhcp-users',
+        comment: JSON.stringify(commentData),
+        timeout: calculateTimeout(params.expiresAt),
+        address: params.address
+    };
+
+    if (pendingEntry) {
+        // An entry exists in the pending list. PATCH it to move it to authorized.
+        return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(pendingEntry.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+        });
+    } else {
+        // No pending entry found. This can happen if the UI loaded before the DHCP script ran.
+        // In this case, we CREATE a new entry directly in the authorized list using PUT.
+        return fetchMikrotikData(router, `/ip/firewall/address-list`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+    }
 };
 
 export const updateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
