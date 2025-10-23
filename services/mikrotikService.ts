@@ -441,23 +441,16 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
 };
 
 export const activateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
-    // 1. Get the details of the pending entry
-    const pendingEntry = await fetchMikrotikData<any>(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`);
-
-    // 2. Add to authorized list
-    await fetchMikrotikData(router, '/ip/firewall/address-list', {
-        method: 'PUT',
+    // FIX: Replaced the multi-step (GET, PUT, DELETE) process with a single, atomic PATCH request.
+    // This correctly updates the existing address-list entry, moving it from the 'pending'
+    // to the 'authorized' list and setting its comment and timeout in one operation.
+    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`, {
+        method: 'PATCH',
         body: JSON.stringify({
             list: 'authorized-dhcp-users',
-            address: pendingEntry.address,
             comment: params.customerInfo,
             timeout: calculateTimeout(params.expiresAt)
         })
-    });
-    
-    // 3. Remove from pending list
-    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`, {
-        method: 'DELETE'
     });
 };
 
