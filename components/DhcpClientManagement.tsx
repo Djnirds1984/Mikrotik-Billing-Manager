@@ -14,10 +14,17 @@ const ActivateClientModal: React.FC<{
 }> = ({ isOpen, onClose, onSave, client, isSubmitting }) => {
     const [customerInfo, setCustomerInfo] = useState('');
     const [expiresAt, setExpiresAt] = useState('');
+    const [speedLimit, setSpeedLimit] = useState('');
+    const [contactNumber, setContactNumber] = useState('');
+    const [email, setEmail] = useState('');
+
 
     useEffect(() => {
         if (isOpen && client) {
             setCustomerInfo(client.customerInfo || '');
+            setSpeedLimit(client.speedLimit || '');
+            setContactNumber(client.contactNumber || '');
+            setEmail(client.email || '');
             
             // If timeout exists, calculate expiry date, otherwise set a default
             if (client.status === 'active' && client.creationTime && client.timeout) {
@@ -52,7 +59,16 @@ const ActivateClientModal: React.FC<{
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave({ addressListId: client.id, customerInfo, expiresAt });
+        onSave({ 
+            addressListId: client.id, 
+            macAddress: client.macAddress,
+            address: client.address,
+            customerInfo, 
+            expiresAt,
+            speedLimit,
+            contactNumber,
+            email
+        });
     };
 
     return (
@@ -64,12 +80,28 @@ const ActivateClientModal: React.FC<{
                         <p className="text-sm text-slate-500 mb-4 font-mono">{client.address} ({client.macAddress})</p>
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium">Customer Info (Optional)</label>
-                                <input value={customerInfo} onChange={e => setCustomerInfo(e.target.value)} placeholder="e.g., John Doe - Unit 5" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                <label className="block text-sm font-medium">Customer Name</label>
+                                <input value={customerInfo} onChange={e => setCustomerInfo(e.target.value)} placeholder="e.g., John Doe - Unit 5" required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium">Expires At</label>
-                                <input type="datetime-local" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium">Contact Number</label>
+                                    <input type="tel" value={contactNumber} onChange={e => setContactNumber(e.target.value)} placeholder="Optional" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium">Email Address</label>
+                                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium">Speed Limit (Mbps)</label>
+                                    <input type="number" value={speedLimit} onChange={e => setSpeedLimit(e.target.value)} placeholder="e.g., 5" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium">Expires At</label>
+                                    <input type="datetime-local" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
                             </div>
                         </div>
                     </div>

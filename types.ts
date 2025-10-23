@@ -575,13 +575,34 @@ export interface DhcpClient {
     address: string;
     macAddress: string;
     hostName: string;
+    // Parsed from comment
     customerInfo: string;
+    contactNumber?: string;
+    email?: string;
+    speedLimit?: string;
+    // Raw data
     timeout?: string; // e.g. 29d23h59m58s
     creationTime?: string;
 }
 
 export interface DhcpClientActionParams {
     addressListId: string;
+    macAddress: string;
+    address: string;
     customerInfo: string;
     expiresAt: string; // ISO date string
+    speedLimit?: string;
+    contactNumber?: string;
+    email?: string;
 }
+
+export interface SimpleQueue {
+    id: string;
+    name: string;
+    target: string;
+    'max-limit': string;
+    disabled: 'true' | 'false';
+    comment?: string;
+}
+
+export type SimpleQueueData = Partial<Omit<SimpleQueue, 'id'>>;

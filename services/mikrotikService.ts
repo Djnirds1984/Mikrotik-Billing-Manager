@@ -40,7 +40,9 @@ import type {
     DhcpCaptivePortalSetupParams,
     // FIX: Add missing type imports for DHCP Captive Portal
     DhcpClient,
-    DhcpClientActionParams
+    DhcpClientActionParams,
+    SimpleQueue,
+    SimpleQueueData
 } from '../types.ts';
 import { getAuthHeader } from './databaseService.ts';
 
@@ -437,40 +439,114 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
             const ipAddress = item.address;
             const lease = leaseMapByIp.get(ipAddress);
             
-            return {
+            const baseClient = {
                 id: item.id,
                 status: status,
                 address: ipAddress,
                 macAddress: lease?.['mac-address'] || '',
                 hostName: lease?.['host-name'] || 'N/A',
-                customerInfo: item.comment || '',
                 timeout: item.timeout,
                 creationTime: item['creation-time']
             };
+
+            try {
+                const parsedComment = JSON.parse(item.comment);
+                return {
+                    ...baseClient,
+                    customerInfo: parsedComment.customerInfo || '',
+                    contactNumber: parsedComment.contactNumber || '',
+                    email: parsedComment.email || '',
+                    speedLimit: parsedComment.speedLimit || '',
+                };
+            } catch (e) {
+                // Not JSON, treat as plain string
+                return {
+                    ...baseClient,
+                    customerInfo: item.comment || '',
+                };
+            }
         });
 
     return clients;
 };
 
 export const activateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
-    // FIX: Replaced the multi-step (GET, PUT, DELETE) process with a single, atomic PATCH request.
-    // This correctly updates the existing address-list entry, moving it from the 'pending'
-    // to the 'authorized' list and setting its comment and timeout in one operation.
+    // 1. Make lease static
+    const leases = await getDhcpLeases(router);
+    const leaseToMakeStatic = leases.find(l => l['mac-address'] === params.macAddress && l.dynamic === 'true');
+    if (leaseToMakeStatic) {
+        await makeLeaseStatic(router, leaseToMakeStatic.id);
+    }
+
+    // 2. Add simple queue if speed limit is provided
+    const speed = params.speedLimit && !isNaN(parseFloat(params.speedLimit)) ? parseFloat(params.speedLimit) : 0;
+    if (speed > 0) {
+        await addSimpleQueue(router, {
+            name: `dhcp-${params.address}`,
+            target: params.address,
+            'max-limit': `${params.speedLimit}M/${params.speedLimit}M`,
+            comment: `Managed by panel for ${params.customerInfo}`
+        });
+    }
+
+    // 3. Update address list entry
+    const commentData = {
+        customerInfo: params.customerInfo,
+        contactNumber: params.contactNumber,
+        email: params.email,
+        speedLimit: params.speedLimit
+    };
+
     return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`, {
         method: 'PATCH',
         body: JSON.stringify({
             list: 'authorized-dhcp-users',
-            comment: params.customerInfo,
+            comment: JSON.stringify(commentData),
             timeout: calculateTimeout(params.expiresAt)
         })
     });
 };
 
 export const updateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
+    // 1. Manage simple queue
+    const queues = await getSimpleQueues(router);
+    const queueName = `dhcp-${params.address}`;
+    const existingQueue = queues.find(q => q.name === queueName);
+    const speed = params.speedLimit && !isNaN(parseFloat(params.speedLimit)) ? parseFloat(params.speedLimit) : 0;
+
+    if (speed > 0) {
+        const queueData = {
+            'max-limit': `${speed}M/${speed}M`,
+            comment: `Managed by panel for ${params.customerInfo}`
+        };
+        if (existingQueue) {
+            // Update existing queue
+            await updateSimpleQueue(router, existingQueue.id, queueData);
+        } else {
+            // Create new queue
+            await addSimpleQueue(router, {
+                name: queueName,
+                target: params.address,
+                ...queueData
+            });
+        }
+    } else if (existingQueue) {
+        // Speed is 0 or invalid, remove the queue if it exists
+        await deleteSimpleQueue(router, existingQueue.id);
+    }
+    
+    // 2. Update address list entry
+    const commentData = {
+        customerInfo: params.customerInfo,
+        contactNumber: params.contactNumber,
+        email: params.email,
+        speedLimit: params.speedLimit
+    };
+    
     return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`, {
         method: 'PATCH',
         body: JSON.stringify({
-            comment: params.customerInfo,
+            comment: JSON.stringify(commentData),
             timeout: calculateTimeout(params.expiresAt)
         })
     });
@@ -494,6 +570,17 @@ const firewallApi = <T extends FirewallRule, U extends FirewallRuleData>(type: R
 export const { get: getFirewallFilter, add: addFirewallFilter, update: updateFirewallFilter, delete: deleteFirewallFilter } = firewallApi<FirewallFilterRule, FirewallRuleData>('filter');
 export const { get: getFirewallNat, add: addFirewallNat, update: updateFirewallNat, delete: deleteFirewallNat } = firewallApi<FirewallNatRule, FirewallRuleData>('nat');
 export const { get: getFirewallMangle, add: addFirewallMangle, update: updateFirewallMangle, delete: deleteFirewallMangle } = firewallApi<FirewallMangleRule, FirewallRuleData>('mangle');
+
+// --- Simple Queues ---
+const simpleQueueApi = <T extends SimpleQueue, U extends SimpleQueueData>(path: string) => ({
+    get: (router: RouterConfigWithId): Promise<T[]> => fetchMikrotikData<T[]>(router, path),
+    add: (router: RouterConfigWithId, data: U): Promise<any> => fetchMikrotikData(router, path, { method: 'PUT', body: JSON.stringify(data) }),
+    update: (router: RouterConfigWithId, id: string, data: Partial<U>): Promise<any> => fetchMikrotikData(router, `${path}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (router: RouterConfigWithId, id: string): Promise<any> => fetchMikrotikData(router, `${path}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+});
+
+export const { get: getSimpleQueues, add: addSimpleQueue, update: updateSimpleQueue, delete: deleteSimpleQueue } = simpleQueueApi<SimpleQueue, SimpleQueueData>('/queue/simple');
+
 
 // --- Logs ---
 export const getRouterLogs = (router: RouterConfigWithId): Promise<MikroTikLogEntry[]> => {
