@@ -409,9 +409,7 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
     const pendingListName = "pending-dhcp-users";
 
     const leaseMapByIp = new Map<string, DhcpLease>(leases.map(lease => [lease.address, lease]));
-    // Create a map of leases by MAC address to robustly find the correct IP.
-    const leaseMapByMac = new Map<string, DhcpLease>(leases.map(lease => [lease['mac-address'], lease]));
-
+    
     const clients: DhcpClient[] = addressLists
         .filter(item => item.list === authorizedListName || item.list === pendingListName)
         .map(item => {
@@ -419,13 +417,13 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
             
             if (status === 'pending') {
                 const macAddress = item.comment || '';
-                // Find the lease using the MAC address from the comment, which is more reliable than the IP.
-                const lease = leaseMapByMac.get(macAddress);
+                // Find the lease using the MAC address from the comment, ensuring it has a valid IP.
+                const lease = leases.find(l => l['mac-address'] === macAddress && l.address !== '0.0.0.0');
 
                 return {
                     id: item.id,
                     status: status,
-                    // Use the IP from the lease if found; otherwise, fall back to the (potentially incorrect) address-list IP.
+                    // Use the IP from the lease if found; otherwise, fall back to the address-list IP.
                     address: lease?.address || item.address,
                     macAddress: macAddress,
                     hostName: lease?.['host-name'] || 'N/A',
