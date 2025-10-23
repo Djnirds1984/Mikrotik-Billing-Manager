@@ -495,6 +495,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
         const authorizedListName = "authorized-dhcp-users";
         const pendingListName = "pending-dhcp-users";
         const portalRedirectComment = "Redirect pending HTTP to portal";
+        const masqueradeComment = "Masquerade authorized DHCP clients";
 
         const scriptSource = `
 :local mac $"lease-mac-address";
@@ -542,6 +543,18 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
                     `=comment=${portalRedirectComment}`
                 ]);
 
+                // --- NAT Rule to masquerade authorized users ---
+                const oldMasqueradeRule = await client.write('/ip/firewall/nat/print', [`?comment=${masqueradeComment}`]);
+                if (oldMasqueradeRule.length > 0) await client.write('/ip/firewall/nat/remove', [`=.id=${oldMasqueradeRule[0]['.id']}`]);
+                await client.write('/ip/firewall/nat/add', [
+                    '=chain=srcnat',
+                    `=src-address-list=${authorizedListName}`,
+                    '=action=masquerade',
+                    `=comment=${masqueradeComment}`,
+                    '=place-before=0'
+                ]);
+
+
             } finally {
                 await client.close();
             }
@@ -577,6 +590,19 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
                 'to-ports': '3001',
                 comment: portalRedirectComment
             });
+            
+            // --- NAT Rule to masquerade authorized users ---
+            const oldMasqueradeRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${masqueradeComment}`);
+            for (const rule of oldMasqueradeRules.data) {
+                await req.routerInstance.delete(`/ip/firewall/nat/${rule.id}`);
+            }
+            await req.routerInstance.put('/ip/firewall/nat', {
+                chain: 'srcnat',
+                'src-address-list': authorizedListName,
+                action: 'masquerade',
+                comment: masqueradeComment,
+                'place-before': '0'
+            });
         }
         
         return { message: 'DHCP Captive Portal components installed successfully!' };
@@ -589,6 +615,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
         const authorizedListName = "authorized-dhcp-users";
         const pendingListName = "pending-dhcp-users";
         const portalRedirectComment = "Redirect pending HTTP to portal";
+        const masqueradeComment = "Masquerade authorized DHCP clients";
 
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
@@ -602,6 +629,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
                 };
 
                 await findAndRemove('/ip/firewall/nat', [`?comment=${portalRedirectComment}`]);
+                await findAndRemove('/ip/firewall/nat', [`?comment=${masqueradeComment}`]);
 
                 const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
                 for (const comment of filterComments) {
@@ -632,6 +660,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
             };
 
             await findAndRemove('/ip/firewall/nat', `comment=${portalRedirectComment}`);
+            await findAndRemove('/ip/firewall/nat', `comment=${masqueradeComment}`);
 
             const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
             for (const comment of filterComments) {
