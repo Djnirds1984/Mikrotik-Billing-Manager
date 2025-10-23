@@ -417,8 +417,9 @@ app.post('/mt-api/:routerId/ip/dhcp-server/lease/:leaseId/make-static', getRoute
             }
             return { message: 'Lease made static.' };
         } else {
-            // REST API supports this directly. It's a command endpoint that expects an empty body.
-            await req.routerInstance.post(`/ip/dhcp-server/lease/${encodeURIComponent(leaseId)}/make-static`, {});
+            // FIX: Correctly call the 'make-static' command via REST API.
+            // The command is on the collection, and the target ID is in the body.
+            await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": leaseId });
             return { message: 'Lease made static.' };
         }
     });
