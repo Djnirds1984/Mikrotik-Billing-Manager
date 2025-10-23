@@ -399,74 +399,100 @@ const calculateTimeout = (expiresAt: string): string => {
 };
 
 export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpClient[]> => {
-    // Fetch address lists and leases in parallel
-    const [addressLists, leases] = await Promise.all([
-        fetchMikrotikData<any[]>(router, '/ip/firewall/address-list'),
-        fetchMikrotikData<DhcpLease[]>(router, '/ip/dhcp-server/lease')
+    // 1. Fetch all required data in parallel
+    const [leases, addressLists] = await Promise.all([
+        fetchMikrotikData<DhcpLease[]>(router, '/ip/dhcp-server/lease'),
+        fetchMikrotikData<any[]>(router, '/ip/firewall/address-list')
     ]);
 
     const authorizedListName = "authorized-dhcp-users";
     const pendingListName = "pending-dhcp-users";
 
-    const leaseMapByIp = new Map<string, DhcpLease>(leases.map(lease => [lease.address, lease]));
-    
-    const clients: DhcpClient[] = addressLists
-        .filter(item => item.list === authorizedListName || item.list === pendingListName)
-        .map(item => {
-            const status: 'active' | 'pending' = item.list === authorizedListName ? 'active' : 'pending';
-            
-            if (status === 'pending') {
-                const macAddress = item.comment || '';
-                // Find the lease using the MAC address from the comment, ensuring it has a valid IP.
-                const lease = leases.find(l => l['mac-address'] === macAddress && l.address !== '0.0.0.0');
+    // 2. Create lookup maps for efficient processing
+    const authorizedAddressListMapByIp = new Map<string, any>();
+    const pendingAddressListMapByMac = new Map<string, any>();
 
-                return {
-                    id: item.id,
-                    status: status,
-                    // Use the IP from the lease if found; otherwise, fall back to the address-list IP.
-                    address: lease?.address || item.address,
-                    macAddress: macAddress,
-                    hostName: lease?.['host-name'] || 'N/A',
-                    customerInfo: '', // Pending users do not have customer info.
-                    timeout: item.timeout,
-                    creationTime: item['creation-time']
-                };
-            } 
+    for (const item of addressLists) {
+        if (item.list === authorizedListName && item.address) {
+            authorizedAddressListMapByIp.set(item.address, item);
+        } else if (item.list === pendingListName && item.comment) {
+            // Pending list uses MAC in comment
+            pendingAddressListMapByMac.set(item.comment, item);
+        }
+    }
+
+    const clients: DhcpClient[] = [];
+    const processedMacs = new Set<string>();
+
+    // 3. Iterate through DHCP leases as the primary source of truth
+    for (const lease of leases) {
+        const leaseIp = lease.address;
+        const leaseMac = lease['mac-address'];
+
+        // Skip invalid leases or already processed devices
+        if (!leaseMac || leaseIp === '0.0.0.0' || processedMacs.has(leaseMac)) {
+            continue;
+        }
+
+        if (authorizedAddressListMapByIp.has(leaseIp)) {
+            // --- This is an ACTIVE client ---
+            const addressListEntry = authorizedAddressListMapByIp.get(leaseIp)!;
             
-            // status === 'active'
-            const ipAddress = item.address;
-            const lease = leaseMapByIp.get(ipAddress);
-            
-            const baseClient = {
-                id: item.id,
-                status: status,
-                address: ipAddress,
-                macAddress: lease?.['mac-address'] || '',
-                hostName: lease?.['host-name'] || 'N/A',
-                timeout: item.timeout,
-                creationTime: item['creation-time']
+            const baseClient: DhcpClient = {
+                id: addressListEntry.id,
+                status: 'active',
+                address: leaseIp,
+                macAddress: leaseMac,
+                hostName: lease['host-name'] || 'N/A',
+                customerInfo: '', // Default value
+                timeout: addressListEntry.timeout,
+                creationTime: addressListEntry['creation-time']
             };
 
             try {
-                const parsedComment = JSON.parse(item.comment);
-                return {
+                // Try to parse rich data from the comment
+                const parsedComment = JSON.parse(addressListEntry.comment);
+                clients.push({
                     ...baseClient,
                     customerInfo: parsedComment.customerInfo || '',
                     contactNumber: parsedComment.contactNumber || '',
                     email: parsedComment.email || '',
                     speedLimit: parsedComment.speedLimit || '',
-                };
+                });
             } catch (e) {
-                // Not JSON, treat as plain string
-                return {
+                // If comment is not JSON, treat it as a simple string
+                clients.push({
                     ...baseClient,
-                    customerInfo: item.comment || '',
-                };
+                    customerInfo: addressListEntry.comment || '',
+                });
             }
-        });
+
+        } else {
+            // --- This is a PENDING client ---
+            // It has a valid lease but is not in the authorized list.
+            const pendingEntry = pendingAddressListMapByMac.get(leaseMac);
+
+            clients.push({
+                // The ID must come from the address-list to perform actions on it.
+                // If the script hasn't run yet, pendingEntry might not exist.
+                // We use the lease ID as a stable fallback key if needed.
+                id: pendingEntry?.id || `lease_${lease.id}`, 
+                status: 'pending',
+                address: leaseIp,
+                macAddress: leaseMac,
+                hostName: lease['host-name'] || 'N/A',
+                customerInfo: 'N/A',
+                timeout: pendingEntry?.timeout,
+                creationTime: pendingEntry?.['creation-time']
+            });
+        }
+        
+        processedMacs.add(leaseMac);
+    }
 
     return clients;
 };
+
 
 export const activateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
     // 1. Make lease static
@@ -500,7 +526,9 @@ export const activateDhcpClient = async (router: RouterConfigWithId, params: Dhc
         body: JSON.stringify({
             list: 'authorized-dhcp-users',
             comment: JSON.stringify(commentData),
-            timeout: calculateTimeout(params.expiresAt)
+            timeout: calculateTimeout(params.expiresAt),
+            // Also update the address if it was 0.0.0.0
+            address: params.address
         })
     });
 };
@@ -551,6 +579,10 @@ export const updateDhcpClient = async (router: RouterConfigWithId, params: DhcpC
 };
 
 export const deleteDhcpClient = (router: RouterConfigWithId, addressListId: string): Promise<any> => {
+    // If the ID is a lease fallback, we can't delete it directly. This action should only work for actual address list entries.
+    if (addressListId.startsWith('lease_')) {
+        return Promise.reject(new Error('Cannot delete client that does not have a firewall entry yet.'));
+    }
     return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(addressListId)}`, {
         method: 'DELETE'
     });
