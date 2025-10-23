@@ -23,7 +23,18 @@ export type View =
   | 'mikrotik_files'
   | 'license'
   | 'super_admin'
-  | 'dhcp-portal';
+  | 'dhcp-portal'
+  | 'notifications';
+
+export interface Notification {
+  id: string;
+  type: 'pppoe-expired' | 'client-chat' | 'info';
+  message: string;
+  is_read: 0 | 1;
+  timestamp: string; // ISO string
+  link_to?: View;
+  context_json?: string; // JSON string for context data
+}
 
 export interface LicenseStatus {
   licensed: boolean;

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { RouterConfigWithId, View } from '../types.ts';
+import type { RouterConfigWithId, View, Notification } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useTheme, colorThemes, ColorTheme } from '../contexts/ThemeContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
-
+import { useNotifications } from '../contexts/NotificationContext.tsx';
+import { BellIcon } from '../constants.tsx';
 
 interface TopBarProps {
   title: string;
@@ -36,6 +37,69 @@ const LogoutIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
     </svg>
 );
+
+const NotificationDropdown: React.FC<{ setCurrentView: (view: View) => void }> = ({ setCurrentView }) => {
+    const { notifications, unreadCount, markAsRead } = useNotifications();
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    const recentNotifications = notifications.slice(0, 5);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleNotificationClick = (notification: Notification) => {
+        if (notification.is_read === 0) {
+            markAsRead(notification.id);
+        }
+        if (notification.link_to) {
+            setCurrentView(notification.link_to);
+        }
+        setIsOpen(false);
+    };
+
+    return (
+        <div className="relative" ref={dropdownRef}>
+            <button onClick={() => setIsOpen(!isOpen)} className="relative p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors">
+                <BellIcon className="w-5 h-5" />
+                {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                )}
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg z-30">
+                    <div className="p-3 font-semibold border-b border-slate-200 dark:border-slate-700">Notifications</div>
+                    <ul className="py-1 max-h-80 overflow-y-auto">
+                        {recentNotifications.length > 0 ? recentNotifications.map(n => (
+                            <li key={n.id}>
+                                <button onClick={() => handleNotificationClick(n)} className="w-full text-left px-3 py-2 text-sm text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">
+                                    <p className={`truncate ${n.is_read === 0 ? 'font-bold' : ''}`}>{n.message}</p>
+                                    <p className="text-xs text-slate-400">{new Date(n.timestamp).toLocaleString()}</p>
+                                </button>
+                            </li>
+                        )) : (
+                            <li className="px-3 py-4 text-center text-sm text-slate-500">No new notifications</li>
+                        )}
+                    </ul>
+                    <div className="border-t border-slate-200 dark:border-slate-700">
+                        <button onClick={() => { setCurrentView('notifications'); setIsOpen(false); }} className="w-full py-2 text-sm font-semibold text-[--color-primary-600] dark:text-[--color-primary-400] hover:bg-slate-100 dark:hover:bg-slate-700">
+                            View All Notifications
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
 
 
 const ColorSelector: React.FC = () => {
@@ -161,7 +225,7 @@ export const TopBar: React.FC<TopBarProps> = ({ title, routers, selectedRouter, 
   const { logout } = useAuth();
   
   return (
-    <header className="bg-white/80 dark:bg-slate-900/70 backdrop-blur-sm sticky top-0 z-20 border-b border-slate-200 dark:border-slate-800">
+    <header className="bg-white/80 dark:bg-slate-900/70 backdrop-blur-sm sticky top-0 z-20 border-b border-slate-200 dark:border-slate-800 no-print">
       <div className="flex items-center justify-between h-16 px-4 sm:px-8">
         <div className="flex items-center gap-4">
             <button onClick={onToggleSidebar} className="lg:hidden text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" aria-label="Open sidebar">
@@ -177,7 +241,8 @@ export const TopBar: React.FC<TopBarProps> = ({ title, routers, selectedRouter, 
                 setCurrentView={setCurrentView} 
             />
             <ColorSelector />
-             <button
+            <NotificationDropdown setCurrentView={setCurrentView} />
+            <button
                 onClick={logout}
                 className="p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
                 title="Logout"

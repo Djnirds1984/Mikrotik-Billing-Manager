@@ -480,6 +480,23 @@ async function initDb() {
             user_version = 15;
         }
 
+        if (user_version < 16) {
+            console.log('Applying migration v16 (Add notifications table)...');
+            await db.exec(`
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id TEXT PRIMARY KEY,
+                    type TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    is_read INTEGER NOT NULL DEFAULT 0,
+                    timestamp TEXT NOT NULL,
+                    link_to TEXT,
+                    context_json TEXT
+                );
+            `);
+            await db.exec('PRAGMA user_version = 16;');
+            user_version = 16;
+        }
+
 
     } catch (err) {
         console.error('Failed to initialize database:', err);
@@ -746,6 +763,37 @@ authRouter.post('/change-superadmin-password', protect, requireSuperadmin, async
 });
 
 app.use('/api/auth', authRouter);
+
+// New endpoint for captive portal messages
+app.post('/api/captive-message', async (req, res) => {
+    const { message } = req.body;
+    // Get client IP, considering proxies
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+    if (!message) {
+        return res.status(400).json({ message: 'Message content is required.' });
+    }
+
+    try {
+        const notification = {
+            id: `notif_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+            type: 'client-chat',
+            message: `New message from ${clientIp}: "${message}"`,
+            is_read: 0,
+            timestamp: new Date().toISOString(),
+            link_to: 'dhcp-portal',
+            context_json: JSON.stringify({ ip: clientIp })
+        };
+        await db.run(
+            'INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            notification.id, notification.type, notification.message, notification.is_read, notification.timestamp, notification.link_to, notification.context_json
+        );
+        res.status(201).json({ message: 'Message sent successfully.' });
+    } catch (e) {
+        console.error('Error saving captive message:', e);
+        res.status(500).json({ message: 'Failed to send message.' });
+    }
+});
 
 // --- License Management ---
 const getDeviceId = () => {
@@ -1114,7 +1162,8 @@ const tableMap = {
     'billing-plans': 'billing_plans',
     'company-settings': 'company_settings',
     'panel-settings': 'panel_settings',
-    'voucher-plans': 'voucher_plans'
+    'voucher-plans': 'voucher_plans',
+    'notifications': 'notifications',
 };
 
 const dbRouter = express.Router();

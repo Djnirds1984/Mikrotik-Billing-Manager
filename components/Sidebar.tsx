@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { MikroTikLogoIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, ZeroTierIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, ReceiptPercentIcon, KeyIcon, LockClosedIcon, ServerIcon } from '../constants.tsx';
+import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, ZeroTierIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { View, CompanySettings, LicenseStatus } from '../types.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { useNotifications } from '../contexts/NotificationContext.tsx';
 
 interface SidebarProps {
   currentView: View;
@@ -19,7 +20,8 @@ const NavItem: React.FC<{
   isActive: boolean;
   onClick: () => void;
   disabled?: boolean;
-}> = ({ icon, label, isActive, onClick, disabled }) => {
+  badge?: number;
+}> = ({ icon, label, isActive, onClick, disabled, badge }) => {
   return (
     <li>
       <button
@@ -35,6 +37,11 @@ const NavItem: React.FC<{
       >
         {icon}
         <span className="flex-1 ml-3 text-left whitespace-nowrap">{label}</span>
+        {badge > 0 && (
+            <span className="inline-flex items-center justify-center px-2 py-0.5 ml-3 text-xs font-medium text-white bg-red-500 rounded-full">
+                {badge > 9 ? '9+' : badge}
+            </span>
+        )}
       </button>
     </li>
   );
@@ -57,9 +64,11 @@ const TerminalIcon: React.FC<{ className?: string }> = ({ className }) => (
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, companySettings, isOpen, setIsOpen, licenseStatus }) => {
   const { user } = useAuth();
   const { t } = useLocalization();
+  const { unreadCount } = useNotifications();
   
   const navItems = useMemo(() => [
     { id: 'dashboard', label: t('sidebar.dashboard'), icon: <EthernetIcon className="w-6 h-6" /> },
+    { id: 'notifications', label: t('sidebar.notifications'), icon: <BellIcon className="w-6 h-6" />, badge: unreadCount },
     { id: 'scripting', label: t('sidebar.ai_scripting'), icon: <EditIcon className="w-6 h-6" /> },
     { id: 'terminal', label: t('sidebar.terminal'), icon: <TerminalIcon className="w-6 h-6" /> },
     { id: 'routers', label: t('sidebar.routers'), icon: <RouterIcon className="w-6 h-6" /> },
@@ -80,7 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'logs', label: t('sidebar.logs'), icon: <CodeBracketIcon className="w-6 h-6" /> },
     { id: 'license', label: t('sidebar.license'), icon: <KeyIcon className="w-6 h-6" /> },
     { id: 'super_admin', label: t('sidebar.super_admin'), icon: <LockClosedIcon className="w-6 h-6" /> },
-  ], [t]);
+  ], [t, unreadCount]);
 
   const filteredNavItems = useMemo(() => {
     if (!user) return [];
@@ -135,11 +144,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
               isActive={currentView === item.id}
               onClick={() => setCurrentView(item.id as View)}
               disabled={!licenseStatus?.licensed && licensedViews.includes(item.id as View)}
+              badge={item.badge || 0}
             />
           ))}
         </ul>
         <div className="text-center text-xs text-slate-400 dark:text-slate-600 mt-4">
-            v1.0 Beta 2
+            v1.5.0
         </div>
       </div>
     </aside>

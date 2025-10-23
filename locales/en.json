@@ -23,7 +23,8 @@
         "panel_roles": "Panel Roles",
         "mikrotik_files": "Mikrotik Files",
         "license": "License",
-        "super_admin": "Super Admin"
+        "super_admin": "Super Admin",
+        "notifications": "Notifications"
     },
     "titles": {
         "dashboard": "Dashboard",
@@ -46,7 +47,8 @@
         "panel_roles": "Panel Role Management",
         "mikrotik_files": "Mikrotik File Editor",
         "license": "Application Licensing",
-        "super_admin": "Super Admin: License Generator"
+        "super_admin": "Super Admin: License Generator",
+        "notifications": "System Notifications"
     },
     "topbar": {
         "add_router_title": "Go to Routers page to add a new router",

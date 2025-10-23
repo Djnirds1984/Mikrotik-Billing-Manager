@@ -30,6 +30,7 @@ import { SuperAdmin } from './components/SuperAdmin.tsx';
 import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
 import { DhcpPortal } from './components/DhcpPortal.tsx';
 import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
+import { NotificationsPage } from './components/NotificationsPage.tsx';
 import { useRouters } from './hooks/useRouters.ts';
 import { useSalesData } from './hooks/useSalesData.ts';
 import { useInventoryData } from './hooks/useInventoryData.ts';
@@ -37,6 +38,7 @@ import { useExpensesData } from './hooks/useExpensesData.ts';
 import { useCompanySettings } from './hooks/useCompanySettings.ts';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext.tsx';
 import { ThemeProvider } from './contexts/ThemeContext.tsx';
+import { NotificationProvider } from './contexts/NotificationContext.tsx';
 import { useAuth } from './contexts/AuthContext.tsx';
 import type { View, LicenseStatus } from './types.ts';
 import { getAuthHeader } from './services/databaseService.ts';
@@ -147,6 +149,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     switch (currentView) {
       case 'dashboard':
         return <Dashboard selectedRouter={selectedRouter} />;
+      case 'notifications':
+        return <NotificationsPage setCurrentView={setCurrentView} />;
       case 'scripting':
         return <Scripting />;
       case 'routers':
@@ -343,7 +347,9 @@ const AppRouter: React.FC = () => {
 const App: React.FC = () => (
   <ThemeProvider>
     <LocalizationProvider>
-      <AppRouter />
+        <NotificationProvider>
+            <AppRouter />
+        </NotificationProvider>
     </LocalizationProvider>
   </ThemeProvider>
 );
