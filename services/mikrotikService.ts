@@ -210,6 +210,26 @@ export const getIpPools = (router: RouterConfigWithId): Promise<IpPool[]> => {
     return fetchMikrotikData<IpPool[]>(router, '/ip/pool');
 };
 
+export const addIpPool = (router: RouterConfigWithId, poolData: Omit<IpPool, 'id'>): Promise<any> => {
+    return fetchMikrotikData(router, '/ip/pool', {
+        method: 'PUT',
+        body: JSON.stringify(poolData),
+    });
+};
+
+export const updateIpPool = (router: RouterConfigWithId, poolId: string, poolData: Partial<Omit<IpPool, 'id'>>): Promise<any> => {
+    return fetchMikrotikData(router, `/ip/pool/${encodeURIComponent(poolId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(poolData),
+    });
+};
+
+export const deleteIpPool = (router: RouterConfigWithId, poolId: string): Promise<any> => {
+    return fetchMikrotikData(router, `/ip/pool/${encodeURIComponent(poolId)}`, {
+        method: 'DELETE',
+    });
+};
+
 export const getPppSecrets = (router: RouterConfigWithId): Promise<PppSecret[]> => {
     return fetchMikrotikData<PppSecret[]>(router, '/ppp/secret');
 };

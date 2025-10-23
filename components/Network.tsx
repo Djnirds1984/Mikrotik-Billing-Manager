@@ -5,11 +5,12 @@ import {
     addIpRoute, updateIpRoute, deleteIpRoute, getWanRoutes, getWanFailoverStatus,
     setRouteProperty, configureWanFailover,
     getDhcpServers, addDhcpServer, updateDhcpServer, deleteDhcpServer,
-    getDhcpLeases, makeLeaseStatic, deleteDhcpLease, runDhcpSetup, getIpPools
+    getDhcpLeases, makeLeaseStatic, deleteDhcpLease, runDhcpSetup, getIpPools,
+    addIpPool, updateIpPool, deleteIpPool
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
-import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon, ServerIcon } from '../constants.tsx';
+import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon, ServerIcon, CircleStackIcon } from '../constants.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 import { Firewall } from './Firewall.tsx';
 import { DhcpCaptivePortalInstaller } from './DhcpCaptivePortalInstaller.tsx';
@@ -603,9 +604,169 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     );
 };
 
+// --- IP Pool Management Component & Sub-components ---
+const PoolFormModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (poolData: Omit<IpPool, 'id'>, poolId?: string) => void;
+    initialData: IpPool | null;
+    isLoading: boolean;
+}> = ({ isOpen, onClose, onSave, initialData, isLoading }) => {
+    const [pool, setPool] = useState({ name: '', ranges: '' });
+
+    useEffect(() => {
+        if (isOpen) {
+            if (initialData) {
+                setPool({ name: initialData.name, ranges: initialData.ranges });
+            } else {
+                setPool({ name: '', ranges: '' });
+            }
+        }
+    }, [initialData, isOpen]);
+
+    if (!isOpen) return null;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target;
+        setPool(p => ({ ...p, [name]: value }));
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(pool, initialData?.id);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold mb-4">{initialData ? 'Edit IP Pool' : 'Add New IP Pool'}</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label>Pool Name</label>
+                                <input name="name" value={pool.name} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                            </div>
+                            <div>
+                                <label>Ranges</label>
+                                <input name="ranges" value={pool.ranges} onChange={handleChange} required placeholder="e.g., 192.168.10.2-192.168.10.254" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
+                        <button type="button" onClick={onClose} className="px-4 py-2 rounded-md">Cancel</button>
+                        <button type="submit" disabled={isLoading} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">
+                            {isLoading ? 'Saving...' : 'Save'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+const IpPoolManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
+    const [pools, setPools] = useState<IpPool[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingPool, setEditingPool] = useState<IpPool | null>(null);
+
+    const fetchData = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const data = await getIpPools(selectedRouter);
+            setPools(data);
+        } catch (err) {
+            setError(`Failed to fetch IP pools: ${(err as Error).message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [selectedRouter]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    const handleSave = async (poolData: Omit<IpPool, 'id'>, poolId?: string) => {
+        setIsSubmitting(true);
+        try {
+            if (poolId) {
+                await updateIpPool(selectedRouter, poolId, poolData);
+            } else {
+                await addIpPool(selectedRouter, poolData);
+            }
+            setIsModalOpen(false);
+            await fetchData();
+        } catch (err) {
+            alert(`Failed to save IP pool: ${(err as Error).message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDelete = async (poolId: string) => {
+        if (!window.confirm("Are you sure you want to delete this IP pool?")) return;
+        try {
+            await deleteIpPool(selectedRouter, poolId);
+            await fetchData();
+        } catch (err) {
+            alert(`Failed to delete IP pool: ${(err as Error).message}`);
+        }
+    };
+
+    if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
+    if (error) return <div className="p-4 bg-red-100 text-red-700 rounded-md">{error}</div>;
+
+    return (
+        <div>
+            <PoolFormModal 
+                isOpen={isModalOpen} 
+                onClose={() => setIsModalOpen(false)} 
+                onSave={handleSave} 
+                initialData={editingPool} 
+                isLoading={isSubmitting} 
+            />
+            <div className="flex justify-end mb-4">
+                <button 
+                    onClick={() => { setEditingPool(null); setIsModalOpen(true); }} 
+                    className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg"
+                >
+                    Add Pool
+                </button>
+            </div>
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
+                <table className="w-full text-sm">
+                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
+                        <tr>
+                            <th className="px-6 py-3">Name</th>
+                            <th className="px-6 py-3">Ranges</th>
+                            <th className="px-6 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {pools.map(pool => (
+                            <tr key={pool.id} className="border-b dark:border-slate-700">
+                                <td className="px-6 py-4 font-medium">{pool.name}</td>
+                                <td className="px-6 py-4 font-mono">{pool.ranges}</td>
+                                <td className="px-6 py-4 text-right space-x-2">
+                                    <button onClick={() => { setEditingPool(pool); setIsModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => handleDelete(pool.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
 
 // --- Main Component ---
-type ActiveTab = 'wan' | 'routes' | 'firewall' | 'aiwan' | 'dhcp';
+type ActiveTab = 'wan' | 'routes' | 'firewall' | 'aiwan' | 'dhcp' | 'pools';
 
 export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
     const [activeTab, setActiveTab] = useState<ActiveTab>('wan');
@@ -776,7 +937,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
         );
     }
     
-    if (isLoading && activeTab !== 'dhcp') { // Let DHCP manager handle its own loading
+    if (isLoading && activeTab !== 'dhcp' && activeTab !== 'pools') { // Let DHCP/Pool manager handle its own loading
         return (
             <div className="flex flex-col items-center justify-center h-64">
                 <Loader />
@@ -785,7 +946,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
         );
     }
     
-    if (error && (activeTab !== 'wan' && activeTab !== 'dhcp')) { 
+    if (error && (activeTab !== 'wan' && activeTab !== 'dhcp' && activeTab !== 'pools')) { 
          return (
             <div className="flex flex-col items-center justify-center h-64 bg-white dark:bg-slate-800 rounded-lg border border-red-300 dark:border-red-700 p-6 text-center">
                 <p className="text-xl font-semibold text-red-600 dark:text-red-400">Failed to load data.</p>
@@ -901,6 +1062,8 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                 );
             case 'dhcp':
                 return <DhcpManager selectedRouter={selectedRouter} />;
+            case 'pools':
+                return <IpPoolManager selectedRouter={selectedRouter} />;
             default:
                 return null;
         }
@@ -918,6 +1081,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                     <TabButton label="Routes & VLANs" icon={<VlanIcon className="w-5 h-5" />} isActive={activeTab === 'routes'} onClick={() => setActiveTab('routes')} />
                     <TabButton label="AI Multi-WAN" icon={<span className="font-bold text-lg">AI</span>} isActive={activeTab === 'aiwan'} onClick={() => setActiveTab('aiwan')} />
                     <TabButton label="DHCP" icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'dhcp'} onClick={() => setActiveTab('dhcp')} />
+                    <TabButton label="IP Pools" icon={<CircleStackIcon className="w-5 h-5" />} isActive={activeTab === 'pools'} onClick={() => setActiveTab('pools')} />
                 </nav>
             </div>
 
