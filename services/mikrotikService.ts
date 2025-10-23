@@ -407,31 +407,43 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
     const pendingListName = "pending-dhcp-users";
 
     const leaseMapByIp = new Map<string, DhcpLease>(leases.map(lease => [lease.address, lease]));
+    // Create a map of leases by MAC address to robustly find the correct IP.
+    const leaseMapByMac = new Map<string, DhcpLease>(leases.map(lease => [lease['mac-address'], lease]));
 
     const clients: DhcpClient[] = addressLists
         .filter(item => item.list === authorizedListName || item.list === pendingListName)
         .map(item => {
             const status: 'active' | 'pending' = item.list === authorizedListName ? 'active' : 'pending';
-            let macAddress = '';
-            let customerInfo = '';
             
-            const lease = leaseMapByIp.get(item.address);
-
             if (status === 'pending') {
-                macAddress = item.comment || '';
-                customerInfo = '';
-            } else { // active
-                macAddress = lease?.['mac-address'] || '';
-                customerInfo = item.comment || '';
-            }
+                const macAddress = item.comment || '';
+                // Find the lease using the MAC address from the comment, which is more reliable than the IP.
+                const lease = leaseMapByMac.get(macAddress);
+
+                return {
+                    id: item.id,
+                    status: status,
+                    // Use the IP from the lease if found; otherwise, fall back to the (potentially incorrect) address-list IP.
+                    address: lease?.address || item.address,
+                    macAddress: macAddress,
+                    hostName: lease?.['host-name'] || 'N/A',
+                    customerInfo: '', // Pending users do not have customer info.
+                    timeout: item.timeout,
+                    creationTime: item['creation-time']
+                };
+            } 
+            
+            // status === 'active'
+            const ipAddress = item.address;
+            const lease = leaseMapByIp.get(ipAddress);
             
             return {
                 id: item.id,
                 status: status,
-                address: item.address,
-                macAddress: macAddress,
-                hostName: lease?.['host-name'] || '',
-                customerInfo: customerInfo,
+                address: ipAddress,
+                macAddress: lease?.['mac-address'] || '',
+                hostName: lease?.['host-name'] || 'N/A',
+                customerInfo: item.comment || '',
                 timeout: item.timeout,
                 creationTime: item['creation-time']
             };
