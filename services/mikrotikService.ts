@@ -528,10 +528,17 @@ export const activateDhcpClient = async (router: RouterConfigWithId, params: Dhc
         await deleteSimpleQueue(router, existingQueue.id);
     }
 
-    // 3. Robustly find the address list entry ID to modify.
-    // The MAC is stored in the comment of the pending list.
+    // 3. Robustly find the address list entry to modify.
     const addressLists = await fetchMikrotikData<any[]>(router, '/ip/firewall/address-list');
-    const pendingEntry = addressLists.find(item => item.list === 'pending-dhcp-users' && item.comment === params.macAddress);
+    
+    // Prioritize finding the entry via MAC address in the pending list's comment. This is the most reliable way.
+    let entryToModify = addressLists.find(item => item.list === 'pending-dhcp-users' && item.comment === params.macAddress);
+
+    // If not found by MAC, search by IP address in EITHER list as a fallback.
+    // This handles cases where the entry exists but the comment is missing, or it's already in the authorized list for some reason.
+    if (!entryToModify) {
+        entryToModify = addressLists.find(item => item.address === params.address && (item.list === 'pending-dhcp-users' || item.list === 'authorized-dhcp-users'));
+    }
     
     const commentData = {
         customerInfo: params.customerInfo,
@@ -547,17 +554,16 @@ export const activateDhcpClient = async (router: RouterConfigWithId, params: Dhc
         address: params.address
     };
 
-    if (pendingEntry) {
-        // An entry exists in the pending list. PATCH it to move it to authorized.
-        return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(pendingEntry.id)}`, {
+    if (entryToModify) {
+        // An entry exists. PATCH it to move/update it.
+        return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(entryToModify.id)}`, {
             method: 'PATCH',
             body: JSON.stringify(payload)
         });
     } else {
-        // No pending entry found. This can happen if the UI loaded before the DHCP script ran.
-        // In this case, we CREATE a new entry directly in the authorized list using PUT.
+        // No entry found by MAC or IP. It's safe to CREATE a new entry.
         return fetchMikrotikData(router, `/ip/firewall/address-list`, {
-            method: 'PUT',
+            method: 'PUT', // PUT to collection is 'add'
             body: JSON.stringify(payload)
         });
     }
