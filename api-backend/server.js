@@ -429,22 +429,32 @@ app.post('/mt-api/:routerId/ip/dhcp-server/setup', getRouterConfig, async (req, 
     await handleApiRequest(req, res, async () => {
         const { dhcpInterface, dhcpAddressSpace, gateway, addressPool, dnsServers, leaseTime } = req.body;
         const poolName = `dhcp_pool_${dhcpInterface}`;
+
+        // --- ADDED STEP: Assign IP to interface ---
+        const cidr = dhcpAddressSpace.split('/')[1];
+        if (!cidr) {
+            throw new Error('Invalid DHCP Address Space format. It must be in CIDR notation (e.g., 192.168.88.0/24).');
+        }
+        const interfaceAddress = `${gateway}/${cidr}`;
         
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
-                // 1. Create IP Pool
+                 // 1. Assign IP address to interface
+                await client.write('/ip/address/add', [`=address=${interfaceAddress}`, `=interface=${dhcpInterface}`]);
+
+                // 2. Create IP Pool
                 await client.write('/ip/pool/add', [`=name=${poolName}`, `=ranges=${addressPool}`]);
                 
-                // 2. Create DHCP Network
+                // 3. Create DHCP Network
                 await client.write('/ip/dhcp-server/network/add', [
                     `=address=${dhcpAddressSpace}`,
                     `=gateway=${gateway}`,
                     `=dns-server=${dnsServers}`
                 ]);
 
-                // 3. Create DHCP Server
+                // 4. Create DHCP Server
                 await client.write('/ip/dhcp-server/add', [
                     `=name=dhcp_${dhcpInterface}`,
                     `=interface=${dhcpInterface}`,
@@ -457,20 +467,26 @@ app.post('/mt-api/:routerId/ip/dhcp-server/setup', getRouterConfig, async (req, 
                 await client.close();
             }
         } else { // REST API
-             // 1. Create IP Pool
+             // 1. Assign IP address to interface
+            await req.routerInstance.put('/ip/address', {
+                address: interfaceAddress,
+                interface: dhcpInterface,
+            });
+
+             // 2. Create IP Pool
             await req.routerInstance.put('/ip/pool', {
                 name: poolName,
                 ranges: addressPool,
             });
 
-            // 2. Create DHCP Network
+            // 3. Create DHCP Network
             await req.routerInstance.put('/ip/dhcp-server/network', {
                 address: dhcpAddressSpace,
                 gateway: gateway,
                 'dns-server': dnsServers,
             });
             
-            // 3. Create DHCP Server
+            // 4. Create DHCP Server
             await req.routerInstance.put('/ip/dhcp-server', {
                 name: `dhcp_${dhcpInterface}`,
                 interface: dhcpInterface,
