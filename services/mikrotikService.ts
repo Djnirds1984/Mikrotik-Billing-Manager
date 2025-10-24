@@ -614,12 +614,41 @@ export const updateDhcpClient = async (router: RouterConfigWithId, params: DhcpC
     });
 };
 
-export const deleteDhcpClient = (router: RouterConfigWithId, addressListId: string): Promise<any> => {
-    // If the ID is a lease fallback, we can't delete it directly. This action should only work for actual address list entries.
-    if (addressListId.startsWith('lease_')) {
-        return Promise.reject(new Error('Cannot delete client that does not have a firewall entry yet.'));
+export const deleteDhcpClient = async (router: RouterConfigWithId, client: DhcpClient): Promise<any> => {
+    // If the ID is a lease fallback, it's a pending user without a firewall entry yet. 
+    // We can't do anything but wait for the router script to run.
+    if (client.id.startsWith('lease_')) {
+        return Promise.reject(new Error('Cannot delete client that does not have a firewall entry yet. Refresh in a moment.'));
     }
-    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(addressListId)}`, {
+
+    // For active clients, we must also remove their connections and queue to cut internet immediately.
+    if (client.status === 'active') {
+        // 1. Find and remove active firewall connections for the client's IP
+        try {
+            const connections = await fetchMikrotikData<any[]>(router, `/ip/firewall/connection?src-address=${client.address}`);
+            const deletePromises = connections.map(conn => 
+                fetchMikrotikData(router, `/ip/firewall/connection/${encodeURIComponent(conn.id)}`, { method: 'DELETE' })
+            );
+            await Promise.all(deletePromises);
+        } catch (e) {
+            console.warn(`Could not remove active connections for ${client.address}, but proceeding with deactivation. Error:`, (e as Error).message);
+        }
+
+        // 2. Find and remove the simple queue associated with the client
+        try {
+            const queues = await getSimpleQueues(router);
+            const queueName = `dhcp-${client.address}`;
+            const existingQueue = queues.find(q => q.name === queueName);
+            if (existingQueue) {
+                await deleteSimpleQueue(router, existingQueue.id);
+            }
+        } catch (e) {
+            console.warn(`Could not remove simple queue for ${client.address}, but proceeding with deactivation. Error:`, (e as Error).message);
+        }
+    }
+    
+    // 3. Finally, remove the client from the address list (works for both 'active' and 'pending')
+    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(client.id)}`, {
         method: 'DELETE'
     });
 };

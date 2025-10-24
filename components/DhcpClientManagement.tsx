@@ -166,7 +166,7 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
     const handleDelete = async (client: DhcpClient) => {
          if (window.confirm(`Are you sure you want to ${client.status === 'active' ? 'deactivate' : 'delete'} this client record? Deactivating will remove internet access.`)) {
             try {
-                await deleteDhcpClient(selectedRouter, client.id);
+                await deleteDhcpClient(selectedRouter, client);
                 await fetchData();
             } catch (err) {
                 alert(`Failed to delete client: ${(err as Error).message}`);
