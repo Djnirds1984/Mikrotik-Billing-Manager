@@ -540,10 +540,20 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
                 const serverId = dhcpServers[0]['.id'];
                 await client.write('/ip/dhcp-server/set', [`=.id=${serverId}`, `=lease-script=${scriptName}`]);
                 
-                // --- Firewall Filter Rules (Corrected Order) ---
-                await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=src-address-list=${authorizedListName}`, '=place-before=0', '=comment=Allow authorized traffic']);
-                await client.write('/ip/firewall/filter/add', ['=action=drop', '=chain=forward', `=src-address-list=${pendingListName}`, '=place-before=0', '=comment=Drop all other pending traffic']);
-                await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=dst-address=${panelIp}`, `=src-address-list=${pendingListName}`, '=place-before=0', '=comment=Allow pending to access portal']);
+                // --- Firewall Filter Rules (New Secure Logic) ---
+                const filterComments = ["Allow authorized DHCP clients", "Allow LAN access to Captive Portal", "Drop all other LAN traffic (Captive Portal)"];
+                const oldFilterRules = await client.write('/ip/firewall/filter/print');
+                for (const comment of filterComments) {
+                    const rule = oldFilterRules.find(r => r.comment === comment);
+                    if (rule) {
+                        await client.write('/ip/firewall/filter/remove', [`=.id=${rule['.id']}`]);
+                    }
+                }
+                
+                // Insert in reverse order to get the correct final order
+                await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, `=in-interface=${lanInterface}`, '=place-before=0', '=comment=Drop all other LAN traffic (Captive Portal)']);
+                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=dst-address=${panelIp}`, `=in-interface=${lanInterface}`, '=place-before=0', '=comment=Allow LAN access to Captive Portal']);
+                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=src-address-list=${authorizedListName}`, '=place-before=0', '=comment=Allow authorized DHCP clients']);
                 
                 // --- NAT Rule to redirect HTTP traffic to the panel ---
                 const oldNatRule = await client.write('/ip/firewall/nat/print', [`?comment=${portalRedirectComment}`]);
@@ -570,7 +580,6 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
                     '=place-before=0'
                 ]);
 
-
             } finally {
                 await client.close();
             }
@@ -586,10 +595,20 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             const serverId = dhcpServers.data[0].id;
             await req.routerInstance.patch(`/ip/dhcp-server/${serverId}`, { 'lease-script': scriptName });
 
-            // --- Firewall Filter Rules (Corrected Order) ---
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized traffic" });
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'src-address-list': pendingListName, 'place-before': '0', comment: "Drop all other pending traffic" });
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'src-address-list': pendingListName, 'place-before': '0', comment: "Allow pending to access portal" });
+            // --- Firewall Filter Rules (New Secure Logic) ---
+            const filterComments = ["Allow authorized DHCP clients", "Allow LAN access to Captive Portal", "Drop all other LAN traffic (Captive Portal)"];
+            const oldFilterRules = await req.routerInstance.get('/ip/firewall/filter');
+            for (const comment of filterComments) {
+                const rule = oldFilterRules.data.find(r => r.comment === comment);
+                if (rule) {
+                    await req.routerInstance.delete(`/ip/firewall/filter/${rule.id}`);
+                }
+            }
+
+            // Insert in reverse order to get the correct final order
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'in-interface': lanInterface, 'place-before': '0', comment: "Drop all other LAN traffic (Captive Portal)" });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'in-interface': lanInterface, 'place-before': '0', comment: "Allow LAN access to Captive Portal" });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized DHCP clients" });
             
             // --- NAT Rule to redirect HTTP traffic to the panel ---
             const oldNatRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${portalRedirectComment}`);
@@ -632,6 +651,8 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
         const pendingListName = "pending-dhcp-users";
         const portalRedirectComment = "Redirect pending HTTP to portal";
         const masqueradeComment = "Masquerade authorized DHCP clients";
+        const filterComments = ["Allow authorized DHCP clients", "Allow LAN access to Captive Portal", "Drop all other LAN traffic (Captive Portal)"];
+
 
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
@@ -647,7 +668,6 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
                 await findAndRemove('/ip/firewall/nat', [`?comment=${portalRedirectComment}`]);
                 await findAndRemove('/ip/firewall/nat', [`?comment=${masqueradeComment}`]);
 
-                const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
                 for (const comment of filterComments) {
                     await findAndRemove('/ip/firewall/filter', [`?comment=${comment}`]);
                 }
@@ -678,7 +698,6 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
             await findAndRemove('/ip/firewall/nat', `comment=${portalRedirectComment}`);
             await findAndRemove('/ip/firewall/nat', `comment=${masqueradeComment}`);
 
-            const filterComments = ["Allow pending to access portal", "Drop all other pending traffic", "Allow authorized traffic"];
             for (const comment of filterComments) {
                 await findAndRemove('/ip/firewall/filter', `comment=${comment}`);
             }
@@ -706,7 +725,8 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
         const { address, macAddress, expiresAt, speedLimit, customerInfo, contactNumber, email } = params;
         
         const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
-        const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; /ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; /ip firewall connection remove [find where src-address~"^${address}:"];`;
+        const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; /ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; /ip firewall connection remove [find where src-address~"^${address}:"]; :local leaseId [/ip dhcp-server lease find where address="${address}"]; if ($leaseId != "") do={ :local macAddr [/ip dhcp-server lease get $leaseId \`mac-address\`]; /ip firewall address-list add address="${address}" list="pending-dhcp-users" timeout=1d comment=$macAddr; };`;
+
         const commentData = { customerInfo, contactNumber, email, speedLimit };
         const addressListPayload = {
             list: 'authorized-dhcp-users',
@@ -719,38 +739,31 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
         const schedulerDate = `${monthNames[expiryDate.getMonth()]}/${String(expiryDate.getDate()).padStart(2, '0')}/${expiryDate.getFullYear()}`;
         const schedulerTime = `${String(expiryDate.getHours()).padStart(2, '0')}:${String(expiryDate.getMinutes()).padStart(2, '0')}:${String(expiryDate.getSeconds()).padStart(2, '0')}`;
 
-        const queueName = `dhcp-${address}`;
-
         if (req.routerConfig.api_type === 'legacy') {
-            // Legacy API implementation is omitted for brevity but would follow the same logic as REST
-            throw new Error("Scheduler-based DHCP management is not implemented for the legacy API.");
+            throw new Error("Scheduler-based DHCP management with rate-limits is not supported for the legacy API.");
         } else { // REST API
-            // 1. Make lease static (best effort)
-            try {
-                const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${macAddress}&dynamic=true`);
-                if (leases.data.length > 0) {
-                    await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": leases.data[0].id });
-                }
-            } catch(e) { console.warn(`Could not make lease static for ${macAddress}: ${e.message}`); }
+            // 1. Find the lease
+            const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${macAddress}`);
+            if (leases.data.length === 0) {
+                throw new Error(`No DHCP lease found for MAC address ${macAddress}. The client may have disconnected. Please refresh.`);
+            }
+            const lease = leases.data[0];
 
-            // 2. Manage Simple Queue
-            const queues = await req.routerInstance.get(`/queue/simple?name=${queueName}`);
-            const existingQueue = queues.data[0];
-            const speed = speedLimit && !isNaN(parseFloat(speedLimit)) ? parseFloat(speedLimit) : 0;
-            if (speed > 0) {
-                const queueData = { target: address, 'max-limit': `${speed}M/${speed}M`, comment: `Managed for ${customerInfo}` };
-                if (existingQueue) {
-                    await req.routerInstance.patch(`/queue/simple/${existingQueue.id}`, queueData);
-                } else {
-                    await req.routerInstance.put('/queue/simple', { name: queueName, ...queueData });
-                }
-            } else if (existingQueue) {
-                await req.routerInstance.delete(`/queue/simple/${existingQueue.id}`);
+            // 2. Make lease static if it's dynamic
+            if (lease.dynamic === 'true' || lease.dynamic === true) {
+                await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": lease.id });
             }
 
-            // 3. Update Address List entry
+            // 3. Set rate limit on the static lease
+            const speed = speedLimit && !isNaN(parseFloat(speedLimit)) ? parseFloat(speedLimit) : 0;
+            const rateLimitValue = speed > 0 ? `${speed}M/${speed}M` : '';
+            await req.routerInstance.patch(`/ip/dhcp-server/lease/${lease.id}`, {
+                'rate-limit': rateLimitValue
+            });
+
+            // 4. Update Address List entry
             const addressLists = await req.routerInstance.get('/ip/firewall/address-list');
-            let entryToModify = addressLists.data.find(item => item.id === params.addressListId);
+            let entryToModify = addressLists.data.find(item => item.address === address && (item.list === 'pending-dhcp-users' || item.list === 'authorized-dhcp-users'));
 
             if (entryToModify) {
                 await req.routerInstance.patch(`/ip/firewall/address-list/${entryToModify.id}`, addressListPayload);
@@ -758,11 +771,12 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
                  await req.routerInstance.put('/ip/firewall/address-list', addressListPayload);
             }
 
-            // 4. Manage Scheduler
+            // 5. Manage Scheduler
             const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
-            if (schedulers.data.length > 0) {
-                await req.routerInstance.delete(`/system/scheduler/${schedulers.data[0].id}`);
+            for (const scheduler of schedulers.data) {
+                await req.routerInstance.delete(`/system/scheduler/${scheduler.id}`);
             }
+
             await req.routerInstance.put('/system/scheduler', {
                 name: schedulerName,
                 'start-date': schedulerDate,
@@ -780,7 +794,7 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
         const client = req.body;
 
         if (req.routerConfig.api_type === 'legacy') {
-            throw new Error("Scheduler-based DHCP management is not implemented for the legacy API.");
+            throw new Error("Scheduler-based DHCP management with rate-limits is not supported for the legacy API.");
         } else { // REST API
             // For active clients, remove associated rules
             if (client.status === 'active') {
@@ -790,22 +804,22 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
                 } catch(e) { console.warn(`Could not remove connections for ${client.address}: ${e.message}`); }
                 
                 try {
-                    const queueName = `dhcp-${client.address}`;
-                    const queues = await req.routerInstance.get(`/queue/simple?name=${queueName}`);
-                    if (queues.data.length > 0) {
-                        await req.routerInstance.delete(`/queue/simple/${queues.data[0].id}`);
-                    }
-                } catch(e) { console.warn(`Could not remove queue for ${client.address}: ${e.message}`); }
-                
-                try {
                     const schedulerName = `deactivate-dhcp-${client.address.replace(/\./g, '-')}`;
                     const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
-                    if (schedulers.data.length > 0) {
-                        await req.routerInstance.delete(`/system/scheduler/${schedulers.data[0].id}`);
+                     for (const scheduler of schedulers.data) {
+                        await req.routerInstance.delete(`/system/scheduler/${scheduler.id}`);
                     }
                 } catch(e) { console.warn(`Could not remove scheduler for ${client.address}: ${e.message}`); }
             }
             
+             // For all clients, remove associated lease to clear rate-limit
+            try {
+                const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${client.macAddress}`);
+                if (leases.data.length > 0) {
+                    await req.routerInstance.delete(`/ip/dhcp-server/lease/${leases.data[0].id}`);
+                }
+            } catch(e) { console.warn(`Could not remove lease for ${client.macAddress}: ${e.message}`); }
+
             // For both active and pending, remove address list entry
             await req.routerInstance.delete(`/ip/firewall/address-list/${client.id}`);
         }
