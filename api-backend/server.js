@@ -513,15 +513,32 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
         const portalRedirectComment = "Redirect pending HTTP to portal";
         const masqueradeComment = "Masquerade authorized DHCP clients";
 
+        // FIX: Implemented a more robust DHCP lease script to prevent execution errors.
         const scriptSource = `
 :local mac $"lease-mac-address";
 :local ip $"lease-address";
-:log info "DHCP lease script: New lease for $ip ($mac)";
-:if ([/ip firewall address-list find list="${authorizedListName}" address=$ip] = "") do={
-  :log info "DHCP lease script: Adding $ip to pending list";
-  /ip firewall address-list add address=$ip list="${pendingListName}" timeout=1d comment=$mac;
+:log info "DHCP Portal Script: Lease event for IP=$ip MAC=$mac.";
+
+:local authorizedList "authorized-dhcp-users";
+:local pendingList "pending-dhcp-users";
+
+:local isAuthorized [/ip firewall address-list find where list=$authorizedList and address=$ip];
+:if ([:len $isAuthorized] > 0) do={
+    :log info "DHCP Portal Script: IP=$ip is already authorized. No action needed.";
 } else={
-  :log info "DHCP lease script: $ip is already authorized";
+    :local pendingEntry [/ip firewall address-list find where list=$pendingList and comment=$mac];
+    :if ([:len $pendingEntry] > 0) do={
+        :local currentIp [/ip firewall address-list get $pendingEntry address];
+        :if ($currentIp != $ip) do={
+            :log info "DHCP Portal Script: MAC=$mac is pending, updating IP from $currentIp to $ip.";
+            /ip firewall address-list set $pendingEntry address=$ip;
+        } else={
+            :log info "DHCP Portal Script: MAC=$mac with IP=$ip is already in pending list. No action needed.";
+        }
+    } else={
+        :log info "DHCP Portal Script: New client. Adding MAC=$mac with IP=$ip to pending list.";
+        /ip firewall address-list add address=$ip list=$pendingList timeout=1d comment=$mac;
+    }
 }`;
         const compactScriptSource = scriptSource.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
         
@@ -531,7 +548,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             "Drop invalid connections for Captive Portal",
             "Allow authorized DHCP clients",
             "Allow LAN access to Captive Portal",
-            "Drop all other LAN traffic (Captive Portal)"
+            "Drop all other traffic from LAN"
         ];
 
         if (req.routerConfig.api_type === 'legacy') {
@@ -557,7 +574,8 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
                 }
                 
                 // --- Insert new firewall rules in reverse order ---
-                await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, `=in-interface=${lanInterface}`, '=place-before=0', `=comment=${filterComments[4]}`]);
+                // FIX: Modified final drop rule to explicitly ignore authorized users.
+                await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, `=in-interface=${lanInterface}`, `=src-address-list=!${authorizedListName}`, '=place-before=0', `=comment=${filterComments[4]}`]);
                 await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=dst-address=${panelIp}`, `=in-interface=${lanInterface}`, '=place-before=0', `=comment=${filterComments[3]}`]);
                 await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=src-address-list=${authorizedListName}`, '=place-before=0', `=comment=${filterComments[2]}`]);
                 await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, '=connection-state=invalid', '=place-before=0', `=comment=${filterComments[1]}`]);
@@ -596,7 +614,8 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             }
 
             // --- Insert new firewall rules in reverse order ---
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'in-interface': lanInterface, 'place-before': '0', comment: filterComments[4] });
+            // FIX: Modified final drop rule to explicitly ignore authorized users.
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'in-interface': lanInterface, 'src-address-list': `!${authorizedListName}`, 'place-before': '0', comment: filterComments[4] });
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'in-interface': lanInterface, 'place-before': '0', comment: filterComments[3] });
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: filterComments[2] });
             await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'connection-state': 'invalid', 'place-before': '0', comment: filterComments[1] });
@@ -633,7 +652,7 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
             "Drop invalid connections for Captive Portal",
             "Allow authorized DHCP clients",
             "Allow LAN access to Captive Portal",
-            "Drop all other LAN traffic (Captive Portal)"
+            "Drop all other traffic from LAN"
         ];
 
         if (req.routerConfig.api_type === 'legacy') {
