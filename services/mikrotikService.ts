@@ -378,26 +378,6 @@ export const runDhcpCaptivePortalUninstall = (router: RouterConfigWithId): Promi
 // FIX: Add functions for DHCP Captive Portal client management
 // --- DHCP Captive Portal Client Management ---
 
-const calculateTimeout = (expiresAt: string): string => {
-    const expiryDate = new Date(expiresAt);
-    const now = new Date();
-    const diffSeconds = Math.round((expiryDate.getTime() - now.getTime()) / 1000);
-    if (diffSeconds <= 0) return '1s'; // Expire almost immediately
-    
-    const days = Math.floor(diffSeconds / 86400);
-    const hours = Math.floor((diffSeconds % 86400) / 3600);
-    const minutes = Math.floor((diffSeconds % 3600) / 60);
-    const seconds = diffSeconds % 60;
-    
-    let timeoutStr = '';
-    if (days > 0) timeoutStr += `${days}d`;
-    if (hours > 0) timeoutStr += `${hours}h`;
-    if (minutes > 0) timeoutStr += `${minutes}m`;
-    if (seconds > 0) timeoutStr += `${seconds}s`;
-
-    return timeoutStr || '1s';
-};
-
 export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpClient[]> => {
     // 1. Fetch all required data in parallel
     const [leases, addressLists] = await Promise.all([
@@ -494,162 +474,29 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
 };
 
 
-export const activateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
-    // 1. Make lease static
-    const leases = await getDhcpLeases(router);
-    const leaseToMakeStatic = leases.find(l => l['mac-address'] === params.macAddress && l.dynamic === 'true');
-    if (leaseToMakeStatic) {
-        try {
-            await makeLeaseStatic(router, leaseToMakeStatic.id);
-        } catch (e) {
-            console.warn(`Could not make lease static for ${params.macAddress}, but proceeding with activation. Error:`, (e as Error).message);
-        }
-    }
-
-    // 2. Add/update simple queue if speed limit is provided
-    const speed = params.speedLimit && !isNaN(parseFloat(params.speedLimit)) ? parseFloat(params.speedLimit) : 0;
-    const queueName = `dhcp-${params.address}`;
-    const queues = await getSimpleQueues(router);
-    const existingQueue = queues.find(q => q.name === queueName);
-
-    if (speed > 0) {
-        const queueData = {
-            target: params.address,
-            'max-limit': `${params.speedLimit}M/${params.speedLimit}M`,
-            comment: `Managed by panel for ${params.customerInfo}`
-        };
-        if (existingQueue) {
-            await updateSimpleQueue(router, existingQueue.id, queueData);
-        } else {
-            await addSimpleQueue(router, { name: queueName, ...queueData });
-        }
-    } else if (existingQueue) {
-        // If speed is set to 0 or empty, remove the queue
-        await deleteSimpleQueue(router, existingQueue.id);
-    }
-
-    // 3. Robustly find the address list entry to modify.
-    const addressLists = await fetchMikrotikData<any[]>(router, '/ip/firewall/address-list');
-    
-    // Prioritize finding the entry via MAC address in the pending list's comment. This is the most reliable way.
-    let entryToModify = addressLists.find(item => item.list === 'pending-dhcp-users' && item.comment === params.macAddress);
-
-    // If not found by MAC, search by IP address in EITHER list as a fallback.
-    // This handles cases where the entry exists but the comment is missing, or it's already in the authorized list for some reason.
-    if (!entryToModify) {
-        entryToModify = addressLists.find(item => item.address === params.address && (item.list === 'pending-dhcp-users' || item.list === 'authorized-dhcp-users'));
-    }
-    
-    const commentData = {
-        customerInfo: params.customerInfo,
-        contactNumber: params.contactNumber,
-        email: params.email,
-        speedLimit: params.speedLimit
-    };
-
-    const payload = {
-        list: 'authorized-dhcp-users',
-        comment: JSON.stringify(commentData),
-        timeout: calculateTimeout(params.expiresAt),
-        address: params.address
-    };
-
-    if (entryToModify) {
-        // An entry exists. PATCH it to move/update it.
-        return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(entryToModify.id)}`, {
-            method: 'PATCH',
-            body: JSON.stringify(payload)
-        });
-    } else {
-        // No entry found by MAC or IP. It's safe to CREATE a new entry.
-        return fetchMikrotikData(router, `/ip/firewall/address-list`, {
-            method: 'PUT', // PUT to collection is 'add'
-            body: JSON.stringify(payload)
-        });
-    }
-};
-
-export const updateDhcpClient = async (router: RouterConfigWithId, params: DhcpClientActionParams): Promise<any> => {
-    // 1. Manage simple queue
-    const queues = await getSimpleQueues(router);
-    const queueName = `dhcp-${params.address}`;
-    const existingQueue = queues.find(q => q.name === queueName);
-    const speed = params.speedLimit && !isNaN(parseFloat(params.speedLimit)) ? parseFloat(params.speedLimit) : 0;
-
-    if (speed > 0) {
-        const queueData = {
-            'max-limit': `${speed}M/${speed}M`,
-            comment: `Managed by panel for ${params.customerInfo}`
-        };
-        if (existingQueue) {
-            // Update existing queue
-            await updateSimpleQueue(router, existingQueue.id, queueData);
-        } else {
-            // Create new queue
-            await addSimpleQueue(router, {
-                name: queueName,
-                target: params.address,
-                ...queueData
-            });
-        }
-    } else if (existingQueue) {
-        // Speed is 0 or invalid, remove the queue if it exists
-        await deleteSimpleQueue(router, existingQueue.id);
-    }
-    
-    // 2. Update address list entry
-    const commentData = {
-        customerInfo: params.customerInfo,
-        contactNumber: params.contactNumber,
-        email: params.email,
-        speedLimit: params.speedLimit
-    };
-    
-    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(params.addressListId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-            comment: JSON.stringify(commentData),
-            timeout: calculateTimeout(params.expiresAt)
-        })
+/**
+ * Activates or updates a DHCP client's details using a robust scheduler-based deactivation.
+ * This single function replaces the separate `activateDhcpClient` and `updateDhcpClient` methods.
+ */
+export const updateDhcpClientDetails = async (router: RouterConfigWithId, client: DhcpClient, params: DhcpClientActionParams): Promise<any> => {
+    return fetchMikrotikData(router, '/dhcp-client/update', {
+        method: 'POST',
+        body: JSON.stringify({ client, params })
     });
 };
 
+/**
+ * Deactivates a DHCP client by removing their connections, queues, scheduler, and address list entry.
+ * This now calls a dedicated backend endpoint to handle the complex cleanup logic.
+ */
 export const deleteDhcpClient = async (router: RouterConfigWithId, client: DhcpClient): Promise<any> => {
-    // If the ID is a lease fallback, it's a pending user without a firewall entry yet. 
-    // We can't do anything but wait for the router script to run.
     if (client.id.startsWith('lease_')) {
         return Promise.reject(new Error('Cannot delete client that does not have a firewall entry yet. Refresh in a moment.'));
     }
-
-    // For active clients, we must also remove their connections and queue to cut internet immediately.
-    if (client.status === 'active') {
-        // 1. Find and remove active firewall connections for the client's IP
-        try {
-            const connections = await fetchMikrotikData<any[]>(router, `/ip/firewall/connection?src-address=${client.address}`);
-            const deletePromises = connections.map(conn => 
-                fetchMikrotikData(router, `/ip/firewall/connection/${encodeURIComponent(conn.id)}`, { method: 'DELETE' })
-            );
-            await Promise.all(deletePromises);
-        } catch (e) {
-            console.warn(`Could not remove active connections for ${client.address}, but proceeding with deactivation. Error:`, (e as Error).message);
-        }
-
-        // 2. Find and remove the simple queue associated with the client
-        try {
-            const queues = await getSimpleQueues(router);
-            const queueName = `dhcp-${client.address}`;
-            const existingQueue = queues.find(q => q.name === queueName);
-            if (existingQueue) {
-                await deleteSimpleQueue(router, existingQueue.id);
-            }
-        } catch (e) {
-            console.warn(`Could not remove simple queue for ${client.address}, but proceeding with deactivation. Error:`, (e as Error).message);
-        }
-    }
     
-    // 3. Finally, remove the client from the address list (works for both 'active' and 'pending')
-    return fetchMikrotikData(router, `/ip/firewall/address-list/${encodeURIComponent(client.id)}`, {
-        method: 'DELETE'
+    return fetchMikrotikData(router, `/dhcp-client/delete`, {
+        method: 'POST',
+        body: JSON.stringify(client)
     });
 };
 

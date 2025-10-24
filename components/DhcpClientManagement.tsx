@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { RouterConfigWithId, DhcpClient, DhcpClientActionParams } from '../types.ts';
 // FIX: Correctly import functions for DHCP captive portal client management.
-import { getDhcpClients, activateDhcpClient, updateDhcpClient, deleteDhcpClient } from '../services/mikrotikService.ts';
+import { getDhcpClients, updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, CheckCircleIcon } from '../constants.tsx';
 
@@ -149,11 +149,7 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
         if (!selectedClient) return;
         setIsSubmitting(true);
         try {
-            if (selectedClient.status === 'pending') {
-                await activateDhcpClient(selectedRouter, params);
-            } else {
-                await updateDhcpClient(selectedRouter, params);
-            }
+            await updateDhcpClientDetails(selectedRouter, selectedClient, params);
             setIsModalOpen(false);
             await fetchData();
         } catch (err) {

@@ -540,10 +540,10 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
                 const serverId = dhcpServers[0]['.id'];
                 await client.write('/ip/dhcp-server/set', [`=.id=${serverId}`, `=lease-script=${scriptName}`]);
                 
-                // --- Firewall Filter Rules ---
-                await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=dst-address=${panelIp}`, `=src-address-list=${pendingListName}`, '=place-before=0', '=comment=Allow pending to access portal']);
-                await client.write('/ip/firewall/filter/add', ['=action=drop', '=chain=forward', `=src-address-list=${pendingListName}`, '=place-before=1', '=comment=Drop all other pending traffic']);
+                // --- Firewall Filter Rules (Corrected Order) ---
                 await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=src-address-list=${authorizedListName}`, '=place-before=0', '=comment=Allow authorized traffic']);
+                await client.write('/ip/firewall/filter/add', ['=action=drop', '=chain=forward', `=src-address-list=${pendingListName}`, '=place-before=0', '=comment=Drop all other pending traffic']);
+                await client.write('/ip/firewall/filter/add', ['=action=accept', '=chain=forward', `=dst-address=${panelIp}`, `=src-address-list=${pendingListName}`, '=place-before=0', '=comment=Allow pending to access portal']);
                 
                 // --- NAT Rule to redirect HTTP traffic to the panel ---
                 const oldNatRule = await client.write('/ip/firewall/nat/print', [`?comment=${portalRedirectComment}`]);
@@ -586,10 +586,10 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             const serverId = dhcpServers.data[0].id;
             await req.routerInstance.patch(`/ip/dhcp-server/${serverId}`, { 'lease-script': scriptName });
 
-            // --- Firewall Filter Rules ---
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'src-address-list': pendingListName, 'place-before': '0', comment: "Allow pending to access portal" });
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'src-address-list': pendingListName, 'place-before': '1', comment: "Drop all other pending traffic" });
+            // --- Firewall Filter Rules (Corrected Order) ---
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized traffic" });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'src-address-list': pendingListName, 'place-before': '0', comment: "Drop all other pending traffic" });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'src-address-list': pendingListName, 'place-before': '0', comment: "Allow pending to access portal" });
             
             // --- NAT Rule to redirect HTTP traffic to the panel ---
             const oldNatRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${portalRedirectComment}`);
@@ -698,6 +698,122 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
         return { message: 'DHCP Captive Portal components have been uninstalled.' };
     });
 });
+
+// --- NEW DHCP CLIENT ENDPOINTS ---
+app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { client: originalClient, params } = req.body;
+        const { address, macAddress, expiresAt, speedLimit, customerInfo, contactNumber, email } = params;
+        
+        const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
+        const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; /ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; /ip firewall connection remove [find where src-address~"^${address}:"];`;
+        const commentData = { customerInfo, contactNumber, email, speedLimit };
+        const addressListPayload = {
+            list: 'authorized-dhcp-users',
+            comment: JSON.stringify(commentData),
+            address: address,
+        };
+
+        const expiryDate = new Date(expiresAt);
+        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const schedulerDate = `${monthNames[expiryDate.getMonth()]}/${String(expiryDate.getDate()).padStart(2, '0')}/${expiryDate.getFullYear()}`;
+        const schedulerTime = `${String(expiryDate.getHours()).padStart(2, '0')}:${String(expiryDate.getMinutes()).padStart(2, '0')}:${String(expiryDate.getSeconds()).padStart(2, '0')}`;
+
+        const queueName = `dhcp-${address}`;
+
+        if (req.routerConfig.api_type === 'legacy') {
+            // Legacy API implementation is omitted for brevity but would follow the same logic as REST
+            throw new Error("Scheduler-based DHCP management is not implemented for the legacy API.");
+        } else { // REST API
+            // 1. Make lease static (best effort)
+            try {
+                const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${macAddress}&dynamic=true`);
+                if (leases.data.length > 0) {
+                    await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": leases.data[0].id });
+                }
+            } catch(e) { console.warn(`Could not make lease static for ${macAddress}: ${e.message}`); }
+
+            // 2. Manage Simple Queue
+            const queues = await req.routerInstance.get(`/queue/simple?name=${queueName}`);
+            const existingQueue = queues.data[0];
+            const speed = speedLimit && !isNaN(parseFloat(speedLimit)) ? parseFloat(speedLimit) : 0;
+            if (speed > 0) {
+                const queueData = { target: address, 'max-limit': `${speed}M/${speed}M`, comment: `Managed for ${customerInfo}` };
+                if (existingQueue) {
+                    await req.routerInstance.patch(`/queue/simple/${existingQueue.id}`, queueData);
+                } else {
+                    await req.routerInstance.put('/queue/simple', { name: queueName, ...queueData });
+                }
+            } else if (existingQueue) {
+                await req.routerInstance.delete(`/queue/simple/${existingQueue.id}`);
+            }
+
+            // 3. Update Address List entry
+            const addressLists = await req.routerInstance.get('/ip/firewall/address-list');
+            let entryToModify = addressLists.data.find(item => item.id === params.addressListId);
+
+            if (entryToModify) {
+                await req.routerInstance.patch(`/ip/firewall/address-list/${entryToModify.id}`, addressListPayload);
+            } else {
+                 await req.routerInstance.put('/ip/firewall/address-list', addressListPayload);
+            }
+
+            // 4. Manage Scheduler
+            const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+            if (schedulers.data.length > 0) {
+                await req.routerInstance.delete(`/system/scheduler/${schedulers.data[0].id}`);
+            }
+            await req.routerInstance.put('/system/scheduler', {
+                name: schedulerName,
+                'start-date': schedulerDate,
+                'start-time': schedulerTime,
+                interval: '0',
+                'on-event': scriptSource
+            });
+        }
+        return { message: 'Client updated successfully with scheduler-based deactivation.' };
+    });
+});
+
+app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const client = req.body;
+
+        if (req.routerConfig.api_type === 'legacy') {
+            throw new Error("Scheduler-based DHCP management is not implemented for the legacy API.");
+        } else { // REST API
+            // For active clients, remove associated rules
+            if (client.status === 'active') {
+                try {
+                    const connections = await req.routerInstance.get(`/ip/firewall/connection?src-address=${client.address}`);
+                    await Promise.all(connections.data.map(c => req.routerInstance.delete(`/ip/firewall/connection/${c.id}`)));
+                } catch(e) { console.warn(`Could not remove connections for ${client.address}: ${e.message}`); }
+                
+                try {
+                    const queueName = `dhcp-${client.address}`;
+                    const queues = await req.routerInstance.get(`/queue/simple?name=${queueName}`);
+                    if (queues.data.length > 0) {
+                        await req.routerInstance.delete(`/queue/simple/${queues.data[0].id}`);
+                    }
+                } catch(e) { console.warn(`Could not remove queue for ${client.address}: ${e.message}`); }
+                
+                try {
+                    const schedulerName = `deactivate-dhcp-${client.address.replace(/\./g, '-')}`;
+                    const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+                    if (schedulers.data.length > 0) {
+                        await req.routerInstance.delete(`/system/scheduler/${schedulers.data[0].id}`);
+                    }
+                } catch(e) { console.warn(`Could not remove scheduler for ${client.address}: ${e.message}`); }
+            }
+            
+            // For both active and pending, remove address list entry
+            await req.routerInstance.delete(`/ip/firewall/address-list/${client.id}`);
+        }
+        
+        return { message: 'Client deactivated and removed successfully.' };
+    });
+});
+
 
 // Generic proxy handler for all other requests
 app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
