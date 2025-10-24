@@ -525,6 +525,15 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
 }`;
         const compactScriptSource = scriptSource.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
         
+        // --- Firewall Filter Rules (New Secure Logic) ---
+        const filterComments = [
+            "Allow established/related connections for Captive Portal",
+            "Drop invalid connections for Captive Portal",
+            "Allow authorized DHCP clients",
+            "Allow LAN access to Captive Portal",
+            "Drop all other LAN traffic (Captive Portal)"
+        ];
+
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
@@ -540,45 +549,29 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
                 const serverId = dhcpServers[0]['.id'];
                 await client.write('/ip/dhcp-server/set', [`=.id=${serverId}`, `=lease-script=${scriptName}`]);
                 
-                // --- Firewall Filter Rules (New Secure Logic) ---
-                const filterComments = ["Allow authorized DHCP clients", "Allow LAN access to Captive Portal", "Drop all other LAN traffic (Captive Portal)"];
+                // --- Clean old firewall rules ---
                 const oldFilterRules = await client.write('/ip/firewall/filter/print');
                 for (const comment of filterComments) {
                     const rule = oldFilterRules.find(r => r.comment === comment);
-                    if (rule) {
-                        await client.write('/ip/firewall/filter/remove', [`=.id=${rule['.id']}`]);
-                    }
+                    if (rule) await client.write('/ip/firewall/filter/remove', [`=.id=${rule['.id']}`]);
                 }
                 
-                // Insert in reverse order to get the correct final order
-                await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, `=in-interface=${lanInterface}`, '=place-before=0', '=comment=Drop all other LAN traffic (Captive Portal)']);
-                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=dst-address=${panelIp}`, `=in-interface=${lanInterface}`, '=place-before=0', '=comment=Allow LAN access to Captive Portal']);
-                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=src-address-list=${authorizedListName}`, '=place-before=0', '=comment=Allow authorized DHCP clients']);
-                
+                // --- Insert new firewall rules in reverse order ---
+                await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, `=in-interface=${lanInterface}`, '=place-before=0', `=comment=${filterComments[4]}`]);
+                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=dst-address=${panelIp}`, `=in-interface=${lanInterface}`, '=place-before=0', `=comment=${filterComments[3]}`]);
+                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=src-address-list=${authorizedListName}`, '=place-before=0', `=comment=${filterComments[2]}`]);
+                await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, '=connection-state=invalid', '=place-before=0', `=comment=${filterComments[1]}`]);
+                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, '=connection-state=established,related', '=place-before=0', `=comment=${filterComments[0]}`]);
+
                 // --- NAT Rule to redirect HTTP traffic to the panel ---
                 const oldNatRule = await client.write('/ip/firewall/nat/print', [`?comment=${portalRedirectComment}`]);
                 if (oldNatRule.length > 0) await client.write('/ip/firewall/nat/remove', [`=.id=${oldNatRule[0]['.id']}`]);
-                await client.write('/ip/firewall/nat/add', [
-                    '=chain=dstnat',
-                    `=src-address-list=${pendingListName}`,
-                    '=protocol=tcp',
-                    '=dst-port=80',
-                    '=action=dst-nat',
-                    `=to-addresses=${panelIp}`,
-                    '=to-ports=3001',
-                    `=comment=${portalRedirectComment}`
-                ]);
+                await client.write('/ip/firewall/nat/add', ['=chain=dstnat', `=src-address-list=${pendingListName}`, '=protocol=tcp', '=dst-port=80', '=action=dst-nat', `=to-addresses=${panelIp}`, '=to-ports=3001', `=comment=${portalRedirectComment}`]);
 
                 // --- NAT Rule to masquerade authorized users ---
                 const oldMasqueradeRule = await client.write('/ip/firewall/nat/print', [`?comment=${masqueradeComment}`]);
                 if (oldMasqueradeRule.length > 0) await client.write('/ip/firewall/nat/remove', [`=.id=${oldMasqueradeRule[0]['.id']}`]);
-                await client.write('/ip/firewall/nat/add', [
-                    '=chain=srcnat',
-                    `=src-address-list=${authorizedListName}`,
-                    '=action=masquerade',
-                    `=comment=${masqueradeComment}`,
-                    '=place-before=0'
-                ]);
+                await client.write('/ip/firewall/nat/add', ['=chain=srcnat', `=src-address-list=${authorizedListName}`, '=action=masquerade', `=comment=${masqueradeComment}`, '=place-before=0']);
 
             } finally {
                 await client.close();
@@ -595,49 +588,33 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             const serverId = dhcpServers.data[0].id;
             await req.routerInstance.patch(`/ip/dhcp-server/${serverId}`, { 'lease-script': scriptName });
 
-            // --- Firewall Filter Rules (New Secure Logic) ---
-            const filterComments = ["Allow authorized DHCP clients", "Allow LAN access to Captive Portal", "Drop all other LAN traffic (Captive Portal)"];
+            // --- Clean old firewall rules ---
             const oldFilterRules = await req.routerInstance.get('/ip/firewall/filter');
             for (const comment of filterComments) {
                 const rule = oldFilterRules.data.find(r => r.comment === comment);
-                if (rule) {
-                    await req.routerInstance.delete(`/ip/firewall/filter/${rule.id}`);
-                }
+                if (rule) await req.routerInstance.delete(`/ip/firewall/filter/${rule.id}`);
             }
 
-            // Insert in reverse order to get the correct final order
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'in-interface': lanInterface, 'place-before': '0', comment: "Drop all other LAN traffic (Captive Portal)" });
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'in-interface': lanInterface, 'place-before': '0', comment: "Allow LAN access to Captive Portal" });
-            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: "Allow authorized DHCP clients" });
+            // --- Insert new firewall rules in reverse order ---
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'in-interface': lanInterface, 'place-before': '0', comment: filterComments[4] });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'in-interface': lanInterface, 'place-before': '0', comment: filterComments[3] });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: filterComments[2] });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'connection-state': 'invalid', 'place-before': '0', comment: filterComments[1] });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'connection-state': 'established,related', 'place-before': '0', comment: filterComments[0] });
             
             // --- NAT Rule to redirect HTTP traffic to the panel ---
             const oldNatRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${portalRedirectComment}`);
             for (const rule of oldNatRules.data) {
                 await req.routerInstance.delete(`/ip/firewall/nat/${rule.id}`);
             }
-            await req.routerInstance.put('/ip/firewall/nat', {
-                chain: 'dstnat',
-                'src-address-list': pendingListName,
-                protocol: 'tcp',
-                'dst-port': '80',
-                action: 'dst-nat',
-                'to-addresses': panelIp,
-                'to-ports': '3001',
-                comment: portalRedirectComment
-            });
+            await req.routerInstance.put('/ip/firewall/nat', { chain: 'dstnat', 'src-address-list': pendingListName, protocol: 'tcp', 'dst-port': '80', action: 'dst-nat', 'to-addresses': panelIp, 'to-ports': '3001', comment: portalRedirectComment });
             
             // --- NAT Rule to masquerade authorized users ---
             const oldMasqueradeRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${masqueradeComment}`);
             for (const rule of oldMasqueradeRules.data) {
                 await req.routerInstance.delete(`/ip/firewall/nat/${rule.id}`);
             }
-            await req.routerInstance.put('/ip/firewall/nat', {
-                chain: 'srcnat',
-                'src-address-list': authorizedListName,
-                action: 'masquerade',
-                comment: masqueradeComment,
-                'place-before': '0'
-            });
+            await req.routerInstance.put('/ip/firewall/nat', { chain: 'srcnat', 'src-address-list': authorizedListName, action: 'masquerade', comment: masqueradeComment, 'place-before': '0' });
         }
         
         return { message: 'DHCP Captive Portal components installed successfully!' };
@@ -651,8 +628,13 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
         const pendingListName = "pending-dhcp-users";
         const portalRedirectComment = "Redirect pending HTTP to portal";
         const masqueradeComment = "Masquerade authorized DHCP clients";
-        const filterComments = ["Allow authorized DHCP clients", "Allow LAN access to Captive Portal", "Drop all other LAN traffic (Captive Portal)"];
-
+        const filterComments = [
+            "Allow established/related connections for Captive Portal",
+            "Drop invalid connections for Captive Portal",
+            "Allow authorized DHCP clients",
+            "Allow LAN access to Captive Portal",
+            "Drop all other LAN traffic (Captive Portal)"
+        ];
 
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
