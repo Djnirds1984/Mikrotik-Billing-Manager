@@ -1,3 +1,4 @@
+
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -202,8 +203,17 @@ app.post('/mt-api/:routerId/system/clock/sync-time', getRouterConfig, async (req
                 await client.close();
             }
         } else {
-            // REST API uses PATCH to update the existing /system/clock resource
-            await req.routerInstance.patch('/system/clock', payload);
+            // REST API requires patching the specific clock resource, not the collection.
+            // 1. Get the clock resource to find its ID.
+            const response = await req.routerInstance.get('/system/clock');
+            const clockResource = response.data[0];
+            if (!clockResource || !clockResource.id) {
+                throw new Error('Could not find system clock resource on the router.');
+            }
+            const clockId = clockResource.id;
+
+            // 2. Patch the resource by its ID.
+            await req.routerInstance.patch(`/system/clock/${encodeURIComponent(clockId)}`, payload);
         }
 
         return { message: 'Router time synchronized successfully with the panel server.' };
