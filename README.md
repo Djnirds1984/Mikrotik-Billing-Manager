@@ -1,19 +1,64 @@
-# MikroTik Orange Pi Manager
+# Mikrotik Billling Management by AJC
 
 A modern, responsive web dashboard for managing your MikroTik routers, specifically designed to be lightweight enough to run on an Orange Pi or similar single-board computer. It features a real-time monitoring dashboard and a powerful AI Script Assistant powered by the Google Gemini API.
 
-![Screenshot of the MikroTik Orange Pi Manager Dashboard](./screenshot.png)
+![Screenshot of the Mikrotik Billling Management by AJC Dashboard](./screenshot.png)
 
 ## Features
 
--   **Multi-Router Support:** Add, edit, and switch between multiple router configurations seamlessly.
--   **Real-time Dashboard:** Connects to your selected router to monitor system information, resource usage (CPU/Memory), and live interface traffic with dynamic graphs.
--   **AI Script Assistant:** Describe a networking task in plain English (e.g., "Block Facebook for the guest network"), and the AI will generate the corresponding RouterOS terminal script.
--   **PPPoE Management:** Full CRUD management for PPPoE profiles and users (secrets).
--   **Billing System:** Create billing plans and process payments for PPPoE users, with automated scheduler integration for managing expired accounts.
--   **ZeroTier Management:** Join, leave, enable, and disable ZeroTier networks directly from the UI.
--   **Updater:** A one-click updater to fetch the latest version of the panel from your GitHub repository, including automatic backups and rollback functionality.
--   **Responsive Design:** A clean, modern UI that works on both desktop and mobile browsers.
+-   **Dashboard & Monitoring:** Real-time system info, resource usage (CPU/Memory), and live interface traffic graphs for both the panel host and the selected MikroTik router.
+
+-   **AI Script Assistant:** Powered by Google Gemini, generates RouterOS terminal scripts from plain English descriptions. Includes specialized assistants for Multi-WAN (PCC/PBR) and Hotspot setups.
+
+-   **PPPoE Suite:** Full lifecycle management for PPPoE services, including:
+    -   **Users (Secrets):** Create, edit, and delete PPPoE user accounts.
+    -   **Profiles:** Manage speed limits and IP pools for different user tiers.
+    -   **Servers:** Configure and manage PPPoE server instances on router interfaces.
+
+-   **DHCP Captive Portal:** A complete MAC-based "activate before internet" system.
+    -   **One-Click Installer:** Automatically deploys all necessary firewall rules, scripts, and address lists.
+    -   **Client Management:** View connected devices, distinguish between `pending` and `active` clients, and manage their state.
+    -   **Billing Integration:** Create dedicated billing plans (e.g., 30 days for $10), process payments, and automatically set expiration dates.
+    -   **Portal Page Editor:** A live HTML editor to customize the page that pending users see, complete with a live preview.
+
+-   **Hotspot Management:**
+    -   Monitor active users and all connected device hosts.
+    -   Full CRUD management for Hotspot Server Profiles and User Profiles.
+    -   **Vendo Integration:** Automatically detects and provides an embedded management interface for NodeMCU-based "Piso WiFi" vendo machines.
+    -   **Login Page Editor:** Browse the router's file system and edit Hotspot login pages directly from the UI.
+    -   **Setup Assistant:** A guided wizard to create new Hotspot instances, similar to the WinBox setup tool.
+
+-   **Billing & Sales System:**
+    -   Create distinct billing plans for both PPPoE and DHCP Portal services.
+    -   Process payments, apply pro-rated discounts for downtime, and automatically schedule user deactivation on expiry.
+    -   Generate and print professional, branded receipts for every transaction.
+    -   A filterable **Sales Report** tracks all transactions and provides a summary of revenue, sales, and discounts.
+
+-   **Inventory & Expenses:**
+    -   A simple stock and inventory manager to keep track of physical items (e.g., antennas, routers, cables).
+    -   An integrated expense tracker for basic accounting and financial overview.
+
+-   **Comprehensive Network Tools:**
+    -   **Firewall:** A user-friendly interface for managing Filter, NAT, and Mangle rules.
+    -   **IP Services:** Manage IP Routes, VLANs, IP Pools, and DHCP Servers.
+    -   **WAN Management:** A dedicated interface for monitoring and managing WAN failover routes.
+
+-   **Remote Access & System Administration:**
+    -   **ZeroTier & Ngrok:** Integrated management for both services to easily configure secure remote access to your panel.
+    -   **Panel Updater:** One-click updates from a Git repository, with automatic application backups and rollback capability.
+    -   **Database Management:** Create, download, and restore backups of the panel's configuration database.
+    -   **Log Viewer:** A centralized place to view logs from the router, the panel's UI and API servers, and Nginx.
+    -   **File Editor:** A general-purpose tool to browse the MikroTik router's filesystem and edit text-based files.
+
+-   **Multi-User & Security:**
+    -   Features a robust role-based access control (RBAC) system.
+    -   Create multiple user accounts with distinct "Administrator" or "Employee" roles.
+    -   Customize permissions for roles to restrict access to sensitive features like deleting sales records.
+    -   Includes a secure account recovery system using security questions.
+
+-   **Customization:**
+    -   **Company Branding:** Set your company name, logo, and contact details, which automatically appear on printable receipts.
+    -   **Theming & Localization:** Switch between light/dark modes, multiple color themes, and several languages for the UI.
 
 ## Technical Architecture
 

@@ -1,6 +1,6 @@
-# MikroTik Manager - Nginx Deployment Guide
+# Mikrotik Billling Management by AJC - Nginx Deployment Guide
 
-This guide details how to set up the MikroTik Orange Pi Manager in a standard production environment, serving it from the `/var/www/html` directory using Nginx as a reverse proxy. This allows you to access the panel on the standard web port 80.
+This guide details how to set up the Mikrotik Billling Management by AJC in a standard production environment, serving it from the `/var/www/html` directory using Nginx as a reverse proxy. This allows you to access the panel on the standard web port 80.
 
 ## Prerequisites
 

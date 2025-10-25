@@ -1036,5 +1036,5 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`MikroTik API backend server running on http://localhost:${PORT}`);
+    console.log(`Mikrotik Billling Management API backend server running on http://localhost:${PORT}`);
 });

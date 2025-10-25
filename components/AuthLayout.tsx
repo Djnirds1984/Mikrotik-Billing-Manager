@@ -7,7 +7,7 @@ export const AuthLayout: React.FC<{ children: React.ReactNode }> = ({ children }
             <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
                 <MikroTikLogoIcon className="mx-auto h-16 w-auto text-[--color-primary-500]" />
                 <h1 className="mt-4 text-3xl font-extrabold text-slate-900 dark:text-slate-100">
-                    MikroTik Orange Pi Manager
+                    Mikrotik Billling Management by AJC
                 </h1>
             </div>
 

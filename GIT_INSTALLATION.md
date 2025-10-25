@@ -1,4 +1,4 @@
-# MikroTik Orange Pi Manager - Git & Development Guide
+# Mikrotik Billling Management by AJC - Git & Development Guide
 
 This guide is for developers who want to contribute to the project or set up their own development environment from a fork. For production deployment, please see the `README.md` file.
 

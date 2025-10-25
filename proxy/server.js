@@ -2134,6 +2134,6 @@ app.get('*', (req, res) => {
 // --- Start Server ---
 Promise.all([initDb(), initSuperadminDb()]).then(() => {
     app.listen(PORT, () => {
-        console.log(`MikroTik Manager UI server running. Listening on http://localhost:${PORT}`);
+        console.log(`Mikrotik Billling Management UI server running. Listening on http://localhost:${PORT}`);
     });
 });

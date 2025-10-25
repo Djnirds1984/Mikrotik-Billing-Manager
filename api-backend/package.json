@@ -1,7 +1,7 @@
 {
   "name": "mikrotik-api-backend",
   "version": "2.0.0",
-  "description": "Dedicated REST API backend for the MikroTik Orange Pi Manager",
+  "description": "Dedicated REST API backend for the Mikrotik Billling Management by AJC",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
