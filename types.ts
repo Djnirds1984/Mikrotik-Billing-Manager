@@ -626,13 +626,11 @@ export interface DhcpClientDbRecord {
 }
 
 
+// FIX: Updated DhcpClientActionParams to use a billing plan object.
 export interface DhcpClientActionParams {
-    addressListId: string;
-    macAddress: string;
-    address: string;
     customerInfo: string;
-    expiresAt: string; // ISO date string
-    speedLimit?: string;
     contactNumber?: string;
     email?: string;
+    plan: DhcpBillingPlanWithId;
+    downtimeDays: number;
 }
