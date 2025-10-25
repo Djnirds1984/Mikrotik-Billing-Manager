@@ -1,4 +1,3 @@
-
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -206,7 +205,9 @@ app.post('/mt-api/:routerId/system/clock/sync-time', getRouterConfig, async (req
             // REST API requires patching the specific clock resource, not the collection.
             // 1. Get the clock resource to find its ID.
             const response = await req.routerInstance.get('/system/clock');
-            const clockResource = response.data[0];
+            // The response for a resource that can only have one item can be a single object or an array with one object.
+            const clockResource = Array.isArray(response.data) ? response.data[0] : response.data;
+
             if (!clockResource || !clockResource.id) {
                 throw new Error('Could not find system clock resource on the router.');
             }
