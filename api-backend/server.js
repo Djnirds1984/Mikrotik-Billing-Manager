@@ -726,6 +726,7 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
         const { address, macAddress, expiresAt, speedLimit, customerInfo, contactNumber, email } = params;
         
         const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
+        // FIX: The deactivation script now correctly finds the lease by IP and adds the client back to the pending list.
         const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; /ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; /ip firewall connection remove [find where src-address~"^${address}:"]; :local leaseId [/ip dhcp-server lease find where address="${address}"]; if ($leaseId != "") do={ :local macAddr [/ip dhcp-server lease get $leaseId \`mac-address\`]; /ip firewall address-list add address="${address}" list="pending-dhcp-users" timeout=1d comment=$macAddr; };`;
 
         const commentData = { customerInfo, contactNumber, email, speedLimit };
@@ -793,41 +794,56 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
 app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
         const client = req.body;
+        const address = client.address;
 
         if (req.routerConfig.api_type === 'legacy') {
-            throw new Error("Scheduler-based DHCP management with rate-limits is not supported for the legacy API.");
-        } else { // REST API
-            // For active clients, remove associated rules
-            if (client.status === 'active') {
-                try {
-                    const connections = await req.routerInstance.get(`/ip/firewall/connection?src-address=${client.address}`);
-                    await Promise.all(connections.data.map(c => req.routerInstance.delete(`/ip/firewall/connection/${c.id}`)));
-                } catch(e) { console.warn(`Could not remove connections for ${client.address}: ${e.message}`); }
-                
-                try {
-                    const schedulerName = `deactivate-dhcp-${client.address.replace(/\./g, '-')}`;
-                    const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
-                     for (const scheduler of schedulers.data) {
-                        await req.routerInstance.delete(`/system/scheduler/${scheduler.id}`);
-                    }
-                } catch(e) { console.warn(`Could not remove scheduler for ${client.address}: ${e.message}`); }
-            }
-            
-             // For all clients, remove associated lease to clear rate-limit
-            try {
-                const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${client.macAddress}`);
-                if (leases.data.length > 0) {
-                    await req.routerInstance.delete(`/ip/dhcp-server/lease/${leases.data[0].id}`);
-                }
-            } catch(e) { console.warn(`Could not remove lease for ${client.macAddress}: ${e.message}`); }
-
-            // For both active and pending, remove address list entry
-            await req.routerInstance.delete(`/ip/firewall/address-list/${client.id}`);
+            throw new Error("This action is not supported for the legacy API.");
         }
+
+        // --- Deactivation Logic ---
+
+        // 1. If client is active, remove its scheduler.
+        if (client.status === 'active') {
+            try {
+                const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
+                const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+                for (const scheduler of schedulers.data) {
+                    await req.routerInstance.delete(`/system/scheduler/${scheduler.id}`);
+                }
+            } catch (e) { console.warn(`Could not remove scheduler for ${address}: ${e.message}`); }
+        }
+
+        // 2. Remove active connections to force re-evaluation by firewall.
+        try {
+            const connections = await req.routerInstance.get(`/ip/firewall/connection?src-address=${address}`);
+            for (const c of connections.data) {
+                await req.routerInstance.delete(`/ip/firewall/connection/${c.id}`);
+            }
+        } catch (e) { console.warn(`Could not remove connections for ${address}: ${e.message}`); }
+
+        // 3. Clear any rate-limit from the static lease. Do NOT delete the lease itself.
+        try {
+            const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${client.macAddress}`);
+            if (leases.data.length > 0) {
+                await req.routerInstance.patch(`/ip/dhcp-server/lease/${leases.data[0].id}`, { 'rate-limit': '' });
+            }
+        } catch (e) { console.warn(`Could not clear rate-limit for ${client.macAddress}: ${e.message}`); }
         
-        return { message: 'Client deactivated and removed successfully.' };
+        // 4. Remove the client's current address list entry (from either 'authorized' or 'pending' list).
+        await req.routerInstance.delete(`/ip/firewall/address-list/${client.id}`);
+
+        // 5. Immediately add the client back to the 'pending' list to reflect the "deactivated" state.
+        await req.routerInstance.put('/ip/firewall/address-list', {
+            list: 'pending-dhcp-users',
+            address: client.address,
+            comment: client.macAddress,
+            timeout: '1d' // A temporary timeout to allow re-activation.
+        });
+        
+        return { message: 'Client has been deactivated and moved to the pending list.' };
     });
 });
+
 
 
 // Generic proxy handler for all other requests
