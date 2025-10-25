@@ -223,6 +223,20 @@ export interface VoucherPlanWithId extends VoucherPlan {
     id: string;
 }
 
+// FIX: Add DHCP Billing Plan types
+export interface DhcpBillingPlan {
+    routerId: string;
+    name: string;
+    price: number;
+    cycle_days: number;
+    speedLimit?: string;
+    currency: string;
+}
+
+export interface DhcpBillingPlanWithId extends DhcpBillingPlan {
+    id: string;
+}
+
 
 export interface PppSecret {
     id: string;
@@ -451,6 +465,20 @@ export type FirewallNatRuleData = Partial<Omit<FirewallNatRule, 'id' | '.id' | '
 export type FirewallMangleRuleData = Partial<Omit<FirewallMangleRule, 'id' | '.id' | 'invalid' | 'dynamic' | 'bytes' | 'packets'>>;
 export type FirewallRuleData = FirewallFilterRuleData | FirewallNatRuleData | FirewallMangleRuleData;
 
+// FIX: Add SimpleQueue and SimpleQueueData types
+export interface SimpleQueue {
+    id: string;
+    name: string;
+    target: string;
+    'max-limit'?: string;
+    bytes: string;
+    packets: string;
+    disabled: 'true' | 'false';
+    comment?: string;
+}
+
+export type SimpleQueueData = Partial<Omit<SimpleQueue, 'id' | 'bytes' | 'packets'>>;
+
 // --- Hotspot Setup Types ---
 export interface SslCertificate {
     id: string;
@@ -575,8 +603,8 @@ export interface DhcpClient {
     address: string;
     macAddress: string;
     hostName: string;
-    // Parsed from comment
-    customerInfo: string;
+    // Parsed from comment or local DB
+    customerInfo?: string;
     contactNumber?: string;
     email?: string;
     speedLimit?: string;
@@ -608,14 +636,3 @@ export interface DhcpClientActionParams {
     contactNumber?: string;
     email?: string;
 }
-
-export interface SimpleQueue {
-    id: string;
-    name: string;
-    target: string;
-    'max-limit': string;
-    disabled: 'true' | 'false';
-    comment?: string;
-}
-
-export type SimpleQueueData = Partial<Omit<SimpleQueue, 'id'>>;

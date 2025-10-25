@@ -763,69 +763,87 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
 app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
         const { client: originalClient, params } = req.body;
-        const { address, macAddress, expiresAt, speedLimit, customerInfo, contactNumber, email } = params;
+        const { customerInfo, contactNumber, email, plan, downtimeDays } = params;
+        
+        const address = originalClient.address;
+        const macAddress = originalClient.macAddress;
+        
+        if (!plan) {
+            throw new Error("A billing plan is required to activate or renew a client.");
+        }
+
+        const startDate = new Date();
+        const totalDays = plan.cycle_days - (downtimeDays || 0);
+        const expiresAt = new Date(startDate);
+        expiresAt.setDate(expiresAt.getDate() + totalDays);
+
+        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const schedulerDate = `${monthNames[expiresAt.getMonth()]}/${String(expiresAt.getDate()).padStart(2, '0')}/${expiresAt.getFullYear()}`;
+        const schedulerTime = "23:59:59";
         
         const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
-        // FIX: The deactivation script now correctly finds the lease by IP and adds the client back to the pending list.
         const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; ` +
             `/ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; ` +
-            `/ip firewall connection remove [find where src-address~"^${address}:"]; ` +
-            `:local leaseId [/ip dhcp-server lease find where address="${address}"]; ` +
+            `/ip firewall connection remove [find where src-address~"^${address}"]; ` +
+            `:local leaseId [/ip dhcp-server lease find where mac-address="${macAddress}"]; ` +
             `if ([:len $leaseId] > 0) do={ ` +
-                `:local macAddr [/ip dhcp-server lease get $leaseId mac-address]; ` +
-                `/ip firewall address-list add address="${address}" list="pending-dhcp-users" timeout=1d comment=$macAddr; ` +
+                `:local ipAddr [/ip dhcp-server lease get $leaseId address]; ` +
+                `/ip firewall address-list add address=$ipAddr list="pending-dhcp-users" timeout=1d comment="${macAddress}"; ` +
             `}`;
 
-        const commentData = { customerInfo, contactNumber, email, speedLimit };
+        const commentData = { customerInfo, contactNumber, email, planName: plan.name };
         const addressListPayload = {
             list: 'authorized-dhcp-users',
             comment: JSON.stringify(commentData),
             address: address,
         };
 
-        const expiryDate = new Date(expiresAt);
-        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-        const schedulerDate = `${monthNames[expiryDate.getMonth()]}/${String(expiryDate.getDate()).padStart(2, '0')}/${expiryDate.getFullYear()}`;
-        const schedulerTime = `${String(expiryDate.getHours()).padStart(2, '0')}:${String(expiryDate.getMinutes()).padStart(2, '0')}:${String(expiryDate.getSeconds()).padStart(2, '0')}`;
-
         if (req.routerConfig.api_type === 'legacy') {
-            throw new Error("Scheduler-based DHCP management with rate-limits is not supported for the legacy API.");
-        } else { // REST API
-            // 1. Find the lease
-            const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${macAddress}`);
-            if (leases.data.length === 0) {
-                throw new Error(`No DHCP lease found for MAC address ${macAddress}. The client may have disconnected. Please refresh.`);
-            }
-            const lease = leases.data[0];
+            throw new Error("This feature is not supported for the legacy API.");
+        }
 
-            // 2. Make lease static if it's dynamic
-            if (lease.dynamic === 'true' || lease.dynamic === true) {
-                await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": lease.id });
-            }
+        // 1. Find the lease
+        const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${macAddress}`);
+        if (leases.data.length === 0) {
+            throw new Error(`No DHCP lease found for MAC address ${macAddress}. The client may have disconnected. Please refresh.`);
+        }
+        const lease = leases.data[0];
 
-            // 3. Set rate limit on the static lease
-            const speed = speedLimit && !isNaN(parseFloat(speedLimit)) ? parseFloat(speedLimit) : 0;
-            const rateLimitValue = speed > 0 ? `${speed}M/${speed}M` : '';
-            await req.routerInstance.patch(`/ip/dhcp-server/lease/${lease.id}`, {
-                'rate-limit': rateLimitValue
+        // 2. Make lease static if it's dynamic
+        if (lease.dynamic === 'true' || lease.dynamic === true) {
+            await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": lease.id });
+        }
+
+        // 3. Set rate limit on the static lease
+        const speed = plan.speedLimit && !isNaN(parseFloat(plan.speedLimit)) ? parseFloat(plan.speedLimit) : 0;
+        const rateLimitValue = speed > 0 ? `${speed}M/${speed}M` : '';
+        await req.routerInstance.patch(`/ip/dhcp-server/lease/${lease.id}`, {
+            'rate-limit': rateLimitValue
+        });
+
+        // 4. Update Address List entry (remove from pending, add/update in authorized)
+        const addressLists = await req.routerInstance.get('/ip/firewall/address-list');
+        const pendingEntry = addressLists.data.find(item => item.address === address && item.list === 'pending-dhcp-users');
+        if (pendingEntry) {
+            await req.routerInstance.delete(`/ip/firewall/address-list/${pendingEntry.id}`);
+        }
+        
+        const authorizedEntry = addressLists.data.find(item => item.address === address && item.list === 'authorized-dhcp-users');
+        if (authorizedEntry) {
+             await req.routerInstance.patch(`/ip/firewall/address-list/${authorizedEntry.id}`, addressListPayload);
+        } else {
+             await req.routerInstance.put('/ip/firewall/address-list', addressListPayload);
+        }
+
+        // 5. Manage Scheduler
+        const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+        if(schedulers.data.length > 0) {
+            await req.routerInstance.patch(`/system/scheduler/${schedulers.data[0].id}`, {
+                'start-date': schedulerDate,
+                'start-time': schedulerTime,
+                'on-event': scriptSource
             });
-
-            // 4. Update Address List entry
-            const addressLists = await req.routerInstance.get('/ip/firewall/address-list');
-            let entryToModify = addressLists.data.find(item => item.address === address && (item.list === 'pending-dhcp-users' || item.list === 'authorized-dhcp-users'));
-
-            if (entryToModify) {
-                await req.routerInstance.patch(`/ip/firewall/address-list/${entryToModify.id}`, addressListPayload);
-            } else {
-                 await req.routerInstance.put('/ip/firewall/address-list', addressListPayload);
-            }
-
-            // 5. Manage Scheduler
-            const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
-            for (const scheduler of schedulers.data) {
-                await req.routerInstance.delete(`/system/scheduler/${scheduler.id}`);
-            }
-
+        } else {
             await req.routerInstance.put('/system/scheduler', {
                 name: schedulerName,
                 'start-date': schedulerDate,
