@@ -159,13 +159,13 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
         }
     };
     
-    const handleDelete = async (client: DhcpClient) => {
+    const handleDeactivateOrDelete = async (client: DhcpClient) => {
          if (window.confirm(`Are you sure you want to ${client.status === 'active' ? 'deactivate' : 'delete'} this client record? Deactivating will remove internet access.`)) {
             try {
                 await deleteDhcpClient(selectedRouter, client);
                 await fetchData();
             } catch (err) {
-                alert(`Failed to delete client: ${(err as Error).message}`);
+                alert(`Failed to perform action: ${(err as Error).message}`);
             }
          }
     };
@@ -190,6 +190,7 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
                                 <th className="px-6 py-3">MAC Address</th>
                                 <th className="px-6 py-3">Client Hostname</th>
                                 <th className="px-6 py-3">Customer Info</th>
+                                <th className="px-6 py-3">Expires In</th>
                                 <th className="px-6 py-3 text-right">Action</th>
                             </tr>
                         </thead>
@@ -206,16 +207,28 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
                                     <td className="px-6 py-4 font-mono">{client.macAddress}</td>
                                     <td className="px-6 py-4">{client.hostName || 'N/A'}</td>
                                     <td className="px-6 py-4 text-slate-500 italic">{client.customerInfo || 'N/A'}</td>
+                                    <td className="px-6 py-4 font-mono text-sm text-slate-500 dark:text-slate-400">
+                                        {client.status === 'active' ? client.timeout || 'N/A' : 'N/A'}
+                                    </td>
                                     <td className="px-6 py-4 text-right space-x-1">
-                                        {client.status === 'pending' && <button onClick={() => { setSelectedClient(client); setIsModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold">Activate</button>}
-                                        {client.status === 'active' && <button onClick={() => { setSelectedClient(client); setIsModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500"><EditIcon className="w-5 h-5"/></button>}
-                                        <button onClick={() => handleDelete(client)} className="p-2 text-slate-500 hover:text-red-500"><TrashIcon className="w-5 h-5"/></button>
+                                        {client.status === 'pending' && (
+                                            <>
+                                                <button onClick={() => { setSelectedClient(client); setIsModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold">Activate</button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500" title="Remove from pending list"><TrashIcon className="w-5 h-5"/></button>
+                                            </>
+                                        )}
+                                        {client.status === 'active' && (
+                                            <>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-500 text-white rounded-md font-semibold">Deactivate</button>
+                                                <button onClick={() => { setSelectedClient(client); setIsModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client Details"><EditIcon className="w-5 h-5"/></button>
+                                            </>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
                              {clients.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} className="text-center py-8 text-slate-500">No DHCP clients found in pending or authorized lists.</td>
+                                    <td colSpan={7} className="text-center py-8 text-slate-500">No DHCP clients found in pending or authorized lists.</td>
                                 </tr>
                             )}
                         </tbody>

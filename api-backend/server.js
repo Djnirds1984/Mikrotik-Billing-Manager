@@ -727,7 +727,14 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
         
         const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
         // FIX: The deactivation script now correctly finds the lease by IP and adds the client back to the pending list.
-        const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; /ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; /ip firewall connection remove [find where src-address~"^${address}:"]; :local leaseId [/ip dhcp-server lease find where address="${address}"]; if ($leaseId != "") do={ :local macAddr [/ip dhcp-server lease get $leaseId \`mac-address\`]; /ip firewall address-list add address="${address}" list="pending-dhcp-users" timeout=1d comment=$macAddr; };`;
+        const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; ` +
+            `/ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; ` +
+            `/ip firewall connection remove [find where src-address~"^${address}:"]; ` +
+            `:local leaseId [/ip dhcp-server lease find where address="${address}"]; ` +
+            `if ([:len $leaseId] > 0) do={ ` +
+                `:local macAddr [/ip dhcp-server lease get $leaseId mac-address]; ` +
+                `/ip firewall address-list add address="${address}" list="pending-dhcp-users" timeout=1d comment=$macAddr; ` +
+            `}`;
 
         const commentData = { customerInfo, contactNumber, email, speedLimit };
         const addressListPayload = {
@@ -800,7 +807,7 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
             throw new Error("This action is not supported for the legacy API.");
         }
 
-        // --- Deactivation Logic ---
+        // --- Deactivation/Deletion Logic ---
 
         // 1. If client is active, remove its scheduler.
         if (client.status === 'active') {
@@ -821,7 +828,7 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
             }
         } catch (e) { console.warn(`Could not remove connections for ${address}: ${e.message}`); }
 
-        // 3. Clear any rate-limit from the static lease. Do NOT delete the lease itself.
+        // 3. Clear any rate-limit from the static lease.
         try {
             const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${client.macAddress}`);
             if (leases.data.length > 0) {
@@ -832,15 +839,18 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
         // 4. Remove the client's current address list entry (from either 'authorized' or 'pending' list).
         await req.routerInstance.delete(`/ip/firewall/address-list/${client.id}`);
 
-        // 5. Immediately add the client back to the 'pending' list to reflect the "deactivated" state.
-        await req.routerInstance.put('/ip/firewall/address-list', {
-            list: 'pending-dhcp-users',
-            address: client.address,
-            comment: client.macAddress,
-            timeout: '1d' // A temporary timeout to allow re-activation.
-        });
-        
-        return { message: 'Client has been deactivated and moved to the pending list.' };
+        // 5. If the client was active, add them back to the 'pending' list to reflect the "deactivated" state.
+        if (client.status === 'active') {
+            await req.routerInstance.put('/ip/firewall/address-list', {
+                list: 'pending-dhcp-users',
+                address: client.address,
+                comment: client.macAddress,
+                timeout: '1d' // A temporary timeout to allow re-activation.
+            });
+            return { message: 'Client has been deactivated and moved to the pending list.' };
+        } else {
+             return { message: 'Pending client has been removed.' };
+        }
     });
 });
 
