@@ -611,6 +611,7 @@ export interface DhcpClient {
     // Raw data
     timeout?: string; // e.g. 29d23h59m58s
     creationTime?: string;
+    comment?: string;
 }
 
 // FIX: Added DB record type for DHCP clients.
@@ -626,11 +627,15 @@ export interface DhcpClientDbRecord {
 }
 
 
-// FIX: Updated DhcpClientActionParams to use a billing plan object.
+// FIX: Updated DhcpClientActionParams to support both plan-based and manual updates.
 export interface DhcpClientActionParams {
     customerInfo: string;
     contactNumber?: string;
     email?: string;
-    plan: DhcpBillingPlanWithId;
-    downtimeDays: number;
+    // For plan-based activation/renewal
+    plan?: DhcpBillingPlanWithId;
+    downtimeDays?: number;
+    // For manual edits
+    expiresAt?: string; // ISO string for datetime-local
+    speedLimit?: string;
 }

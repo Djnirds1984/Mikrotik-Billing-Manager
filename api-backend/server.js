@@ -763,35 +763,48 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
 app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
         const { client: originalClient, params } = req.body;
-        const { customerInfo, contactNumber, email, plan, downtimeDays } = params;
+        const { customerInfo, contactNumber, email, plan, downtimeDays, expiresAt: manualExpiresAt, speedLimit: manualSpeedLimit } = params;
         
         const address = originalClient.address;
         const macAddress = originalClient.macAddress;
-        
-        if (!plan) {
-            throw new Error("A billing plan is required to activate or renew a client.");
-        }
 
-        const startDate = new Date();
-        const totalDays = plan.cycle_days - (downtimeDays || 0);
-        const expiresAt = new Date(startDate);
-        expiresAt.setDate(expiresAt.getDate() + totalDays);
+        let expiresAt;
+        let planNameForComment;
+        let speedLimit;
+        
+        if (plan) {
+            // Plan-based logic
+            const startDate = new Date();
+            const totalDays = plan.cycle_days - (downtimeDays || 0);
+            expiresAt = new Date(startDate);
+            expiresAt.setDate(expiresAt.getDate() + totalDays);
+            planNameForComment = plan.name;
+            speedLimit = plan.speedLimit;
+        } else if (manualExpiresAt) {
+            // Manual edit logic
+            expiresAt = new Date(manualExpiresAt);
+            planNameForComment = "Manual Edit";
+            speedLimit = manualSpeedLimit;
+        } else {
+            throw new Error("Either a billing plan or a manual expiration date is required to update a client.");
+        }
 
         const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
         const schedulerDate = `${monthNames[expiresAt.getMonth()]}/${String(expiresAt.getDate()).padStart(2, '0')}/${expiresAt.getFullYear()}`;
-        const schedulerTime = "23:59:59";
+        const schedulerTime = `${String(expiresAt.getHours()).padStart(2, '0')}:${String(expiresAt.getMinutes()).padStart(2, '0')}:${String(expiresAt.getSeconds()).padStart(2, '0')}`;
         
         const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
         const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; ` +
             `/ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; ` +
             `/ip firewall connection remove [find where src-address~"^${address}"]; ` +
-            `:local leaseId [/ip dhcp-server lease find where mac-address="${macAddress}"]; ` +
+            `:local macAddr "${macAddress}"; ` +
+            `:local leaseId [/ip dhcp-server lease find where mac-address=$macAddr]; ` +
             `if ([:len $leaseId] > 0) do={ ` +
                 `:local ipAddr [/ip dhcp-server lease get $leaseId address]; ` +
-                `/ip firewall address-list add address=$ipAddr list="pending-dhcp-users" timeout=1d comment="${macAddress}"; ` +
+                `/ip firewall address-list add address=$ipAddr list="pending-dhcp-users" timeout=1d comment=$macAddr; ` +
             `}`;
 
-        const commentData = { customerInfo, contactNumber, email, planName: plan.name };
+        const commentData = { customerInfo, contactNumber, email, planName: planNameForComment, dueDate: expiresAt.toISOString().split('T')[0] };
         const addressListPayload = {
             list: 'authorized-dhcp-users',
             comment: JSON.stringify(commentData),
@@ -815,8 +828,8 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
         }
 
         // 3. Set rate limit on the static lease
-        const speed = plan.speedLimit && !isNaN(parseFloat(plan.speedLimit)) ? parseFloat(plan.speedLimit) : 0;
-        const rateLimitValue = speed > 0 ? `${speed}M/${speed}M` : '';
+        const speed = speedLimit && !isNaN(parseFloat(speedLimit)) ? parseFloat(speedLimit) : 0;
+        const rateLimitValue = speed > 0 ? `${speed}M/${speed}M` : ''; // Supports empty string to clear limit
         await req.routerInstance.patch(`/ip/dhcp-server/lease/${lease.id}`, {
             'rate-limit': rateLimitValue
         });

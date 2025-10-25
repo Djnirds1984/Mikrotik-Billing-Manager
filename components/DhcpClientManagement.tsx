@@ -27,18 +27,20 @@ const ActivationPaymentModal: React.FC<{
 
     useEffect(() => {
         if (isOpen && client) {
-            // FIX: Merge client data from router with data from local DB to ensure all properties are available.
             const initialData = { ...client, ...(dbClient || {}) };
             setCustomerInfo(initialData.customerInfo || initialData.hostName || '');
             setContactNumber(initialData.contactNumber || '');
             setEmail(initialData.email || '');
             setDowntimeDays('0');
 
-            if (plans.length > 0 && !selectedPlanId) {
-                setSelectedPlanId(plans[0].id);
+            if (plans.length > 0) {
+                // Try to find a plan that matches the last known plan for this client
+                const lastPlanName = dbClient?.customerInfo ? JSON.parse(client.comment || '{}').planName : null;
+                const lastPlan = lastPlanName ? plans.find(p => p.name === lastPlanName) : null;
+                setSelectedPlanId(lastPlan?.id || plans[0].id);
             }
         }
-    }, [isOpen, client, dbClient, plans, selectedPlanId]);
+    }, [isOpen, client, dbClient, plans]);
 
     const selectedPlan = useMemo(() => plans.find(p => p.id === selectedPlanId), [plans, selectedPlanId]);
     
@@ -79,7 +81,7 @@ const ActivationPaymentModal: React.FC<{
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
                 <form onSubmit={handleSubmit}>
                     <div className="p-6">
-                        <h3 className="text-xl font-bold mb-4">{client.status === 'pending' ? 'Activate Client' : 'Renew/Edit Client'}</h3>
+                        <h3 className="text-xl font-bold mb-4">{client.status === 'pending' ? 'Activate Client' : 'Renew Subscription'}</h3>
                         <p className="text-sm text-slate-500 mb-4 font-mono">{client.address} ({client.macAddress})</p>
                         <div className="space-y-4">
                             <div>
@@ -131,6 +133,84 @@ const ActivationPaymentModal: React.FC<{
     );
 };
 
+// New modal for manual editing
+const EditClientModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (params: DhcpClientActionParams) => void;
+    client: DhcpClient | null;
+    isSubmitting: boolean;
+    dbClient?: DhcpClientDbRecord | null;
+}> = ({ isOpen, onClose, onSave, client, isSubmitting, dbClient }) => {
+    const [formData, setFormData] = useState<Partial<DhcpClientActionParams>>({});
+    
+    useEffect(() => {
+        if (isOpen && client) {
+            const initialData = { ...client, ...(dbClient || {}) };
+            
+            let currentExpiresAt = '';
+            if (client.comment) {
+                try {
+                    const parsed = JSON.parse(client.comment);
+                    if (parsed.dueDate) {
+                        // The saved date is YYYY-MM-DD. We assume end of day for datetime-local.
+                        currentExpiresAt = `${parsed.dueDate}T23:59`;
+                    }
+                } catch(e) {}
+            }
+
+            setFormData({
+                customerInfo: initialData.customerInfo || initialData.hostName || '',
+                contactNumber: initialData.contactNumber || '',
+                email: initialData.email || '',
+                speedLimit: initialData.speedLimit || '',
+                expiresAt: currentExpiresAt,
+            });
+        }
+    }, [isOpen, client, dbClient]);
+
+    if (!isOpen || !client) return null;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setFormData(prev => ({...prev, [e.target.name]: e.target.value}));
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(formData as DhcpClientActionParams);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold mb-4">Edit Client</h3>
+                        <div className="space-y-4">
+                            <div><label>Customer Name</label><input name="customerInfo" value={formData.customerInfo} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label>Contact Number</label><input name="contactNumber" value={formData.contactNumber} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                                <div><label>Email</label><input type="email" name="email" value={formData.email} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                            </div>
+                             <div className="grid grid-cols-2 gap-4">
+                                <div><label>Speed Limit (Mbps)</label><input type="number" name="speedLimit" value={formData.speedLimit} onChange={handleChange} placeholder="Leave blank for no limit" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                                <div>
+                                    <label>Expires At</label>
+                                    <input type="datetime-local" name="expiresAt" value={formData.expiresAt} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
+                        <button type="button" onClick={onClose}>Cancel</button>
+                        <button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">{isSubmitting ? 'Saving...' : 'Save Changes'}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 
 interface DhcpClientManagementProps {
     selectedRouter: RouterConfigWithId;
@@ -138,14 +218,15 @@ interface DhcpClientManagementProps {
 }
 
 export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ selectedRouter, addSale }) => {
-    const { currency } = useLocalization();
     const [clients, setClients] = useState<DhcpClient[]>([]);
     const [dbClients, setDbClients] = useState<DhcpClientDbRecord[]>([]);
     const { plans, isLoading: isLoadingPlans } = useDhcpBillingPlans(selectedRouter.id);
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [isModalOpen, setModalOpen] = useState(false);
+    
+    const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
+    const [isEditModalOpen, setEditModalOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
 
     const fetchData = useCallback(async () => {
@@ -175,7 +256,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
         const dbClientMap = new Map(dbClients.map(c => [c.macAddress, c]));
         return clients.map(client => {
             const dbData = dbClientMap.get(client.macAddress);
-            return dbData ? { ...client, ...dbData } : client;
+            return dbData ? { ...client, customerInfo: dbData.customerInfo, contactNumber: dbData.contactNumber, email: dbData.email, speedLimit: dbData.speedLimit } : client;
         });
     }, [clients, dbClients]);
     
@@ -191,8 +272,8 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
         } catch (e) { console.error("Failed to save DHCP client to local DB:", e); }
     };
 
-    const handleSave = async (params: DhcpClientActionParams) => {
-        if (!selectedClient) return;
+    const handleSavePayment = async (params: DhcpClientActionParams) => {
+        if (!selectedClient || !params.plan) return;
         setIsSubmitting(true);
         try {
             await updateDhcpClientDetails(selectedRouter, selectedClient, params);
@@ -205,8 +286,8 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 clientName: params.customerInfo,
                 planName: params.plan.name,
                 planPrice: params.plan.price,
-                discountAmount: discountAmount,
-                finalAmount: finalAmount,
+                discountAmount,
+                finalAmount,
                 currency: params.plan.currency,
                 clientContact: params.contactNumber,
                 clientEmail: params.email,
@@ -215,7 +296,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 date: new Date().toISOString()
             });
             
-             await upsertDbClient({
+            await upsertDbClient({
                 routerId: selectedRouter.id,
                 macAddress: selectedClient.macAddress,
                 customerInfo: params.customerInfo,
@@ -225,7 +306,30 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 lastSeen: new Date().toISOString(),
             });
 
-            setModalOpen(false);
+            setPaymentModalOpen(false);
+            await fetchData();
+        } catch (err) {
+            alert(`Failed to save client: ${(err as Error).message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    const handleSaveEdit = async (params: DhcpClientActionParams) => {
+        if (!selectedClient) return;
+        setIsSubmitting(true);
+        try {
+             await updateDhcpClientDetails(selectedRouter, selectedClient, params);
+             await upsertDbClient({
+                routerId: selectedRouter.id,
+                macAddress: selectedClient.macAddress,
+                customerInfo: params.customerInfo,
+                contactNumber: params.contactNumber,
+                email: params.email,
+                speedLimit: params.speedLimit,
+                lastSeen: new Date().toISOString(),
+            });
+            setEditModalOpen(false);
             await fetchData();
         } catch (err) {
             alert(`Failed to save client: ${(err as Error).message}`);
@@ -235,7 +339,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     };
     
     const handleDeactivateOrDelete = async (client: DhcpClient) => {
-         if (window.confirm(`Are you sure you want to ${client.status === 'active' ? 'deactivate' : 'delete'} this client record? Deactivating will remove internet access.`)) {
+         if (window.confirm(`Are you sure you want to ${client.status === 'active' ? 'deactivate' : 'delete'} this client?`)) {
             try {
                 await deleteDhcpClient(selectedRouter, client);
                 await fetchData();
@@ -249,17 +353,24 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     return (
         <div className="space-y-6">
             <ActivationPaymentModal 
-                isOpen={isModalOpen} 
-                onClose={() => setModalOpen(false)} 
-                onSave={handleSave} 
+                isOpen={isPaymentModalOpen} 
+                onClose={() => setPaymentModalOpen(false)} 
+                onSave={handleSavePayment} 
                 client={selectedClient} 
                 plans={plans}
                 isSubmitting={isSubmitting}
                 dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
             />
+            <EditClientModal
+                isOpen={isEditModalOpen}
+                onClose={() => setEditModalOpen(false)}
+                onSave={handleSaveEdit}
+                client={selectedClient}
+                isSubmitting={isSubmitting}
+                dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
+            />
 
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
-            <p className="text-sm text-slate-500 -mt-4">Activate new installations and manage DHCP-based customers.</p>
 
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
                 <div className="overflow-x-auto">
@@ -294,17 +405,23 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                                     </td>
                                     <td className="px-6 py-4 text-right space-x-1">
                                          {client.status === 'pending' ? (
-                                            <button onClick={() => { setSelectedClient(client); setModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold disabled:opacity-50" disabled={client.id.startsWith('lease_')}>Activate</button>
+                                             <>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold disabled:opacity-50" disabled={client.id.startsWith('lease_')}>Activate</button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50" title="Delete from pending list" disabled={client.id.startsWith('lease_')}><TrashIcon className="w-5 h-5"/></button>
+                                             </>
                                          ) : (
-                                            <button onClick={() => { setSelectedClient(client); setModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold">Pay/Renew</button>
+                                            <>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold">Pay/Renew</button>
+                                                <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client"><EditIcon className="w-5 h-5"/></button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold">Deactivate</button>
+                                            </>
                                          )}
-                                        <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50" title={client.status === 'active' ? 'Deactivate Client' : 'Remove from pending list'} disabled={client.id.startsWith('lease_')}><TrashIcon className="w-5 h-5"/></button>
                                     </td>
                                 </tr>
                             ))}
                              {combinedClients.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} className="text-center py-8 text-slate-500">No DHCP clients found in pending or authorized lists on portal-enabled servers.</td>
+                                    <td colSpan={7} className="text-center py-8 text-slate-500">No DHCP clients found.</td>
                                 </tr>
                             )}
                         </tbody>
