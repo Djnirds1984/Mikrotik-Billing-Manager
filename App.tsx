@@ -160,7 +160,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
       case 'terminal':
           return <Terminal selectedRouter={selectedRouter} />;
       case 'dhcp-portal':
-          return <DhcpPortal selectedRouter={selectedRouter} />;
+          return <DhcpPortal selectedRouter={selectedRouter} addSale={addSale} />;
       case 'pppoe':
           return <Pppoe selectedRouter={selectedRouter} addSale={addSale} />;
       case 'billing':

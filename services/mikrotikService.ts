@@ -380,15 +380,28 @@ export const runDhcpCaptivePortalUninstall = (router: RouterConfigWithId): Promi
 
 export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpClient[]> => {
     // 1. Fetch all required data in parallel
-    const [leases, addressLists] = await Promise.all([
+    const [servers, leases, addressLists] = await Promise.all([
+        fetchMikrotikData<DhcpServer[]>(router, '/ip/dhcp-server'),
         fetchMikrotikData<DhcpLease[]>(router, '/ip/dhcp-server/lease'),
         fetchMikrotikData<any[]>(router, '/ip/firewall/address-list')
     ]);
 
+    // 2. Filter to get only leases from DHCP servers with the portal script
+    const portalServerNames = new Set(
+        servers.filter(s => s['lease-script'] === 'dhcp-lease-add-to-pending').map(s => s.name)
+    );
+
+    if (portalServerNames.size === 0) {
+        // If no servers have the script, there are no portal clients to show.
+        return [];
+    }
+
+    const portalLeases = leases.filter(l => portalServerNames.has(l.server));
+
     const authorizedListName = "authorized-dhcp-users";
     const pendingListName = "pending-dhcp-users";
 
-    // 2. Create lookup maps for efficient processing
+    // 3. Create lookup maps for efficient processing
     const authorizedAddressListMapByIp = new Map<string, any>();
     const pendingAddressListMapByMac = new Map<string, any>();
 
@@ -404,8 +417,8 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
     const clients: DhcpClient[] = [];
     const processedMacs = new Set<string>();
 
-    // 3. Iterate through DHCP leases as the primary source of truth
-    for (const lease of leases) {
+    // 4. Iterate through the filtered DHCP leases
+    for (const lease of portalLeases) {
         const leaseIp = lease.address;
         const leaseMac = lease['mac-address'];
 
@@ -453,9 +466,6 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
             const pendingEntry = pendingAddressListMapByMac.get(leaseMac);
 
             clients.push({
-                // The ID must come from the address-list to perform actions on it.
-                // If the script hasn't run yet, pendingEntry might not exist.
-                // We use the lease ID as a stable fallback key if needed.
                 id: pendingEntry?.id || `lease_${lease.id}`, 
                 status: 'pending',
                 address: leaseIp,

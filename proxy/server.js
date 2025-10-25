@@ -497,6 +497,25 @@ async function initDb() {
             user_version = 16;
         }
 
+        if (user_version < 17) {
+            console.log('Applying migration v17 (Add dhcp_clients table)...');
+            await db.exec(`
+                CREATE TABLE IF NOT EXISTS dhcp_clients (
+                    id TEXT PRIMARY KEY,
+                    routerId TEXT NOT NULL,
+                    macAddress TEXT NOT NULL,
+                    customerInfo TEXT,
+                    contactNumber TEXT,
+                    email TEXT,
+                    speedLimit TEXT,
+                    lastSeen TEXT,
+                    UNIQUE(routerId, macAddress)
+                );
+            `);
+            await db.exec('PRAGMA user_version = 17;');
+            user_version = 17;
+        }
+
 
     } catch (err) {
         console.error('Failed to initialize database:', err);
@@ -1164,6 +1183,8 @@ const tableMap = {
     'panel-settings': 'panel_settings',
     'voucher-plans': 'voucher_plans',
     'notifications': 'notifications',
+    // FIX: Add mapping for the new dhcp_clients table to allow generic API access.
+    'dhcp_clients': 'dhcp_clients',
 };
 
 const dbRouter = express.Router();

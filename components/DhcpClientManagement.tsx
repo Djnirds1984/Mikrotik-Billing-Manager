@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { RouterConfigWithId, DhcpClient, DhcpClientActionParams } from '../types.ts';
-// FIX: Correctly import functions for DHCP captive portal client management.
+import type { RouterConfigWithId, DhcpClient, DhcpClientActionParams, SaleRecord, DhcpClientDbRecord } from '../types.ts';
 import { getDhcpClients, updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
+import { dbApi } from '../services/databaseService.ts';
+import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { Loader } from './Loader.tsx';
-import { EditIcon, TrashIcon, CheckCircleIcon } from '../constants.tsx';
+import { EditIcon, TrashIcon, CheckCircleIcon, CurrencyDollarIcon } from '../constants.tsx';
 
 const ActivateClientModal: React.FC<{
     isOpen: boolean;
@@ -117,14 +118,78 @@ const ActivateClientModal: React.FC<{
     );
 };
 
-// FIX: Destructure selectedRouter from props to make it available in the component scope.
-export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
+const PayModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (data: { amount: number, description: string }) => void;
+    client: DhcpClient | null;
+    isSubmitting: boolean;
+}> = ({ isOpen, onClose, onSave, client, isSubmitting }) => {
+    const { formatCurrency } = useLocalization();
+    const [amount, setAmount] = useState('');
+    const [description, setDescription] = useState('1 Month Internet Access');
+
+    useEffect(() => {
+        if (isOpen) {
+            setAmount('');
+            setDescription('1 Month Internet Access');
+        }
+    }, [isOpen]);
+
+    if (!isOpen || !client) return null;
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave({ amount: parseFloat(amount) || 0, description });
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold mb-4">Process Payment</h3>
+                        <p className="text-sm text-slate-500 mb-4">For client: {client.customerInfo || client.hostName} ({client.macAddress})</p>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium">Payment Amount</label>
+                                <input type="number" value={amount} onChange={e => setAmount(e.target.value)} required min="0" step="0.01" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium">Description for Sales Report</label>
+                                <input value={description} onChange={e => setDescription(e.target.value)} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
+                        <button type="button" onClick={onClose} className="px-4 py-2 rounded-md">Cancel</button>
+                        <button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">
+                            {isSubmitting ? 'Processing...' : 'Confirm & Activate'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+interface DhcpClientManagementProps {
+    selectedRouter: RouterConfigWithId;
+    addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void>;
+}
+
+export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ selectedRouter, addSale }) => {
+    const { currency } = useLocalization();
     const [clients, setClients] = useState<DhcpClient[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [isModalOpen, setIsModalOpen] = useState(false);
+    
+    const [isActivateModalOpen, setActivateModalOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
+
+    const [isPayModalOpen, setPayModalOpen] = useState(false);
+    const [payingClient, setPayingClient] = useState<DhcpClient | null>(null);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -144,13 +209,39 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
         const interval = setInterval(fetchData, 8000);
         return () => clearInterval(interval);
     }, [fetchData]);
+    
+    const upsertDbClient = async (clientData: Omit<DhcpClientDbRecord, 'id'>) => {
+        try {
+            const existingClients = await dbApi.get<DhcpClientDbRecord[]>(`/dhcp_clients?routerId=${clientData.routerId}`);
+            const existing = existingClients.find(c => c.macAddress === clientData.macAddress);
+
+            if (existing) {
+                await dbApi.patch(`/dhcp_clients/${existing.id}`, clientData);
+            } else {
+                const newRecord = { ...clientData, id: `dhcp_client_${Date.now()}` };
+                await dbApi.post('/dhcp_clients', newRecord);
+            }
+        } catch (e) {
+            console.error("Failed to save DHCP client to local DB:", e);
+        }
+    };
+
 
     const handleAction = async (params: DhcpClientActionParams) => {
         if (!selectedClient) return;
         setIsSubmitting(true);
         try {
             await updateDhcpClientDetails(selectedRouter, selectedClient, params);
-            setIsModalOpen(false);
+            await upsertDbClient({
+                routerId: selectedRouter.id,
+                macAddress: params.macAddress,
+                customerInfo: params.customerInfo,
+                contactNumber: params.contactNumber,
+                email: params.email,
+                speedLimit: params.speedLimit,
+                lastSeen: new Date().toISOString(),
+            });
+            setActivateModalOpen(false);
             await fetchData();
         } catch (err) {
             alert(`Failed to save client: ${(err as Error).message}`);
@@ -158,6 +249,61 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
             setIsSubmitting(false);
         }
     };
+    
+    const handleProcessPayment = async ({ amount, description }: { amount: number, description: string }) => {
+        if (!payingClient) return;
+        setIsSubmitting(true);
+        try {
+            const expiresAt = new Date();
+            expiresAt.setMonth(expiresAt.getMonth() + 1);
+
+            const params: DhcpClientActionParams = {
+                addressListId: payingClient.id,
+                macAddress: payingClient.macAddress,
+                address: payingClient.address,
+                customerInfo: payingClient.customerInfo || payingClient.hostName,
+                expiresAt: expiresAt.toISOString(),
+                speedLimit: payingClient.speedLimit,
+                contactNumber: payingClient.contactNumber,
+                email: payingClient.email,
+            };
+            await updateDhcpClientDetails(selectedRouter, payingClient, params);
+
+            // FIX: Added missing 'date' and 'routerName' properties to the sale record object to match the 'SaleRecord' type and resolve the TypeScript error.
+            await addSale({
+                clientName: payingClient.customerInfo || payingClient.hostName,
+                planName: description,
+                planPrice: amount,
+                discountAmount: 0,
+                finalAmount: amount,
+                currency: currency,
+                clientAddress: 'N/A',
+                clientContact: payingClient.contactNumber,
+                clientEmail: payingClient.email,
+                routerId: selectedRouter.id,
+                date: new Date().toISOString(),
+                routerName: selectedRouter.name
+            });
+            
+             await upsertDbClient({
+                routerId: selectedRouter.id,
+                macAddress: params.macAddress,
+                customerInfo: params.customerInfo,
+                contactNumber: params.contactNumber,
+                email: params.email,
+                speedLimit: params.speedLimit,
+                lastSeen: new Date().toISOString(),
+            });
+
+            setPayModalOpen(false);
+            await fetchData();
+        } catch (err) {
+            alert(`Payment process failed: ${(err as Error).message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     
     const handleDeactivateOrDelete = async (client: DhcpClient) => {
          if (window.confirm(`Are you sure you want to ${client.status === 'active' ? 'deactivate' : 'delete'} this client record? Deactivating will remove internet access.`)) {
@@ -175,8 +321,9 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
 
     return (
         <div className="space-y-6">
-            <ActivateClientModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleAction} client={selectedClient} isSubmitting={isSubmitting} />
-            
+            <ActivateClientModal isOpen={isActivateModalOpen} onClose={() => setActivateModalOpen(false)} onSave={handleAction} client={selectedClient} isSubmitting={isSubmitting} />
+            <PayModal isOpen={isPayModalOpen} onClose={() => setPayModalOpen(false)} onSave={handleProcessPayment} client={payingClient} isSubmitting={isSubmitting} />
+
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
             <p className="text-sm text-slate-500 -mt-4">Activate new installations and manage DHCP-based customers.</p>
 
@@ -211,16 +358,19 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
                                         {client.status === 'active' ? client.timeout || 'N/A' : 'N/A'}
                                     </td>
                                     <td className="px-6 py-4 text-right space-x-1">
+                                         <button onClick={() => { setPayingClient(client); setPayModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-md font-semibold disabled:opacity-50" title="Process Payment & Activate for 1 Month" disabled={client.id.startsWith('lease_')}>
+                                            <CurrencyDollarIcon className="w-5 h-5"/>
+                                        </button>
                                         {client.status === 'pending' && (
                                             <>
-                                                <button onClick={() => { setSelectedClient(client); setIsModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold">Activate</button>
-                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500" title="Remove from pending list"><TrashIcon className="w-5 h-5"/></button>
+                                                <button onClick={() => { setSelectedClient(client); setActivateModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold disabled:opacity-50" disabled={client.id.startsWith('lease_')}>Activate</button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50" title="Remove from pending list" disabled={client.id.startsWith('lease_')}><TrashIcon className="w-5 h-5"/></button>
                                             </>
                                         )}
                                         {client.status === 'active' && (
                                             <>
                                                 <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-500 text-white rounded-md font-semibold">Deactivate</button>
-                                                <button onClick={() => { setSelectedClient(client); setIsModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client Details"><EditIcon className="w-5 h-5"/></button>
+                                                <button onClick={() => { setSelectedClient(client); setActivateModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client Details"><EditIcon className="w-5 h-5"/></button>
                                             </>
                                         )}
                                     </td>
@@ -228,7 +378,7 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
                             ))}
                              {clients.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} className="text-center py-8 text-slate-500">No DHCP clients found in pending or authorized lists.</td>
+                                    <td colSpan={7} className="text-center py-8 text-slate-500">No DHCP clients found in pending or authorized lists on portal-enabled servers.</td>
                                 </tr>
                             )}
                         </tbody>

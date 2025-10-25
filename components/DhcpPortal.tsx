@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { RouterConfigWithId } from '../types.ts';
+import type { RouterConfigWithId, SaleRecord } from '../types.ts';
 import { DhcpClientManagement } from './DhcpClientManagement.tsx';
 import { DhcpCaptivePortalInstaller } from './DhcpCaptivePortalInstaller.tsx';
 import { DhcpPortalServerManager } from './DhcpPortalServerManager.tsx';
@@ -23,7 +23,12 @@ const TabButton: React.FC<{ label: string, icon: React.ReactNode, isActive: bool
 
 type ActiveTab = 'clients' | 'server' | 'installer' | 'page';
 
-export const DhcpPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
+interface DhcpPortalProps {
+    selectedRouter: RouterConfigWithId | null;
+    addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void>;
+}
+
+export const DhcpPortal: React.FC<DhcpPortalProps> = ({ selectedRouter, addSale }) => {
     const { t } = useLocalization();
     const [activeTab, setActiveTab] = useState<ActiveTab>('clients');
 
@@ -48,7 +53,7 @@ export const DhcpPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }>
                 </nav>
             </div>
             <div>
-                {activeTab === 'clients' && <DhcpClientManagement selectedRouter={selectedRouter} />}
+                {activeTab === 'clients' && <DhcpClientManagement selectedRouter={selectedRouter} addSale={addSale} />}
                 {activeTab === 'server' && <DhcpPortalServerManager selectedRouter={selectedRouter} />}
                 {activeTab === 'page' && <DhcpPortalPageEditor selectedRouter={selectedRouter} />}
                 {activeTab === 'installer' && <DhcpCaptivePortalInstaller selectedRouter={selectedRouter} />}

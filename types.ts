@@ -585,6 +585,19 @@ export interface DhcpClient {
     creationTime?: string;
 }
 
+// FIX: Added DB record type for DHCP clients.
+export interface DhcpClientDbRecord {
+    id: string;
+    routerId: string;
+    macAddress: string;
+    customerInfo?: string;
+    contactNumber?: string;
+    email?: string;
+    speedLimit?: string;
+    lastSeen: string;
+}
+
+
 export interface DhcpClientActionParams {
     addressListId: string;
     macAddress: string;
