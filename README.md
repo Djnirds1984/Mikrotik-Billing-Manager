@@ -38,6 +38,11 @@ A modern, responsive web dashboard for managing your MikroTik routers, specifica
     -   A simple stock and inventory manager to keep track of physical items (e.g., antennas, routers, cables).
     -   An integrated expense tracker for basic accounting and financial overview.
 
+-   **Payroll Management:**
+    -   Manage a list of employees, including their personal information, role, and salary details.
+    -   Track Philippine-specific government benefits (SSS, PhilHealth, Pag-IBIG).
+    -   Includes a Daily Time Record (DTR) manager to log employee work hours for accurate payroll calculation.
+
 -   **Comprehensive Network Tools:**
     -   **Firewall:** A user-friendly interface for managing Filter, NAT, and Mangle rules.
     -   **IP Services:** Manage IP Routes, VLANs, IP Pools, and DHCP Servers.

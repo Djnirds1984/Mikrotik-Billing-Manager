@@ -1,6 +1,6 @@
 {
   "name": "mikrotik-proxy-frontend",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Frontend server for the Mikrotik Billling Management by AJC",
   "main": "server.js",
   "scripts": {

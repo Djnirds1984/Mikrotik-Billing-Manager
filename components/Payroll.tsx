@@ -25,8 +25,9 @@ const EmployeeFormModal: React.FC<{
     initialData: { employee: Employee, benefit: EmployeeBenefit } | null;
     isSubmitting: boolean;
 }> = ({ isOpen, onClose, onSave, initialData, isSubmitting }) => {
-    const [employee, setEmployee] = useState<Partial<Employee>>({ salaryType: 'daily' });
-    const [benefit, setBenefit] = useState<Partial<Omit<EmployeeBenefit, 'id'|'employeeId'>>>({ sss: false, philhealth: false, pagibig: false });
+    // FIX: Use specific types for state instead of Partial to prevent type errors on save.
+    const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', rate: 0 });
+    const [benefit, setBenefit] = useState<Omit<EmployeeBenefit, 'id' | 'employeeId'>>({ sss: false, philhealth: false, pagibig: false });
 
     useEffect(() => {
         if (isOpen) {
@@ -42,18 +43,29 @@ const EmployeeFormModal: React.FC<{
 
     if (!isOpen) return null;
 
+    // FIX: Correctly handle checkbox change events by casting the event target to HTMLInputElement.
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const { name, value, type, checked } = e.target;
+        const target = e.target;
+        const { name, value, type } = target;
         if (['sss', 'philhealth', 'pagibig'].includes(name)) {
+            const { checked } = target as HTMLInputElement;
             setBenefit(b => ({ ...b, [name]: checked }));
         } else {
             setEmployee(emp => ({ ...emp, [name]: type === 'number' ? parseFloat(value) || 0 : value }));
         }
     };
 
+    // FIX: Ensure the correct data types are passed to onSave for add vs. edit scenarios.
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave(initialData ? employee as Employee : employee as Omit<Employee, 'id'>, initialData ? benefit as EmployeeBenefit : benefit);
+        if (initialData) {
+            onSave(
+                { ...initialData.employee, ...employee },
+                { ...initialData.benefit, ...benefit }
+            );
+        } else {
+            onSave(employee, benefit);
+        }
     };
 
     return (
