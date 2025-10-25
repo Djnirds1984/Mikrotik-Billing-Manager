@@ -111,7 +111,7 @@ export const rebootRouter = (router: RouterConfigWithId): Promise<{ message: str
 };
 
 export const syncTimeToRouter = (router: RouterConfigWithId): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/system/clock/sync', { method: 'POST' });
+    return fetchMikrotikData<{ message: string }>(router, '/system/clock/sync-time', { method: 'POST' });
 };
 
 // --- Interfaces & IPs ---

@@ -181,6 +181,35 @@ app.post('/mt-api/test-connection', async (req, res) => {
     });
 });
 
+app.post('/mt-api/:routerId/system/clock/sync-time', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const now = new Date();
+        
+        // Format date and time for MikroTik API
+        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const date = `${monthNames[now.getMonth()]}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}`;
+        const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+        const payload = { date, time };
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // Legacy API uses '/system/clock/set' command with parameters
+                await client.write('/system/clock/set', [`=date=${date}`, `=time=${time}`]);
+            } finally {
+                await client.close();
+            }
+        } else {
+            // REST API uses PATCH to update the existing /system/clock resource
+            await req.routerInstance.patch('/system/clock', payload);
+        }
+
+        return { message: 'Router time synchronized successfully with the panel server.' };
+    });
+});
+
 app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
         let resource;
