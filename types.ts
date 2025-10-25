@@ -11,12 +11,12 @@ export type View =
   | 'billing'
   | 'sales'
   | 'inventory'
+  | 'payroll'
   | 'hotspot'
   | 'zerotier'
   | 'company'
   | 'system'
   | 'updater'
-  | 'super_router'
   | 'logs'
   | 'panel_roles'
   | 'help'
@@ -411,6 +411,33 @@ export interface WanRoute {
 export interface FailoverStatus {
     enabled: boolean;
 }
+
+// --- Payroll Types ---
+export interface Employee {
+  id: string;
+  fullName: string;
+  role: string;
+  hireDate: string; // ISO string YYYY-MM-DD
+  salaryType: 'daily' | 'monthly';
+  rate: number;
+}
+
+export interface EmployeeBenefit {
+    id: string;
+    employeeId: string;
+    sss: boolean;
+    philhealth: boolean;
+    pagibig: boolean;
+}
+
+export interface TimeRecord {
+    id: string;
+    employeeId: string;
+    date: string; // YYYY-MM-DD
+    timeIn: string; // HH:MM
+    timeOut: string; // HH:MM
+}
+
 
 // --- Firewall Types ---
 export interface FirewallRuleBase {

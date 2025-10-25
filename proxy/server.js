@@ -533,6 +533,39 @@ async function initDb() {
             user_version = 18;
         }
 
+        if (user_version < 19) {
+            console.log('Applying migration v19 (Add payroll tables)...');
+            await db.exec(`
+                CREATE TABLE IF NOT EXISTS employees (
+                    id TEXT PRIMARY KEY,
+                    fullName TEXT NOT NULL,
+                    role TEXT,
+                    hireDate TEXT,
+                    salaryType TEXT NOT NULL,
+                    rate REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS employee_benefits (
+                    id TEXT PRIMARY KEY,
+                    employeeId TEXT NOT NULL,
+                    sss INTEGER NOT NULL DEFAULT 0,
+                    philhealth INTEGER NOT NULL DEFAULT 0,
+                    pagibig INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (employeeId) REFERENCES employees(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS time_records (
+                    id TEXT PRIMARY KEY,
+                    employeeId TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    timeIn TEXT,
+                    timeOut TEXT,
+                    UNIQUE(employeeId, date),
+                    FOREIGN KEY (employeeId) REFERENCES employees(id) ON DELETE CASCADE
+                );
+            `);
+            await db.exec('PRAGMA user_version = 19;');
+            user_version = 19;
+        }
+
 
     } catch (err) {
         console.error('Failed to initialize database:', err);
@@ -1202,6 +1235,9 @@ const tableMap = {
     'notifications': 'notifications',
     'dhcp_clients': 'dhcp_clients',
     'dhcp-billing-plans': 'dhcp_billing_plans',
+    'employees': 'employees',
+    'employee-benefits': 'employee_benefits',
+    'time-records': 'time_records',
 };
 
 const dbRouter = express.Router();

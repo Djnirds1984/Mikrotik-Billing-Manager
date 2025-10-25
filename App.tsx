@@ -21,7 +21,6 @@ import { Login } from './components/Login.tsx';
 import { Register } from './components/Register.tsx';
 import { ForgotPassword } from './components/ForgotPassword.tsx';
 import { AuthLayout } from './components/AuthLayout.tsx';
-import { SuperRouter } from './components/SuperRouter.tsx';
 import { Logs } from './components/Logs.tsx';
 import { PanelRoles } from './components/PanelRoles.tsx';
 import { MikrotikFiles } from './components/MikrotikFiles.tsx';
@@ -31,11 +30,13 @@ import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
 import { DhcpPortal } from './components/DhcpPortal.tsx';
 import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
 import { NotificationsPage } from './components/NotificationsPage.tsx';
+import { Payroll } from './components/Payroll.tsx';
 import { useRouters } from './hooks/useRouters.ts';
 import { useSalesData } from './hooks/useSalesData.ts';
 import { useInventoryData } from './hooks/useInventoryData.ts';
 import { useExpensesData } from './hooks/useExpensesData.ts';
 import { useCompanySettings } from './hooks/useCompanySettings.ts';
+import { usePayrollData } from './hooks/usePayrollData.ts';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext.tsx';
 import { ThemeProvider } from './contexts/ThemeContext.tsx';
 import { NotificationProvider } from './contexts/NotificationContext.tsx';
@@ -91,11 +92,12 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const { sales, addSale, deleteSale, clearSales, isLoading: isLoadingSales } = useSalesData(selectedRouterId);
   const { items, addItem, updateItem, deleteItem, isLoading: isLoadingInventory } = useInventoryData();
   const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData();
+  const payrollData = usePayrollData();
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
 
 
-  const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses;
+  const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;
 
   useEffect(() => {
     setIsSidebarOpen(isLargeScreen);
@@ -139,7 +141,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
 
     const licensedViews: View[] = [
         'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
-        'inventory', 'hotspot', 'mikrotik_files', 'zerotier', 'super_router', 'logs', 'dhcp-portal'
+        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'zerotier', 'logs', 'dhcp-portal'
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
@@ -178,6 +180,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     updateExpense={updateExpense}
                     deleteExpense={deleteExpense}
                  />;
+      case 'payroll':
+          return <Payroll {...payrollData} />;
       case 'hotspot':
           return <Hotspot selectedRouter={selectedRouter} />;
       case 'mikrotik_files':
@@ -190,8 +194,6 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           return <SystemSettings selectedRouter={selectedRouter} licenseStatus={licenseStatus} />;
       case 'updater':
         return <Updater />;
-      case 'super_router':
-        return <SuperRouter />;
       case 'logs':
         return <Logs selectedRouter={selectedRouter} />;
       case 'panel_roles':
@@ -318,40 +320,45 @@ const AppRouter: React.FC = () => {
         checkLicense();
     };
 
-    if (isLoading || isLicenseLoading) {
-        return (
-            <div className="flex min-h-screen items-center justify-center bg-slate-100 dark:bg-slate-950">
-                <Loader />
-            </div>
-        );
+    if (isLoading) {
+        return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
     }
 
     if (!user) {
-        return (
-            <AuthLayout>
-                {authView === 'login' && <Login onSwitchToForgotPassword={() => setAuthView('forgot')} />}
-                {authView === 'register' && <Register />}
-                {authView === 'forgot' && <ForgotPassword onSwitchToLogin={() => setAuthView('login')} />}
-            </AuthLayout>
-        );
-    }
-    
-    const userRole = user.role.name.toLowerCase();
-    if (!licenseStatus?.licensed && userRole !== 'administrator' && userRole !== 'superadmin') {
-        return <License onLicenseChange={handleLicenseChange} licenseStatus={licenseStatus} />;
+        if (isLoading) {
+             return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
+        }
+        if (!hasUsers) {
+             return <AuthLayout><Register /></AuthLayout>;
+        }
+        if (authView === 'login') {
+            return <AuthLayout><Login onSwitchToForgotPassword={() => setAuthView('forgot')} /></AuthLayout>;
+        }
+        if (authView === 'forgot') {
+            return <AuthLayout><ForgotPassword onSwitchToLogin={() => setAuthView('login')} /></AuthLayout>;
+        }
     }
 
-    return <AppContent onLicenseChange={handleLicenseChange} licenseStatus={licenseStatus} />;
+    if (user) {
+        if (isLicenseLoading) {
+            return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
+        }
+        return <AppContent licenseStatus={licenseStatus} onLicenseChange={handleLicenseChange} />;
+    }
+
+    return <AuthLayout><Login onSwitchToForgotPassword={() => setAuthView('forgot')} /></AuthLayout>;
 };
 
-const App: React.FC = () => (
-  <ThemeProvider>
-    <LocalizationProvider>
-        <NotificationProvider>
+const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <LocalizationProvider>
+          <NotificationProvider>
             <AppRouter />
-        </NotificationProvider>
-    </LocalizationProvider>
-  </ThemeProvider>
-);
+          </NotificationProvider>
+      </LocalizationProvider>
+    </ThemeProvider>
+  );
+};
 
 export default App;

@@ -27,7 +27,8 @@ const ActivationPaymentModal: React.FC<{
 
     useEffect(() => {
         if (isOpen && client) {
-            const initialData = { ...client, ...(dbClient || {}) };
+            // FIX: Add explicit type to help TypeScript infer the shape of the merged object.
+            const initialData: Partial<DhcpClient & DhcpClientDbRecord> = { ...client, ...(dbClient || {}) };
             setCustomerInfo(initialData.customerInfo || initialData.hostName || '');
             setContactNumber(initialData.contactNumber || '');
             setEmail(initialData.email || '');
@@ -146,7 +147,8 @@ const EditClientModal: React.FC<{
     
     useEffect(() => {
         if (isOpen && client) {
-            const initialData = { ...client, ...(dbClient || {}) };
+            // FIX: Add explicit type to help TypeScript infer the shape of the merged object.
+            const initialData: Partial<DhcpClient & DhcpClientDbRecord> = { ...client, ...(dbClient || {}) };
             
             let currentExpiresAt = '';
             if (client.comment) {
