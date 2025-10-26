@@ -1254,7 +1254,7 @@ const tableMap = {
     'dhcp-billing-plans': 'dhcp_billing_plans',
     'employees': 'employees',
     'employee-benefits': 'employee_benefits',
-    'time-records': 'time_records',
+    'time-records': 'time-records',
 };
 
 const dbRouter = express.Router();
@@ -1658,7 +1658,7 @@ dataplicityRouter.post('/install', (req, res) => {
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
     let { command } = req.body; // Use let to allow modification
-    if (!command || typeof command !== 'string' || !command.includes('dataplicity.com/install.py')) {
+    if (!command || typeof command !== 'string' || !command.includes('dataplicity.com/')) {
         send({ status: 'error', message: 'Invalid Dataplicity installation command provided.' });
         send({ status: 'finished' });
         return res.end();
@@ -1982,6 +1982,30 @@ const runCommandStream = (command, res, options = {}) => {
 const runCommand = (command) => runCommandStream(command, null);
 
 // --- Ngrok Endpoints ---
+const createStreamHandler = (commandGenerator) => (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    const run = async () => {
+        try {
+            const commands = await commandGenerator(req);
+            for (const { cmd, msg } of commands) {
+                send({ log: msg });
+                await runCommandStream(cmd, res);
+            }
+            send({ status: 'success', log: 'Operation completed successfully.' });
+        } catch (e) {
+            send({ status: 'error', log: e.message, isError: true });
+        } finally {
+            send({ status: 'finished' });
+            res.end();
+        }
+    };
+    run();
+};
+
 const ngrokApi = express.Router();
 ngrokApi.use(protect);
 
@@ -2048,30 +2072,6 @@ ngrokApi.post('/control/:action', async (req, res) => {
         res.status(500).json({ message: e.message, code: 'SUDO_ERROR' });
     }
 });
-
-const createStreamHandler = (commandGenerator) => (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    const run = async () => {
-        try {
-            const commands = await commandGenerator(req);
-            for (const { cmd, msg } of commands) {
-                send({ log: msg });
-                await runCommandStream(cmd, res);
-            }
-            send({ status: 'success', log: 'Operation completed successfully.' });
-        } catch (e) {
-            send({ status: 'error', log: e.message, isError: true });
-        } finally {
-            send({ status: 'finished' });
-            res.end();
-        }
-    };
-    run();
-};
 
 ngrokApi.get('/install', createStreamHandler(async (req) => {
     const config = JSON.parse(await fsPromises.readFile(NGROK_CONFIG_PATH, 'utf-8'));
