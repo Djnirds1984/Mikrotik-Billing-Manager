@@ -1559,8 +1559,10 @@ piTunnelRouter.get('/uninstall', (req, res) => {
             if (code === 0) {
                 resolve();
             } else {
-                if (command.includes('systemctl stop') && code !== 0) {
-                    send({ log: `Warning: Could not stop service (may already be stopped). Continuing...` });
+                // Ignore errors for stopping services that might not be running
+                // or removing files that don't exist.
+                if (command.startsWith('sudo systemctl stop') || command.startsWith('sudo rm')) {
+                    send({ log: `Warning: Command "${command.split(' ')[1]}" may have failed (this is often okay during uninstall). Continuing...` });
                     resolve();
                 } else {
                     const rejectMessage = `Command "${command}" failed. ${stderrOutput ? 'Details: ' + stderrOutput.trim() : ''}`;
@@ -1574,8 +1576,12 @@ piTunnelRouter.get('/uninstall', (req, res) => {
     const run = async () => {
         try {
             await runCommandWithLogs('sudo systemctl stop pitunnel.service', 'Stopping pitunnel service...');
-            await runCommandWithLogs('sudo /usr/local/bin/pitunnel --remove', 'Running pitunnel uninstall command...');
-            send({ status: 'success', log: 'Uninstallation process finished.' });
+            await runCommandWithLogs('sudo systemctl disable pitunnel.service', 'Disabling pitunnel service from startup...');
+            await runCommandWithLogs('sudo rm -f /etc/systemd/system/pitunnel.service', 'Removing service file...');
+            await runCommandWithLogs('sudo rm -f /usr/local/bin/pitunnel', 'Removing pitunnel executable...');
+            await runCommandWithLogs('sudo systemctl daemon-reload', 'Reloading system services...');
+            await runCommandWithLogs('sudo rm -rf /root/.pitunnel', 'Removing configuration files...');
+            send({ status: 'success', log: 'Uninstallation process finished successfully.' });
         } catch (e) {
             send({ status: 'error', message: e.message, isError: true });
         } finally {
