@@ -1,240 +1,132 @@
-
-
 import React, { useState, useEffect } from 'react';
 import type { RouterConfig, RouterConfigWithId } from '../types.ts';
 import { testRouterConnection } from '../services/mikrotikService.ts';
-import { EditIcon, TrashIcon, RouterIcon } from '../constants.tsx';
+import { RouterIcon, EditIcon, TrashIcon, CheckCircleIcon, ExclamationTriangleIcon } from '../constants.tsx';
+import { Loader } from './Loader.tsx';
 
-interface RouterFormProps {
-    onSave: (routerConfig: RouterConfig | RouterConfigWithId) => void;
-    onCancel: () => void;
-    initialData?: RouterConfigWithId | null;
-}
-
-const RouterForm: React.FC<RouterFormProps> = ({ onSave, onCancel, initialData }) => {
-    const [router, setRouter] = useState<RouterConfig>({
-        name: '',
-        host: '',
-        user: 'admin',
-        password: '',
-        port: 80, // Default MikroTik REST API port
-        api_type: 'rest',
+const RouterFormModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (router: RouterConfig | RouterConfigWithId) => void;
+    router: RouterConfigWithId | null;
+}> = ({ isOpen, onClose, onSave, router }) => {
+    const [formState, setFormState] = useState<RouterConfig>({
+        name: '', host: '', user: 'admin', password: '', port: 8728, api_type: 'rest'
     });
-    const [isTesting, setIsTesting] = useState(false);
-    const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+    const [testStatus, setTestStatus] = useState<{ type: 'idle' | 'testing' | 'success' | 'error', message: string }>({ type: 'idle', message: '' });
 
     useEffect(() => {
-        if (initialData) {
-            // Don't pre-fill password for security, but keep the rest
-            setRouter({ ...initialData, password: '' });
-        } else {
-            // Reset form for new entry
-             setRouter({
-                name: '',
-                host: '',
-                user: 'admin',
-                password: '',
-                port: 80,
-                api_type: 'rest',
-            });
+        if (isOpen) {
+            setFormState(router ? { ...router } : { name: '', host: '', user: 'admin', password: '', port: 8728, api_type: 'rest' });
+            setTestStatus({ type: 'idle', message: '' });
         }
-    }, [initialData]);
+    }, [isOpen, router]);
+
+    if (!isOpen) return null;
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        setRouter(prev => ({ ...prev, [name]: name === 'port' ? parseInt(value, 10) || 0 : value }));
-        setTestResult(null); // Clear test result on change
+        setFormState(prev => ({ ...prev, [name]: name === 'port' ? parseInt(value, 10) : value }));
     };
 
-    const handleApiTypeChange = (apiType: 'rest' | 'legacy') => {
-        setRouter(prev => ({
-            ...prev,
-            api_type: apiType,
-            port: apiType === 'legacy' ? 8728 : 80
-        }));
-        setTestResult(null);
+    const handleTest = async () => {
+        setTestStatus({ type: 'testing', message: 'Connecting...' });
+        try {
+            const result = await testRouterConnection(formState);
+            setTestStatus({ type: 'success', message: result.message });
+        } catch (err) {
+            setTestStatus({ type: 'error', message: (err as Error).message });
+        }
     };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (initialData) {
-            const finalRouterData = { ...initialData, ...router };
-            if (!router.password) {
-                // @ts-ignore
-                finalRouterData.password = initialData.password;
-            }
-            onSave(finalRouterData);
-        } else {
-            onSave(router);
-        }
-    };
-    
-    const handleTestConnection = async () => {
-        setIsTesting(true);
-        setTestResult(null);
-        const testConfig: RouterConfig = {...router};
-        if (initialData && !router.password) {
-             // @ts-ignore
-             testConfig.password = initialData.password;
-        }
-        const result = await testRouterConnection(testConfig);
-        setTestResult(result);
-        setIsTesting(false);
+        onSave(router ? { ...formState, id: router.id } : formState);
     };
 
     return (
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700">
-            <h3 className="text-xl font-bold text-[--color-primary-500] dark:text-[--color-primary-400] mb-4">{initialData ? `Edit '${initialData.name}'` : 'Add New Router'}</h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                    <label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Router Name</label>
-                    <input type="text" name="name" id="name" value={router.name} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder="e.g., Home Router" />
-                </div>
-                 <div>
-                    <label htmlFor="host" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Host / IP Address</label>
-                    <input type="text" name="host" id="host" value={router.host} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder="e.g., 192.168.88.1" />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">API Type</label>
-                    <div className="mt-1 grid grid-cols-2 gap-2 rounded-lg bg-slate-100 dark:bg-slate-700 p-1">
-                        <button type="button" onClick={() => handleApiTypeChange('rest')} className={`w-full rounded-md py-2 px-3 text-sm font-medium ${router.api_type === 'rest' ? 'bg-white dark:bg-slate-900 text-[--color-primary-600]' : 'text-slate-600 dark:text-slate-300'}`}>REST API (v7+)</button>
-                        <button type="button" onClick={() => handleApiTypeChange('legacy')} className={`w-full rounded-md py-2 px-3 text-sm font-medium ${router.api_type === 'legacy' ? 'bg-white dark:bg-slate-900 text-[--color-primary-600]' : 'text-slate-600 dark:text-slate-300'}`}>Legacy API (v6)</button>
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold mb-4">{router ? 'Edit' : 'Add'} Router</h3>
+                        <div className="space-y-4">
+                            <div><label>Name</label><input name="name" value={formState.name} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"/></div>
+                            <div><label>Host/IP</label><input name="host" value={formState.host} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"/></div>
+                             <div className="grid grid-cols-2 gap-4">
+                                <div><label>Username</label><input name="user" value={formState.user} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"/></div>
+                                <div><label>Password</label><input type="password" name="password" value={formState.password} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"/></div>
+                            </div>
+                             <div className="grid grid-cols-2 gap-4">
+                                <div><label>Port</label><input type="number" name="port" value={formState.port} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"/></div>
+                                <div><label>API Type</label><select name="api_type" value={formState.api_type} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"><option value="rest">REST (v7+)</option><option value="legacy">Legacy (v6)</option></select></div>
+                            </div>
+                            {testStatus.type !== 'idle' && (
+                                <div className={`flex items-center gap-2 p-2 rounded-md text-sm ${testStatus.type === 'success' ? 'bg-green-100 text-green-800' : testStatus.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-sky-100 text-sky-800'}`}>
+                                    {testStatus.type === 'success' && <CheckCircleIcon className="w-5 h-5"/>}
+                                    {testStatus.type === 'error' && <ExclamationTriangleIcon className="w-5 h-5"/>}
+                                    {testStatus.type === 'testing' && <Loader />}
+                                    <span>{testStatus.message}</span>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label htmlFor="user" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Username</label>
-                        <input type="text" name="user" id="user" value={router.user} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" />
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-between items-center">
+                        <button type="button" onClick={handleTest} disabled={testStatus.type === 'testing'} className="px-4 py-2 text-sm bg-slate-200 dark:bg-slate-600 rounded-md disabled:opacity-50">Test Connection</button>
+                        <div className="flex gap-4">
+                            <button type="button" onClick={onClose}>Cancel</button>
+                            <button type="submit" className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md">Save</button>
+                        </div>
                     </div>
-                    <div>
-                        <label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
-                        <input type="password" name="password" id="password" value={router.password || ''} onChange={handleChange} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" placeholder={initialData ? "Leave blank to keep existing" : ""} />
-                    </div>
-                </div>
-                 <div>
-                    <label htmlFor="port" className="block text-sm font-medium text-slate-700 dark:text-slate-300">API Port</label>
-                    <input type="number" name="port" id="port" value={router.port} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] sm:text-sm" />
-                </div>
-                
-                {testResult && (
-                    <div className={`p-3 rounded-md text-sm ${testResult.success ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300 border border-green-200 dark:border-green-700' : 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-700'}`}>
-                        {testResult.message}
-                    </div>
-                )}
-
-                <div className="flex flex-col-reverse sm:flex-row sm:justify-end sm:items-center gap-3 pt-4">
-                     <button type="submit" className="w-full sm:w-auto px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-800 focus:ring-[--color-primary-500]">
-                        Save Router
-                    </button>
-                    <button type="button" onClick={onCancel} className="w-full sm:w-auto px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-lg shadow-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none">Cancel</button>
-                    <button
-                        type="button"
-                        onClick={handleTestConnection}
-                        disabled={isTesting || !router.host || !router.user}
-                        className="w-full sm:w-auto px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-lg shadow-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-800 focus:ring-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isTesting ? 'Testing...' : 'Test Connection'}
-                    </button>
-                </div>
-            </form>
+                </form>
+            </div>
         </div>
     );
 };
 
-interface RoutersProps {
+export const Routers: React.FC<{
     routers: RouterConfigWithId[];
-    onAddRouter: (routerConfig: RouterConfig) => void;
-    onUpdateRouter: (updatedRouter: RouterConfigWithId) => void;
-    onDeleteRouter: (routerId: string) => void;
-}
-
-export const Routers: React.FC<RoutersProps> = ({ routers, onAddRouter, onUpdateRouter, onDeleteRouter }) => {
+    onAddRouter: (router: RouterConfig) => void;
+    onUpdateRouter: (router: RouterConfigWithId) => void;
+    onDeleteRouter: (id: string) => void;
+}> = ({ routers, onAddRouter, onUpdateRouter, onDeleteRouter }) => {
+    const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingRouter, setEditingRouter] = useState<RouterConfigWithId | null>(null);
-    const [isAdding, setIsAdding] = useState(false);
 
-    const handleSave = (routerData: RouterConfig | RouterConfigWithId) => {
-        if ('id' in routerData && routerData.id) {
-            onUpdateRouter(routerData as RouterConfigWithId);
+    const handleSave = (router: RouterConfig | RouterConfigWithId) => {
+        if ('id' in router) {
+            onUpdateRouter(router as RouterConfigWithId);
         } else {
-            onAddRouter(routerData as RouterConfig);
+            onAddRouter(router);
         }
-        setEditingRouter(null);
-        setIsAdding(false);
-    };
-
-    const handleCancel = () => {
-        setEditingRouter(null);
-        setIsAdding(false);
-    };
-    
-    const handleAddNew = () => {
-        setIsAdding(true);
-        setEditingRouter(null);
-    };
-
-    const handleEdit = (router: RouterConfigWithId) => {
-        setEditingRouter(router);
-        setIsAdding(false);
-    };
-
-    const handleDelete = (routerId: string) => {
-        if (window.confirm("Are you sure you want to delete this router?")) {
-            onDeleteRouter(routerId);
-        }
+        setIsModalOpen(false);
     };
 
     return (
-        <div className="max-w-4xl mx-auto">
-            <div className="flex flex-col gap-4 md:flex-row justify-between md:items-center mb-6">
-                <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Manage Routers</h2>
-                {!isAdding && !editingRouter && (
-                     <button
-                        onClick={handleAddNew}
-                        className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-sm hover:shadow-md self-start md:self-auto"
-                    >
-                        Add New Router
-                    </button>
-                )}
+        <div className="space-y-6">
+            <RouterFormModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} router={editingRouter} />
+
+            <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><RouterIcon className="w-6 h-6" /> Router Management</h2>
+                <button onClick={() => { setEditingRouter(null); setIsModalOpen(true); }} className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg">
+                    Add Router
+                </button>
             </div>
 
-            {(isAdding || editingRouter) && (
-                <div className="mb-8">
-                    <RouterForm 
-                        onSave={handleSave} 
-                        onCancel={handleCancel}
-                        initialData={editingRouter} 
-                    />
-                </div>
-            )}
-
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
-                <ul role="list" className="divide-y divide-slate-200 dark:divide-slate-700">
-                    {routers.length > 0 ? (
-                        routers.map((router) => (
-                            <li key={router.id} className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                                <div className="flex items-center gap-4">
-                                    <RouterIcon className="h-8 w-8 text-[--color-primary-500] dark:text-[--color-primary-400]" />
-                                    <div>
-                                        <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{router.name}</p>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400 font-mono">{router.user}@{router.host}:{router.port}</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <button onClick={() => handleEdit(router)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400] rounded-md transition-colors" title="Edit Router">
-                                        <EditIcon className="h-5 w-5" />
-                                    </button>
-                                     <button onClick={() => handleDelete(router.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md transition-colors" title="Delete Router">
-                                        <TrashIcon className="h-5 w-5" />
-                                    </button>
-                                </div>
-                            </li>
-                        ))
-                    ) : (
-                         <li className="p-6 text-center text-slate-500">
-                            No routers configured. Click 'Add New Router' to get started.
-                        </li>
-                    )}
-                </ul>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {routers.map(router => (
+                    <div key={router.id} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md p-6 flex flex-col justify-between">
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white">{router.name}</h3>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 font-mono">{router.user}@{router.host}:{router.port}</p>
+                            <span className="text-xs font-semibold uppercase px-2 py-1 bg-slate-200 dark:bg-slate-700 rounded-full mt-2 inline-block">{router.api_type || 'rest'}</span>
+                        </div>
+                        <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+                            <button onClick={() => { setEditingRouter(router); setIsModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500"><EditIcon className="w-5 h-5"/></button>
+                            <button onClick={() => onDeleteRouter(router.id)} className="p-2 text-slate-500 hover:text-red-500"><TrashIcon className="w-5 h-5"/></button>
+                        </div>
+                    </div>
+                ))}
             </div>
         </div>
     );
