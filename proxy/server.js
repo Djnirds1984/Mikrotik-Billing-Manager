@@ -1615,8 +1615,6 @@ piTunnelRouter.post('/tunnels/create', (req, res) => {
 
 app.use('/api/pitunnel', piTunnelRouter);
 
-// FIX: This entire block was a duplicate and has been removed to prevent redeclaration errors.
-
 // --- Dataplicity CLI ---
 const dataplicityRouter = express.Router();
 dataplicityRouter.use(protect);
@@ -1659,11 +1657,18 @@ dataplicityRouter.post('/install', (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-    const { command } = req.body;
+    let { command } = req.body; // Use let to allow modification
     if (!command || typeof command !== 'string' || !command.includes('dataplicity.com/install.py')) {
         send({ status: 'error', message: 'Invalid Dataplicity installation command provided.' });
         send({ status: 'finished' });
         return res.end();
+    }
+    
+    // For compatibility with modern systems that may not have a `python` symlink,
+    // we replace `sudo python` with `sudo python3`.
+    if (command.includes('| sudo python')) {
+        command = command.replace('| sudo python', '| sudo python3');
+        send({ log: "Note: Auto-corrected install command to use 'python3' for better compatibility." });
     }
     
     streamExec(res, command, `Executing installation command: ${command}`);
