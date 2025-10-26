@@ -1480,7 +1480,13 @@ piTunnelRouter.post('/install', (req, res) => {
         return res.end();
     }
     
-    const child = exec(command);
+    const options = {
+      env: {
+        ...process.env,
+        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+      }
+    };
+    const child = exec(command, options);
 
     child.stdout.on('data', log => send({ log }));
     child.stderr.on('data', log => send({ log, isError: true }));
@@ -1508,9 +1514,16 @@ piTunnelRouter.get('/uninstall', (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
     
+    const options = {
+      env: {
+        ...process.env,
+        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+      }
+    };
+
     const runCommandWithLogs = (command, message) => new Promise((resolve, reject) => {
         send({ log: message });
-        const child = exec(command);
+        const child = exec(command, options);
         child.stdout.on('data', log => send({ log }));
         child.stderr.on('data', log => send({ log, isError: true }));
         child.on('close', code => {
