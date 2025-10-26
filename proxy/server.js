@@ -30,10 +30,27 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.text({ limit: '10mb' })); // For AI fixer
 
 // --- Captive Portal Redirect Middleware ---
+// Helper to determine if the request is from an admin or a captive client.
+const isAdminHostname = (hostname) => {
+    // Direct access via IP or localhost is considered admin access.
+    if (hostname === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+        return true;
+    }
+    // Whitelist common tunneling service domains used for remote admin access.
+    const adminDomains = [
+        '.pitunnel.net',
+        '.ngrok.io',
+        '.ngrok-free.app', // Newer ngrok domain
+        '.dataplicity.io'
+    ];
+    return adminDomains.some(domain => hostname.endsWith(domain));
+};
+
+
 app.use((req, res, next) => {
     // This is a heuristic to distinguish between a user directly accessing the panel
-    // vs. a captive client being redirected. Direct access usually uses localhost or an IP.
-    const isDirectAccess = req.hostname === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(req.hostname);
+    // vs. a captive client being redirected.
+    const isDirectAccess = isAdminHostname(req.hostname);
 
     // List of paths that should be ignored by this redirect logic.
     const ignoredPaths = [
