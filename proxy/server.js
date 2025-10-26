@@ -16,13 +16,7 @@ const crypto = require('crypto');
 
 const app = express();
 const PORT = 3001;
-const DB_PATH = path.join(__dirname, 'panel.db');
-const SUPERADMIN_DB_PATH = path.join(__dirname, 'superadmin.db');
-const BACKUP_DIR = path.join(__dirname, 'backups');
-const API_BACKEND_FILE = path.join(__dirname, '..', 'api-backend', 'server.js');
-const NGROK_CONFIG_PATH = path.join(__dirname, 'ngrok-config.json');
-const NGROK_BINARY_PATH = '/usr/local/bin/ngrok';
-const SECRET_KEY = process.env.JWT_SECRET || 'a-very-weak-secret-key-for-dev-only';
+const DB_SERVER_URL = 'http://localhost:3001';
 const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret-string-for-licenses-!@#$%^&*()';
 
 
@@ -72,8 +66,44 @@ app.use((req, res, next) => {
     next();
 });
 
+// Middleware to build .tsx/.ts files on the fly
+app.get(/\.(tsx|ts)$/, async (req, res, next) => {
+  // Simple path validation to prevent directory traversal
+  if (req.path.includes('..')) {
+    return res.status(403).send('Forbidden');
+  }
+
+  const filePath = path.join(__dirname, '..', req.path);
+
+  if (!fs.existsSync(filePath)) {
+    return next();
+  }
+
+  try {
+    const result = await esbuild.build({
+      entryPoints: [filePath],
+      bundle: false, // Transpile file-by-file
+      write: false,
+      format: 'esm',
+      jsx: 'automatic',
+      loader: {
+        '.tsx': 'tsx',
+        '.ts': 'ts'
+      },
+      absWorkingDir: path.join(__dirname, '..'),
+    });
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.send(result.outputFiles[0].text);
+  } catch (e) {
+    console.error(`esbuild error for ${req.path}:`, e);
+    // Send a valid JS syntax error to the browser console for better debugging
+    res.status(500).setHeader('Content-Type', 'application/javascript; charset=utf-8').send(`console.error('esbuild error for ${req.path}: ${e.message.replace(/'/g, "\\'")}');`);
+  }
+});
+
 
 // Ensure backup directory exists
+const BACKUP_DIR = path.join(__dirname, 'backups');
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
 let db;
