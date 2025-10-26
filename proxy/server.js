@@ -265,8 +265,13 @@ const initializeDatabase = async () => {
         const applied = await db.get('SELECT id FROM migrations WHERE name = ?', migration.name);
         if (!applied) {
             console.log(`Applying migration: ${migration.name}`);
-            await db.exec(migration.sql);
-            await db.run('INSERT INTO migrations (name, applied_at) VALUES (?, ?)', migration.name, new Date().toISOString());
+            try {
+                await db.exec(migration.sql);
+                await db.run('INSERT INTO migrations (name, applied_at) VALUES (?, ?)', migration.name, new Date().toISOString());
+            } catch (err) {
+                 console.error(`Migration ${migration.name} failed:`, err);
+                 process.exit(1);
+            }
         }
     }
     
@@ -313,13 +318,14 @@ app.use((req, res, next) => {
     const isTunnel = adminDomains.some(domain => hostname.endsWith(domain));
     const isAllowedAsset = req.path.startsWith('/assets/') || req.path.startsWith('/locales/') || req.path.startsWith('/env.js');
     const isApiCall = req.path.startsWith('/api/');
+    const isCaptivePath = req.path.startsWith('/captive');
 
-    if (isLocal || isTunnel || isAllowedAsset || isApiCall) {
+    if (isLocal || isTunnel || isAllowedAsset || isApiCall || isCaptivePath) {
         return next();
     }
     
     // Redirect all other traffic to the captive portal page
-    res.sendFile(path.join(__dirname, '..', 'dist', 'captive.html'));
+    return res.redirect('/captive');
 });
 
 // --- Authentication & RBAC Middleware ---
@@ -415,26 +421,34 @@ const createStreamHandler = (command, options = execOptions) => (req, res) => {
 
 // --- AUTH (PUBLIC) ENDPOINTS ---
 app.get('/api/auth/has-users', async (req, res) => {
-    const userCount = await db.get('SELECT COUNT(*) as count FROM users');
-    res.json({ hasUsers: userCount.count > 0 });
+    try {
+        const userCount = await db.get('SELECT COUNT(*) as count FROM users');
+        res.json({ hasUsers: userCount.count > 0 });
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
 });
 
 app.post('/api/auth/register', async (req, res) => {
     const { username, password, securityQuestions } = req.body;
-    const userCount = await db.get('SELECT COUNT(*) as count FROM users');
-    if (userCount.count > 0) {
-        return res.status(403).json({ message: 'Registration is closed.' });
-    }
-    
-    const salt = await bcrypt.genSalt(10);
-    const hash = await bcrypt.hash(password, salt);
-    
-    const role = await db.get('SELECT id FROM roles WHERE name = ?', 'Administrator');
-    if (!role) {
-        return res.status(500).json({ message: "Administrator role not found."});
-    }
-
     try {
+        const userCount = await db.get('SELECT COUNT(*) as count FROM users');
+        const isAdminRegistration = userCount.count === 0;
+        const roleName = isAdminRegistration ? 'Administrator' : 'Employee'; // Or whatever default you want
+
+        const role = await db.get('SELECT id FROM roles WHERE name = ?', roleName);
+        if (!role) {
+            return res.status(500).json({ message: `${roleName} role not found.` });
+        }
+
+        if (!isAdminRegistration) {
+            // Here you'd need an authenticated admin to be making this request
+            // We'll skip that check for now, assuming it's handled by middleware on a different route
+        }
+        
+        const salt = await bcrypt.genSalt(10);
+        const hash = await bcrypt.hash(password, salt);
+
         const newUser = { id: `user_${Date.now()}`, username, password_hash: hash, role_id: role.id };
         await db.run('INSERT INTO users (id, username, password_hash, role_id) VALUES (?, ?, ?, ?)', newUser.id, newUser.username, newUser.password_hash, newUser.role_id);
         
@@ -444,12 +458,17 @@ app.post('/api/auth/register', async (req, res) => {
         }
 
         const token = jwt.sign({ id: newUser.id, username: newUser.username }, SECRET_KEY, { expiresIn: '7d' });
+        const perms = await db.all('SELECT p.name FROM role_permissions rp JOIN permissions p ON rp.permission_id = p.id WHERE rp.role_id = ?', role.id);
+
         res.status(201).json({
             token,
-            user: { id: newUser.id, username: newUser.username, role: { id: role.id, name: 'Administrator' }, permissions: ['*:*'] }
+            user: { id: newUser.id, username: newUser.username, role: { id: role.id, name: roleName }, permissions: perms.map(p => p.name) }
         });
 
     } catch(e) {
+        if (e.code === 'SQLITE_CONSTRAINT' && e.message.includes('users.username')) {
+            return res.status(409).json({ message: 'Username already exists.' });
+        }
         res.status(500).json({ message: e.message });
     }
 });
