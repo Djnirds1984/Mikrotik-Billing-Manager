@@ -30,14 +30,6 @@
             fontFamily: {
               sans: ['Inter', 'sans-serif'],
             },
-            colors: {
-              'primary-300': 'var(--color-primary-300)',
-              'primary-400': 'var(--color-primary-400)',
-              'primary-500': 'var(--color-primary-500)',
-              'primary-600': 'var(--color-primary-600)',
-              'primary-700': 'var(--color-primary-700)',
-              'primary-800': 'var(--color-primary-800)',
-            }
           },
         },
       };
@@ -45,18 +37,21 @@
   <script type="importmap">
 {
   "imports": {
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "@google/genai": "https://esm.sh/@google/genai@0.1.0-beta.3",
-    "react": "https://esm.sh/react@18.2.0",
-    "recharts": "https://esm.sh/recharts@2.12.0",
+    "react-dom/client": "https://esm.sh/react-dom@^19.1.1/client",
+    "@google/genai": "https://esm.sh/@google/genai@^1.15.0",
+    "react": "https://esm.sh/react@^19.1.1",
+    "recharts": "https://esm.sh/recharts@^2.12.7",
     "xterm": "https://esm.sh/xterm@5.3.0",
     "xterm-addon-fit": "https://esm.sh/xterm-addon-fit@0.8.0",
     "xterm-addon-web-links": "https://esm.sh/xterm-addon-web-links@0.9.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
     "url": "https://aistudiocdn.com/url@^0.11.4",
-    "vite": "https://aistudiocdn.com/vite@^7.1.12"
+    "react-chartjs-2": "https://aistudiocdn.com/react-chartjs-2@^5.3.0",
+    "chart.js": "https://aistudiocdn.com/chart.js@^4.5.0",
+    "vite": "https://aistudiocdn.com/vite@^7.1.9",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.0.4"
   }
 }
 </script>
@@ -68,14 +63,6 @@
   }
   
   /* Define CSS variables for color themes */
-  :root {
-    --color-primary-300: #fdba74;
-    --color-primary-400: #fb923c;
-    --color-primary-500: #f97316;
-    --color-primary-600: #ea580c;
-    --color-primary-700: #c2410c;
-    --color-primary-800: #9a3412;
-  }
   .theme-orange {
     --color-primary-300: #fdba74;
     --color-primary-400: #fb923c;
@@ -169,6 +156,7 @@
     display: block;
   }
   .xterm .xterm-viewport {
+    background-color: #000;
     overflow-y: scroll;
     cursor: default;
     position: absolute;
@@ -198,6 +186,96 @@
   }
   .xterm {
     cursor: text;
+  }
+  .xterm.enable-mouse-events {
+    cursor: default;
+  }
+  .xterm.xterm-cursor-pointer {
+    cursor: pointer;
+  }
+  .xterm.column-select.focus {
+    cursor: crosshair;
+  }
+  .xterm .xterm-accessibility,
+  .xterm .xterm-message {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 10;
+    color: #fff;
+  }
+  .xterm .live-region {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .xterm-dim {
+    opacity: 0.5;
+  }
+  .xterm-normal {
+    font-weight: 400;
+  }
+  .xterm-bold {
+    font-weight: 700;
+  }
+  .xterm-italic {
+    font-style: italic;
+  }
+  .xterm-underline {
+    text-decoration: underline;
+  }
+  .xterm-strikethrough {
+    text-decoration: line-through;
+  }
+  .xterm-overline {
+    text-decoration: overline;
+  }
+  .xterm-inverse {
+  }
+  .xterm-invisible {
+    visibility: hidden;
+  }
+  .xterm-cursor {
+    color: #000;
+    background: #fff;
+  }
+  .xterm-cursor-blink {
+    animation: xterm-cursor-blink 1s step-end infinite;
+  }
+  .xterm-cursor-style-block.xterm-cursor-blink.focus:not(.xterm-cursor-focussed) {
+    outline: 1px solid #fff;
+    outline-offset: -1px;
+  }
+  .xterm-cursor-style-bar.xterm-cursor-blink:not(.focus) {
+    animation: none;
+  }
+  .xterm-cursor-style-underline.xterm-cursor-blink:not(.focus) {
+    animation: none;
+  }
+  @keyframes xterm-cursor-blink {
+    50% {
+      background: transparent;
+      color: inherit;
+    }
+  }
+  .xterm-decoration-container .xterm-decoration {
+    z-index: 6;
+    position: absolute;
+  }
+  .xterm-decoration-container .xterm-decoration-overview-ruler {
+    z-index: 7;
+    position: absolute;
+    top: 0;
+    right: 0;
+    pointer-events: none;
+  }
+  .xterm-decoration-container .xterm-decoration-top {
+    z-index: 2;
+    position: relative;
   }
 </style>
 </head>
