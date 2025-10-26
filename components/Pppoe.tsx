@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { RouterConfigWithId, PppProfile, IpPool, PppProfileData, PppSecret, PppActiveConnection, SaleRecord, BillingPlanWithId, Customer, PppSecretData, PppServer, PppServerData, Interface } from '../types.ts';
 import { 
@@ -30,6 +28,83 @@ const TabButton: React.FC<{ label: string, icon: React.ReactNode, isActive: bool
         <span className="ml-2">{label}</span>
     </button>
 );
+
+// --- Profile Form Modal (Refactored) ---
+const ProfileFormModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (data: PppProfile | PppProfileData) => void;
+    initialData: PppProfile | null;
+    pools: IpPool[];
+    isSubmitting: boolean;
+}> = ({ isOpen, onClose, onSave, initialData, pools, isSubmitting }) => {
+    const [profile, setProfile] = useState<Partial<PppProfileData>>({});
+
+    useEffect(() => {
+        if (isOpen) {
+            if (initialData) {
+                setProfile({ 
+                    name: initialData.name, 
+                    'local-address': initialData['local-address'] || '', 
+                    'remote-address': initialData['remote-address'] || 'none', 
+                    'rate-limit': initialData['rate-limit'] || '' 
+                });
+            } else {
+                setProfile({ name: '', 'local-address': '', 'remote-address': 'none', 'rate-limit': '' });
+            }
+        }
+    }, [initialData, isOpen]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(initialData ? { ...profile, id: initialData.id } as PppProfile : profile as PppProfileData);
+    };
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        setProfile(p => ({ ...p, [e.target.name]: e.target.value }));
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold mb-4">{initialData ? 'Edit Profile' : 'Add New Profile'}</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label>Profile Name</label>
+                                <input type="text" name="name" value={profile.name} onChange={handleChange} required disabled={!!initialData} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2 disabled:opacity-50" />
+                            </div>
+                            <div>
+                                <label>Local Address</label>
+                                <input type="text" name="local-address" value={profile['local-address']} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2" />
+                            </div>
+                            <div>
+                                <label>Remote Address (Pool)</label>
+                                <select name="remote-address" value={profile['remote-address']} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">
+                                    <option value="none">none</option>
+                                    {pools.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label>Rate Limit (rx/tx)</label>
+                                <input type="text" placeholder="e.g., 10M/20M" name="rate-limit" value={profile['rate-limit']} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2" />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-3">
+                        <button type="button" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+                        <button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">
+                            {isSubmitting ? 'Saving...' : 'Save'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 // --- Profiles Management Sub-component ---
 const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
@@ -80,54 +155,20 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
         } catch (err) { alert(`Error deleting profile: ${(err as Error).message}`); }
     };
     
-    // FIX: Pass isSubmitting to disable save button during submission
-    const ProfileFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, isSubmitting }) => {
-        const [profile, setProfile] = useState<Partial<PppProfileData>>({ name: '', 'local-address': '', 'remote-address': '', 'rate-limit': '' });
-        
-        useEffect(() => {
-            if (isOpen) {
-                if (initialData) {
-                    setProfile({ name: initialData.name, 'local-address': initialData['local-address'] || '', 'remote-address': initialData['remote-address'] || '', 'rate-limit': initialData['rate-limit'] || '' });
-                } else {
-                    const defaultPool = pools.length > 0 ? pools[0].name : '';
-                    setProfile({ name: '', 'local-address': '', 'remote-address': defaultPool, 'rate-limit': '' });
-                }
-            }
-        }, [initialData, isOpen]);
-
-        if (!isOpen) return null;
-        const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); onSave(initialData ? { ...profile, id: initialData.id } : profile); };
-        
-        const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-            setProfile(p => ({ ...p, [e.target.name]: e.target.value }));
-        };
-
-        return (
-            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
-                    <form onSubmit={handleSubmit}>
-                        <div className="p-6"><h3 className="text-xl font-bold mb-4">{initialData ? 'Edit Profile' : 'Add New Profile'}</h3>
-                           <div className="space-y-4">
-                                <div><label>Profile Name</label><input type="text" name="name" value={profile.name} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2" /></div>
-                                <div><label>Local Address</label><input type="text" name="local-address" value={profile['local-address']} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2" /></div>
-                                <div><label>Remote Address (Pool)</label><select name="remote-address" value={profile['remote-address']} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2"><option value="">none</option>{pools.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
-                                <div><label>Rate Limit (rx/tx)</label><input type="text" placeholder="e.g., 10M/20M" name="rate-limit" value={profile['rate-limit']} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2" /></div>
-                            </div>
-                        </div>
-                        <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-3"><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={isSubmitting}>Save</button></div>
-                    </form>
-                </div>
-            </div>
-        );
-    };
 
     if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
     if (error?.profiles) return <div className="p-4 text-red-600">{error.profiles}</div>;
 
     return (
         <div>
-            {/* FIX: Pass isSubmitting prop to modal */}
-            <ProfileFormModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingProfile(null); }} onSave={handleSave} initialData={editingProfile} isSubmitting={isSubmitting} />
+            <ProfileFormModal 
+                isOpen={isModalOpen} 
+                onClose={() => { setIsModalOpen(false); setEditingProfile(null); }} 
+                onSave={handleSave} 
+                initialData={editingProfile} 
+                pools={pools}
+                isSubmitting={isSubmitting} 
+            />
             <div className="flex justify-end mb-4">
                 <button onClick={() => { setEditingProfile(null); setIsModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New Profile</button>
             </div>

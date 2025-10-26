@@ -245,7 +245,9 @@ export const addPppProfile = (router: RouterConfigWithId, profileData: PppProfil
 };
 
 export const updatePppProfile = (router: RouterConfigWithId, profileData: PppProfile): Promise<any> => {
-    const { id, ...dataToSend } = profileData as any;
+    // FIX: The `name` of a profile is often read-only after creation.
+    // Exclude it from the PATCH payload to prevent a 400 Bad Request error from the MikroTik API.
+    const { id, name, ...dataToSend } = profileData as any;
     delete dataToSend['.id'];
     return fetchMikrotikData(router, `/ppp/profile/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(dataToSend) });
 };
