@@ -1438,6 +1438,114 @@ app.get('/api/zt/install', protect, (req, res) => {
     });
 });
 
+// --- Pi Tunnel CLI ---
+const piTunnelRouter = express.Router();
+piTunnelRouter.use(protect);
+
+piTunnelRouter.get('/status', async (req, res) => {
+    try {
+        const installed = fs.existsSync('/usr/local/bin/pitunnel');
+        let active = false;
+
+        if (installed) {
+            const statusOutput = await new Promise((resolve, reject) => {
+                 exec('sudo systemctl is-active pitunnel.service', (err, stdout, stderr) => {
+                    if (err) {
+                        if (stderr.includes("sudo: a terminal is required") || stderr.includes("sudo: a password is required")) {
+                            return reject({ status: 403, code: 'SUDO_PASSWORD_REQUIRED', message: 'Passwordless sudo is not configured correctly.' });
+                        }
+                        return resolve(stdout || stderr);
+                    }
+                    resolve(stdout);
+                 });
+            });
+            active = (statusOutput || '').toString().trim() === 'active';
+        }
+        res.json({ installed, active, url: 'https://pitunnel.com/dashboard' });
+    } catch (e) {
+        res.status(e.status || 500).json({ message: e.message, code: e.code });
+    }
+});
+
+piTunnelRouter.post('/install', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    const { command } = req.body;
+    if (!command || typeof command !== 'string' || !command.includes('pitunnel.com/inst')) {
+        send({ status: 'error', message: 'Invalid PiTunnel installation command provided.' });
+        send({ status: 'finished' });
+        return res.end();
+    }
+    
+    const child = exec(command);
+
+    child.stdout.on('data', log => send({ log }));
+    child.stderr.on('data', log => send({ log, isError: true }));
+
+    child.on('close', code => {
+        if (code === 0) {
+            send({ status: 'success', log: 'Installation command finished.' });
+        } else {
+            send({ status: 'error', message: `Installation script failed with exit code ${code}.` });
+        }
+        send({ status: 'finished' });
+        res.end();
+    });
+
+    child.on('error', err => {
+        send({ status: 'error', message: `Failed to execute command: ${err.message}` });
+        send({ status: 'finished' });
+        res.end();
+    });
+});
+
+piTunnelRouter.get('/uninstall', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    
+    const runCommandWithLogs = (command, message) => new Promise((resolve, reject) => {
+        send({ log: message });
+        const child = exec(command);
+        child.stdout.on('data', log => send({ log }));
+        child.stderr.on('data', log => send({ log, isError: true }));
+        child.on('close', code => {
+            if (code === 0) {
+                resolve();
+            } else {
+                // Ignore errors from stopping a service that might not be running
+                if (command.includes('systemctl stop') && code !== 0) {
+                    send({ log: `Warning: Could not stop service (may already be stopped). Continuing...` });
+                    resolve();
+                } else {
+                    reject(new Error(`Command "${command}" failed.`));
+                }
+            }
+        });
+        child.on('error', reject);
+    });
+
+    const run = async () => {
+        try {
+            await runCommandWithLogs('sudo systemctl stop pitunnel.service', 'Stopping pitunnel service...');
+            await runCommandWithLogs('sudo pitunnel --remove', 'Running pitunnel uninstall command...');
+            send({ status: 'success', log: 'Uninstallation process finished.' });
+        } catch (e) {
+            send({ status: 'error', message: e.message, isError: true });
+        } finally {
+            send({ status: 'finished' });
+            res.end();
+        }
+    };
+    run();
+});
+
+app.use('/api/pitunnel', piTunnelRouter);
+
 // --- Host Router Endpoints ---
 const runSudo = (command) => new Promise((resolve, reject) => {
     exec(`sudo ${command}`, (err, stdout, stderr) => {
