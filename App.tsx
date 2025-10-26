@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
@@ -42,9 +41,7 @@ import { LocalizationProvider, useLocalization } from './contexts/LocalizationCo
 import { ThemeProvider } from './contexts/ThemeContext.tsx';
 import { NotificationProvider } from './contexts/NotificationContext.tsx';
 import { useAuth } from './contexts/AuthContext.tsx';
-// FIX: Import PppProfile and getPppProfiles to fix missing prop error in Billing component
-import type { View, LicenseStatus, PppProfile } from './types.ts';
-import { getPppProfiles } from './services/mikrotikService.ts';
+import type { View, LicenseStatus } from './types.ts';
 import { getAuthHeader } from './services/databaseService.ts';
 
 
@@ -98,17 +95,9 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const payrollData = usePayrollData();
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
-  // FIX: Add state for PPP profiles required by the Billing component
-  const [pppProfiles, setPppProfiles] = useState<PppProfile[]>([]);
 
 
   const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;
-
-  // FIX: Moved selectedRouter declaration before its usage in useEffect hooks.
-  const selectedRouter = useMemo(
-    () => routers.find(r => r.id === selectedRouterId) || null,
-    [routers, selectedRouterId]
-  );
 
   useEffect(() => {
     setIsSidebarOpen(isLargeScreen);
@@ -135,19 +124,10 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     }
   }, [routers, selectedRouterId]);
 
-  // FIX: Fetch PPP profiles when the selected router changes
-  useEffect(() => {
-      if (selectedRouter) {
-          getPppProfiles(selectedRouter)
-              .then(setPppProfiles)
-              .catch(err => {
-                  console.error("Failed to fetch PPP profiles in App.tsx", err);
-                  setPppProfiles([]); // Clear on error
-              });
-      } else {
-          setPppProfiles([]);
-      }
-  }, [selectedRouter]);
+  const selectedRouter = useMemo(
+    () => routers.find(r => r.id === selectedRouterId) || null,
+    [routers, selectedRouterId]
+  );
 
   const renderView = () => {
     if (appIsLoading) {
@@ -186,8 +166,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
       case 'pppoe':
           return <Pppoe selectedRouter={selectedRouter} addSale={addSale} />;
       case 'billing':
-          // FIX: Pass the fetched pppProfiles to the Billing component
-          return <Billing selectedRouter={selectedRouter} profiles={pppProfiles} />;
+          return <Billing selectedRouter={selectedRouter} />;
       case 'sales':
           return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} />;
       case 'inventory':

@@ -1,55 +1,80 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import type { RouterConfigWithId, DhcpClient, DhcpClientActionParams, DhcpBillingPlanWithId } from '../types.ts';
-import { getDhcpClients, updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
-import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import type { RouterConfigWithId, DhcpClient, DhcpClientActionParams, SaleRecord, DhcpClientDbRecord, DhcpBillingPlanWithId } from '../types.ts';
+import { updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
+import { dbApi } from '../services/databaseService.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
+import { getDhcpClients } from '../services/mikrotikService.ts';
 import { Loader } from './Loader.tsx';
-import { CheckCircleIcon, ExclamationTriangleIcon, SearchIcon, TrashIcon } from '../constants.tsx';
+import { EditIcon, TrashIcon } from '../constants.tsx';
 
-// --- Update/Activation Modal ---
-const ClientUpdateModal: React.FC<{
+// The new unified modal for activation and payment
+const ActivationPaymentModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
-    onSave: (client: DhcpClient, params: DhcpClientActionParams) => void;
+    onSave: (params: DhcpClientActionParams) => void;
     client: DhcpClient | null;
     plans: DhcpBillingPlanWithId[];
-    isLoading: boolean;
-}> = ({ isOpen, onClose, onSave, client, plans, isLoading }) => {
+    isSubmitting: boolean;
+    dbClient?: DhcpClientDbRecord | null;
+}> = ({ isOpen, onClose, onSave, client, plans, isSubmitting, dbClient }) => {
     const { formatCurrency } = useLocalization();
-    const [params, setParams] = useState<DhcpClientActionParams>({ customerInfo: '' });
-    const [updateType, setUpdateType] = useState<'plan' | 'manual'>('plan');
+    const [customerInfo, setCustomerInfo] = useState('');
+    const [contactNumber, setContactNumber] = useState('');
+    const [email, setEmail] = useState('');
+    const [selectedPlanId, setSelectedPlanId] = useState('');
+    const [downtimeDays, setDowntimeDays] = useState('0');
 
     useEffect(() => {
-        if (client) {
-            setParams({
-                customerInfo: client.customerInfo || '',
-                contactNumber: client.contactNumber || '',
-                email: client.email || '',
-                plan: plans[0],
-                downtimeDays: 0,
-            });
-            setUpdateType('plan');
+        if (isOpen && client) {
+            // FIX: Add explicit type to help TypeScript infer the shape of the merged object.
+            const initialData: Partial<DhcpClient & DhcpClientDbRecord> = { ...client, ...(dbClient || {}) };
+            setCustomerInfo(initialData.customerInfo || initialData.hostName || '');
+            setContactNumber(initialData.contactNumber || '');
+            setEmail(initialData.email || '');
+            setDowntimeDays('0');
+
+            if (plans.length > 0) {
+                // Try to find a plan that matches the last known plan for this client
+                const lastPlanName = dbClient?.customerInfo ? JSON.parse(client.comment || '{}').planName : null;
+                const lastPlan = lastPlanName ? plans.find(p => p.name === lastPlanName) : null;
+                setSelectedPlanId(lastPlan?.id || plans[0].id);
+            }
         }
-    }, [client, plans]);
+    }, [isOpen, client, dbClient, plans]);
+
+    const selectedPlan = useMemo(() => plans.find(p => p.id === selectedPlanId), [plans, selectedPlanId]);
+    
+    const pricePerDay = useMemo(() => {
+        if (!selectedPlan || !selectedPlan.cycle_days || selectedPlan.cycle_days === 0) return 0;
+        return selectedPlan.price / selectedPlan.cycle_days;
+    }, [selectedPlan]);
+
+    const discountAmount = useMemo(() => {
+        const days = parseInt(downtimeDays, 10) || 0;
+        return pricePerDay * days;
+    }, [downtimeDays, pricePerDay]);
+
+    const finalAmount = useMemo(() => {
+        if (!selectedPlan) return 0;
+        return Math.max(0, selectedPlan.price - discountAmount);
+    }, [selectedPlan, discountAmount]);
 
     if (!isOpen || !client) return null;
 
-    const selectedPlan = params.plan;
-    const planPrice = selectedPlan?.price || 0;
-    const daysInCycle = selectedPlan?.cycle_days || 30;
-    const pricePerDay = daysInCycle > 0 ? planPrice / daysInCycle : 0;
-    const downtimeDays = params.downtimeDays || 0;
-    const discountAmount = pricePerDay * downtimeDays;
-    const finalAmount = Math.max(0, planPrice - discountAmount);
-    
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave(client, params);
-    };
-
-    const handlePlanChange = (planId: string) => {
-        const newPlan = plans.find(p => p.id === planId);
-        setParams(p => ({ ...p, plan: newPlan }));
+        if (!selectedPlan) {
+            alert("Please select a billing plan.");
+            return;
+        }
+        onSave({
+            customerInfo,
+            contactNumber,
+            email,
+            plan: selectedPlan,
+            downtimeDays: parseInt(downtimeDays, 10) || 0,
+        });
     };
 
     return (
@@ -57,37 +82,50 @@ const ClientUpdateModal: React.FC<{
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
                 <form onSubmit={handleSubmit}>
                     <div className="p-6">
-                        <h3 className="text-xl font-bold mb-4">Update Client: <span className="font-mono text-[--color-primary-500]">{client.address}</span></h3>
+                        <h3 className="text-xl font-bold mb-4">{client.status === 'pending' ? 'Activate Client' : 'Renew Subscription'}</h3>
+                        <p className="text-sm text-slate-500 mb-4 font-mono">{client.address} ({client.macAddress})</p>
                         <div className="space-y-4">
-                            <div><label>Customer Name</label><input value={params.customerInfo} onChange={e => setParams(p => ({ ...p, customerInfo: e.target.value }))} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><label>Contact No.</label><input value={params.contactNumber} onChange={e => setParams(p => ({ ...p, contactNumber: e.target.value }))} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                                <div><label>Email</label><input type="email" value={params.email} onChange={e => setParams(p => ({ ...p, email: e.target.value }))} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                            </div>
-
-                             <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                                <label>Billing Plan</label>
-                                <select onChange={e => handlePlanChange(e.target.value)} value={selectedPlan?.id || ''} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
-                                    {plans.map(p => <option key={p.id} value={p.id}>{p.name} ({formatCurrency(p.price)} / {p.cycle_days} days)</option>)}
-                                </select>
-                            </div>
                             <div>
-                                <label>Discount for Downtime (Days)</label>
-                                <input type="number" min="0" value={params.downtimeDays} onChange={e => setParams(p => ({...p, downtimeDays: parseInt(e.target.value) || 0 }))} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                <label className="block text-sm font-medium">Customer Name</label>
+                                <input value={customerInfo} onChange={e => setCustomerInfo(e.target.value)} placeholder="e.g., John Doe - Unit 5" required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                             </div>
-                            
-                            <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                                <div className="flex justify-between text-lg font-bold text-slate-900 dark:text-white mt-2">
-                                    <span>TOTAL:</span>
-                                    <span>{formatCurrency(finalAmount)}</span>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium">Contact Number</label>
+                                    <input type="tel" value={contactNumber} onChange={e => setContactNumber(e.target.value)} placeholder="Optional" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-medium">Email Address</label>
+                                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                            </div>
+                            <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                     <div>
+                                        <label className="block text-sm font-medium">Billing Plan</label>
+                                        <select value={selectedPlanId} onChange={e => setSelectedPlanId(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                            {plans.length > 0 ? plans.map(p => <option key={p.id} value={p.id}>{p.name} ({formatCurrency(p.price)})</option>) : <option>No plans found</option>}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium">Downtime Discount (Days)</label>
+                                        <input type="number" value={downtimeDays} onChange={e => setDowntimeDays(e.target.value)} min="0" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                    </div>
+                                </div>
+                                {selectedPlan && (
+                                <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-md space-y-1 text-sm">
+                                    <div className="flex justify-between"><span>Plan Price:</span> <span>{formatCurrency(selectedPlan.price)}</span></div>
+                                    <div className="flex justify-between text-yellow-600 dark:text-yellow-400"><span>Discount:</span> <span>- {formatCurrency(discountAmount)}</span></div>
+                                    <div className="flex justify-between font-bold text-lg pt-1 border-t border-slate-200 dark:border-slate-600"><span>Total Due:</span> <span>{formatCurrency(finalAmount)}</span></div>
+                                </div>
+                                )}
                             </div>
                         </div>
                     </div>
                     <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
-                        <button type="button" onClick={onClose} disabled={isLoading}>Cancel</button>
-                        <button type="submit" disabled={isLoading} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">
-                            {isLoading ? 'Saving...' : (client.status === 'active' ? 'Update Subscription' : 'Activate Client')}
+                        <button type="button" onClick={onClose} className="px-4 py-2 rounded-md">Cancel</button>
+                        <button type="submit" disabled={isSubmitting || !selectedPlan} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">
+                            {isSubmitting ? 'Saving...' : 'Save & Activate'}
                         </button>
                     </div>
                 </form>
@@ -96,25 +134,113 @@ const ClientUpdateModal: React.FC<{
     );
 };
 
+// New modal for manual editing
+const EditClientModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (params: DhcpClientActionParams) => void;
+    client: DhcpClient | null;
+    isSubmitting: boolean;
+    dbClient?: DhcpClientDbRecord | null;
+}> = ({ isOpen, onClose, onSave, client, isSubmitting, dbClient }) => {
+    const [formData, setFormData] = useState<Partial<DhcpClientActionParams>>({});
+    
+    useEffect(() => {
+        if (isOpen && client) {
+            // FIX: Add explicit type to help TypeScript infer the shape of the merged object.
+            const initialData: Partial<DhcpClient & DhcpClientDbRecord> = { ...client, ...(dbClient || {}) };
+            
+            let currentExpiresAt = '';
+            if (client.comment) {
+                try {
+                    const parsed = JSON.parse(client.comment);
+                    if (parsed.dueDate) {
+                        // The saved date is YYYY-MM-DD. We assume end of day for datetime-local.
+                        currentExpiresAt = `${parsed.dueDate}T23:59`;
+                    }
+                } catch(e) {}
+            }
 
-// --- Main Component ---
-export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (saleData: any) => Promise<void> }> = ({ selectedRouter, addSale }) => {
+            setFormData({
+                customerInfo: initialData.customerInfo || initialData.hostName || '',
+                contactNumber: initialData.contactNumber || '',
+                email: initialData.email || '',
+                speedLimit: initialData.speedLimit || '',
+                expiresAt: currentExpiresAt,
+            });
+        }
+    }, [isOpen, client, dbClient]);
+
+    if (!isOpen || !client) return null;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setFormData(prev => ({...prev, [e.target.name]: e.target.value}));
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(formData as DhcpClientActionParams);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold mb-4">Edit Client</h3>
+                        <div className="space-y-4">
+                            <div><label>Customer Name</label><input name="customerInfo" value={formData.customerInfo} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label>Contact Number</label><input name="contactNumber" value={formData.contactNumber} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                                <div><label>Email</label><input type="email" name="email" value={formData.email} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                            </div>
+                             <div className="grid grid-cols-2 gap-4">
+                                <div><label>Speed Limit (Mbps)</label><input type="number" name="speedLimit" value={formData.speedLimit} onChange={handleChange} placeholder="Leave blank for no limit" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                                <div>
+                                    <label>Expires At</label>
+                                    <input type="datetime-local" name="expiresAt" value={formData.expiresAt} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
+                        <button type="button" onClick={onClose}>Cancel</button>
+                        <button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">{isSubmitting ? 'Saving...' : 'Save Changes'}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+interface DhcpClientManagementProps {
+    selectedRouter: RouterConfigWithId;
+    addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void>;
+}
+
+export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ selectedRouter, addSale }) => {
     const [clients, setClients] = useState<DhcpClient[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
-    const [searchTerm, setSearchTerm] = useState('');
-
+    const [dbClients, setDbClients] = useState<DhcpClientDbRecord[]>([]);
     const { plans, isLoading: isLoadingPlans } = useDhcpBillingPlans(selectedRouter.id);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    
+    const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
+    const [isEditModalOpen, setEditModalOpen] = useState(false);
+    const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            const data = await getDhcpClients(selectedRouter);
-            setClients(data);
+            const [routerClients, localClients] = await Promise.all([
+                getDhcpClients(selectedRouter),
+                dbApi.get<DhcpClientDbRecord[]>(`/dhcp_clients?routerId=${selectedRouter.id}`)
+            ]);
+            setClients(routerClients);
+            setDbClients(localClients);
         } catch (err) {
             setError((err as Error).message);
         } finally {
@@ -124,103 +250,186 @@ export const DhcpClientManagement: React.FC<{ selectedRouter: RouterConfigWithId
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 10000); // Poll for new clients
+        const interval = setInterval(fetchData, 8000);
         return () => clearInterval(interval);
     }, [fetchData]);
 
-    const handleSave = async (client: DhcpClient, params: DhcpClientActionParams) => {
-        setIsSubmitting(true);
+    const combinedClients = useMemo(() => {
+        const dbClientMap = new Map(dbClients.map(c => [c.macAddress, c]));
+        return clients.map(client => {
+            const dbData = dbClientMap.get(client.macAddress);
+            return dbData ? { ...client, customerInfo: dbData.customerInfo, contactNumber: dbData.contactNumber, email: dbData.email, speedLimit: dbData.speedLimit } : client;
+        });
+    }, [clients, dbClients]);
+    
+    const upsertDbClient = async (clientData: Omit<DhcpClientDbRecord, 'id'>) => {
         try {
-            await updateDhcpClientDetails(selectedRouter, client, params);
-            
-            // Log the sale if a plan was used
-            if (params.plan) {
-                const planPrice = params.plan.price;
-                const pricePerDay = params.plan.cycle_days > 0 ? planPrice / params.plan.cycle_days : 0;
-                const discountAmount = pricePerDay * (params.downtimeDays || 0);
-                const finalAmount = Math.max(0, planPrice - discountAmount);
-
-                await addSale({
-                    clientName: params.customerInfo,
-                    planName: params.plan.name,
-                    planPrice: planPrice,
-                    discountAmount,
-                    finalAmount,
-                    currency: params.plan.currency,
-                    routerName: selectedRouter.name,
-                    clientAddress: '',
-                    clientContact: params.contactNumber,
-                    clientEmail: params.email
-                });
+            const existing = dbClients.find(c => c.macAddress === clientData.macAddress);
+            if (existing) {
+                await dbApi.patch(`/dhcp_clients/${existing.id}`, clientData);
+            } else {
+                const newRecord = { ...clientData, id: `dhcp_client_${Date.now()}` };
+                await dbApi.post('/dhcp_clients', newRecord);
             }
-            
-            setIsModalOpen(false);
-            await fetchData();
-        } catch (err) {
-            alert(`Failed to update client: ${(err as Error).message}`);
-        } finally {
-            setIsSubmitting(false);
-        }
+        } catch (e) { console.error("Failed to save DHCP client to local DB:", e); }
     };
-    
-    const handleDelete = async (client: DhcpClient) => {
-        const action = client.status === 'active' ? 'deactivate' : 'remove';
-        if (!window.confirm(`Are you sure you want to ${action} client ${client.address}?`)) return;
-        
+
+    const handleSavePayment = async (params: DhcpClientActionParams) => {
+        if (!selectedClient || !params.plan) return;
         setIsSubmitting(true);
         try {
-            await deleteDhcpClient(selectedRouter, client);
+            await updateDhcpClientDetails(selectedRouter, selectedClient, params);
+
+            const pricePerDay = params.plan.cycle_days > 0 ? params.plan.price / params.plan.cycle_days : 0;
+            const discountAmount = pricePerDay * (params.downtimeDays || 0);
+            const finalAmount = Math.max(0, params.plan.price - discountAmount);
+
+            await addSale({
+                clientName: params.customerInfo,
+                planName: params.plan.name,
+                planPrice: params.plan.price,
+                discountAmount,
+                finalAmount,
+                currency: params.plan.currency,
+                clientContact: params.contactNumber,
+                clientEmail: params.email,
+                routerId: selectedRouter.id,
+                routerName: selectedRouter.name,
+                date: new Date().toISOString()
+            });
+            
+            await upsertDbClient({
+                routerId: selectedRouter.id,
+                macAddress: selectedClient.macAddress,
+                customerInfo: params.customerInfo,
+                contactNumber: params.contactNumber,
+                email: params.email,
+                speedLimit: params.plan.speedLimit,
+                lastSeen: new Date().toISOString(),
+            });
+
+            setPaymentModalOpen(false);
             await fetchData();
         } catch (err) {
-            alert(`Failed to ${action} client: ${(err as Error).message}`);
+            alert(`Failed to save client: ${(err as Error).message}`);
         } finally {
             setIsSubmitting(false);
         }
     };
     
-    const filteredClients = clients.filter(c => 
-        c.address.includes(searchTerm) ||
-        c.macAddress.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c.customerInfo && c.customerInfo.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const handleSaveEdit = async (params: DhcpClientActionParams) => {
+        if (!selectedClient) return;
+        setIsSubmitting(true);
+        try {
+             await updateDhcpClientDetails(selectedRouter, selectedClient, params);
+             await upsertDbClient({
+                routerId: selectedRouter.id,
+                macAddress: selectedClient.macAddress,
+                customerInfo: params.customerInfo,
+                contactNumber: params.contactNumber,
+                email: params.email,
+                speedLimit: params.speedLimit,
+                lastSeen: new Date().toISOString(),
+            });
+            setEditModalOpen(false);
+            await fetchData();
+        } catch (err) {
+            alert(`Failed to save client: ${(err as Error).message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    const handleDeactivateOrDelete = async (client: DhcpClient) => {
+         if (window.confirm(`Are you sure you want to ${client.status === 'active' ? 'deactivate' : 'delete'} this client?`)) {
+            try {
+                await deleteDhcpClient(selectedRouter, client);
+                await fetchData();
+            } catch (err) { alert(`Failed to perform action: ${(err as Error).message}`); }
+         }
+    };
+    
+    if ((isLoading || isLoadingPlans) && clients.length === 0) return <div className="flex justify-center p-8"><Loader /></div>;
+    if (error) return <div className="p-4 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-md">{error}</div>;
 
     return (
-        <div className="space-y-4">
-            <ClientUpdateModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} client={selectedClient} plans={plans} isLoading={isSubmitting || isLoadingPlans} />
-            <div className="relative">
-                <input type="text" placeholder="Search by IP, MAC, or Name..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-3 pl-10 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg" />
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-            </div>
-            
-            {isLoading && <div className="flex justify-center p-8"><Loader /></div>}
-            {error && <div className="p-4 bg-red-100 text-red-700 rounded-md">{error}</div>}
-            
-            {!isLoading && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredClients.map(client => (
-                        <div key={client.id} className={`p-4 rounded-lg border ${client.status === 'active' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700/50' : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-700/50'}`}>
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <h4 className="font-bold text-lg text-slate-800 dark:text-slate-200">{client.customerInfo !== 'N/A' ? client.customerInfo : (client.hostName || 'Unknown Host')}</h4>
-                                    <p className="font-mono text-sm text-slate-500">{client.address} | {client.macAddress}</p>
-                                </div>
-                                <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${client.status === 'active' ? 'bg-green-200 text-green-800' : 'bg-yellow-200 text-yellow-800'}`}>
-                                    {client.status === 'active' ? <CheckCircleIcon className="w-4 h-4" /> : <ExclamationTriangleIcon className="w-4 h-4" />}
-                                    {client.status}
-                                </span>
-                            </div>
-                            <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
-                                <button onClick={() => handleDelete(client)} disabled={isSubmitting} className="px-3 py-1 text-sm text-red-700 bg-red-100 hover:bg-red-200 rounded-md disabled:opacity-50">
-                                    {client.status === 'active' ? 'Deactivate' : 'Remove'}
-                                </button>
-                                <button onClick={() => { setSelectedClient(client); setIsModalOpen(true); }} disabled={isSubmitting} className="px-3 py-1 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-md disabled:opacity-50">
-                                    {client.status === 'active' ? 'Update' : 'Activate'}
-                                </button>
-                            </div>
-                        </div>
-                    ))}
+        <div className="space-y-6">
+            <ActivationPaymentModal 
+                isOpen={isPaymentModalOpen} 
+                onClose={() => setPaymentModalOpen(false)} 
+                onSave={handleSavePayment} 
+                client={selectedClient} 
+                plans={plans}
+                isSubmitting={isSubmitting}
+                dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
+            />
+            <EditClientModal
+                isOpen={isEditModalOpen}
+                onClose={() => setEditModalOpen(false)}
+                onSave={handleSaveEdit}
+                client={selectedClient}
+                isSubmitting={isSubmitting}
+                dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
+            />
+
+            <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
+
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-900/50">
+                            <tr>
+                                <th className="px-6 py-3">Status</th>
+                                <th className="px-6 py-3">IP Address</th>
+                                <th className="px-6 py-3">MAC Address</th>
+                                <th className="px-6 py-3">Customer Info</th>
+                                <th className="px-6 py-3">Expires In</th>
+                                <th className="px-6 py-3 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {combinedClients.map(client => (
+                                <tr key={client.id} className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                    <td className="px-6 py-4">
+                                        {client.status === 'active' ? 
+                                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400">Active</span> : 
+                                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-400">Pending</span>
+                                        }
+                                    </td>
+                                    <td className="px-6 py-4 font-mono">{client.address}</td>
+                                    <td className="px-6 py-4 font-mono">{client.macAddress}</td>
+                                    <td className="px-6 py-4">
+                                        <p className="font-semibold text-slate-800 dark:text-slate-200">{client.customerInfo || client.hostName}</p>
+                                        <p className="text-xs text-slate-500">{client.contactNumber}</p>
+                                    </td>
+                                    <td className="px-6 py-4 font-mono text-sm text-slate-500 dark:text-slate-400">
+                                        {client.status === 'active' ? client.timeout || 'N/A' : 'N/A'}
+                                    </td>
+                                    <td className="px-6 py-4 text-right space-x-1">
+                                         {client.status === 'pending' ? (
+                                             <>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold disabled:opacity-50" disabled={client.id.startsWith('lease_')}>Activate</button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50" title="Delete from pending list" disabled={client.id.startsWith('lease_')}><TrashIcon className="w-5 h-5"/></button>
+                                             </>
+                                         ) : (
+                                            <>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold">Pay/Renew</button>
+                                                <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client"><EditIcon className="w-5 h-5"/></button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold">Deactivate</button>
+                                            </>
+                                         )}
+                                    </td>
+                                </tr>
+                            ))}
+                             {combinedClients.length === 0 && (
+                                <tr>
+                                    <td colSpan={7} className="text-center py-8 text-slate-500">No DHCP clients found.</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
-            )}
+            </div>
         </div>
     );
 };

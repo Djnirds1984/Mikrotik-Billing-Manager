@@ -9,7 +9,7 @@ import { createDatabaseBackup, listDatabaseBackups, deleteDatabaseBackup, getPan
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { Loader } from './Loader.tsx';
 // FIX: Import ClockIcon from constants
-import { KeyIcon, CogIcon, PowerIcon, RouterIcon, CircleStackIcon, ArrowPathIcon, TrashIcon, UsersIcon, ClockIcon } from '../constants.tsx';
+import { KeyIcon, CogIcon, PowerIcon, RouterIcon, CircleStackIcon, ArrowPathIcon, TrashIcon, UsersIcon, DataplicityIcon, ClockIcon } from '../constants.tsx';
 import { SudoInstructionBox } from './SudoInstructionBox.tsx';
 
 // --- Icon Components ---

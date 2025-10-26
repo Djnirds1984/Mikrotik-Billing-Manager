@@ -171,7 +171,7 @@ export const Updater: React.FC = () => {
         streamRollbackApp(backupFile, {
              onMessage: (data) => {
                 if(data.log) {
-                    setLogs(prev => [...prev, { text: data.log.trim(), isError: !!data.isError }]);
+                    setLogs(prev => [...prev, { text: data.log.trim(), isError: data.isError }]);
                 }
                 if(data.status === 'restarting') {
                     setStatusInfo({ status: 'restarting', message: 'Rollback complete! Server is restarting...' });

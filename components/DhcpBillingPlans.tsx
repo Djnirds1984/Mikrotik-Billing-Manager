@@ -1,174 +1,138 @@
-import React, { useState } from 'react';
-import type { DhcpBillingPlan, DhcpBillingPlanWithId, RouterConfigWithId } from '../types.ts';
+import React, { useState, useEffect } from 'react';
+import type { DhcpBillingPlan, DhcpBillingPlanWithId } from '../types.ts';
 import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { EditIcon, TrashIcon, SignalIcon } from '../constants.tsx';
 import { Loader } from './Loader.tsx';
-import { SignalIcon, EditIcon, TrashIcon } from '../constants.tsx';
 
-const PlanFormModal: React.FC<{
-    isOpen: boolean;
-    onClose: () => void;
-    onSave: (plan: Omit<DhcpBillingPlan, 'routerId'> | DhcpBillingPlanWithId) => void;
-    plan: DhcpBillingPlanWithId | null;
-    isLoading: boolean;
-}> = ({ isOpen, onClose, onSave, plan, isLoading }) => {
+// Form component for adding/editing DHCP plans
+const DhcpPlanForm: React.FC<{
+    onSave: (plan: DhcpBillingPlan | DhcpBillingPlanWithId) => void;
+    onCancel: () => void;
+    initialData?: DhcpBillingPlanWithId | null;
+}> = ({ onSave, onCancel, initialData }) => {
     const { currency } = useLocalization();
-    const [formState, setFormState] = useState<Omit<DhcpBillingPlan, 'routerId'>>({
-        name: '',
-        price: 0,
-        cycle_days: 30,
-        speedLimit: '',
-        currency: currency,
-    });
+    const [plan, setPlan] = useState<Partial<DhcpBillingPlanWithId>>({});
+    
+    useEffect(() => {
+        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency };
+        setPlan(initialData ? { ...initialData } : defaults);
+    }, [initialData, currency]);
 
-    React.useEffect(() => {
-        if (isOpen) {
-            if (plan) {
-                setFormState({
-                    name: plan.name,
-                    price: plan.price,
-                    cycle_days: plan.cycle_days,
-                    speedLimit: plan.speedLimit || '',
-                    currency: plan.currency || currency,
-                });
-            } else {
-                setFormState({
-                    name: '',
-                    price: 0,
-                    cycle_days: 30,
-                    speedLimit: '',
-                    currency: currency,
-                });
-            }
-        }
-    }, [isOpen, plan, currency]);
-
-    if (!isOpen) return null;
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const { name, value } = e.target;
-        setFormState(prev => ({ ...prev, [name]: name === 'price' || name === 'cycle_days' ? parseFloat(value) || 0 : value }));
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value, type } = e.target;
+        setPlan(prev => ({ ...prev, [name]: type === 'number' ? (value ? parseFloat(value) : '') : value }));
     };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave(plan ? { ...formState, id: plan.id } : formState);
+        onSave(plan as DhcpBillingPlanWithId);
     };
 
     return (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
-                <form onSubmit={handleSubmit}>
-                    <div className="p-6">
-                        <h3 className="text-xl font-bold mb-4">{plan ? 'Edit' : 'Add'} DHCP Billing Plan</h3>
-                        <div className="space-y-4">
-                            <div><label>Plan Name</label><input name="name" value={formState.name} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><label>Price ({currency})</label><input type="number" name="price" value={formState.price} onChange={handleChange} required min="0" step="0.01" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                                <div><label>Cycle (Days)</label><input type="number" name="cycle_days" value={formState.cycle_days} onChange={handleChange} required min="1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                            </div>
-                            <div><label>Speed Limit (e.g., 5M/5M)</label><input name="speedLimit" value={formState.speedLimit} onChange={handleChange} placeholder="Leave empty for no limit" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                        </div>
+        <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700">
+            <h3 className="text-xl font-bold mb-4">{initialData ? `Edit DHCP Plan` : 'Add New DHCP Plan'}</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium">Plan Name</label>
+                        <input type="text" name="name" value={plan.name || ''} onChange={handleChange} required className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                     </div>
-                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
-                        <button type="button" onClick={onClose}>Cancel</button>
-                        <button type="submit" disabled={isLoading} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">{isLoading ? 'Saving...' : 'Save Plan'}</button>
+                    <div>
+                        <label className="block text-sm font-medium">Price ({currency})</label>
+                        <input type="number" name="price" value={plan.price || ''} onChange={handleChange} required min="0" step="0.01" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                     </div>
-                </form>
-            </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium">Validity (Days)</label>
+                        <input type="number" name="cycle_days" value={plan.cycle_days || ''} onChange={handleChange} required min="1" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium">Speed Limit (Mbps)</label>
+                        <input type="number" name="speedLimit" value={plan.speedLimit || ''} onChange={handleChange} placeholder="e.g., 5 for 5Mbps" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                    </div>
+                </div>
+                <div className="flex justify-end gap-4 pt-4">
+                    <button type="button" onClick={onCancel} className="px-4 py-2 text-sm rounded-md">Cancel</button>
+                    <button type="submit" className="px-4 py-2 text-sm bg-[--color-primary-600] text-white rounded-md">Save Plan</button>
+                </div>
+            </form>
         </div>
     );
 };
 
-export const DhcpBillingPlans: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
-    const { plans, addPlan, updatePlan, deletePlan, isLoading, error, fetchPlans } = useDhcpBillingPlans(selectedRouter.id);
+export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) => {
+    const { plans, addPlan, updatePlan, deletePlan, isLoading } = useDhcpBillingPlans(routerId);
     const { formatCurrency } = useLocalization();
-    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingPlan, setEditingPlan] = useState<DhcpBillingPlanWithId | null>(null);
-    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleOpenAddModal = () => {
-        setEditingPlan(null);
-        setIsModalOpen(true);
+    const handleSave = (planData: any) => {
+        if (planData.id) {
+            updatePlan(planData);
+        } else {
+            addPlan(planData);
+        }
+        setIsFormOpen(false);
     };
 
-    const handleOpenEditModal = (plan: DhcpBillingPlanWithId) => {
+    const handleEdit = (plan: DhcpBillingPlanWithId) => {
         setEditingPlan(plan);
-        setIsModalOpen(true);
+        setIsFormOpen(true);
     };
 
-    const handleSave = async (planData: Omit<DhcpBillingPlan, 'routerId'> | DhcpBillingPlanWithId) => {
-        setIsSubmitting(true);
-        try {
-            if ('id' in planData) {
-                await updatePlan(planData);
-            } else {
-                await addPlan(planData);
-            }
-        } catch (err) {
-            alert(`Failed to save plan: ${(err as Error).message}`);
-        }
-        setIsSubmitting(false);
-        setIsModalOpen(false);
-    };
-
-    const handleDelete = async (planId: string) => {
-        if (window.confirm('Are you sure you want to delete this plan?')) {
-            await deletePlan(planId);
+    const handleDelete = (planId: string) => {
+        if (window.confirm("Are you sure?")) {
+            deletePlan(planId);
         }
     };
-
-    if (isLoading) {
-        return <div className="flex justify-center p-8"><Loader /></div>;
-    }
-
-    if (error) {
-        return <div className="p-4 bg-red-100 text-red-700 rounded-md">Error loading billing plans: {error}</div>;
-    }
 
     return (
         <div className="space-y-6">
-            <PlanFormModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} plan={editingPlan} isLoading={isSubmitting} />
-            <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><SignalIcon className="w-6 h-6" /> DHCP Billing Plans</h2>
-                <button onClick={handleOpenAddModal} className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg">
-                    Add Plan
-                </button>
-            </div>
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
-                            <tr>
-                                <th className="px-6 py-3">Plan Name</th>
-                                <th className="px-6 py-3">Price</th>
-                                <th className="px-6 py-3">Cycle</th>
-                                <th className="px-6 py-3">Speed Limit</th>
-                                <th className="px-6 py-3 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {plans.map(plan => (
-                                <tr key={plan.id} className="border-b dark:border-slate-700">
-                                    <td className="px-6 py-4 font-semibold">{plan.name}</td>
-                                    <td className="px-6 py-4">{formatCurrency(plan.price)}</td>
-                                    <td className="px-6 py-4">{plan.cycle_days} Days</td>
-                                    <td className="px-6 py-4 font-mono">{plan.speedLimit || 'Unlimited'}</td>
-                                    <td className="px-6 py-4 text-right space-x-2">
-                                        <button onClick={() => handleOpenEditModal(plan)} className="p-2 text-slate-500 hover:text-sky-500"><EditIcon className="w-5 h-5" /></button>
-                                        <button onClick={() => handleDelete(plan.id)} className="p-2 text-slate-500 hover:text-red-500"><TrashIcon className="w-5 h-5" /></button>
-                                    </td>
-                                </tr>
-                            ))}
-                            {plans.length === 0 && (
-                                <tr>
-                                    <td colSpan={5} className="text-center py-8 text-slate-500">No billing plans found.</td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
+            {!isFormOpen && (
+                <div className="flex justify-end">
+                    <button onClick={() => { setEditingPlan(null); setIsFormOpen(true); }} className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg">Add New Plan</button>
                 </div>
-            </div>
+            )}
+
+            {isFormOpen && (
+                <DhcpPlanForm
+                    onSave={handleSave}
+                    onCancel={() => setIsFormOpen(false)}
+                    initialData={editingPlan}
+                />
+            )}
+
+            {isLoading ? <div className="flex justify-center p-8"><Loader /></div> : (
+                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
+                    <ul role="list" className="divide-y divide-slate-200 dark:divide-slate-700">
+                        {plans.map((plan) => (
+                            <li key={plan.id} className="p-4 flex justify-between items-center">
+                                <div className="flex items-center gap-4">
+                                    <SignalIcon className="h-8 w-8 text-[--color-primary-500]" />
+                                    <div>
+                                        <p className="font-semibold">{plan.name}</p>
+                                        <p className="text-sm text-slate-500">
+                                            <span className="font-bold">{formatCurrency(plan.price)}</span> for {plan.cycle_days} days
+                                            {plan.speedLimit && ` | Speed: ${plan.speedLimit}Mbps`}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="space-x-2">
+                                    <button onClick={() => handleEdit(plan)} className="p-2 text-slate-500 hover:text-sky-500"><EditIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => handleDelete(plan.id)} className="p-2 text-slate-500 hover:text-red-500"><TrashIcon className="w-5 h-5"/></button>
+                                </div>
+                            </li>
+                        ))}
+                         {plans.length === 0 && (
+                            <li className="p-6 text-center text-slate-500">
+                                No DHCP billing plans created yet.
+                            </li>
+                        )}
+                    </ul>
+                </div>
+            )}
         </div>
     );
 };
