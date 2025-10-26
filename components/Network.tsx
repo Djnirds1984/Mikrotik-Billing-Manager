@@ -10,10 +10,11 @@ import {
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
-import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon, ServerIcon, CircleStackIcon } from '../constants.tsx';
+import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon, ServerIcon, CircleStackIcon, BridgeIcon } from '../constants.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 import { Firewall } from './Firewall.tsx';
 import { DhcpCaptivePortalInstaller } from './DhcpCaptivePortalInstaller.tsx';
+import { BridgeManager } from './BridgeManager.tsx';
 
 
 // Reusable ToggleSwitch component
@@ -766,7 +767,7 @@ const IpPoolManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selec
 
 
 // --- Main Component ---
-type ActiveTab = 'wan' | 'routes' | 'firewall' | 'aiwan' | 'dhcp' | 'pools';
+type ActiveTab = 'wan' | 'routes' | 'firewall' | 'aiwan' | 'dhcp' | 'pools' | 'bridge';
 
 export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
     const [activeTab, setActiveTab] = useState<ActiveTab>('wan');
@@ -1064,6 +1065,8 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                 return <DhcpManager selectedRouter={selectedRouter} />;
             case 'pools':
                 return <IpPoolManager selectedRouter={selectedRouter} />;
+            case 'bridge':
+                return <BridgeManager selectedRouter={selectedRouter} interfaces={interfaces} onDataChange={fetchData} />;
             default:
                 return null;
         }
@@ -1079,6 +1082,7 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                     <TabButton label="WAN & Failover" icon={<ShareIcon className="w-5 h-5" />} isActive={activeTab === 'wan'} onClick={() => setActiveTab('wan')} />
                     <TabButton label="Firewall" icon={<ShieldCheckIcon className="w-5 h-5" />} isActive={activeTab === 'firewall'} onClick={() => setActiveTab('firewall')} />
                     <TabButton label="Routes & VLANs" icon={<VlanIcon className="w-5 h-5" />} isActive={activeTab === 'routes'} onClick={() => setActiveTab('routes')} />
+                    <TabButton label="Bridge" icon={<BridgeIcon className="w-5 h-5" />} isActive={activeTab === 'bridge'} onClick={() => setActiveTab('bridge')} />
                     <TabButton label="AI Multi-WAN" icon={<span className="font-bold text-lg">AI</span>} isActive={activeTab === 'aiwan'} onClick={() => setActiveTab('aiwan')} />
                     <TabButton label="DHCP" icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'dhcp'} onClick={() => setActiveTab('dhcp')} />
                     <TabButton label="IP Pools" icon={<CircleStackIcon className="w-5 h-5" />} isActive={activeTab === 'pools'} onClick={() => setActiveTab('pools')} />

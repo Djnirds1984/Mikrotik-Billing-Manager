@@ -274,6 +274,33 @@ export interface VlanInterface {
     interface: string;
 }
 
+export interface Bridge {
+    id: string;
+    name: string;
+    mtu: string;
+    l2mtu: string;
+    arp: 'enabled' | 'disabled' | 'proxy-arp' | 'reply-only';
+    'mac-address': string;
+    'protocol-mode': 'none' | 'rstp' | 'stp' | 'mstp';
+    'fast-forward': 'true' | 'false';
+    'vlan-filtering': 'true' | 'false';
+    disabled: 'true' | 'false';
+}
+
+export type BridgeData = Partial<Omit<Bridge, 'id' | 'l2mtu' | 'mac-address'>>;
+
+export interface BridgePort {
+    id: string;
+    interface: string;
+    bridge: string;
+    pvid: string;
+    hw: 'true' | 'false';
+    disabled: 'true' | 'false';
+    comment?: string;
+}
+
+export type BridgePortData = Partial<Omit<BridgePort, 'id' | 'hw'>>;
+
 export interface SaleRecord {
     id: string;
     date: string;

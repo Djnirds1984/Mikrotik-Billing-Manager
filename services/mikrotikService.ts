@@ -17,6 +17,10 @@ import type {
     HotspotUserProfileData,
     NtpSettings,
     VlanInterface,
+    Bridge,
+    BridgeData,
+    BridgePort,
+    BridgePortData,
     IpAddress,
     IpRoute,
     IpRouteData,
@@ -136,6 +140,48 @@ export const addVlan = (router: RouterConfigWithId, vlanData: Omit<VlanInterface
 
 export const deleteVlan = (router: RouterConfigWithId, vlanId: string): Promise<any> => {
     return fetchMikrotikData(router, `/interface/vlan/${encodeURIComponent(vlanId)}`, {
+        method: 'DELETE',
+    });
+};
+
+// --- Bridge ---
+export const getBridges = (router: RouterConfigWithId): Promise<Bridge[]> => {
+    return fetchMikrotikData<Bridge[]>(router, '/interface/bridge');
+};
+
+export const addBridge = (router: RouterConfigWithId, bridgeData: BridgeData): Promise<any> => {
+    return fetchMikrotikData(router, '/interface/bridge', {
+        method: 'PUT',
+        body: JSON.stringify(bridgeData),
+    });
+};
+
+export const updateBridge = (router: RouterConfigWithId, bridgeId: string, bridgeData: BridgeData): Promise<any> => {
+    return fetchMikrotikData(router, `/interface/bridge/${encodeURIComponent(bridgeId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(bridgeData),
+    });
+};
+
+export const deleteBridge = (router: RouterConfigWithId, bridgeId: string): Promise<any> => {
+    return fetchMikrotikData(router, `/interface/bridge/${encodeURIComponent(bridgeId)}`, {
+        method: 'DELETE',
+    });
+};
+
+export const getBridgePorts = (router: RouterConfigWithId): Promise<BridgePort[]> => {
+    return fetchMikrotikData<BridgePort[]>(router, '/interface/bridge/port');
+};
+
+export const addBridgePort = (router: RouterConfigWithId, portData: BridgePortData): Promise<any> => {
+    return fetchMikrotikData(router, '/interface/bridge/port', {
+        method: 'PUT',
+        body: JSON.stringify(portData),
+    });
+};
+
+export const deleteBridgePort = (router: RouterConfigWithId, portId: string): Promise<any> => {
+    return fetchMikrotikData(router, `/interface/bridge/port/${encodeURIComponent(portId)}`, {
         method: 'DELETE',
     });
 };
