@@ -18,6 +18,7 @@
         "remote": "Acceso Remoto",
         "company": "Empresa",
         "system_settings": "Configuración del Sistema",
+        "database": "Base de Datos",
         "updater": "Actualizador",
         "logs": "Registros del Sistema",
         "panel_roles": "Roles del Panel",
@@ -42,6 +43,7 @@
         "remote": "Gestión de Acceso Remoto",
         "company": "Configuración de la Empresa",
         "system": "Configuración del Sistema",
+        "database": "Gestión de Base de Datos",
         "updater": "--- START OF FILE locales/fil.json ---
 
 {
@@ -64,6 +66,7 @@
         "remote": "Remote Access",
         "company": "Kumpanya",
         "system_settings": "Mga Setting ng System",
+        "database": "Database",
         "updater": "Updater",
         "logs": "Mga Log ng System",
         "panel_roles": "Mga Tungkulin ng Panel",
@@ -87,6 +90,7 @@
         "remote": "Pamamahala ng Remote Access",
         "company": "Mga Setting ng Kumpanya",
         "system": "Mga Setting ng System",
+        "database": "Pamamahala ng Database",
         "updater": "Panel Updater",
         "logs": "Tingnan ang Log",
         "panel_roles": "Pamamahala ng Tungkulin ng Panel",

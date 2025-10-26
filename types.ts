@@ -24,6 +24,7 @@ export type View =
   | 'license'
   | 'super_admin'
   | 'dhcp-portal'
+  | 'database'
   | 'notifications';
 
 export interface Notification {
@@ -207,7 +208,7 @@ export interface BillingPlan {
 }
 
 export interface BillingPlanWithId extends BillingPlan {
-    id: string;
+  id: string;
 }
 
 export interface VoucherPlan {

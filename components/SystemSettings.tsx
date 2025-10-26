@@ -5,19 +5,16 @@ import { useTheme } from '../contexts/ThemeContext.tsx';
 import { initializeAiClient } from '../services/geminiService.ts';
 import { rebootRouter, syncTimeToRouter } from '../services/mikrotikService.ts';
 import { getPanelSettings, savePanelSettings, getAuthHeader } from '../services/databaseService.ts';
-import { createDatabaseBackup, listDatabaseBackups, deleteDatabaseBackup, getPanelNtpStatus, togglePanelNtp } from '../services/panelService.ts';
+import { getPanelNtpStatus, togglePanelNtp } from '../services/panelService.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { Loader } from './Loader.tsx';
-// FIX: Import ClockIcon from constants
-import { KeyIcon, CogIcon, PowerIcon, RouterIcon, CircleStackIcon, ArrowPathIcon, TrashIcon, UsersIcon, DataplicityIcon, ClockIcon } from '../constants.tsx';
+import { KeyIcon, CogIcon, PowerIcon, RouterIcon, CircleStackIcon, UsersIcon, ClockIcon } from '../constants.tsx';
 import { SudoInstructionBox } from './SudoInstructionBox.tsx';
 
 // --- Icon Components ---
 const SunIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>;
 const MoonIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /></svg>;
 const ComputerDesktopIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>;
-// FIX: Removed local ClockIcon definition as it will be imported from constants.tsx.
-
 
 // A generic settings card component
 const SettingsCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; }> = ({ title, icon, children }) => (
@@ -160,137 +157,6 @@ const TimeSyncManager: React.FC<{ selectedRouter: RouterConfigWithId | null }> =
         </div>
     );
 };
-
-
-const DatabaseManager: React.FC = () => {
-    const [backups, setBackups] = useState<string[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [isActioning, setIsActioning] = useState<string | null>(null); // 'create', 'delete-filename', 'restore-filename'
-    const [restoreLogs, setRestoreLogs] = useState<string[]>([]);
-
-    const fetchBackups = useCallback(async () => {
-        setIsLoading(true);
-        try {
-            const data = await listDatabaseBackups();
-            setBackups(data.filter(f => f.endsWith('.sqlite')));
-        } catch (error) {
-            console.error("Failed to list backups:", error);
-            alert(`Error: ${(error as Error).message}`);
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchBackups();
-    }, [fetchBackups]);
-
-    const handleCreateBackup = async () => {
-        setIsActioning('create');
-        try {
-            const result = await createDatabaseBackup();
-            alert(result.message);
-            await fetchBackups();
-        } catch (error) {
-            alert(`Failed to create backup: ${(error as Error).message}`);
-        } finally {
-            setIsActioning(null);
-        }
-    };
-
-    const handleDeleteBackup = async (filename: string) => {
-        if (!window.confirm(`Are you sure you want to permanently delete backup "${filename}"?`)) return;
-        setIsActioning(`delete-${filename}`);
-        try {
-            await deleteDatabaseBackup(filename);
-            await fetchBackups();
-        } catch (error) {
-            alert(`Failed to delete backup: ${(error as Error).message}`);
-        } finally {
-            setIsActioning(null);
-        }
-    };
-
-    const handleRestore = (filename: string) => {
-        if (!window.confirm(`Are you sure you want to restore from "${filename}"? This will overwrite all current panel data.`)) return;
-        
-        setIsActioning(`restore-${filename}`);
-        setRestoreLogs([]);
-
-        const eventSource = new EventSource(`/api/restore-backup?backupFile=${encodeURIComponent(filename)}`);
-
-        eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.log) setRestoreLogs(prev => [...prev, data.log]);
-            if (data.status === 'restarting') {
-                alert('Restore successful! The panel is restarting. The page will reload in a few seconds.');
-                setTimeout(() => window.location.reload(), 8000);
-                eventSource.close();
-            }
-            if (data.status === 'error') {
-                alert(`Restore failed: ${data.message}`);
-                setIsActioning(null);
-                eventSource.close();
-            }
-        };
-
-        eventSource.onerror = () => {
-            alert('Connection lost during restore process.');
-            setIsActioning(null);
-            eventSource.close();
-        };
-    };
-
-    const handleDownload = (filename: string) => {
-        const a = document.createElement('a');
-        a.href = `/download-backup/${filename}`;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    };
-
-    return (
-        <div className="space-y-4">
-            <button onClick={handleCreateBackup} disabled={!!isActioning} className="w-full px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2">
-                {isActioning === 'create' ? <Loader /> : <CircleStackIcon className="w-5 h-5" />}
-                {isActioning === 'create' ? 'Backing up...' : 'Create New Backup'}
-            </button>
-            <div className="pt-4">
-                <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Available Backups</h4>
-                {isLoading ? <div className="flex justify-center"><Loader/></div> :
-                 backups.length > 0 ? (
-                    <ul className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                        {backups.map(backup => (
-                            <li key={backup} className="bg-slate-100 dark:bg-slate-700/50 p-3 rounded-md flex justify-between items-center">
-                                <span className="font-mono text-sm text-slate-800 dark:text-slate-300 truncate mr-4">{backup}</span>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                    <button onClick={() => handleRestore(backup)} disabled={!!isActioning} className="p-2 text-slate-500 hover:text-sky-500 disabled:opacity-50" title="Restore"><ArrowPathIcon className="h-5 w-5"/></button>
-                                    <button onClick={() => handleDownload(backup)} className="p-2 text-slate-500 hover:text-green-500" title="Download"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></button>
-                                    <button onClick={() => handleDeleteBackup(backup)} disabled={!!isActioning} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50" title="Delete">
-                                        {isActioning === `delete-${backup}` ? <Loader/> : <TrashIcon className="h-5 w-5"/>}
-                                    </button>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                 ) : (
-                    <p className="text-slate-500 dark:text-slate-400 text-center py-4">No database backups found.</p>
-                 )
-                }
-            </div>
-            {isActioning?.startsWith('restore-') && (
-                <div className="mt-4">
-                    <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Restoring...</h4>
-                    <div className="bg-slate-900 text-slate-300 font-mono text-xs p-4 rounded-md h-48 overflow-y-auto">
-                        {restoreLogs.map((log, i) => <pre key={i} className="whitespace-pre-wrap">{log}</pre>)}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-
 
 interface SystemSettingsProps {
     selectedRouter: RouterConfigWithId | null;
@@ -445,10 +311,6 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({ selectedRouter, 
                         </button>
                     </div>
                 </div>
-            </SettingsCard>
-            
-            <SettingsCard title="Database Management" icon={<CircleStackIcon className="w-6 h-6" />}>
-                <DatabaseManager />
             </SettingsCard>
             
             <SettingsCard title="AI Settings" icon={<KeyIcon className="w-6 h-6" />}>
