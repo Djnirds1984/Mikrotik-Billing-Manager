@@ -1442,6 +1442,13 @@ app.get('/api/zt/install', protect, (req, res) => {
 const piTunnelRouter = express.Router();
 piTunnelRouter.use(protect);
 
+const piTunnelExecOptions = {
+    env: {
+        ...process.env,
+        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+    }
+};
+
 piTunnelRouter.get('/status', async (req, res) => {
     try {
         const installed = fs.existsSync('/usr/local/bin/pitunnel');
@@ -1449,7 +1456,7 @@ piTunnelRouter.get('/status', async (req, res) => {
 
         if (installed) {
             const statusOutput = await new Promise((resolve, reject) => {
-                 exec('sudo systemctl is-active pitunnel.service', (err, stdout, stderr) => {
+                 exec('sudo systemctl is-active pitunnel.service', piTunnelExecOptions, (err, stdout, stderr) => {
                     if (err) {
                         if (stderr.includes("sudo: a terminal is required") || stderr.includes("sudo: a password is required")) {
                             return reject({ status: 403, code: 'SUDO_PASSWORD_REQUIRED', message: 'Passwordless sudo is not configured correctly.' });
@@ -1480,13 +1487,7 @@ piTunnelRouter.post('/install', (req, res) => {
         return res.end();
     }
     
-    const options = {
-      env: {
-        ...process.env,
-        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-      }
-    };
-    const child = exec(command, options);
+    const child = exec(command, piTunnelExecOptions);
 
     child.stdout.on('data', log => send({ log }));
     child.stderr.on('data', log => send({ log, isError: true }));
@@ -1514,16 +1515,9 @@ piTunnelRouter.get('/uninstall', (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
     
-    const options = {
-      env: {
-        ...process.env,
-        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-      }
-    };
-
     const runCommandWithLogs = (command, message) => new Promise((resolve, reject) => {
         send({ log: message });
-        const child = exec(command, options);
+        const child = exec(command, piTunnelExecOptions);
         child.stdout.on('data', log => send({ log }));
         child.stderr.on('data', log => send({ log, isError: true }));
         child.on('close', code => {
