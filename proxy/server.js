@@ -1455,11 +1455,8 @@ app.get('/api/zt/install', protect, (req, res) => {
     });
 });
 
-// --- Pi Tunnel CLI ---
-const piTunnelRouter = express.Router();
-piTunnelRouter.use(protect);
-
-const piTunnelExecOptions = {
+// --- Remote Access Service Helpers ---
+const sudoExecOptions = {
     env: {
         ...process.env,
         PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
@@ -1471,7 +1468,7 @@ const streamExec = (res, command, message) => {
     if (message) send({ log: message });
     
     let stderrOutput = '';
-    const child = exec(command, piTunnelExecOptions);
+    const child = exec(command, sudoExecOptions);
 
     child.stdout.on('data', log => send({ log: log.toString() }));
     child.stderr.on('data', log => {
@@ -1498,6 +1495,10 @@ const streamExec = (res, command, message) => {
 };
 
 
+// --- Pi Tunnel CLI ---
+const piTunnelRouter = express.Router();
+piTunnelRouter.use(protect);
+
 piTunnelRouter.get('/status', async (req, res) => {
     try {
         const installed = fs.existsSync('/usr/local/bin/pitunnel');
@@ -1505,7 +1506,7 @@ piTunnelRouter.get('/status', async (req, res) => {
 
         if (installed) {
             const statusOutput = await new Promise((resolve, reject) => {
-                 exec('sudo systemctl is-active pitunnel.service', piTunnelExecOptions, (err, stdout, stderr) => {
+                 exec('sudo systemctl is-active pitunnel.service', sudoExecOptions, (err, stdout, stderr) => {
                     if (err) {
                         if (stderr.includes("sudo: a terminal is required") || stderr.includes("sudo: a password is required")) {
                             return reject({ status: 403, code: 'SUDO_PASSWORD_REQUIRED', message: 'Passwordless sudo is not configured correctly.' });
@@ -1548,7 +1549,7 @@ piTunnelRouter.get('/uninstall', (req, res) => {
     const runCommandWithLogs = (command, message) => new Promise((resolve, reject) => {
         send({ log: message });
         let stderrOutput = '';
-        const child = exec(command, piTunnelExecOptions);
+        const child = exec(command, sudoExecOptions);
         child.stdout.on('data', log => send({ log: log.toString() }));
         child.stderr.on('data', log => {
             stderrOutput += log.toString();
@@ -1613,6 +1614,72 @@ piTunnelRouter.post('/tunnels/create', (req, res) => {
 });
 
 app.use('/api/pitunnel', piTunnelRouter);
+
+// FIX: This entire block was a duplicate and has been removed to prevent redeclaration errors.
+
+// --- Dataplicity CLI ---
+const dataplicityRouter = express.Router();
+dataplicityRouter.use(protect);
+
+dataplicityRouter.get('/status', async (req, res) => {
+    try {
+        const statusOutput = await new Promise((resolve, reject) => {
+             exec('sudo systemctl is-active dataplicity.service', sudoExecOptions, (err, stdout, stderr) => {
+                if (err) {
+                    if (stderr.includes("sudo: a terminal is required") || stderr.includes("sudo: a password is required")) {
+                        return reject({ status: 403, code: 'SUDO_PASSWORD_REQUIRED', message: 'Passwordless sudo is not configured correctly for dataplicity.' });
+                    }
+                    return resolve(stdout || stderr); // Resolve with output even on error for status checks
+                }
+                resolve(stdout);
+             });
+        });
+
+        const active = (statusOutput || '').toString().trim() === 'active';
+        let installed = active;
+
+        if (!installed) {
+            const listUnitsOutput = await new Promise((resolve) => {
+                exec('sudo systemctl list-units --type=service --all | grep -F dataplicity.service', sudoExecOptions, (err, stdout) => {
+                    resolve(stdout); // Grep returns non-zero on no match, which is not an execution error
+                });
+            });
+            installed = (listUnitsOutput || '').toString().includes('dataplicity.service');
+        }
+
+        res.json({ installed, active, url: 'https://app.dataplicity.com/' });
+    } catch (e) {
+        res.status(e.status || 500).json({ message: e.message, code: e.code });
+    }
+});
+
+dataplicityRouter.post('/install', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    const { command } = req.body;
+    if (!command || typeof command !== 'string' || !command.includes('dataplicity.com/install.py')) {
+        send({ status: 'error', message: 'Invalid Dataplicity installation command provided.' });
+        send({ status: 'finished' });
+        return res.end();
+    }
+    
+    streamExec(res, command, `Executing installation command: ${command}`);
+});
+
+dataplicityRouter.get('/uninstall', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    
+    const uninstallCommand = 'curl -s https://www.dataplicity.com/uninstall.py | sudo python3';
+    streamExec(res, uninstallCommand, 'Executing Dataplicity uninstall command...');
+});
+
+app.use('/api/dataplicity', dataplicityRouter);
+
 
 // --- Host Router Endpoints ---
 const runSudo = (command) => new Promise((resolve, reject) => {
