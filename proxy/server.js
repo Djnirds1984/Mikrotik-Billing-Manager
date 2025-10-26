@@ -17,7 +17,15 @@ const crypto = require('crypto');
 const app = express();
 const PORT = 3001;
 const DB_SERVER_URL = 'http://localhost:3001';
+const SECRET_KEY = process.env.JWT_SECRET || 'a-very-secret-string-for-jwt-!@#$%^&*()';
 const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret-string-for-licenses-!@#$%^&*()';
+
+// --- Define File Paths ---
+const DB_PATH = path.join(__dirname, 'panel.db');
+const SUPERADMIN_DB_PATH = path.join(__dirname, 'superadmin.db');
+const API_BACKEND_FILE = path.join(__dirname, '..', 'api-backend', 'server.js');
+const NGROK_CONFIG_PATH = path.join(__dirname, 'ngrok-config.json');
+const NGROK_BINARY_PATH = '/usr/local/bin/ngrok';
 
 
 app.use(express.json({ limit: '10mb' }));
@@ -1263,6 +1271,24 @@ app.post('/api/generate-report', protect, async (req, res) => {
         res.status(500).json({ message: e.message });
     }
 });
+
+
+// Helper for running commands with sudo
+const runSudo = (command) => {
+    return new Promise((resolve, reject) => {
+        exec(`sudo -n ${command}`, (error, stdout, stderr) => {
+            if (error) {
+                if (stderr.includes('a password is required')) {
+                    const sudoError = new Error('Sudo password required. Configure passwordless sudo for this command.');
+                    sudoError.code = 'SUDO_PASSWORD_REQUIRED';
+                    return reject(sudoError);
+                }
+                return reject(new Error(stderr || error.message));
+            }
+            resolve(stdout.trim());
+        });
+    });
+};
 
 
 // --- Updater and Backups ---
