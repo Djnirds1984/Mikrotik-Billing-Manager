@@ -11,7 +11,6 @@ import { Remote } from './components/Remote.tsx';
 import { Hotspot } from './components/Hotspot.tsx';
 import { Help } from './components/Help.tsx';
 import { SystemSettings } from './components/SystemSettings.tsx';
-import { DatabaseManager } from './components/DatabaseManager.tsx';
 import { SalesReport } from './components/SalesReport.tsx';
 import { Network } from './components/Network.tsx';
 import { Inventory } from './components/Inventory.tsx';
@@ -193,8 +192,6 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           return <Company settings={companySettings} onSave={updateCompanySettings} />;
       case 'system':
           return <SystemSettings selectedRouter={selectedRouter} licenseStatus={licenseStatus} />;
-      case 'database':
-          return <DatabaseManager />;
       case 'updater':
         return <Updater />;
       case 'logs':

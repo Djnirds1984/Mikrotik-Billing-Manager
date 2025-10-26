@@ -20,12 +20,6 @@ const fetchData = async <T>(path: string, options: RequestInit = {}): Promise<T>
     }
   
     const contentType = response.headers.get("content-type");
-    
-    // If the server returns HTML instead of an expected API response, it's an error.
-    if (contentType && contentType.includes("text/html")) {
-        throw new Error(`API Error (${response.status}): Server returned an HTML page instead of data for path: ${path}. This suggests a routing issue.`);
-    }
-
     if (!response.ok) {
         let errorMsg = `Request failed with status ${response.status}`;
         if (contentType && contentType.includes("application/json")) {
