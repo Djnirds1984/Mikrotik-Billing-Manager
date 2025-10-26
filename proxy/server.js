@@ -1899,9 +1899,10 @@ const createCommandStreamer = (commandGetter) => (req, res) => {
 
     try {
         const command = commandGetter(req);
-        if (!command) {
+        if (!command || !command.trim()) {
             send({ status: 'error', message: 'Invalid command provided.' });
-            return res.end();
+            res.end();
+            return;
         }
         
         send({ log: `Executing command...` });
@@ -1954,7 +1955,7 @@ piTunnelApi.get('/status', async (req, res) => {
             if (active) {
                 try {
                     const logs = await runSudo('journalctl -u pitunnel.service -n 20 --no-pager');
-                    const urlMatch = logs.match(/Tunnel is online at:\\s*(https:\\/\\/[a-zA-Z0-9-]+\\.pitunnel\\.com)/);
+                    const urlMatch = logs.match(/Tunnel is online at:\s*(https:\/\/[a-zA-Z0-9-]+\.pitunnel\.com)/);
                     if (urlMatch && urlMatch[1]) {
                         url = urlMatch[1];
                     }
@@ -1979,7 +1980,8 @@ piTunnelApi.post('/install', (req, res) => {
 
     if (!command || !command.trim().startsWith('curl')) {
         send({ status: 'error', message: 'Invalid installation command provided.' });
-        return res.end();
+        res.end();
+        return;
     }
     
     send({ log: `Executing installation script...` });
