@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, ZeroTierIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon } from '../constants.tsx';
+import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon, CloudIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { View, CompanySettings, LicenseStatus } from '../types.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -80,8 +80,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'inventory', label: t('sidebar.inventory'), icon: <ArchiveBoxIcon className="w-6 h-6" /> },
     { id: 'payroll', label: t('sidebar.payroll'), icon: <CalculatorIcon className="w-6 h-6" /> },
     { id: 'hotspot', label: t('sidebar.hotspot'), icon: <WifiIcon className="w-6 h-6" /> },
+    { id: 'remote', label: t('sidebar.remote'), icon: <CloudIcon className="w-6 h-6" /> },
     { id: 'mikrotik_files', label: t('sidebar.mikrotik_files'), icon: <ArchiveBoxIcon className="w-6 h-6" /> },
-    { id: 'zerotier', label: t('sidebar.zerotier'), icon: <ZeroTierIcon className="w-6 h-6" /> },
     { id: 'company', label: t('sidebar.company'), icon: <BuildingOffice2Icon className="w-6 h-6" /> },
     { id: 'system', label: t('sidebar.system_settings'), icon: <CogIcon className="w-6 h-6" /> },
     { id: 'panel_roles', label: t('sidebar.panel_roles'), icon: <KeyIcon className="w-6 h-6" /> },
@@ -109,7 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
 
   const licensedViews: View[] = [
       'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
-      'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'zerotier', 'logs', 'dhcp-portal'
+      'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal'
   ];
 
   return (

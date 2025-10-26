@@ -15,7 +15,7 @@
         "inventory": "Stock & Inventory",
         "payroll": "Payroll Management",
         "hotspot": "Hotspot",
-        "zerotier": "ZeroTier",
+        "remote": "Remote Access",
         "company": "Company",
         "system_settings": "System Settings",
         "updater": "Updater",
@@ -39,7 +39,7 @@
         "inventory": "Stock & Inventory",
         "payroll": "Payroll Management",
         "hotspot": "Hotspot Management",
-        "zerotier": "ZeroTier Management",
+        "remote": "Remote Access Management",
         "company": "Company Settings",
         "system": "System Settings",
         "updater": "Panel Updater",
@@ -99,6 +99,28 @@
         "interface": "Interface",
         "default_profile": "Default Profile",
         "authentication": "Authentication"
+    },
+    "remote": {
+        "zerotier": "ZeroTier",
+        "pitunnel": "Pi Tunnel",
+        "ngrok": "Ngrok",
+        "dataplicity": "Dataplicity"
+    },
+    "pitunnel": {
+        "title": "Pi Tunnel Remote Access",
+        "step1_title": "Step 1: Get Install Command",
+        "step1_desc": "Go to your PiTunnel.com Dashboard, add a new tunnel, and copy the full installation command provided.",
+        "install_command": "Pi Tunnel Install Command",
+        "install_placeholder": "curl -s https://pitunnel.com/inst/... | sudo python3",
+        "step2_title": "Step 2: Manage Service & Check Status",
+        "step2_desc": "Use the buttons below to control the Pi Tunnel service. 'Install' will download and run the installer script provided above.",
+        "current_status": "Current Status",
+        "public_url": "Public URL",
+        "status_active": "ACTIVE",
+        "status_inactive": "INACTIVE",
+        "status_not_installed": "NOT INSTALLED",
+        "install": "Install",
+        "uninstall": "Uninstall"
     },
     "ngrok": {
         "title": "Ngrok Remote Access",

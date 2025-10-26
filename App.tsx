@@ -7,7 +7,7 @@ import { Routers } from './components/Routers.tsx';
 import { Updater } from './components/Updater.tsx';
 import { Pppoe } from './components/Pppoe.tsx';
 import { Billing } from './components/Billing.tsx';
-import { ZeroTier } from './components/ZeroTier.tsx';
+import { Remote } from './components/Remote.tsx';
 import { Hotspot } from './components/Hotspot.tsx';
 import { Help } from './components/Help.tsx';
 import { SystemSettings } from './components/SystemSettings.tsx';
@@ -141,7 +141,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
 
     const licensedViews: View[] = [
         'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
-        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'zerotier', 'logs', 'dhcp-portal'
+        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal'
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
@@ -184,10 +184,10 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           return <Payroll {...payrollData} />;
       case 'hotspot':
           return <Hotspot selectedRouter={selectedRouter} />;
+      case 'remote':
+          return <Remote />;
       case 'mikrotik_files':
           return <MikrotikFiles selectedRouter={selectedRouter} />;
-      case 'zerotier':
-          return <ZeroTier />;
       case 'company':
           return <Company settings={companySettings} onSave={updateCompanySettings} />;
       case 'system':

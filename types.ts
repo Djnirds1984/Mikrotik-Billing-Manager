@@ -13,7 +13,7 @@ export type View =
   | 'inventory'
   | 'payroll'
   | 'hotspot'
-  | 'zerotier'
+  | 'remote'
   | 'company'
   | 'system'
   | 'updater'
@@ -541,6 +541,12 @@ export interface NewVersionInfo {
 // FIX: Added missing DataplicityStatus interface.
 export interface DataplicityStatus {
     installed: boolean;
+    url?: string;
+}
+
+export interface PiTunnelStatus {
+    installed: boolean;
+    active: boolean;
     url?: string;
 }
 
