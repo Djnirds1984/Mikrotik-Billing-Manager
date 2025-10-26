@@ -5,7 +5,8 @@ import { SimpleQueues } from './SimpleQueues.tsx';
 import { IpRoutes } from './IpRoutes.tsx';
 import { Vlans } from './Vlans.tsx';
 import { getInterfaces } from '../services/mikrotikService.ts';
-import { ShareIcon, Loader } from '../constants.tsx';
+import { ShareIcon } from '../constants.tsx';
+import { Loader } from './Loader.tsx';
 
 type NetworkTab = 'routes' | 'vlans' | 'firewall' | 'queues';
 

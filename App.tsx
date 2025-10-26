@@ -41,7 +41,9 @@ import { LocalizationProvider, useLocalization } from './contexts/LocalizationCo
 import { ThemeProvider } from './contexts/ThemeContext.tsx';
 import { NotificationProvider } from './contexts/NotificationContext.tsx';
 import { useAuth } from './contexts/AuthContext.tsx';
-import type { View, LicenseStatus } from './types.ts';
+// FIX: Import PppProfile and getPppProfiles to fix missing prop error in Billing component
+import type { View, LicenseStatus, PppProfile } from './types.ts';
+import { getPppProfiles } from './services/mikrotikService.ts';
 import { getAuthHeader } from './services/databaseService.ts';
 
 
@@ -95,6 +97,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const payrollData = usePayrollData();
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
+  // FIX: Add state for PPP profiles required by the Billing component
+  const [pppProfiles, setPppProfiles] = useState<PppProfile[]>([]);
 
 
   const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;
@@ -123,6 +127,20 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
         setSelectedRouterId(routers.length > 0 ? routers[0].id : null);
     }
   }, [routers, selectedRouterId]);
+
+  // FIX: Fetch PPP profiles when the selected router changes
+  useEffect(() => {
+      if (selectedRouter) {
+          getPppProfiles(selectedRouter)
+              .then(setPppProfiles)
+              .catch(err => {
+                  console.error("Failed to fetch PPP profiles in App.tsx", err);
+                  setPppProfiles([]); // Clear on error
+              });
+      } else {
+          setPppProfiles([]);
+      }
+  }, [selectedRouter]);
 
   const selectedRouter = useMemo(
     () => routers.find(r => r.id === selectedRouterId) || null,
@@ -166,7 +184,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
       case 'pppoe':
           return <Pppoe selectedRouter={selectedRouter} addSale={addSale} />;
       case 'billing':
-          return <Billing selectedRouter={selectedRouter} />;
+          // FIX: Pass the fetched pppProfiles to the Billing component
+          return <Billing selectedRouter={selectedRouter} profiles={pppProfiles} />;
       case 'sales':
           return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} />;
       case 'inventory':
