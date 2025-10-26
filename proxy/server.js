@@ -1531,7 +1531,7 @@ piTunnelRouter.post('/install', (req, res) => {
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
     const { command } = req.body;
-    if (!command || typeof command !== 'string' || !command.includes('pitunnel.com/inst')) {
+    if (!command || typeof command !== 'string' || !command.includes('pitunnel.com')) {
         send({ status: 'error', message: 'Invalid PiTunnel installation command provided.' });
         send({ status: 'finished' });
         return res.end();
@@ -1664,7 +1664,7 @@ dataplicityRouter.post('/install', (req, res) => {
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
     let { command } = req.body; // Use let to allow modification
-    if (!command || typeof command !== 'string' || !command.includes('dataplicity.com/')) {
+    if (!command || typeof command !== 'string' || !command.includes('dataplicity.com')) {
         send({ status: 'error', message: 'Invalid Dataplicity installation command provided.' });
         send({ status: 'finished' });
         return res.end();
