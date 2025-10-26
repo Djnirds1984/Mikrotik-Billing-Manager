@@ -541,6 +541,7 @@ export interface NewVersionInfo {
 // FIX: Added missing DataplicityStatus interface.
 export interface DataplicityStatus {
     installed: boolean;
+    active: boolean;
     url?: string;
 }
 
