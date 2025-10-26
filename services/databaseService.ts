@@ -29,16 +29,30 @@ const fetchData = async <T>(path: string, options: RequestInit = {}): Promise<T>
         throw new Error('Session expired. Please log in again.');
     }
 
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: `Request failed with status ${response.status}` }));
-        throw new Error(errorData.message);
-    }
-    
     if (response.status === 204) { // No Content
         return {} as T;
     }
+    
+    const contentType = response.headers.get("content-type");
+    // Check if the response is JSON before trying to parse it.
+    if (!contentType || !contentType.includes("application/json")) {
+        const text = await response.text();
+        // If the server returns an HTML page, it's a routing error.
+        if (text && text.trim().startsWith('<!DOCTYPE html>')) {
+            throw new Error(`API Error (${response.status}): Server returned an HTML page instead of JSON. This suggests a routing issue for path: ${path}.`);
+        }
+        // Handle other non-JSON responses that are not HTML.
+        throw new Error(`Expected a JSON response but received "${contentType || 'no content type'}".`);
+    }
 
-    return response.json() as Promise<T>;
+    // Now it's safe to assume the response is JSON.
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.message || `Request failed with status ${response.status}`);
+    }
+
+    return data as Promise<T>;
 };
 
 export const dbApi = {
