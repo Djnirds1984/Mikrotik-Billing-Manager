@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
@@ -103,6 +104,12 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
 
   const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;
 
+  // FIX: Moved selectedRouter declaration before its usage in useEffect hooks.
+  const selectedRouter = useMemo(
+    () => routers.find(r => r.id === selectedRouterId) || null,
+    [routers, selectedRouterId]
+  );
+
   useEffect(() => {
     setIsSidebarOpen(isLargeScreen);
   }, [isLargeScreen]);
@@ -141,11 +148,6 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           setPppProfiles([]);
       }
   }, [selectedRouter]);
-
-  const selectedRouter = useMemo(
-    () => routers.find(r => r.id === selectedRouterId) || null,
-    [routers, selectedRouterId]
-  );
 
   const renderView = () => {
     if (appIsLoading) {
