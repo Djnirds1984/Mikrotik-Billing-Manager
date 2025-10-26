@@ -108,3 +108,12 @@ export const streamUninstallPiTunnel = (callbacks: StreamCallbacks) => {
     };
     streamEvents('/api/pitunnel/uninstall', options, callbacks);
 };
+
+export const streamCreatePiTunnel = (params: { port: string; name: string; protocol: string }, callbacks: StreamCallbacks) => {
+    const options = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify(params),
+    };
+    streamEvents('/api/pitunnel/tunnels/create', options, callbacks);
+};

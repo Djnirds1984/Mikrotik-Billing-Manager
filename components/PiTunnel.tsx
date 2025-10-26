@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { getPiTunnelStatus, streamUninstallPiTunnel, streamInstallPiTunnel } from '../services/piTunnelService.ts';
+import { getPiTunnelStatus, streamUninstallPiTunnel, streamInstallPiTunnel, streamCreatePiTunnel } from '../services/piTunnelService.ts';
 import type { PiTunnelStatus } from '../types.ts';
 import { Loader } from './Loader.tsx';
 import { CheckCircleIcon, TrashIcon } from '../constants.tsx';
@@ -39,6 +39,79 @@ const SudoInstructionBox: React.FC = () => {
     );
 };
 
+const CreateTunnelModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (params: { port: string; name: string; protocol: string }) => void;
+    isLoading: boolean;
+}> = ({ isOpen, onClose, onSave, isLoading }) => {
+    const [port, setPort] = useState('80');
+    const [name, setName] = useState('');
+    const [protocol, setProtocol] = useState('http');
+
+    useEffect(() => {
+        if (isOpen) {
+            setPort('80');
+            setName('');
+            setProtocol('http');
+        }
+    }, [isOpen]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave({ port, name, protocol });
+    };
+    
+    const generatedCommand = `pitunnel --port=${port} ${name ? `--name=${name.replace(/[^a-zA-Z0-9-]/g, '')}` : ''} ${protocol !== 'tcp' ? `--${protocol}` : ''}`.trim();
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg border border-slate-200 dark:border-slate-700">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold text-[--color-primary-500] dark:text-[--color-primary-400] mb-4">Create Custom Tunnel</h3>
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Local Port Number</label>
+                                    <input type="number" value={port} onChange={e => setPort(e.target.value)} required min="1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Tunnel Name <span className="text-xs">(Optional)</span></label>
+                                    <input type="text" value={name} onChange={e => setName(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Protocol of your Server</label>
+                                <select value={protocol} onChange={e => setProtocol(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                    <option value="http">HTTP</option>
+                                    <option value="https">HTTPS</option>
+                                    <option value="ssh">SSH</option>
+                                    <option value="vnc">VNC</option>
+                                    <option value="tcp">Other (TCP)</option>
+                                </select>
+                            </div>
+                            <div className="pt-2">
+                                <p className="text-xs text-slate-500">This will run the following command:</p>
+                                <div className="mt-1 p-2 bg-slate-100 dark:bg-slate-900 rounded-md text-sm font-mono text-slate-800 dark:text-slate-200">
+                                    {generatedCommand}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
+                        <button type="button" onClick={onClose} disabled={isLoading}>Cancel</button>
+                        <button type="submit" disabled={isLoading || !port} className="px-4 py-2 bg-green-600 text-white rounded-md disabled:opacity-50">
+                            {isLoading ? 'Creating...' : 'Create Tunnel'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 export const PiTunnel: React.FC = () => {
     const { t } = useLocalization();
@@ -47,6 +120,7 @@ export const PiTunnel: React.FC = () => {
     const [logs, setLogs] = useState<{text: string, isError?: boolean}[]>([]);
     const [command, setCommand] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
     const fetchData = useCallback(async () => {
         setStatus('loading');
@@ -89,6 +163,7 @@ export const PiTunnel: React.FC = () => {
                 }
             },
             onClose: () => {
+                // Check status again after a delay to ensure it's not an error state
                 if (status !== 'error') {
                     setTimeout(fetchData, 1000); 
                 }
@@ -100,10 +175,44 @@ export const PiTunnel: React.FC = () => {
         });
     };
 
+     const handleCreateTunnel = (params: { port: string; name: string; protocol: string }) => {
+        setStatus('installing'); // Reuse 'installing' state for a generic "working with logs" view
+        setLogs([]);
+        setErrorMessage('');
+        
+        streamCreatePiTunnel(params, {
+            onMessage: (data: any) => {
+                if (data.log) setLogs(prev => [...prev, { text: data.log.trim(), isError: !!data.isError }]);
+                if (data.status === 'error') {
+                    setStatus('error');
+                    setErrorMessage(data.message || 'An unknown error occurred.');
+                }
+            },
+            onClose: () => {
+                if (status !== 'error') {
+                    alert('Tunnel creation process finished. Check logs for details.');
+                    setTimeout(fetchData, 1000); // Refresh status
+                }
+                setIsCreateModalOpen(false);
+            },
+            onError: (err: Error) => {
+                setStatus('error');
+                setErrorMessage(`Connection to server failed: ${err.message}`);
+                setIsCreateModalOpen(false);
+            }
+        });
+    };
+
     const isWorking = ['loading', 'uninstalling', 'installing'].includes(status);
 
     return (
         <div className="space-y-6">
+            <CreateTunnelModal
+                isOpen={isCreateModalOpen}
+                onClose={() => setIsCreateModalOpen(false)}
+                onSave={handleCreateTunnel}
+                isLoading={isWorking && status === 'installing'}
+            />
             <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-200">{t('pitunnel.title')}</h3>
             {isWorking && (
                  <div className="flex flex-col items-center justify-center p-8">
@@ -126,8 +235,11 @@ export const PiTunnel: React.FC = () => {
                         <p className="font-semibold">Next Step:</p>
                         <p className="text-sm">Manage your tunnel and get your public URL from your <a href={data.url || 'https://pitunnel.com/dashboard'} target="_blank" rel="noopener noreferrer" className="underline hover:text-sky-600 dark:hover:text-sky-200">Pi Tunnel dashboard</a>.</p>
                     </div>
-                    <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                        <button onClick={() => handleStreamAction('uninstall')} disabled={isWorking} className="w-full sm:w-auto px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg flex items-center justify-center gap-2">
+                    <div className="pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-wrap gap-4">
+                        <button onClick={() => setIsCreateModalOpen(true)} disabled={isWorking} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg flex items-center justify-center gap-2">
+                            Create Custom Tunnel
+                        </button>
+                        <button onClick={() => handleStreamAction('uninstall')} disabled={isWorking} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg flex items-center justify-center gap-2">
                             <TrashIcon className="w-5 h-5"/>
                             {t('pitunnel.uninstall')}
                         </button>

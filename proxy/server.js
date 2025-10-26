@@ -1449,6 +1449,38 @@ const piTunnelExecOptions = {
     }
 };
 
+const streamExec = (res, command, message) => {
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    if (message) send({ log: message });
+    
+    let stderrOutput = '';
+    const child = exec(command, piTunnelExecOptions);
+
+    child.stdout.on('data', log => send({ log: log.toString() }));
+    child.stderr.on('data', log => {
+        stderrOutput += log.toString();
+        send({ log: log.toString(), isError: true });
+    });
+
+    child.on('close', code => {
+        if (code === 0) {
+            send({ status: 'success', log: 'Command finished successfully.' });
+        } else {
+            const errorMessage = `Command failed with exit code ${code}. ${stderrOutput ? 'Details: ' + stderrOutput.trim() : ''}`;
+            send({ status: 'error', message: errorMessage, isError: true });
+        }
+        send({ status: 'finished' });
+        res.end();
+    });
+
+    child.on('error', err => {
+        send({ status: 'error', message: `Failed to execute command: ${err.message}`, isError: true });
+        send({ status: 'finished' });
+        res.end();
+    });
+};
+
+
 piTunnelRouter.get('/status', async (req, res) => {
     try {
         const installed = fs.existsSync('/usr/local/bin/pitunnel');
@@ -1487,26 +1519,7 @@ piTunnelRouter.post('/install', (req, res) => {
         return res.end();
     }
     
-    const child = exec(command, piTunnelExecOptions);
-
-    child.stdout.on('data', log => send({ log }));
-    child.stderr.on('data', log => send({ log, isError: true }));
-
-    child.on('close', code => {
-        if (code === 0) {
-            send({ status: 'success', log: 'Installation command finished.' });
-        } else {
-            send({ status: 'error', message: `Installation script failed with exit code ${code}.` });
-        }
-        send({ status: 'finished' });
-        res.end();
-    });
-
-    child.on('error', err => {
-        send({ status: 'error', message: `Failed to execute command: ${err.message}` });
-        send({ status: 'finished' });
-        res.end();
-    });
+    streamExec(res, command, `Executing installation command: ${command}`);
 });
 
 piTunnelRouter.get('/uninstall', (req, res) => {
@@ -1517,29 +1530,33 @@ piTunnelRouter.get('/uninstall', (req, res) => {
     
     const runCommandWithLogs = (command, message) => new Promise((resolve, reject) => {
         send({ log: message });
+        let stderrOutput = '';
         const child = exec(command, piTunnelExecOptions);
-        child.stdout.on('data', log => send({ log }));
-        child.stderr.on('data', log => send({ log, isError: true }));
+        child.stdout.on('data', log => send({ log: log.toString() }));
+        child.stderr.on('data', log => {
+            stderrOutput += log.toString();
+            send({ log: log.toString(), isError: true });
+        });
         child.on('close', code => {
             if (code === 0) {
                 resolve();
             } else {
-                // Ignore errors from stopping a service that might not be running
                 if (command.includes('systemctl stop') && code !== 0) {
                     send({ log: `Warning: Could not stop service (may already be stopped). Continuing...` });
                     resolve();
                 } else {
-                    reject(new Error(`Command "${command}" failed.`));
+                    const rejectMessage = `Command "${command}" failed. ${stderrOutput ? 'Details: ' + stderrOutput.trim() : ''}`;
+                    reject(new Error(rejectMessage));
                 }
             }
         });
-        child.on('error', reject);
+        child.on('error', err => reject(new Error(`Execution failed: ${err.message}`)));
     });
 
     const run = async () => {
         try {
             await runCommandWithLogs('sudo systemctl stop pitunnel.service', 'Stopping pitunnel service...');
-            await runCommandWithLogs('sudo pitunnel --remove', 'Running pitunnel uninstall command...');
+            await runCommandWithLogs('sudo /usr/local/bin/pitunnel --remove', 'Running pitunnel uninstall command...');
             send({ status: 'success', log: 'Uninstallation process finished.' });
         } catch (e) {
             send({ status: 'error', message: e.message, isError: true });
@@ -1549,6 +1566,33 @@ piTunnelRouter.get('/uninstall', (req, res) => {
         }
     };
     run();
+});
+
+piTunnelRouter.post('/tunnels/create', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const { port, name, protocol } = req.body;
+    if (!port || isNaN(parseInt(port, 10))) {
+        const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+        send({ status: 'error', message: 'A valid port number is required.' });
+        send({ status: 'finished' });
+        return res.end();
+    }
+
+    let command = `sudo /usr/local/bin/pitunnel --port=${parseInt(port, 10)}`;
+    if (name && typeof name === 'string' && name.trim()) {
+        // Sanitize the name to be safe for shell execution
+        const sanitizedName = name.replace(/[^a-zA-Z0-9-]/g, '');
+        command += ` --name=${sanitizedName}`;
+    }
+    if (protocol && typeof protocol === 'string' && ['http', 'https', 'ssh', 'vnc'].includes(protocol)) {
+        command += ` --${protocol}`;
+    }
+    // Note: 'tcp' is the default and doesn't require a flag.
+
+    streamExec(res, command, `Attempting to create tunnel with command: ${command}`);
 });
 
 app.use('/api/pitunnel', piTunnelRouter);
