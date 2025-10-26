@@ -15,8 +15,8 @@ export const usePayrollData = () => {
         try {
             const [empData, benData, timeData] = await Promise.all([
                 dbApi.get<Employee[]>('/employees'),
-                dbApi.get<EmployeeBenefit[]>('/employee-benefits'),
-                dbApi.get<TimeRecord[]>('/time-records'),
+                dbApi.get<EmployeeBenefit[]>('/employee_benefits'),
+                dbApi.get<TimeRecord[]>('/time_records'),
             ]);
             setEmployees(empData.sort((a, b) => a.fullName.localeCompare(b.fullName)));
             setBenefits(benData);
@@ -46,7 +46,7 @@ export const usePayrollData = () => {
                 id: `ben_${Date.now()}`,
                 employeeId: newEmployee.id,
             };
-            await dbApi.post('/employee-benefits', newBenefit);
+            await dbApi.post('/employee_benefits', newBenefit);
             await fetchData();
         } catch (err) {
             console.error("Failed to add employee:", err);
@@ -58,7 +58,7 @@ export const usePayrollData = () => {
         try {
             await Promise.all([
                 dbApi.patch(`/employees/${updatedEmployee.id}`, updatedEmployee),
-                dbApi.patch(`/employee-benefits/${updatedBenefit.id}`, updatedBenefit),
+                dbApi.patch(`/employee_benefits/${updatedBenefit.id}`, updatedBenefit),
             ]);
             await fetchData();
         } catch (err) {
@@ -80,10 +80,10 @@ export const usePayrollData = () => {
     const saveTimeRecord = async (recordData: Omit<TimeRecord, 'id'> | TimeRecord) => {
         try {
             if ('id' in recordData) {
-                 await dbApi.patch(`/time-records/${recordData.id}`, recordData);
+                 await dbApi.patch(`/time_records/${recordData.id}`, recordData);
             } else {
                 const newRecord = { ...recordData, id: `dtr_${Date.now()}`};
-                await dbApi.post('/time-records', newRecord);
+                await dbApi.post('/time_records', newRecord);
             }
             await fetchData();
         } catch (err) {
@@ -94,7 +94,7 @@ export const usePayrollData = () => {
     
     const deleteTimeRecord = async (recordId: string) => {
         try {
-            await dbApi.delete(`/time-records/${recordId}`);
+            await dbApi.delete(`/time_records/${recordId}`);
             await fetchData();
         } catch (err) {
             console.error("Failed to delete time record:", err);
