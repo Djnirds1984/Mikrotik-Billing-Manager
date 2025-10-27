@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader } from './Loader.tsx';
 import { getAuthHeader } from '../services/databaseService.ts';
@@ -35,21 +36,47 @@ const FullBackupManager: React.FC = () => {
         fetchBackups();
     }, [fetchBackups]);
     
-    const handleStream = (url: string, onMessage: (data: any) => void) => {
-        const eventSource = new EventSource(url);
-        eventSource.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                onMessage(data);
-                if (data.status === 'finished' || data.status === 'error' || data.status === 'restarting') {
-                    eventSource.close();
+    const handleStream = async (url: string, onMessage: (data: any) => void) => {
+        try {
+            const response = await fetch(url, { headers: getAuthHeader() });
+
+            if (response.status === 401) {
+                onMessage({ status: 'error', message: 'Authentication error. Please log in again.' });
+                return;
+            }
+
+            if (!response.ok || !response.body) {
+                throw new Error(`Failed to connect to stream: ${response.statusText}`);
+            }
+
+            const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+            let buffer = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    onMessage({ status: 'finished' });
+                    break;
                 }
-            } catch(e) { console.error("SSE parse error", e); }
-        };
-        eventSource.onerror = () => {
-            onMessage({ status: 'error', message: 'Connection to server lost.' });
-            eventSource.close();
-        };
+
+                buffer += value;
+                const parts = buffer.split('\n\n');
+                buffer = parts.pop() || ''; // Keep the last, possibly incomplete, part
+
+                for (const part of parts) {
+                    if (part.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(part.substring(6));
+                            onMessage(data);
+                        } catch (e) {
+                            console.error("Failed to parse SSE message:", e);
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            onMessage({ status: 'error', message: (err as Error).message });
+        }
     };
 
     const handleCreateBackup = () => {
@@ -149,31 +176,35 @@ const FullBackupManager: React.FC = () => {
                 </div>
             )}
 
+            {/* FIX: The conditional rendering logic was causing a TypeScript type error and hiding UI elements incorrectly.
+    The `!isWorking` block is split to allow the "Available Backups" section to render its loading state
+    independently, fixing the type conflict and improving user experience during data fetching. */}
             {!isWorking && (
-                <>
                 <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
                     <button onClick={handleCreateBackup} disabled={isWorking} className="w-full sm:w-auto px-6 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg disabled:opacity-50">
                         Create Full Panel Backup (.mk)
                     </button>
                 </div>
+            )}
                 
-                <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
-                     <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-2">Available Backups</h3>
-                     {status === 'fetching' ? <div className="flex justify-center"><Loader /></div> : backups.length > 0 ? (
-                        <ul className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                            {backups.map(file => (
-                                <li key={file} className="bg-slate-100 dark:bg-slate-700/50 p-2 rounded-md flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                                    <span className="font-mono text-sm break-all">{file}</span>
-                                    <div className="flex gap-2 self-end sm:self-center flex-shrink-0">
-                                        <a href={`/download-backup/${file}`} className="px-3 py-1 text-xs bg-green-600 text-white rounded-md">Download</a>
-                                        <button onClick={() => handleDeleteBackup(file)} disabled={isWorking} className="px-3 py-1 text-xs bg-red-600 text-white rounded-md">Delete</button>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                     ) : <p className="text-sm text-slate-500">No backups found.</p>}
-                </div>
-                
+            <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-2">Available Backups</h3>
+                    {status === 'fetching' ? <div className="flex justify-center"><Loader /></div> : backups.length > 0 ? (
+                    <ul className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                        {backups.map(file => (
+                            <li key={file} className="bg-slate-100 dark:bg-slate-700/50 p-2 rounded-md flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                                <span className="font-mono text-sm break-all">{file}</span>
+                                <div className="flex gap-2 self-end sm:self-center flex-shrink-0">
+                                    <a href={`/download-backup/${file}`} className="px-3 py-1 text-xs bg-green-600 text-white rounded-md">Download</a>
+                                    <button onClick={() => handleDeleteBackup(file)} disabled={isWorking} className="px-3 py-1 text-xs bg-red-600 text-white rounded-md">Delete</button>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                    ) : <p className="text-sm text-slate-500">No backups found.</p>}
+            </div>
+            
+            {!isWorking && (
                  <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
                      <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Restore from Backup</h3>
                      <p className="text-sm text-yellow-600 dark:text-yellow-400 my-2">Warning: Restoring will overwrite all current panel files and data.</p>
@@ -184,7 +215,6 @@ const FullBackupManager: React.FC = () => {
                         </button>
                      </div>
                  </div>
-                </>
             )}
         </div>
     );
