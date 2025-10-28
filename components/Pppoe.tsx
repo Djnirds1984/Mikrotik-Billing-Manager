@@ -3,6 +3,7 @@ import type { RouterConfigWithId, PppProfile, IpPool, PppProfileData, PppSecret,
 import { 
     getPppProfiles, getIpPools, addPppProfile, updatePppProfile, deletePppProfile,
     getPppSecrets, getPppActiveConnections, addPppSecret, updatePppSecret, deletePppSecret, processPppPayment,
+    deletePppActiveConnection,
     getPppServers, addPppServer, updatePppServer, deletePppServer, getInterfaces
 } from '../services/mikrotikService.ts';
 import { useBillingPlans } from '../hooks/useBillingPlans.ts';
@@ -189,14 +190,12 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
     );
 }
 
-// FIX: Pass isSubmitting to disable save button during submission
+// --- User Form Modal ---
 const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, isSubmitting }) => {
     const [secret, setSecret] = useState({ name: '', password: '', profile: '' }); // profile is plan ID
     const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '' });
     const [showPass, setShowPass] = useState(false);
 
-    // This effect initializes the form state when the modal opens or the user-to-edit changes.
-    // It's designed to not overwrite user input if the component re-renders for other reasons.
     useEffect(() => {
         if (!isOpen) {
             return;
@@ -214,14 +213,11 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 email: linkedCustomer?.email || '' 
             });
         } else {
-            // Only set the initial state for a new user form.
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
             setCustomer({ fullName: '', address: '', contactNumber: '', email: '' });
         }
     }, [isOpen, initialData]);
 
-    // This separate effect handles setting the default profile once plans are loaded,
-    // without re-clobbering the whole state.
     useEffect(() => {
         if (isOpen && !initialData && plans.length > 0 && !secret.profile) {
             setSecret(s => ({...s, profile: plans[0].id}));
@@ -238,7 +234,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         const secretPayload: PppSecretData = {
             name: secret.name,
             service: 'pppoe',
-            profile: initialData?.profile || 'default', // Default to original profile
+            profile: initialData?.profile || 'default',
             comment: initialData?.comment || '',
             disabled: initialData?.disabled || 'false',
         };
@@ -283,12 +279,10 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     )
 };
 
-
 // --- Users Management Sub-component ---
 const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void> }> = ({ selectedRouter, addSale }) => {
     const { hasPermission } = useAuth();
     const [secrets, setSecrets] = useState<PppSecret[]>([]);
-    const [active, setActive] = useState<PppActiveConnection[]>([]);
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const { plans } = useBillingPlans(selectedRouter.id);
     const { customers, addCustomer, updateCustomer } = useCustomers(selectedRouter.id);
@@ -306,13 +300,11 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         setIsLoading(true);
         setError(null);
         try {
-            const [secretsData, activeData, profilesData] = await Promise.all([
+            const [secretsData, profilesData] = await Promise.all([
                 getPppSecrets(selectedRouter),
-                getPppActiveConnections(selectedRouter),
                 getPppProfiles(selectedRouter),
             ]);
             setSecrets(secretsData);
-            setActive(activeData);
             setProfiles(profilesData);
         } catch (err) {
             setError(`Failed to fetch PPPoE users: ${(err as Error).message}`);
@@ -324,7 +316,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     useEffect(() => { fetchData() }, [fetchData]);
     
     const combinedUsers = useMemo(() => {
-        const activeMap = new Map(active.map(a => [a.name, a]));
         return secrets.map(secret => {
             const customer = customers.find(c => c.username === secret.name);
             let subscription = { plan: 'N/A', dueDate: 'No Info' };
@@ -337,33 +328,26 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             }
             return {
                 ...secret,
-                isActive: activeMap.has(secret.name),
-                activeInfo: activeMap.get(secret.name),
                 customer,
                 subscription
             };
         });
-    }, [secrets, active, customers]);
+    }, [secrets, customers]);
     
     const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>) => {
         setIsSubmitting(true);
         try {
-            // Find if a customer record already exists in our local DB for this user.
             const existingCustomer = customers.find(c => c.username === secretData.name);
 
-            // Step 1: Update the MikroTik router first. If this fails, we don't touch our DB.
-            if (selectedSecret) { // Editing an existing secret
+            if (selectedSecret) {
                 await updatePppSecret(selectedRouter, { ...selectedSecret, ...secretData });
-            } else { // Adding a new secret
+            } else {
                 await addPppSecret(selectedRouter, secretData);
             }
 
-            // Step 2: Update our local customer database.
             if (existingCustomer) {
-                // If the customer record exists, update it with the new form data.
                 await updateCustomer({ ...existingCustomer, ...customerData });
             } else {
-                // Only create a new customer record if there's actual customer info to save.
                 const hasCustomerInfo = Object.values(customerData).some(val => val && String(val).trim() !== '');
                 if (hasCustomerInfo) {
                     await addCustomer({ 
@@ -374,10 +358,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 }
             }
             
-            // Step 3: Close modal and refresh data from router.
             setUserModalOpen(false);
             setSelectedSecret(null);
-            await fetchData(); // The `useCustomers` hook will refresh itself after add/update.
+            await fetchData();
         } catch(err) {
             alert(`Failed to save user: ${(err as Error).message}`);
         } finally {
@@ -411,7 +394,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
 
     return (
         <div>
-            {/* FIX: Pass isSubmitting prop to modal */}
             <UserFormModal 
                 isOpen={isUserModalOpen} 
                 onClose={() => setUserModalOpen(false)} 
@@ -428,7 +410,14 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
                  <table className="w-full text-sm">
-                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50"><tr><th className="px-6 py-3">Username/Customer</th><th className="px-6 py-3">Profile</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Subscription Due</th><th className="px-6 py-3 text-right">Actions</th></tr></thead>
+                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
+                        <tr>
+                            <th className="px-6 py-3">Username/Customer</th>
+                            <th className="px-6 py-3">Profile</th>
+                            <th className="px-6 py-3">Subscription Due</th>
+                            <th className="px-6 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
                     <tbody>
                         {combinedUsers.map(user => (
                             <tr key={user.id} className={`border-b dark:border-slate-700 ${user.disabled === 'true' ? 'opacity-50' : ''}`}>
@@ -437,7 +426,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     <p className="text-xs text-slate-500">{user.customer?.fullName}</p>
                                 </td>
                                 <td>{user.profile}</td>
-                                <td>{user.isActive ? <span className="text-green-500">Active</span> : <span className="text-slate-500">Inactive</span>}</td>
                                 <td>{user.subscription.dueDate}</td>
                                 <td className="px-6 py-4 text-right space-x-1">
                                     <button onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }} className="p-1"><CurrencyDollarIcon className="w-5 h-5"/></button>
@@ -452,6 +440,95 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         </div>
     );
 }
+
+// --- Active Users Manager ---
+const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
+    const [activeUsers, setActiveUsers] = useState<PppActiveConnection[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [isKicking, setIsKicking] = useState<string | null>(null);
+
+    const fetchData = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const data = await getPppActiveConnections(selectedRouter);
+            setActiveUsers(data);
+        } catch (err) {
+            setError(`Failed to fetch active connections: ${(err as Error).message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [selectedRouter]);
+
+    useEffect(() => {
+        fetchData();
+        const interval = setInterval(fetchData, 5000); // Poll every 5 seconds
+        return () => clearInterval(interval);
+    }, [fetchData]);
+
+    const handleKickUser = async (connectionId: string) => {
+        if (!window.confirm("Are you sure you want to kick this user?")) return;
+        setIsKicking(connectionId);
+        try {
+            await deletePppActiveConnection(selectedRouter, connectionId);
+            await fetchData(); // Refresh data after kicking
+        } catch (err) {
+            alert(`Failed to kick user: ${(err as Error).message}`);
+        } finally {
+            setIsKicking(null);
+        }
+    };
+
+    if (isLoading && activeUsers.length === 0) return <div className="flex justify-center p-8"><Loader /></div>;
+    if (error) return <div className="p-4 text-red-600">{error}</div>;
+
+    return (
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
+                        <tr>
+                            <th className="px-6 py-3">Username</th>
+                            <th className="px-6 py-3">Service</th>
+                            <th className="px-6 py-3">IP Address</th>
+                            <th className="px-6 py-3">Caller ID (MAC)</th>
+                            <th className="px-6 py-3">Uptime</th>
+                            <th className="px-6 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {activeUsers.map(user => (
+                            <tr key={user.id} className="border-b dark:border-slate-700">
+                                <td className="px-6 py-4 font-medium">{user.name}</td>
+                                <td className="px-6 py-4">{user.service}</td>
+                                <td className="px-6 py-4 font-mono">{user.address}</td>
+                                <td className="px-6 py-4 font-mono">{user['caller-id']}</td>
+                                <td className="px-6 py-4 font-mono">{user.uptime}</td>
+                                <td className="px-6 py-4 text-right">
+                                    <button 
+                                        onClick={() => handleKickUser(user.id)} 
+                                        disabled={isKicking === user.id}
+                                        className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold disabled:opacity-50"
+                                    >
+                                        {isKicking === user.id ? 'Kicking...' : 'Kick'}
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                         {activeUsers.length === 0 && (
+                            <tr>
+                                <td colSpan={6} className="text-center py-8 text-slate-500">
+                                    No active PPPoE users.
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
 
 // --- Servers Management Sub-component ---
 const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
@@ -490,7 +567,6 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
         setIsSubmitting(true);
         try {
             const payload = { ...serverData };
-            // Convert auth array to comma-separated string for MikroTik API
             if (Array.isArray(payload.authentication)) {
                 payload.authentication = payload.authentication.join(',');
             }
@@ -520,7 +596,6 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
         }
     };
     
-    // FIX: Pass isSubmitting to disable save button during submission
     const ServerFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, isSubmitting }) => {
         const [server, setServer] = useState<PppServerData>({ 'service-name': '', interface: '', 'default-profile': '', authentication: ['pap', 'chap', 'mschap1', 'mschap2'], disabled: 'false' });
         
@@ -589,7 +664,6 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
 
     return (
         <div>
-            {/* FIX: Pass isSubmitting prop to modal */}
             <ServerFormModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} initialData={editingServer} isSubmitting={isSubmitting} />
             <div className="flex justify-end mb-4"><button onClick={() => { setEditingServer(null); setIsModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">{t('pppoe.add_new_server')}</button></div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
@@ -610,12 +684,14 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
 
 
 // --- Main Container Component ---
+type PppoeTab = 'users' | 'active_users' | 'profiles' | 'servers';
+
 export const Pppoe: React.FC<{ 
     selectedRouter: RouterConfigWithId | null;
     addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void>;
 }> = ({ selectedRouter, addSale }) => {
     const { t } = useLocalization();
-    const [activeTab, setActiveTab] = useState<'users' | 'profiles' | 'servers'>('users');
+    const [activeTab, setActiveTab] = useState<PppoeTab>('users');
     
     if (!selectedRouter) {
         return (
@@ -632,12 +708,14 @@ export const Pppoe: React.FC<{
             <div className="border-b border-slate-200 dark:border-slate-700">
                 <nav className="flex space-x-2" aria-label="Tabs">
                     <TabButton label={t('pppoe.users')} icon={<UsersIcon className="w-5 h-5" />} isActive={activeTab === 'users'} onClick={() => setActiveTab('users')} />
+                    <TabButton label={t('pppoe.active_users')} icon={<UsersIcon className="w-5 h-5" />} isActive={activeTab === 'active_users'} onClick={() => setActiveTab('active_users')} />
                     <TabButton label={t('pppoe.profiles')} icon={<SignalIcon className="w-5 h-5" />} isActive={activeTab === 'profiles'} onClick={() => setActiveTab('profiles')} />
                     <TabButton label={t('pppoe.servers')} icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'servers'} onClick={() => setActiveTab('servers')} />
                 </nav>
             </div>
 
             {activeTab === 'users' && <UsersManager selectedRouter={selectedRouter} addSale={addSale} />}
+            {activeTab === 'active_users' && <ActiveUsersManager selectedRouter={selectedRouter} />}
             {activeTab === 'profiles' && <ProfilesManager selectedRouter={selectedRouter} />}
             {activeTab === 'servers' && <ServersManager selectedRouter={selectedRouter} />}
         </div>
