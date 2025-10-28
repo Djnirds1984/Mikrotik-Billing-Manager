@@ -306,6 +306,10 @@ export const getPppActiveConnections = (router: RouterConfigWithId): Promise<Ppp
     return fetchMikrotikData<PppActiveConnection[]>(router, '/ppp/active');
 };
 
+export const deletePppActiveConnection = (router: RouterConfigWithId, connectionId: string): Promise<any> => {
+    return fetchMikrotikData(router, `/ppp/active/${encodeURIComponent(connectionId)}`, { method: 'DELETE' });
+};
+
 export const processPppPayment = (router: RouterConfigWithId, paymentData: any): Promise<any> => {
     return fetchMikrotikData(router, '/ppp/process-payment', { method: 'POST', body: JSON.stringify(paymentData) });
 };

@@ -89,6 +89,7 @@
     },
      "pppoe": {
         "users": "Usuários",
+        "active_users": "Usuários Ativos",
         "profiles": "Perfis",
         "servers": "Servidores",
         "add_new_server": "Adicionar Novo Servidor",
