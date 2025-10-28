@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader } from './Loader.tsx';
 import { getAuthHeader } from '../services/databaseService.ts';
@@ -9,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 // --- Full Backup & Restore Component ---
 const FullBackupManager: React.FC = () => {
     const [backups, setBackups] = useState<string[]>([]);
-    const [status, setStatus] = useState<'idle' | 'fetching' | 'backing_up' | 'restoring' | 'uploading' | 'deleting' | 'error'>('idle');
+    const [status, setStatus] = useState<'idle' | 'fetching' | 'backing_up' | 'restoring' | 'uploading' | 'deleting' | 'downloading' | 'error'>('idle');
     const [logs, setLogs] = useState<{ text: string, isError?: boolean }[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [fileToRestore, setFileToRestore] = useState<File | null>(null);
@@ -114,6 +113,44 @@ const FullBackupManager: React.FC = () => {
             setStatus('error');
         }
     };
+    
+    const handleDownloadBackup = async (filename: string) => {
+        setStatus('downloading');
+        setLogs(prev => [...prev, { text: `Starting download for ${filename}...` }]);
+        setError(null);
+        try {
+            const res = await fetch(`/download-backup/${filename}`, {
+                headers: getAuthHeader(),
+            });
+            if (!res.ok) {
+                let errorMsg = `Download failed: ${res.statusText}`;
+                try {
+                    const data = await res.json();
+                    errorMsg = data.message || errorMsg;
+                } catch (e) { /* ignore */ }
+                throw new Error(errorMsg);
+            }
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            setLogs(prev => [...prev, { text: 'Download successful.' }]);
+        } catch (err) {
+            const errorMsg = (err as Error).message;
+            setError(errorMsg);
+            setLogs(prev => [...prev, { text: `Error: ${errorMsg}`, isError: true }]);
+            setStatus('error');
+        } finally {
+            if (status !== 'error') {
+                setTimeout(() => setStatus('idle'), 500);
+            }
+        }
+    };
 
     const handleRestore = async () => {
         if (!fileToRestore) return;
@@ -176,9 +213,6 @@ const FullBackupManager: React.FC = () => {
                 </div>
             )}
 
-            {/* FIX: The conditional rendering logic was causing a TypeScript type error and hiding UI elements incorrectly.
-    The `!isWorking` block is split to allow the "Available Backups" section to render its loading state
-    independently, fixing the type conflict and improving user experience during data fetching. */}
             {!isWorking && (
                 <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
                     <button onClick={handleCreateBackup} disabled={isWorking} className="w-full sm:w-auto px-6 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg disabled:opacity-50">
@@ -195,7 +229,9 @@ const FullBackupManager: React.FC = () => {
                             <li key={file} className="bg-slate-100 dark:bg-slate-700/50 p-2 rounded-md flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                                 <span className="font-mono text-sm break-all">{file}</span>
                                 <div className="flex gap-2 self-end sm:self-center flex-shrink-0">
-                                    <a href={`/download-backup/${file}`} className="px-3 py-1 text-xs bg-green-600 text-white rounded-md">Download</a>
+                                    <button onClick={() => handleDownloadBackup(file)} disabled={isWorking} className="px-3 py-1 text-xs bg-green-600 text-white rounded-md disabled:opacity-50">
+                                        {status === 'downloading' ? '...' : 'Download'}
+                                    </button>
                                     <button onClick={() => handleDeleteBackup(file)} disabled={isWorking} className="px-3 py-1 text-xs bg-red-600 text-white rounded-md">Delete</button>
                                 </div>
                             </li>
