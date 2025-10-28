@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { Employee, EmployeeBenefit, TimeRecord } from '../types.ts';
 import { Loader } from './Loader.tsx';
-// FIX: Import ClockIcon from constants
 import { EditIcon, TrashIcon, UsersIcon, ClockIcon, CalculatorIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 
@@ -25,7 +24,6 @@ const EmployeeFormModal: React.FC<{
     initialData: { employee: Employee, benefit: EmployeeBenefit } | null;
     isSubmitting: boolean;
 }> = ({ isOpen, onClose, onSave, initialData, isSubmitting }) => {
-    // FIX: Use specific types for state instead of Partial to prevent type errors on save.
     const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', rate: 0 });
     const [benefit, setBenefit] = useState<Omit<EmployeeBenefit, 'id' | 'employeeId'>>({ sss: false, philhealth: false, pagibig: false });
 
@@ -43,7 +41,6 @@ const EmployeeFormModal: React.FC<{
 
     if (!isOpen) return null;
 
-    // FIX: Correctly handle checkbox change events by casting the event target to HTMLInputElement.
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const target = e.target;
         const { name, value, type } = target;
@@ -55,7 +52,6 @@ const EmployeeFormModal: React.FC<{
         }
     };
 
-    // FIX: Ensure the correct data types are passed to onSave for add vs. edit scenarios.
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (initialData) {
@@ -156,9 +152,165 @@ const EmployeeManager: React.FC<PayrollProps> = (props) => {
             </div>
         </div>
     );
-}
+};
 
-// More components to follow
+const TimeRecordManager: React.FC<PayrollProps> = (props) => {
+    const { employees, timeRecords, saveTimeRecord, deleteTimeRecord } = props;
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
+    const [currentDate, setCurrentDate] = useState(new Date());
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [editingRecord, setEditingRecord] = useState<Partial<TimeRecord> & { date: string }>({
+        date: new Date().toISOString().split('T')[0],
+        timeIn: '',
+        timeOut: ''
+    });
+
+    useEffect(() => {
+        if (!selectedEmployeeId && employees.length > 0) {
+            setSelectedEmployeeId(employees[0].id);
+        }
+    }, [employees, selectedEmployeeId]);
+
+    const changeMonth = (offset: number) => {
+        setCurrentDate(d => new Date(d.getFullYear(), d.getMonth() + offset, 1));
+    };
+
+    const calculateHours = (timeIn: string, timeOut: string): number => {
+        if (!timeIn || !timeOut) return 0;
+        try {
+            const inDate = new Date(`1970-01-01T${timeIn}`);
+            const outDate = new Date(`1970-01-01T${timeOut}`);
+            if (outDate < inDate) { 
+                return 0; // Does not handle overnight shifts for simplicity
+            }
+            const diff = outDate.getTime() - inDate.getTime();
+            return diff / (1000 * 60 * 60);
+        } catch (e) {
+            return 0;
+        }
+    };
+
+    const filteredRecords = useMemo(() => {
+        if (!selectedEmployeeId) return [];
+        return timeRecords
+            .filter(r => r.employeeId === selectedEmployeeId && 
+                         new Date(r.date).getFullYear() === currentDate.getFullYear() &&
+                         new Date(r.date).getMonth() === currentDate.getMonth())
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }, [timeRecords, selectedEmployeeId, currentDate]);
+    
+    const totalHours = useMemo(() => filteredRecords.reduce((sum, r) => sum + calculateHours(r.timeIn || '', r.timeOut || ''), 0), [filteredRecords]);
+
+    const handleSave = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedEmployeeId || !editingRecord.date || !editingRecord.timeIn || !editingRecord.timeOut) {
+            alert("Please fill all fields.");
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            await saveTimeRecord({
+                ...editingRecord,
+                employeeId: selectedEmployeeId,
+            } as TimeRecord); 
+            // Reset form
+            setEditingRecord({ date: new Date().toISOString().split('T')[0], timeIn: '', timeOut: '' });
+        } catch (e) {
+            alert(`Failed to save: ${(e as Error).message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDelete = async (recordId: string) => {
+        if (window.confirm("Delete this time record?")) {
+            await deleteTimeRecord(recordId);
+        }
+    };
+
+    const handleEditClick = (record: TimeRecord) => {
+        setEditingRecord(record);
+    };
+
+    const cancelEdit = () => {
+        setEditingRecord({ date: new Date().toISOString().split('T')[0], timeIn: '', timeOut: '' });
+    };
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target;
+        setEditingRecord(prev => ({ ...prev, [name]: value }));
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 space-y-4">
+                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                    <div>
+                        <label htmlFor="employee-select" className="block text-sm font-medium">Employee</label>
+                        <select id="employee-select" value={selectedEmployeeId || ''} onChange={e => setSelectedEmployeeId(e.target.value)} className="mt-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                            {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.fullName}</option>)}
+                        </select>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => changeMonth(-1)} className="p-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700">{"<"}</button>
+                        <h3 className="text-lg font-semibold w-32 text-center">{currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
+                        <button onClick={() => changeMonth(1)} className="p-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700">{">"}</button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
+                <h4 className="font-bold text-lg mb-4">{editingRecord.id ? 'Edit Record' : 'Add New Record'}</h4>
+                <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                    <div className="md:col-span-1"><label className="block text-sm">Date</label><input type="date" name="date" value={editingRecord.date} onChange={handleInputChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded" /></div>
+                    <div className="md:col-span-1"><label className="block text-sm">Time In</label><input type="time" name="timeIn" value={editingRecord.timeIn || ''} onChange={handleInputChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded" /></div>
+                    <div className="md:col-span-1"><label className="block text-sm">Time Out</label><input type="time" name="timeOut" value={editingRecord.timeOut || ''} onChange={handleInputChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded" /></div>
+                    <div className="md:col-span-2 flex gap-2">
+                        <button type="submit" disabled={isSubmitting || !selectedEmployeeId} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md w-full disabled:opacity-50">{isSubmitting ? 'Saving...' : 'Save'}</button>
+                        {editingRecord.id && <button type="button" onClick={cancelEdit} className="px-4 py-2 bg-slate-200 dark:bg-slate-600 rounded-md w-full">Cancel</button>}
+                    </div>
+                </form>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-x-auto">
+                 <table className="w-full text-sm">
+                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
+                        <tr>
+                            <th className="px-4 py-2 text-left">Date</th>
+                            <th className="px-4 py-2 text-left">Time In</th>
+                            <th className="px-4 py-2 text-left">Time Out</th>
+                            <th className="px-4 py-2 text-left">Hours Worked</th>
+                            <th className="px-4 py-2 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {filteredRecords.map(rec => (
+                            <tr key={rec.id} className="border-t dark:border-slate-700">
+                                <td className="px-4 py-2">{new Date(rec.date).toLocaleDateString()}</td>
+                                <td className="px-4 py-2">{rec.timeIn}</td>
+                                <td className="px-4 py-2">{rec.timeOut}</td>
+                                <td className="px-4 py-2">{calculateHours(rec.timeIn || '', rec.timeOut || '').toFixed(2)}</td>
+                                <td className="px-4 py-2 space-x-2 text-right">
+                                    <button onClick={() => handleEditClick(rec)}><EditIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => handleDelete(rec.id)}><TrashIcon className="w-5 h-5"/></button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                    <tfoot className="bg-slate-50 dark:bg-slate-900/50">
+                        <tr className="border-t-2 font-bold">
+                            <td colSpan={3} className="px-4 py-2 text-right">Total Hours:</td>
+                            <td className="px-4 py-2">{totalHours.toFixed(2)}</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+
 export const Payroll: React.FC<PayrollProps> = (props) => {
     const [activeTab, setActiveTab] = useState('employees');
 
@@ -173,14 +325,14 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     return (
         <div className="max-w-7xl mx-auto space-y-6">
             <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Payroll Management</h2>
-            <div className="border-b">
+            <div className="border-b border-slate-200 dark:border-slate-700">
                 <nav className="flex -mb-px gap-4">
-                    <button onClick={() => setActiveTab('employees')} className={`py-2 px-1 border-b-2 ${activeTab === 'employees' ? 'border-[--color-primary-500]' : 'border-transparent'}`}><UsersIcon className="w-5 h-5 inline-block mr-2"/>Employees</button>
-                    {/* <button onClick={() => setActiveTab('dtr')} className={`py-2 px-1 border-b-2 ${activeTab === 'dtr' ? 'border-[--color-primary-500]' : 'border-transparent'}`}><ClockIcon className="w-5 h-5 inline-block mr-2"/>Daily Time Record</button> */}
+                    <button onClick={() => setActiveTab('employees')} className={`flex items-center gap-2 py-2 px-1 border-b-2 ${activeTab === 'employees' ? 'border-[--color-primary-500] text-[--color-primary-600]' : 'border-transparent text-slate-500'}`}><UsersIcon className="w-5 h-5"/>Employees</button>
+                    <button onClick={() => setActiveTab('dtr')} className={`flex items-center gap-2 py-2 px-1 border-b-2 ${activeTab === 'dtr' ? 'border-[--color-primary-500] text-[--color-primary-600]' : 'border-transparent text-slate-500'}`}><ClockIcon className="w-5 h-5"/>Daily Time Record</button>
                 </nav>
             </div>
             {activeTab === 'employees' && <EmployeeManager {...props} />}
-            {/* {activeTab === 'dtr' && <TimeRecordManager {...props} />} */}
+            {activeTab === 'dtr' && <TimeRecordManager {...props} />}
         </div>
     );
 };
