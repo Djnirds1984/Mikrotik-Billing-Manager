@@ -46,12 +46,19 @@ const createRouterInstance = (config) => {
     }
     
     if (config.api_type === 'legacy') {
+        const isTls = config.port === 8729; // Common legacy SSL port
         return new RouterOSClient({
             host: config.host,
             user: config.user,
             password: config.password || '',
             port: config.port || 8728,
             timeout: 5,
+            tls: isTls,
+            tlsOptions: isTls ? {
+                rejectUnauthorized: false,
+                // Allow legacy server connections for compatibility
+                secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+            } : undefined,
         });
     }
 
@@ -64,8 +71,8 @@ const createRouterInstance = (config) => {
         auth,
         httpsAgent: new https.Agent({ 
             rejectUnauthorized: false,
-            // Allow legacy TLS ciphers for compatibility with some MikroTik devices
-            ciphers: 'DEFAULT:@SECLEVEL=1'
+            // Allow legacy server connections for compatibility with some MikroTik devices
+            secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
         }),
         timeout: 5000
     });
