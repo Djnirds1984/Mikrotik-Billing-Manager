@@ -62,7 +62,11 @@ const createRouterInstance = (config) => {
     const instance = axios.create({ 
         baseURL, 
         auth,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        httpsAgent: new https.Agent({ 
+            rejectUnauthorized: false,
+            // Allow legacy TLS ciphers for compatibility with some MikroTik devices
+            ciphers: 'DEFAULT:@SECLEVEL=1'
+        }),
         timeout: 5000
     });
 
