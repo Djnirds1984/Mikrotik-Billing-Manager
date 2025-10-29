@@ -1,3 +1,4 @@
+
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -9,7 +10,7 @@ const os = require('os');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
-const RouterOSClient = require('node-routeros');
+const { RouterOSAPI } = require('node-routeros');
 
 const app = express();
 const PORT = 3002;
@@ -47,7 +48,7 @@ const createRouterInstance = (config) => {
     
     if (config.api_type === 'legacy') {
         const isTls = config.port === 8729; // Common legacy SSL port
-        return new RouterOSClient({
+        return new RouterOSAPI({
             host: config.host,
             user: config.user,
             password: config.password || '',
