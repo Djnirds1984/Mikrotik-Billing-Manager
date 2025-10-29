@@ -235,6 +235,27 @@ app.post('/mt-api/:routerId/system/clock/sync-time', getRouterConfig, async (req
     });
 });
 
+app.post('/mt-api/:routerId/system/reboot', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // Legacy API uses '/system/reboot' command
+                await client.write('/system/reboot');
+            } finally {
+                await client.close();
+            }
+        } else {
+            // REST API uses POST to the /reboot resource
+            await req.routerInstance.post('/system/reboot');
+        }
+        // This response might not be sent if the router reboots too quickly, but we send it optimistically.
+        return { message: 'Router is rebooting.' };
+    });
+});
+
+
 app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
         let resource;
@@ -462,7 +483,8 @@ app.post('/mt-api/:routerId/ip/dhcp-server/lease/:leaseId/make-static', getRoute
             const client = req.routerInstance;
             await client.connect();
             try {
-                const result = await client.write('/ip/dhcp-server/lease/make-static', [`=.id=${leaseId}`]);
+                // Use a query `?` to select the item for an action, not `=`
+                const result = await client.write('/ip/dhcp-server/lease/make-static', [`?.id=${leaseId}`]);
                 if (result && result.length > 0 && result[0].message) {
                     throw new Error(result[0].message);
                 }
@@ -471,8 +493,6 @@ app.post('/mt-api/:routerId/ip/dhcp-server/lease/:leaseId/make-static', getRoute
             }
             return { message: 'Lease made static.' };
         } else {
-            // FIX: Correctly call the 'make-static' command via REST API.
-            // The command is on the collection, and the target ID is in the body.
             await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": leaseId });
             return { message: 'Lease made static.' };
         }
