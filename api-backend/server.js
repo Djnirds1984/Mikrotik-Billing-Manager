@@ -56,8 +56,9 @@ const createRouterInstance = (config) => {
             tls: isTls,
             tlsOptions: isTls ? {
                 rejectUnauthorized: false,
-                // Allow legacy server connections for compatibility
-                secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+                // Force TLSv1.2 to be compatible with older RouterOS versions
+                minVersion: 'TLSv1.2',
+                maxVersion: 'TLSv1.2',
             } : undefined,
         });
     }
@@ -71,8 +72,9 @@ const createRouterInstance = (config) => {
         auth,
         httpsAgent: new https.Agent({ 
             rejectUnauthorized: false,
-            // Allow legacy server connections for compatibility with some MikroTik devices
-            secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+            // Force TLSv1.2 to be compatible with older RouterOS versions
+            minVersion: 'TLSv1.2',
+            maxVersion: 'TLSv1.2',
         }),
         timeout: 5000
     });
