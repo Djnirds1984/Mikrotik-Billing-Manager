@@ -114,6 +114,7 @@ const writeLegacySafe = async (client, query) => {
         // We'll catch this specific error and treat it as a success (empty result).
         if (error.errno === 'UNKNOWNREPLY' && error.message.includes('!empty')) {
             const command = Array.isArray(query) ? query[0] : query;
+            console.log(`Gracefully handling '!empty' reply for command: ${command}`);
             // For print commands, an empty array is the correct "empty" response.
             if (command.includes('/print')) {
                 return [];
