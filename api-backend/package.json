@@ -13,7 +13,7 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
-    "node-routeros": "1.6.8",
+    "node-routeros-v2": "1.6.12",
     "ssh2": "^1.15.0",
     "ws": "^8.17.0"
   }
