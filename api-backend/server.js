@@ -104,6 +104,28 @@ const createRouterInstance = (config) => {
 };
 
 // --- Error Handling ---
+
+// Helper to wrap legacy write commands to handle '!empty' responses gracefully.
+const writeLegacySafe = async (client, query) => {
+    try {
+        return await client.write(query);
+    } catch (error) {
+        // The node-routeros library throws an error on '!empty' responses, which are valid for some action commands.
+        // We'll catch this specific error and treat it as a success (empty result).
+        if (error.errno === 'UNKNOWNREPLY' && error.message.includes('!empty')) {
+            const command = Array.isArray(query) ? query[0] : query;
+            // For print commands, an empty array is the correct "empty" response.
+            if (command.includes('/print')) {
+                return [];
+            }
+            // For action commands, just return an empty object to signify success with no data.
+            return {};
+        }
+        // Re-throw any other errors.
+        throw error;
+    }
+};
+
 const handleApiRequest = async (req, res, action) => {
     try {
         const result = await action();
@@ -211,7 +233,7 @@ app.post('/mt-api/:routerId/system/clock/sync-time', getRouterConfig, async (req
             await client.connect();
             try {
                 // Legacy API uses '/system/clock/set' command with parameters
-                await client.write('/system/clock/set', [`=date=${date}`, `=time=${time}`]);
+                await writeLegacySafe(client, ['/system/clock/set', `=date=${date}`, `=time=${time}`]);
             } finally {
                 await client.close();
             }
@@ -242,7 +264,7 @@ app.post('/mt-api/:routerId/system/reboot', getRouterConfig, async (req, res) =>
             await client.connect();
             try {
                 // Legacy API uses '/system/reboot' command
-                await client.write('/system/reboot');
+                await writeLegacySafe(client, '/system/reboot');
             } finally {
                 await client.close();
             }
@@ -263,7 +285,7 @@ app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) =
             const client = req.routerInstance;
             await client.connect();
             try {
-                const result = await client.write('/system/resource/print');
+                const result = await writeLegacySafe(client, '/system/resource/print');
                 resource = result.length > 0 ? normalizeLegacyObject(result[0]) : null;
             } finally {
                 await client.close();
@@ -301,7 +323,7 @@ app.get('/mt-api/:routerId/ip/wan-routes', getRouterConfig, async (req, res) => 
             const client = req.routerInstance;
             await client.connect();
             try {
-                routes = await client.write('/ip/route/print');
+                routes = await writeLegacySafe(client, '/ip/route/print');
                 routes = routes.map(normalizeLegacyObject);
             } finally {
                 await client.close();
@@ -321,7 +343,7 @@ app.get('/mt-api/:routerId/ip/wan-failover-status', getRouterConfig, async (req,
             const client = req.routerInstance;
             await client.connect();
             try {
-                routes = await client.write('/ip/route/print');
+                routes = await writeLegacySafe(client, '/ip/route/print');
                 routes = routes.map(normalizeLegacyObject);
             } finally {
                 await client.close();
@@ -343,12 +365,12 @@ app.post('/mt-api/:routerId/ip/wan-failover', getRouterConfig, async (req, res) 
             const client = req.routerInstance;
             await client.connect();
             try {
-                let routes = await client.write('/ip/route/print');
+                let routes = await writeLegacySafe(client, '/ip/route/print');
                 routes = routes.map(normalizeLegacyObject);
                 const wanRoutes = routes.filter(r => r['check-gateway']);
 
                 const promises = wanRoutes.map(r => 
-                    client.write(['/ip/route/set', `=.id=${r.id}`, `=disabled=${enabled ? 'no' : 'yes'}`])
+                    writeLegacySafe(client, ['/ip/route/set', `=.id=${r.id}`, `=disabled=${enabled ? 'no' : 'yes'}`])
                 );
                 await Promise.all(promises);
             } finally {
@@ -409,7 +431,7 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
             await client.connect();
             try {
                 // Update secret
-                await client.write('/ppp/secret/set', [
+                await writeLegacySafe(client, ['/ppp/secret/set',
                     `=.id=${secret.id}`,
                     `=profile=${plan.pppoeProfile}`,
                     `=comment=${newComment}`,
@@ -417,11 +439,11 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
                 ]);
 
                 // Find existing scheduler
-                const existingScheduler = await client.write('/system/scheduler/print', [`?name=${schedulerName}`]);
+                const existingScheduler = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedulerName}`]);
 
                 if (existingScheduler.length > 0) {
                     // Update existing scheduler
-                    await client.write('/system/scheduler/set', [
+                    await writeLegacySafe(client, ['/system/scheduler/set',
                         `=.id=${existingScheduler[0]['.id']}`,
                         `=start-date=${schedulerDate}`,
                         `=start-time=${schedulerTime}`,
@@ -429,7 +451,7 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
                     ]);
                 } else {
                     // Add new scheduler
-                    await client.write('/system/scheduler/add', [
+                    await writeLegacySafe(client, ['/system/scheduler/add',
                         `=name=${schedulerName}`,
                         `=start-date=${schedulerDate}`,
                         `=start-time=${schedulerTime}`,
@@ -484,7 +506,7 @@ app.post('/mt-api/:routerId/ip/dhcp-server/lease/:leaseId/make-static', getRoute
             await client.connect();
             try {
                 // Use a query `?` to select the item for an action, not `=`
-                const result = await client.write('/ip/dhcp-server/lease/make-static', [`?.id=${leaseId}`]);
+                const result = await writeLegacySafe(client, ['/ip/dhcp-server/lease/make-static', `?.id=${leaseId}`]);
                 if (result && result.length > 0 && result[0].message) {
                     throw new Error(result[0].message);
                 }
@@ -516,20 +538,20 @@ app.post('/mt-api/:routerId/ip/dhcp-server/setup', getRouterConfig, async (req, 
             await client.connect();
             try {
                  // 1. Assign IP address to interface
-                await client.write('/ip/address/add', [`=address=${interfaceAddress}`, `=interface=${dhcpInterface}`]);
+                await writeLegacySafe(client, ['/ip/address/add', `=address=${interfaceAddress}`, `=interface=${dhcpInterface}`]);
 
                 // 2. Create IP Pool
-                await client.write('/ip/pool/add', [`=name=${poolName}`, `=ranges=${addressPool}`]);
+                await writeLegacySafe(client, ['/ip/pool/add', `=name=${poolName}`, `=ranges=${addressPool}`]);
                 
                 // 3. Create DHCP Network
-                await client.write('/ip/dhcp-server/network/add', [
+                await writeLegacySafe(client, ['/ip/dhcp-server/network/add',
                     `=address=${dhcpAddressSpace}`,
                     `=gateway=${gateway}`,
                     `=dns-server=${dnsServers}`
                 ]);
 
                 // 4. Create DHCP Server
-                await client.write('/ip/dhcp-server/add', [
+                await writeLegacySafe(client, ['/ip/dhcp-server/add',
                     `=name=dhcp_${dhcpInterface}`,
                     `=interface=${dhcpInterface}`,
                     `=address-pool=${poolName}`,
@@ -587,7 +609,6 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
         const portalRedirectComment = "Redirect pending HTTP to portal";
         const masqueradeComment = "Masquerade authorized DHCP clients";
 
-        // FIX: Implemented a more robust DHCP lease script to prevent execution errors.
         const scriptSource = `
 :local mac $"lease-mac-address";
 :local ip $"lease-address";
@@ -616,7 +637,6 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
 }`;
         const compactScriptSource = scriptSource.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
         
-        // --- Firewall Filter Rules (New Secure Logic) ---
         const filterComments = [
             "Allow established/related connections for Captive Portal",
             "Drop invalid connections for Captive Portal",
@@ -630,40 +650,39 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             await client.connect();
             try {
                 // --- Base Setup (Address Lists, Script) ---
-                await client.write('/ip/firewall/address-list/add', [`=list=${authorizedListName}`, `=comment=Users authorized by panel`]);
-                await client.write('/ip/firewall/address-list/add', [`=list=${pendingListName}`, `=comment=Users pending authorization`]);
-                await client.write('/system/script/add', [`=name=${scriptName}`, `=source=${compactScriptSource}`]);
+                await writeLegacySafe(client, ['/ip/firewall/address-list/add', `=list=${authorizedListName}`, `=comment=Users authorized by panel`]);
+                await writeLegacySafe(client, ['/ip/firewall/address-list/add', `=list=${pendingListName}`, `=comment=Users pending authorization`]);
+                await writeLegacySafe(client, ['/system/script/add', `=name=${scriptName}`, `=source=${compactScriptSource}`]);
 
                 // --- DHCP Server Script Integration ---
-                const dhcpServers = await client.write('/ip/dhcp-server/print', [`?interface=${lanInterface}`]);
+                const dhcpServers = await writeLegacySafe(client, ['/ip/dhcp-server/print', `?interface=${lanInterface}`]);
                 if (dhcpServers.length === 0) throw new Error(`No DHCP server found on interface "${lanInterface}".`);
                 const serverId = dhcpServers[0]['.id'];
-                await client.write('/ip/dhcp-server/set', [`=.id=${serverId}`, `=lease-script=${scriptName}`]);
+                await writeLegacySafe(client, ['/ip/dhcp-server/set', `=.id=${serverId}`, `=lease-script=${scriptName}`]);
                 
                 // --- Clean old firewall rules ---
-                const oldFilterRules = await client.write('/ip/firewall/filter/print');
+                const oldFilterRules = await writeLegacySafe(client, '/ip/firewall/filter/print');
                 for (const comment of filterComments) {
                     const rule = oldFilterRules.find(r => r.comment === comment);
-                    if (rule) await client.write('/ip/firewall/filter/remove', [`=.id=${rule['.id']}`]);
+                    if (rule) await writeLegacySafe(client, ['/ip/firewall/filter/remove', `=.id=${rule['.id']}`]);
                 }
                 
                 // --- Insert new firewall rules in reverse order ---
-                // FIX: Modified final drop rule to explicitly ignore authorized users.
-                await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, `=in-interface=${lanInterface}`, `=src-address-list=!${authorizedListName}`, '=place-before=0', `=comment=${filterComments[4]}`]);
-                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=dst-address=${panelIp}`, `=in-interface=${lanInterface}`, '=place-before=0', `=comment=${filterComments[3]}`]);
-                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, `=src-address-list=${authorizedListName}`, '=place-before=0', `=comment=${filterComments[2]}`]);
-                await client.write('/ip/firewall/filter/add', ['=action=drop', `=chain=forward`, '=connection-state=invalid', '=place-before=0', `=comment=${filterComments[1]}`]);
-                await client.write('/ip/firewall/filter/add', ['=action=accept', `=chain=forward`, '=connection-state=established,related', '=place-before=0', `=comment=${filterComments[0]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=drop', `=chain=forward`, `=in-interface=${lanInterface}`, `=src-address-list=!${authorizedListName}`, '=place-before=0', `=comment=${filterComments[4]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=accept', `=chain=forward`, `=dst-address=${panelIp}`, `=in-interface=${lanInterface}`, '=place-before=0', `=comment=${filterComments[3]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=accept', `=chain=forward`, `=src-address-list=${authorizedListName}`, '=place-before=0', `=comment=${filterComments[2]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=drop', `=chain=forward`, '=connection-state=invalid', '=place-before=0', `=comment=${filterComments[1]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=accept', `=chain=forward`, '=connection-state=established,related', '=place-before=0', `=comment=${filterComments[0]}`]);
 
                 // --- NAT Rule to redirect HTTP traffic to the panel ---
-                const oldNatRule = await client.write('/ip/firewall/nat/print', [`?comment=${portalRedirectComment}`]);
-                if (oldNatRule.length > 0) await client.write('/ip/firewall/nat/remove', [`=.id=${oldNatRule[0]['.id']}`]);
-                await client.write('/ip/firewall/nat/add', ['=chain=dstnat', `=src-address-list=${pendingListName}`, '=protocol=tcp', '=dst-port=80', '=action=dst-nat', `=to-addresses=${panelIp}`, '=to-ports=3001', `=comment=${portalRedirectComment}`]);
+                const oldNatRule = await writeLegacySafe(client, ['/ip/firewall/nat/print', `?comment=${portalRedirectComment}`]);
+                if (oldNatRule.length > 0) await writeLegacySafe(client, ['/ip/firewall/nat/remove', `=.id=${oldNatRule[0]['.id']}`]);
+                await writeLegacySafe(client, ['/ip/firewall/nat/add', '=chain=dstnat', `=src-address-list=${pendingListName}`, '=protocol=tcp', '=dst-port=80', '=action=dst-nat', `=to-addresses=${panelIp}`, '=to-ports=3001', `=comment=${portalRedirectComment}`]);
 
                 // --- NAT Rule to masquerade authorized users ---
-                const oldMasqueradeRule = await client.write('/ip/firewall/nat/print', [`?comment=${masqueradeComment}`]);
-                if (oldMasqueradeRule.length > 0) await client.write('/ip/firewall/nat/remove', [`=.id=${oldMasqueradeRule[0]['.id']}`]);
-                await client.write('/ip/firewall/nat/add', ['=chain=srcnat', `=src-address-list=${authorizedListName}`, '=action=masquerade', `=comment=${masqueradeComment}`, '=place-before=0']);
+                const oldMasqueradeRule = await writeLegacySafe(client, ['/ip/firewall/nat/print', `?comment=${masqueradeComment}`]);
+                if (oldMasqueradeRule.length > 0) await writeLegacySafe(client, ['/ip/firewall/nat/remove', `=.id=${oldMasqueradeRule[0]['.id']}`]);
+                await writeLegacySafe(client, ['/ip/firewall/nat/add', '=chain=srcnat', `=src-address-list=${authorizedListName}`, '=action=masquerade', `=comment=${masqueradeComment}`, '=place-before=0']);
 
             } finally {
                 await client.close();
@@ -688,7 +707,6 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (
             }
 
             // --- Insert new firewall rules in reverse order ---
-            // FIX: Modified final drop rule to explicitly ignore authorized users.
             await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'in-interface': lanInterface, 'src-address-list': `!${authorizedListName}`, 'place-before': '0', comment: filterComments[4] });
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'in-interface': lanInterface, 'place-before': '0', comment: filterComments[3] });
             await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: filterComments[2] });
@@ -734,9 +752,9 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
             await client.connect();
             try {
                 const findAndRemove = async (path, query) => {
-                    const items = await client.write(path + '/print', query);
+                    const items = await writeLegacySafe(client, [path + '/print', ...query]);
                     for (const item of items) {
-                        await client.write(path + '/remove', [`=.id=${item['.id']}`]);
+                        await writeLegacySafe(client, [path + '/remove', `=.id=${item['.id']}`]);
                     }
                 };
 
@@ -747,9 +765,9 @@ app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, asy
                     await findAndRemove('/ip/firewall/filter', [`?comment=${comment}`]);
                 }
 
-                const dhcpServers = await client.write('/ip/dhcp-server/print', [`?lease-script=${scriptName}`]);
+                const dhcpServers = await writeLegacySafe(client, ['/ip/dhcp-server/print', `?lease-script=${scriptName}`]);
                 for (const server of dhcpServers) {
-                    await client.write('/ip/dhcp-server/set', [`=.id=${server['.id']}`, '=lease-script=none']);
+                    await writeLegacySafe(client, ['/ip/dhcp-server/set', `=.id=${server['.id']}`, '=lease-script=none']);
                 }
                 
                 await findAndRemove('/system/script', [`?name=${scriptName}`]);
@@ -974,11 +992,10 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
             try {
                 const method = req.method.toLowerCase();
                 const pathParts = apiPath.split('/').filter(Boolean);
-                const hasId = pathParts.length > 1;
-                const command = `/${pathParts.join('/')}`; // Adjusted to handle nested paths
+                const hasId = pathParts.length > 1 && pathParts[pathParts.length-1].startsWith('*');
+                const command = `/${pathParts.join('/')}`;
                 const id = hasId ? pathParts[pathParts.length - 1] : null;
-                const commandWithoutId = hasId ? command.substring(0, command.lastIndexOf('/')) : command;
-
+                const commandWithoutId = hasId ? `/${pathParts.slice(0, -1).join('/')}` : command;
 
                 let query = [];
 
@@ -999,7 +1016,7 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
                 }
 
                 if (query.length > 0) {
-                    result = await client.write(query);
+                    result = await writeLegacySafe(client, query);
                 } else {
                     throw new Error(`Unsupported legacy method/path combination: ${method.toUpperCase()} ${apiPath}`);
                 }
