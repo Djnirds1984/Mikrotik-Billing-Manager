@@ -5,18 +5,55 @@ This guide details how to set up the Mikrotik Billling Management by AJC in a st
 ## Prerequisites
 
 -   An Orange Pi or similar SBC running a Debian-based OS (like Armbian) with SSH access.
--   **Node.js v20.x or newer (includes npm):**
-    ```bash
-    # Run this command to add the Node.js v20 repository
-    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-    ```
--   **Essential Tools:** `nodejs`, `git`, `pm2`, `nginx`, and `build-essential`.
-    ```bash
-    sudo apt-get update
-    # The 'nodejs' package from the previous step will be installed here
-    sudo apt-get install -y nodejs git build-essential nginx
-    sudo npm install -g pm2
-    ```
+-   **Node.js v20.x, npm, and other essential tools.** The following steps will guide you through the installation.
+
+### 1. Install Node.js and Essential Tools
+
+This project requires a modern version of Node.js. The recommended way to install it on Armbian/Debian is by using the NodeSource repository.
+
+**a. Update System Packages**
+
+First, ensure your system's package list is up-to-date.
+```bash
+sudo apt update
+sudo apt upgrade
+```
+
+**b. Add the NodeSource Repository**
+
+Use `curl` to download and run the setup script for the recommended Node.js version. `curl` might not be installed, so we ensure it is.
+```bash
+sudo apt install -y curl
+# This script adds the repository for Node.js v20.x (LTS)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+```
+
+**c. Install Node.js, Git, Nginx, and Build Tools**
+
+Now, install `nodejs` (which includes `npm`) along with the other required packages.
+```bash
+# `build-essential` is needed for some npm packages that compile from source.
+# `nginx` is our reverse proxy.
+# `git` is for cloning the repository.
+sudo apt install -y nodejs git build-essential nginx
+```
+
+**d. Verify the Installation**
+
+Check that Node.js and npm are installed correctly.
+```bash
+node -v
+npm -v
+```
+You should see version numbers like `v20.x.x` and `10.x.x`.
+
+### 2. Install PM2
+
+`pm2` is a process manager that will keep the panel running as a background service. Install it globally using `npm`.
+```bash
+sudo npm install -g pm2
+```
+
 -   **Gemini API Key (Optional)**: For the "AI Scripting" feature, get a key from [Google AI Studio](https://aistudio.google.com/app/apikey).
 
 ## Step 1: Prepare the Directory
