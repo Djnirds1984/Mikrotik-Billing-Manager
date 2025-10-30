@@ -5,11 +5,16 @@ This guide details how to set up the Mikrotik Billling Management by AJC in a st
 ## Prerequisites
 
 -   An Orange Pi or similar SBC running a Debian-based OS (like Armbian) with SSH access.
--   **Node.js v20.x or newer.**
--   **Essential Tools:** `git`, `pm2`, `nginx`, and `build-essential`.
+-   **Node.js v20.x or newer (includes npm):**
+    ```bash
+    # Run this command to add the Node.js v20 repository
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    ```
+-   **Essential Tools:** `nodejs`, `git`, `pm2`, `nginx`, and `build-essential`.
     ```bash
     sudo apt-get update
-    sudo apt-get install -y git build-essential nginx
+    # The 'nodejs' package from the previous step will be installed here
+    sudo apt-get install -y nodejs git build-essential nginx
     sudo npm install -g pm2
     ```
 -   **Gemini API Key (Optional)**: For the "AI Scripting" feature, get a key from [Google AI Studio](https://aistudio.google.com/app/apikey).
