@@ -141,7 +141,7 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
     ```
 
 2.  **Paste the Following Configuration:**
-    Ensure the **entire contents** of the file are replaced with this structure. This configuration routes traffic for the main app, the API, and the WebSocket terminal, and includes important headers to ensure the application works correctly behind a proxy.Important to change the <your_orangepi_ip_or_ubuntuX64> with the ip of your billing System. example server_name 192.168.1.2;
+    Ensure the **entire contents** of the file are replaced with this structure (Control+k long press to delete all contents). This configuration routes traffic for the main app, the API, and the WebSocket terminal, and includes important headers to ensure the application works correctly behind a proxy.Important to change the <your_orangepi_ip_or_ubuntuX64> with the ip of your billing System. example server_name 192.168.1.2;
 
     ```nginx
     server {
