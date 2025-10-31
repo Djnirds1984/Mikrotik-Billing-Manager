@@ -53,7 +53,7 @@ const createRouterInstance = (config) => {
             user: config.user,
             password: config.password || '',
             port: config.port || 8728,
-            timeout: 5,
+            timeout: 15,
             tls: isTls,
             tlsOptions: isTls ? {
                 rejectUnauthorized: false,
@@ -77,7 +77,7 @@ const createRouterInstance = (config) => {
             minVersion: 'TLSv1.2',
             maxVersion: 'TLSv1.2',
         }),
-        timeout: 5000
+        timeout: 15000
     });
 
     instance.interceptors.response.use(response => {

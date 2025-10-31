@@ -408,8 +408,8 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                                     <td className="px-6 py-4 text-right space-x-1">
                                          {client.status === 'pending' ? (
                                              <>
-                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold disabled:opacity-50" disabled={client.id.startsWith('lease_')}>Activate</button>
-                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50" title="Delete from pending list" disabled={client.id.startsWith('lease_')}><TrashIcon className="w-5 h-5"/></button>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold">Activate</button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500" title="Delete from pending list"><TrashIcon className="w-5 h-5"/></button>
                                              </>
                                          ) : (
                                             <>
