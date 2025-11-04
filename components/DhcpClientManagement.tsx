@@ -6,7 +6,7 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
 import { getDhcpClients } from '../services/mikrotikService.ts';
 import { Loader } from './Loader.tsx';
-import { EditIcon, TrashIcon } from '../constants.tsx';
+import { EditIcon, TrashIcon, ExclamationTriangleIcon } from '../constants.tsx';
 
 // The new unified modal for activation and payment
 const ActivationPaymentModal: React.FC<{
@@ -231,6 +231,8 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     const [isEditModalOpen, setEditModalOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
 
+    const isLegacyApi = selectedRouter.api_type === 'legacy';
+
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
@@ -258,7 +260,12 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
         const dbClientMap = new Map(dbClients.map(c => [c.macAddress, c]));
         return clients.map(client => {
             const dbData = dbClientMap.get(client.macAddress);
-            return dbData ? { ...client, customerInfo: dbData.customerInfo, contactNumber: dbData.contactNumber, email: dbData.email, speedLimit: dbData.speedLimit } : client;
+            if (dbData) {
+                // FIX: Cast dbData to 'any' to resolve a TypeScript inference issue where the compiler incorrectly sees the type as 'unknown'.
+                const typedDbData = dbData as any;
+                return { ...client, customerInfo: typedDbData.customerInfo, contactNumber: typedDbData.contactNumber, email: typedDbData.email, speedLimit: typedDbData.speedLimit };
+            }
+            return client;
         });
     }, [clients, dbClients]);
     
@@ -374,6 +381,16 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
 
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
 
+            {isLegacyApi && (
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 rounded-lg flex items-start gap-3">
+                    <ExclamationTriangleIcon className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-1" />
+                    <div>
+                        <h4 className="font-bold">Legacy API Mode</h4>
+                        <p className="text-sm">Client management features (Activate, Renew, Edit, Deactivate) are disabled because this router is configured to use the legacy API (RouterOS v6). These features require the REST API (RouterOS v7+).</p>
+                    </div>
+                </div>
+            )}
+
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -408,14 +425,14 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                                     <td className="px-6 py-4 text-right space-x-1">
                                          {client.status === 'pending' ? (
                                              <>
-                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold">Activate</button>
-                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500" title="Delete from pending list"><TrashIcon className="w-5 h-5"/></button>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Activate Client"}>Activate</button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed" title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Delete from pending list"} disabled={isLegacyApi}><TrashIcon className="w-5 h-5"/></button>
                                              </>
                                          ) : (
                                             <>
-                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold">Pay/Renew</button>
-                                                <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client"><EditIcon className="w-5 h-5"/></button>
-                                                <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold">Deactivate</button>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Pay/Renew"}>Pay/Renew</button>
+                                                <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500 disabled:opacity-50 disabled:cursor-not-allowed" title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Edit Client"} disabled={isLegacyApi}><EditIcon className="w-5 h-5"/></button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Deactivate"}>Deactivate</button>
                                             </>
                                          )}
                                     </td>
