@@ -1,5 +1,6 @@
 
 
+
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -427,6 +428,8 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
         const scriptSource = `:log info "Subscription expired for ${secret.name}, changing profile."; /ppp secret set [find name="${secret.name}"] profile=${nonPaymentProfile};`;
         const schedulerName = `disable-${secret.name.replace(/[^a-zA-Z0-9]/g, '_')}`; // Sanitize name for scheduler
 
+        let kickMessage = '';
+
         // 4. Update secret and create/update scheduler
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
@@ -461,6 +464,12 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
                         `=on-event=${scriptSource}`
                     ]);
                 }
+                // 5. Kick user to apply new profile
+                const activeConnections = await writeLegacySafe(client, ['/ppp/active/print', `?name=${secret.name}`]);
+                if (activeConnections.length > 0) {
+                    await writeLegacySafe(client, ['/ppp/active/remove', `=.id=${activeConnections[0]['.id']}`]);
+                    kickMessage = "User was kicked to apply new profile.";
+                }
             } finally {
                 await client.close();
             }
@@ -493,9 +502,15 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
                     'on-event': scriptSource
                 });
             }
+            // 5. Kick user to apply new profile
+            const response = await req.routerInstance.get(`/ppp/active?name=${secret.name}`);
+            if (response.data.length > 0) {
+                await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
+                kickMessage = "User was kicked to apply new profile.";
+            }
         }
         
-        return { message: 'Payment processed and subscription updated successfully.' };
+        return { message: `Payment processed and subscription updated successfully. ${kickMessage}`.trim() };
     });
 });
 
@@ -563,7 +578,22 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
                 });
             }
         }
-        return { message: 'User saved and subscription scheduled successfully.' };
+        
+        // 3. Kick user if they are active to apply changes
+        let kickMessage = '';
+        try {
+            const response = await req.routerInstance.get(`/ppp/active?name=${secretData.name}`);
+            if (response.data.length > 0) {
+                await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
+                kickMessage = "User was kicked to apply changes.";
+            }
+        } catch (kickError) {
+            // Don't fail the whole operation if kick fails.
+            console.error(`Could not kick user ${secretData.name}: ${kickError.message}`);
+            kickMessage = "Could not kick user; they may need to reconnect manually.";
+        }
+
+        return { message: `User saved and subscription scheduled successfully. ${kickMessage}`.trim() };
     });
 });
 
