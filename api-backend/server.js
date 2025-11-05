@@ -1,4 +1,5 @@
 
+
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -495,6 +496,74 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
         }
         
         return { message: 'Payment processed and subscription updated successfully.' };
+    });
+});
+
+app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { initialSecret, secretData, subscriptionData } = req.body;
+        const isUpdate = !!initialSecret?.id;
+
+        if (req.routerConfig.api_type === 'legacy') {
+            throw new Error("This feature requires the REST API (RouterOS v7+) and is not supported for legacy API connections.");
+        }
+
+        // 1. Save the secret (add or update)
+        let savedSecretId = initialSecret?.id;
+        if (isUpdate) {
+            // For updates, we only send the fields that were actually passed in secretData.
+            await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(initialSecret.id)}`, secretData);
+        } else {
+            const response = await req.routerInstance.put('/ppp/secret', secretData);
+            // The response for a PUT is an object with the new ID, not an array.
+            savedSecretId = response.data.id;
+        }
+
+        if (!savedSecretId) {
+            // Try to find the user if the response didn't include the ID
+            const users = await req.routerInstance.get(`/ppp/secret?name=${secretData.name}`);
+            if (users.data.length > 0) {
+                savedSecretId = users.data[0].id;
+            } else {
+                throw new Error("Could not determine secret ID after save operation.");
+            }
+        }
+
+        // 2. Manage the scheduler
+        const schedulerName = `disable-${secretData.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const schedulersResponse = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+        const existingSchedulers = schedulersResponse.data;
+        
+        // If due date is cleared, delete existing scheduler
+        if (!subscriptionData?.dueDate) {
+            if (existingSchedulers.length > 0) {
+                await req.routerInstance.delete(`/system/scheduler/${existingSchedulers[0].id}`);
+            }
+        } else { // If due date is set, create or update scheduler
+            const dueDate = new Date(subscriptionData.dueDate);
+            const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+            const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
+            const schedulerTime = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}:${String(dueDate.getSeconds()).padStart(2, '0')}`;
+            
+            const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile};`;
+
+            const schedulerPayload = {
+                'start-date': schedulerDate,
+                'start-time': schedulerTime,
+                'on-event': scriptSource
+            };
+
+            if (existingSchedulers.length > 0) {
+                await req.routerInstance.patch(`/system/scheduler/${existingSchedulers[0].id}`, schedulerPayload);
+            } else {
+                await req.routerInstance.put('/system/scheduler', {
+                    name: schedulerName,
+                    interval: '0',
+                    ...schedulerPayload
+                });
+            }
+        }
+        return { message: 'User saved and subscription scheduled successfully.' };
     });
 });
 

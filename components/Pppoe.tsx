@@ -4,7 +4,8 @@ import {
     getPppProfiles, getIpPools, addPppProfile, updatePppProfile, deletePppProfile,
     getPppSecrets, getPppActiveConnections, addPppSecret, updatePppSecret, deletePppSecret, processPppPayment,
     deletePppActiveConnection,
-    getPppServers, addPppServer, updatePppServer, deletePppServer, getInterfaces
+    getPppServers, addPppServer, updatePppServer, deletePppServer, getInterfaces,
+    savePppUser // Import the new service function
 } from '../services/mikrotikService.ts';
 import { useBillingPlans } from '../hooks/useBillingPlans.ts';
 import { useCustomers } from '../hooks/useCustomers.ts';
@@ -191,10 +192,13 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
 }
 
 // --- User Form Modal ---
-const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, isSubmitting }) => {
+const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, profiles, isSubmitting }) => {
     const [secret, setSecret] = useState({ name: '', password: '', profile: '' }); // profile is plan ID
     const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '' });
     const [showPass, setShowPass] = useState(false);
+    const [dueDate, setDueDate] = useState('');
+    const [nonPaymentProfile, setNonPaymentProfile] = useState('');
+
 
     useEffect(() => {
         if (!isOpen) {
@@ -212,11 +216,29 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 contactNumber: linkedCustomer?.contactNumber || '', 
                 email: linkedCustomer?.email || '' 
             });
+            try {
+                const commentData = JSON.parse(initialData.comment);
+                if (commentData.dueDate) {
+                    const dateTime = commentData.dueDate.includes('T') ? commentData.dueDate : `${commentData.dueDate}T23:59`;
+                    setDueDate(dateTime);
+                } else {
+                    setDueDate('');
+                }
+            } catch (e) {
+                setDueDate('');
+            }
+
         } else {
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
             setCustomer({ fullName: '', address: '', contactNumber: '', email: '' });
+            setDueDate('');
         }
-    }, [isOpen, initialData]);
+        
+        if (profiles.length > 0) {
+            const defaultNonPayment = profiles.find(p => p.name.toLowerCase().includes('cut') || p.name.toLowerCase().includes('disable'))?.name || profiles[0].name;
+            setNonPaymentProfile(defaultNonPayment);
+        }
+    }, [isOpen, initialData, plans, customers, profiles]);
 
     useEffect(() => {
         if (isOpen && !initialData && plans.length > 0 && !secret.profile) {
@@ -246,7 +268,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer);
+        onSave(secretPayload, customer, { dueDate, nonPaymentProfile, planId: secret.profile });
     }
 
     return (
@@ -259,9 +281,23 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                         <div><label>Username</label><input type="text" value={secret.name} onChange={e => setSecret(s => ({...s, name: e.target.value}))} disabled={!!initialData} required className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700 disabled:opacity-50" /></div>
                         <div className="relative"><label>Password</label><input type={showPass ? 'text' : 'password'} value={secret.password} onChange={e => setSecret(s => ({...s, password: e.target.value}))} placeholder={initialData ? "Leave blank to keep old" : ""} required={!initialData} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /><button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-9">{showPass ? <EyeSlashIcon className="w-5 h-5"/> : <EyeIcon className="w-5 h-5"/>}</button></div>
                         <div><label>Billing Plan</label><select value={secret.profile} onChange={e => setSecret(s => ({...s, profile: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700">
-                            <option value="">-- No Change --</option>
+                            {initialData && <option value="">-- No Change --</option>}
                             {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select></div>
+                        <hr className="my-4 border-slate-200 dark:border-slate-700" />
+                        <h4 className="font-semibold">Subscription Details</h4>
+                        <div>
+                            <label>Due Date & Time</label>
+                            <input type="datetime-local" value={dueDate} onChange={e => setDueDate(e.target.value)} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" />
+                            <p className="text-xs text-slate-500 mt-1">Leave blank for no expiration.</p>
+                        </div>
+                        <div>
+                            <label>Profile on Expiry</label>
+                            <select value={nonPaymentProfile} onChange={e => setNonPaymentProfile(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">
+                                {profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                            </select>
+                            <p className="text-xs text-slate-500 mt-1">Profile to apply when the due date is reached.</p>
+                        </div>
                         <hr className="my-4 border-slate-200 dark:border-slate-700" />
                         <h4 className="font-semibold">Customer Information (Optional)</h4>
                         <div><label>Full Name</label><input type="text" value={customer.fullName} onChange={e => setCustomer(c => ({...c, fullName: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
@@ -285,7 +321,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [secrets, setSecrets] = useState<PppSecret[]>([]);
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const { plans } = useBillingPlans(selectedRouter.id);
-    const { customers, addCustomer, updateCustomer } = useCustomers(selectedRouter.id);
+    const { customers, addCustomer, updateCustomer, fetchCustomers } = useCustomers(selectedRouter.id);
     const { settings: companySettings } = useCompanySettings();
 
     const [isLoading, setIsLoading] = useState(true);
@@ -303,6 +339,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             const [secretsData, profilesData] = await Promise.all([
                 getPppSecrets(selectedRouter),
                 getPppProfiles(selectedRouter),
+                fetchCustomers() // from useCustomers hook
             ]);
             setSecrets(secretsData);
             setProfiles(profilesData);
@@ -311,7 +348,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         } finally {
             setIsLoading(false);
         }
-    }, [selectedRouter]);
+    }, [selectedRouter, fetchCustomers]);
 
     useEffect(() => { fetchData() }, [fetchData]);
     
@@ -334,17 +371,42 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         });
     }, [secrets, customers]);
     
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string, planId: string }) => {
         setIsSubmitting(true);
         try {
             const existingCustomer = customers.find(c => c.username === secretData.name);
 
-            if (selectedSecret) {
-                await updatePppSecret(selectedRouter, { ...selectedSecret, ...secretData });
-            } else {
-                await addPppSecret(selectedRouter, secretData);
-            }
+            // Construct comment based on subscription data
+            let commentJson: any = {};
+            try {
+                if (selectedSecret?.comment) {
+                    commentJson = JSON.parse(selectedSecret.comment);
+                }
+            } catch (e) { /* ignore malformed comment */ }
 
+            if (subscriptionData.dueDate) {
+                commentJson.dueDate = subscriptionData.dueDate.split('T')[0]; // Store only YYYY-MM-DD
+            } else {
+                delete commentJson.dueDate; // Remove due date if field is cleared
+            }
+            
+            const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
+            if (selectedPlan) {
+                secretData.profile = selectedPlan.pppoeProfile; // Set the actual profile on the secret
+                commentJson.plan = selectedPlan.name;
+                commentJson.price = selectedPlan.price;
+                commentJson.currency = selectedPlan.currency;
+            }
+            secretData.comment = JSON.stringify(commentJson);
+
+            // This new service function handles secret creation/update and scheduler management
+            await savePppUser(selectedRouter, {
+                initialSecret: selectedSecret,
+                secretData,
+                subscriptionData,
+            });
+
+            // Update local customer DB
             if (existingCustomer) {
                 await updateCustomer({ ...existingCustomer, ...customerData });
             } else {
@@ -401,6 +463,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 initialData={selectedSecret} 
                 plans={plans} 
                 customers={customers}
+                profiles={profiles}
                 isSubmitting={isSubmitting}
             />
             <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />

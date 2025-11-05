@@ -322,6 +322,14 @@ export const deletePppSecret = (router: RouterConfigWithId, secretId: string): P
     return fetchMikrotikData(router, `/ppp/secret/${encodeURIComponent(secretId)}`, { method: 'DELETE' });
 };
 
+export const savePppUser = (router: RouterConfigWithId, payload: {
+    initialSecret: PppSecret | null;
+    secretData: PppSecretData;
+    subscriptionData: { dueDate: string; nonPaymentProfile: string };
+}): Promise<any> => {
+    return fetchMikrotikData(router, '/ppp/user/save', { method: 'POST', body: JSON.stringify(payload) });
+};
+
 export const getPppActiveConnections = (router: RouterConfigWithId): Promise<PppActiveConnection[]> => {
     return fetchMikrotikData<PppActiveConnection[]>(router, '/ppp/active');
 };
