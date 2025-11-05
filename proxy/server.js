@@ -1,3 +1,4 @@
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -1412,7 +1413,8 @@ const createSettingsSaver = (tableName) => async (req, res) => {
 
 app.get('/api/db/panel-settings', protect, createSettingsHandler('panel_settings'));
 app.post('/api/db/panel-settings', protect, createSettingsSaver('panel_settings'));
-app.get('/api/db/company-settings', protect, createSettingsHandler('company_settings'));
+// Make GET public for login page logo, but keep POST protected.
+app.get('/api/db/company-settings', createSettingsHandler('company_settings'));
 app.post('/api/db/company-settings', protect, createSettingsSaver('company_settings'));
 
 app.use('/api/db', protect, dbRouter);
