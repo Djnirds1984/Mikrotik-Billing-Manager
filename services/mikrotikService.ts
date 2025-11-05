@@ -293,19 +293,26 @@ export const updatePppSecret = (router: RouterConfigWithId, secretData: PppSecre
     const { id, ...dataToUpdate } = secretData as any;
 
     // Delete known read-only or client-side properties before sending the PATCH request.
-    // MikroTik's API will return a 400 Bad Request if you try to modify read-only properties.
-    delete dataToUpdate['.id']; // Redundant if `id` is a copy, but safe.
-    delete dataToUpdate.name; // Name is the identifier and cannot be changed via PATCH.
-    delete dataToUpdate.service; // Service type is often immutable.
+    // The MikroTik API will return a 400 Bad Request if you try to modify read-only properties.
+    delete dataToUpdate['.id'];
+    delete dataToUpdate.name;
+    delete dataToUpdate.service;
     delete dataToUpdate['last-logged-out'];
     delete dataToUpdate['caller-id'];
     delete dataToUpdate['last-caller-id'];
+    delete dataToUpdate['last-disconnect-reason']; // FIX: Added this additional read-only property.
     
     // Delete properties added by the frontend UI for display purposes
     delete dataToUpdate.isActive;
     delete dataToUpdate.activeInfo;
     delete dataToUpdate.customer;
     delete dataToUpdate.subscription;
+
+    // If password field is submitted as empty, don't include it in the update.
+    // This respects the placeholder "Leave blank to keep old".
+    if (dataToUpdate.password === '') {
+        delete dataToUpdate.password;
+    }
     
     // The only fields that should be left are the ones intended for update, like password, profile, comment, disabled.
     return fetchMikrotikData(router, `/ppp/secret/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(dataToUpdate) });
