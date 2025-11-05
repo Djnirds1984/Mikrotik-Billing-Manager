@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MikroTikLogoIcon } from '../constants.tsx';
 import type { CompanySettings } from '../types.ts';
-import { dbApi } from '../services/databaseService.ts';
 
 export const AuthLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [settings, setSettings] = useState<CompanySettings | null>(null);
@@ -9,8 +8,16 @@ export const AuthLayout: React.FC<{ children: React.ReactNode }> = ({ children }
     useEffect(() => {
         const fetchSettings = async () => {
             try {
-                // This endpoint is now public for GET requests
-                const data = await dbApi.get<CompanySettings>('/company-settings');
+                // This endpoint is public. Use a direct fetch to avoid the
+                // authenticated dbApi which can cause a reload loop on 401 errors
+                // when an expired token is present on the login page.
+                const response = await fetch('/api/db/company-settings');
+                if (!response.ok) {
+                    // Don't throw, just log the error to avoid breaking the page
+                    console.error("Failed to fetch company settings for login page:", response.statusText);
+                    return;
+                }
+                const data = await response.json();
                 setSettings(data);
             } catch (err) {
                 console.error("Failed to fetch company settings for login page:", err);
