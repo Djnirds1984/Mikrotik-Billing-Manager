@@ -19,7 +19,14 @@ export const useCompanySettings = () => {
         setIsLoading(true);
         setError(null);
         try {
-            const data = await dbApi.get<CompanySettings>('/company-settings');
+            // FIX: Use a direct fetch call for this public resource to avoid
+            // the authenticated dbApi which can cause a reload loop on 401 errors
+            // when an expired token is present on the login page.
+            const response = await fetch('/api/db/company-settings');
+            if (!response.ok) {
+                throw new Error('Failed to fetch company settings.');
+            }
+            const data = await response.json();
             setSettings(s => ({...s, ...data}));
         } catch (err) {
             setError((err as Error).message);
@@ -35,6 +42,7 @@ export const useCompanySettings = () => {
 
     const updateSettings = async (updatedSettings: CompanySettings) => {
         try {
+            // Saving settings still uses the protected dbApi endpoint.
             await dbApi.post('/company-settings', updatedSettings);
             await fetchSettings(); // Re-fetch to confirm changes
         } catch (err) {
