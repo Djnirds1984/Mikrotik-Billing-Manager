@@ -490,10 +490,30 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                 </td>
                                 <td>{user.profile}</td>
                                 <td>{user.subscription.dueDate}</td>
-                                <td className="px-6 py-4 text-right space-x-1">
-                                    <button onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }} className="p-1"><CurrencyDollarIcon className="w-5 h-5"/></button>
-                                    <button onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button>
-                                    {hasPermission('pppoe_users:delete') && <button onClick={() => handleDeleteUser(user.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button>}
+                                <td className="px-6 py-4 text-right space-x-2">
+                                    <button
+                                        onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }}
+                                        className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition-colors"
+                                        title="Process Payment"
+                                    >
+                                        Pay
+                                    </button>
+                                    <button
+                                        onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }}
+                                        className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700 transition-colors"
+                                        title="Edit User"
+                                    >
+                                        Edit
+                                    </button>
+                                    {hasPermission('pppoe_users:delete') && (
+                                        <button
+                                            onClick={() => handleDeleteUser(user.id)}
+                                            className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700 transition-colors"
+                                            title="Delete User"
+                                        >
+                                            Delete
+                                        </button>
+                                    )}
                                 </td>
                             </tr>
                         ))}
