@@ -203,6 +203,7 @@ export interface BillingPlan {
     pppoeProfile: string;
     description: string;
     currency: string;
+    billingType: 'prepaid' | 'postpaid';
     routerId?: string;
 }
 
@@ -231,6 +232,7 @@ export interface DhcpBillingPlan {
     cycle_days: number;
     speedLimit?: string;
     currency: string;
+    billingType: 'prepaid' | 'postpaid';
 }
 
 export interface DhcpBillingPlanWithId extends DhcpBillingPlan {
