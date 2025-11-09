@@ -18,10 +18,11 @@ export const useBillingPlans = (routerId: string | null) => {
         setError(null);
         try {
             const data = await dbApi.get<BillingPlanWithId[]>(`/billing-plans?routerId=${routerId}`);
-            // FIX: Provide a fallback currency for plans created before this update.
+            // Provide fallbacks for legacy plans
             const dataWithFallback = data.map(plan => ({
                 ...plan,
-                currency: plan.currency || 'USD'
+                currency: plan.currency || 'USD',
+                billingType: (plan as any).billingType || 'prepaid'
             }));
             setPlans(dataWithFallback);
         } catch (err) {
@@ -46,6 +47,7 @@ export const useBillingPlans = (routerId: string | null) => {
                 ...planConfig,
                 id: `plan_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
                 routerId: routerId,
+                billingType: planConfig.billingType || 'prepaid',
             };
             await dbApi.post('/billing-plans', newPlan);
             await fetchPlans();
