@@ -11,12 +11,13 @@ const DhcpPlanForm: React.FC<{
     onCancel: () => void;
     initialData?: DhcpBillingPlanWithId | null;
 }> = ({ onSave, onCancel, initialData }) => {
-    const { currency } = useLocalization();
+    const { currency, t } = useLocalization();
     const [plan, setPlan] = useState<Partial<DhcpBillingPlanWithId>>({});
     
     useEffect(() => {
-        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency };
-        setPlan(initialData ? { ...initialData } : defaults);
+        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency, billingType: 'prepaid' } as Partial<DhcpBillingPlanWithId>;
+        const init = initialData ? { ...initialData, billingType: (initialData as any).billingType || 'prepaid' } : defaults;
+        setPlan(init);
     }, [initialData, currency]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -53,6 +54,15 @@ const DhcpPlanForm: React.FC<{
                         <input type="number" name="speedLimit" value={plan.speedLimit || ''} onChange={handleChange} placeholder="e.g., 5 for 5Mbps" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                     </div>
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium">{t('billing.type')}</label>
+                        <select name="billingType" value={(plan as any).billingType || 'prepaid'} onChange={handleChange} className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                            <option value="prepaid">{t('billing.prepaid')}</option>
+                            <option value="postpaid">{t('billing.postpaid')}</option>
+                        </select>
+                    </div>
+                </div>
                 <div className="flex justify-end gap-4 pt-4">
                     <button type="button" onClick={onCancel} className="px-4 py-2 text-sm rounded-md">Cancel</button>
                     <button type="submit" className="px-4 py-2 text-sm bg-[--color-primary-600] text-white rounded-md">Save Plan</button>
@@ -64,7 +74,7 @@ const DhcpPlanForm: React.FC<{
 
 export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) => {
     const { plans, addPlan, updatePlan, deletePlan, isLoading } = useDhcpBillingPlans(routerId);
-    const { formatCurrency } = useLocalization();
+    const { formatCurrency, t } = useLocalization();
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingPlan, setEditingPlan] = useState<DhcpBillingPlanWithId | null>(null);
 
@@ -116,6 +126,8 @@ export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) =
                                         <p className="text-sm text-slate-500">
                                             <span className="font-bold">{formatCurrency(plan.price)}</span> for {plan.cycle_days} days
                                             {plan.speedLimit && ` | Speed: ${plan.speedLimit}Mbps`}
+                                            <span className="mx-2 text-slate-300">|</span>
+                                            {t('billing.type')}: <span className="inline-block px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs">{t(`billing.${(plan as any).billingType || 'prepaid'}`)}</span>
                                         </p>
                                     </div>
                                 </div>

@@ -16,14 +16,14 @@ const PlanForm: React.FC<{
 }> = ({ onSave, onCancel, initialData, profiles, isLoadingProfiles }) => {
     // FIX: Add currency to plan state and handle it during initialization.
     const { t, currency } = useLocalization();
-    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', pppoeProfile: '', description: '', currency };
+    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', pppoeProfile: '', description: '', currency, billingType: 'prepaid' };
     const [plan, setPlan] = useState<BillingPlan>(initialData || defaultPlanState);
     
     useEffect(() => {
         // If it's an existing plan, it will have its own currency.
         // If it's a new plan, it will get the current global currency from the context.
         const initialState = initialData ? 
-            { ...initialData } : 
+            { ...initialData, billingType: (initialData as any).billingType || 'prepaid' } : 
             { ...defaultPlanState, currency: currency };
 
         if (!initialState.pppoeProfile && profiles.length > 0) {
@@ -69,6 +69,15 @@ const PlanForm: React.FC<{
                             <option>{t('billing.monthly')}</option>
                             <option>{t('billing.quarterly')}</option>
                             <option>{t('billing.yearly')}</option>
+                        </select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="billingType" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.type')}</label>
+                        <select name="billingType" value={plan.billingType as any} onChange={handleChange} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]">
+                            <option value="prepaid">{t('billing.prepaid')}</option>
+                            <option value="postpaid">{t('billing.postpaid')}</option>
                         </select>
                     </div>
                 </div>
@@ -198,6 +207,8 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                                             <span className="font-bold text-slate-800 dark:text-slate-200">{formatCurrency(plan.price)}</span> / {t(`billing.${plan.cycle.toLowerCase()}`)}
                                             <span className="mx-2 text-slate-300 dark:text-slate-600">|</span>
                                             {t('billing.profile')}: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">{plan.pppoeProfile}</span>
+                                            <span className="mx-2 text-slate-300 dark:text-slate-600">|</span>
+                                            {t('billing.type')}: <span className="inline-block px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs">{t(`billing.${(plan as any).billingType || 'prepaid'}`)}</span>
                                         </p>
                                     </div>
                                 </div>
