@@ -22,7 +22,7 @@ export const useDhcpBillingPlans = (routerId: string | null) => {
             const dataWithFallback = data.map(plan => ({
                 ...plan,
                 currency: plan.currency || 'USD',
-                billingType: (plan as any).billingType || 'prepaid',
+                billingType: (plan as any).billingType || 'prepaid'
             }));
             setPlans(dataWithFallback);
         } catch (err) {
@@ -37,7 +37,11 @@ export const useDhcpBillingPlans = (routerId: string | null) => {
     }, [fetchPlans]);
 
     const addPlan = async (planConfig: Omit<DhcpBillingPlan, 'routerId'>) => {
-        if (!routerId) return;
+        if (!routerId) {
+            const err = new Error('Please select a router before managing plans.');
+            console.error("Failed to add DHCP billing plan:", err.message);
+            throw err;
+        }
         try {
             const newPlan: DhcpBillingPlanWithId = {
                 ...planConfig,

@@ -73,18 +73,28 @@ const DhcpPlanForm: React.FC<{
 };
 
 export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) => {
-    const { plans, addPlan, updatePlan, deletePlan, isLoading } = useDhcpBillingPlans(routerId);
+    const { plans, addPlan, updatePlan, deletePlan, isLoading, error } = useDhcpBillingPlans(routerId);
     const { formatCurrency, t } = useLocalization();
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingPlan, setEditingPlan] = useState<DhcpBillingPlanWithId | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
 
-    const handleSave = (planData: any) => {
-        if (planData.id) {
-            updatePlan(planData);
-        } else {
-            addPlan(planData);
+    const handleSave = async (planData: any) => {
+        setIsSaving(true);
+        try {
+            if (planData.id) {
+                await updatePlan(planData);
+                alert('Plan updated successfully.');
+            } else {
+                await addPlan(planData);
+                alert('Plan created successfully.');
+            }
+            setIsFormOpen(false);
+        } catch (err) {
+            alert(`Failed to save plan: ${(err as Error).message}`);
+        } finally {
+            setIsSaving(false);
         }
-        setIsFormOpen(false);
     };
 
     const handleEdit = (plan: DhcpBillingPlanWithId) => {
@@ -92,9 +102,14 @@ export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) =
         setIsFormOpen(true);
     };
 
-    const handleDelete = (planId: string) => {
+    const handleDelete = async (planId: string) => {
         if (window.confirm("Are you sure?")) {
-            deletePlan(planId);
+            try {
+                await deletePlan(planId);
+                alert('Plan deleted successfully.');
+            } catch (err) {
+                alert(`Failed to delete plan: ${(err as Error).message}`);
+            }
         }
     };
 
@@ -102,7 +117,20 @@ export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) =
         <div className="space-y-6">
             {!isFormOpen && (
                 <div className="flex justify-end">
-                    <button onClick={() => { setEditingPlan(null); setIsFormOpen(true); }} className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg">Add New Plan</button>
+                    <button
+                        onClick={() => {
+                            if (!routerId) {
+                                alert(t('select_router_alert'));
+                                return;
+                            }
+                            setEditingPlan(null);
+                            setIsFormOpen(true);
+                        }}
+                        className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg"
+                        disabled={!routerId}
+                    >
+                        Add New Plan
+                    </button>
                 </div>
             )}
 
@@ -116,6 +144,9 @@ export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) =
 
             {isLoading ? <div className="flex justify-center p-8"><Loader /></div> : (
                 <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
+                    {error && (
+                        <div className="p-4 text-sm text-red-600">{error}</div>
+                    )}
                     <ul role="list" className="divide-y divide-slate-200 dark:divide-slate-700">
                         {plans.map((plan) => (
                             <li key={plan.id} className="p-4 flex justify-between items-center">
@@ -132,8 +163,8 @@ export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) =
                                     </div>
                                 </div>
                                 <div className="space-x-2">
-                                    <button onClick={() => handleEdit(plan)} className="p-2 text-slate-500 hover:text-sky-500"><EditIcon className="w-5 h-5"/></button>
-                                    <button onClick={() => handleDelete(plan.id)} className="p-2 text-slate-500 hover:text-red-500"><TrashIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => handleEdit(plan)} className="p-2 text-slate-500 hover:text-sky-500" disabled={isSaving}><EditIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => handleDelete(plan.id)} className="p-2 text-slate-500 hover:text-red-500" disabled={isSaving}><TrashIcon className="w-5 h-5"/></button>
                                 </div>
                             </li>
                         ))}
