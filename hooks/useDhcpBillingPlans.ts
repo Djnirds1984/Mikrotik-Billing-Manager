@@ -50,7 +50,18 @@ export const useDhcpBillingPlans = (routerId: string | null) => {
                 currency: planConfig.currency || currency,
                 billingType: (planConfig as any).billingType || 'prepaid',
             };
-            await dbApi.post('/dhcp-billing-plans', newPlan);
+            try {
+                await dbApi.post('/dhcp-billing-plans', newPlan);
+            } catch (postErr: any) {
+                const msg = (postErr?.message || '').toString();
+                if (msg.includes('no column named billingType')) {
+                    console.warn('[DHCP Billing Plans] Backend DB missing billingType column; applying fallback and retrying without it. To permanently fix, restart the backend to apply migration v20.');
+                    const { billingType, ...withoutBillingType } = newPlan as any;
+                    await dbApi.post('/dhcp-billing-plans', withoutBillingType);
+                } else {
+                    throw postErr;
+                }
+            }
             await fetchPlans();
         } catch (err) {
             console.error("Failed to add DHCP billing plan:", err);
@@ -60,7 +71,18 @@ export const useDhcpBillingPlans = (routerId: string | null) => {
 
     const updatePlan = async (updatedPlan: DhcpBillingPlanWithId) => {
         try {
-            await dbApi.patch(`/dhcp-billing-plans/${updatedPlan.id}`, updatedPlan);
+            try {
+                await dbApi.patch(`/dhcp-billing-plans/${updatedPlan.id}`, updatedPlan);
+            } catch (patchErr: any) {
+                const msg = (patchErr?.message || '').toString();
+                if (msg.includes('no column named billingType')) {
+                    console.warn('[DHCP Billing Plans] Backend DB missing billingType column; applying fallback and retrying update without it. To permanently fix, restart the backend to apply migration v20.');
+                    const { billingType, ...withoutBillingType } = updatedPlan as any;
+                    await dbApi.patch(`/dhcp-billing-plans/${updatedPlan.id}`, withoutBillingType);
+                } else {
+                    throw patchErr;
+                }
+            }
             await fetchPlans();
         } catch (err) {
             console.error("Failed to update DHCP billing plan:", err);

@@ -46,7 +46,7 @@ const DhcpPlanForm: React.FC<{
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium">Validity (Days)</label>
+                        <label className="block text sm font-medium">Validity (Days)</label>
                         <input type="number" name="cycle_days" value={plan.cycle_days || ''} onChange={handleChange} required min="1" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                     </div>
                     <div>
