@@ -15,8 +15,8 @@ const DhcpPlanForm: React.FC<{
     const [plan, setPlan] = useState<Partial<DhcpBillingPlanWithId>>({});
     
     useEffect(() => {
-        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency, billingType: 'prepaid' } as Partial<DhcpBillingPlanWithId>;
-        const init = initialData ? { ...initialData, billingType: (initialData as any).billingType || 'prepaid' } : defaults;
+        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency } as Partial<DhcpBillingPlanWithId>;
+        const init = initialData ? { ...initialData } : defaults;
         setPlan(init);
     }, [initialData, currency]);
 
@@ -46,7 +46,7 @@ const DhcpPlanForm: React.FC<{
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text sm font-medium">Validity (Days)</label>
+                        <label className="block text-sm font-medium">Validity (Days)</label>
                         <input type="number" name="cycle_days" value={plan.cycle_days || ''} onChange={handleChange} required min="1" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                     </div>
                     <div>
@@ -54,15 +54,7 @@ const DhcpPlanForm: React.FC<{
                         <input type="number" name="speedLimit" value={plan.speedLimit || ''} onChange={handleChange} placeholder="e.g., 5 for 5Mbps" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                     </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium">{t('billing.type')}</label>
-                        <select name="billingType" value={(plan as any).billingType || 'prepaid'} onChange={handleChange} className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
-                            <option value="prepaid">{t('billing.prepaid')}</option>
-                            <option value="postpaid">{t('billing.postpaid')}</option>
-                        </select>
-                    </div>
-                </div>
+                {/* Billing type removed from DHCP plan UI; handled per-user in client management */}
                 <div className="flex justify-end gap-4 pt-4">
                     <button type="button" onClick={onCancel} className="px-4 py-2 text-sm rounded-md">Cancel</button>
                     <button type="submit" className="px-4 py-2 text-sm bg-[--color-primary-600] text-white rounded-md">Save Plan</button>

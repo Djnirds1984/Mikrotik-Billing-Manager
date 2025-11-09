@@ -200,10 +200,10 @@ export interface BillingPlan {
     name: string;
     price: number;
     cycle: 'Monthly' | 'Quarterly' | 'Yearly';
+    billingType: 'prepaid' | 'postpaid';
     pppoeProfile: string;
     description: string;
     currency: string;
-    billingType: 'prepaid' | 'postpaid';
     routerId?: string;
 }
 
@@ -230,9 +230,9 @@ export interface DhcpBillingPlan {
     name: string;
     price: number;
     cycle_days: number;
+    billingType: 'prepaid' | 'postpaid';
     speedLimit?: string;
     currency: string;
-    billingType: 'prepaid' | 'postpaid';
 }
 
 export interface DhcpBillingPlanWithId extends DhcpBillingPlan {
@@ -700,4 +700,6 @@ export interface DhcpClientActionParams {
     // For manual edits
     expiresAt?: string; // ISO string for datetime-local
     speedLimit?: string;
+    // Per-user billing policy (moved from plan UI)
+    billingType?: 'prepaid' | 'postpaid';
 }
