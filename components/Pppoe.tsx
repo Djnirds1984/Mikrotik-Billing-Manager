@@ -198,6 +198,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
     const [nonPaymentProfile, setNonPaymentProfile] = useState('');
+    const [billingType, setBillingType] = useState<'prepaid' | 'postpaid'>('prepaid');
 
 
     useEffect(() => {
@@ -224,14 +225,21 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 } else {
                     setDueDate('');
                 }
+                if (commentData.billingType === 'postpaid' || commentData.billingType === 'prepaid') {
+                    setBillingType(commentData.billingType);
+                } else {
+                    setBillingType('prepaid');
+                }
             } catch (e) {
                 setDueDate('');
+                setBillingType('prepaid');
             }
 
         } else {
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
             setCustomer({ fullName: '', address: '', contactNumber: '', email: '' });
             setDueDate('');
+            setBillingType('prepaid');
         }
         
         if (profiles.length > 0) {
@@ -268,7 +276,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer, { dueDate, nonPaymentProfile, planId: secret.profile });
+        onSave(secretPayload, customer, { dueDate, nonPaymentProfile, planId: secret.profile, billingType });
     }
 
     return (
@@ -290,6 +298,14 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             <label>Due Date & Time</label>
                             <input type="datetime-local" value={dueDate} onChange={e => setDueDate(e.target.value)} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" />
                             <p className="text-xs text-slate-500 mt-1">Leave blank for no expiration.</p>
+                        </div>
+                        <div>
+                            <label>Billing Type</label>
+                            <select value={billingType} onChange={e => setBillingType(e.target.value as 'prepaid' | 'postpaid')} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">
+                                <option value="prepaid">Prepaid</option>
+                                <option value="postpaid">Postpaid</option>
+                            </select>
+                            <p className="text-xs text-slate-500 mt-1">Choose how this user is billed.</p>
                         </div>
                         <div>
                             <label>Profile on Expiry</label>
@@ -371,7 +387,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         });
     }, [secrets, customers]);
     
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string, planId: string }) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string; planId: string; billingType?: 'prepaid' | 'postpaid' }) => {
         setIsSubmitting(true);
         try {
             const existingCustomer = customers.find(c => c.username === secretData.name);
@@ -388,6 +404,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 commentJson.dueDate = subscriptionData.dueDate.split('T')[0]; // Store only YYYY-MM-DD
             } else {
                 delete commentJson.dueDate; // Remove due date if field is cleared
+            }
+            // Persist billing type at user level
+            if (subscriptionData.billingType) {
+                commentJson.billingType = subscriptionData.billingType;
             }
             
             const selectedPlan = plans.find(p => p.id === subscriptionData.planId);

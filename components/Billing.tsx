@@ -13,17 +13,18 @@ const PlanForm: React.FC<{
     initialData?: BillingPlanWithId | null;
     profiles: PppProfile[];
     isLoadingProfiles: boolean;
-}> = ({ onSave, onCancel, initialData, profiles, isLoadingProfiles }) => {
+    isSaving: boolean;
+}> = ({ onSave, onCancel, initialData, profiles, isLoadingProfiles, isSaving }) => {
     // FIX: Add currency to plan state and handle it during initialization.
     const { t, currency } = useLocalization();
-    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', pppoeProfile: '', description: '', currency, billingType: 'prepaid' };
-    const [plan, setPlan] = useState<BillingPlan>(initialData || defaultPlanState);
+    const defaultPlanState: Omit<BillingPlan, 'billingType'> = { name: '', price: 0, cycle: 'Monthly', pppoeProfile: '', description: '', currency };
+    const [plan, setPlan] = useState<Omit<BillingPlan, 'billingType'>>(initialData ? { name: initialData.name, price: initialData.price, cycle: initialData.cycle, pppoeProfile: initialData.pppoeProfile, description: initialData.description, currency: initialData.currency } : defaultPlanState);
     
     useEffect(() => {
         // If it's an existing plan, it will have its own currency.
         // If it's a new plan, it will get the current global currency from the context.
         const initialState = initialData ? 
-            { ...initialData, billingType: (initialData as any).billingType || 'prepaid' } : 
+            { name: initialData.name, price: initialData.price, cycle: initialData.cycle, pppoeProfile: initialData.pppoeProfile, description: initialData.description, currency: initialData.currency } : 
             { ...defaultPlanState, currency: currency };
 
         if (!initialState.pppoeProfile && profiles.length > 0) {
@@ -34,12 +35,12 @@ const PlanForm: React.FC<{
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        setPlan(prev => ({ ...prev, [name]: name === 'price' ? parseFloat(value) || 0 : value }));
+        setPlan(prev => ({ ...prev, [name]: name === 'price' ? parseFloat(value) || 0 : value } as any));
     };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave(initialData ? { ...initialData, ...plan } : plan);
+        onSave(initialData ? { ...initialData, ...plan } as BillingPlanWithId : (plan as BillingPlan));
     };
 
     return (
@@ -72,22 +73,14 @@ const PlanForm: React.FC<{
                         </select>
                     </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label htmlFor="billingType" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.type')}</label>
-                        <select name="billingType" value={plan.billingType as any} onChange={handleChange} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]">
-                            <option value="prepaid">{t('billing.prepaid')}</option>
-                            <option value="postpaid">{t('billing.postpaid')}</option>
-                        </select>
-                    </div>
-                </div>
+                {/* billingType removed from plan form; handled per-user in modal */}
                 <div>
                     <label htmlFor="description" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.description')}</label>
                     <textarea name="description" value={plan.description} onChange={handleChange} rows={2} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]" placeholder={t('billing.description_placeholder')}></textarea>
                 </div>
                 <div className="flex items-center justify-end space-x-4 pt-4">
                     <button type="button" onClick={onCancel} className="px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-lg shadow-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700">{t('common.cancel')}</button>
-                    <button type="submit" className="px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] transition-all hover:shadow-md">{t('common.save_plan')}</button>
+                    <button type="submit" disabled={isLoadingProfiles || isSaving} className="px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] transition-all hover:shadow-md disabled:opacity-50">{isSaving ? t('common.saving') : t('common.save_plan')}</button>
                 </div>
             </form>
         </div>
@@ -105,6 +98,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
     const [isAdding, setIsAdding] = useState(false);
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if ((isAdding || editingPlan) && selectedRouter) {
@@ -119,14 +113,23 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
         }
     }, [isAdding, editingPlan, selectedRouter]);
 
-    const handleSave = (planData: BillingPlan | BillingPlanWithId) => {
-        if ('id' in planData && planData.id) {
-            updatePlan(planData as BillingPlanWithId);
-        } else {
-            addPlan(planData as BillingPlan);
+    const handleSave = async (planData: BillingPlan | BillingPlanWithId) => {
+        setIsSaving(true);
+        try {
+            if ('id' in planData && (planData as any).id) {
+                await updatePlan(planData as BillingPlanWithId);
+                alert(t('common.updated_success'));
+            } else {
+                await addPlan(planData as BillingPlan);
+                alert(t('common.saved_success'));
+            }
+            setEditingPlan(null);
+            setIsAdding(false);
+        } catch (err) {
+            alert(`${t('common.error_saving')}: ${(err as Error).message}`);
+        } finally {
+            setIsSaving(false);
         }
-        setEditingPlan(null);
-        setIsAdding(false);
     };
 
     const handleDelete = (planId: string) => {
@@ -182,6 +185,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                             initialData={editingPlan}
                             profiles={profiles}
                             isLoadingProfiles={isLoadingProfiles}
+                            isSaving={isSaving}
                         />
                     )}
                 </div>
@@ -207,8 +211,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                                             <span className="font-bold text-slate-800 dark:text-slate-200">{formatCurrency(plan.price)}</span> / {t(`billing.${plan.cycle.toLowerCase()}`)}
                                             <span className="mx-2 text-slate-300 dark:text-slate-600">|</span>
                                             {t('billing.profile')}: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">{plan.pppoeProfile}</span>
-                                            <span className="mx-2 text-slate-300 dark:text-slate-600">|</span>
-                                            {t('billing.type')}: <span className="inline-block px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs">{t(`billing.${(plan as any).billingType || 'prepaid'}`)}</span>
+                                            {/* billingType display removed; handled per-user in modal */}
                                         </p>
                                     </div>
                                 </div>
