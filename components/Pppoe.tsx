@@ -12,6 +12,7 @@ import { useCustomers } from '../hooks/useCustomers.ts';
 import { Loader } from './Loader.tsx';
 import { RouterIcon, EditIcon, TrashIcon, ExclamationTriangleIcon, UsersIcon, SignalIcon, CurrencyDollarIcon, KeyIcon, SearchIcon, EyeIcon, EyeSlashIcon, ServerIcon } from '../constants.tsx';
 import { PaymentModal } from './PaymentModal.tsx';
+import { GracePeriodModal } from './GracePeriodModal.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -347,6 +348,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [isUserModalOpen, setUserModalOpen] = useState(false);
     const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
     const [selectedSecret, setSelectedSecret] = useState<PppSecret | null>(null);
+    const [isGraceModalOpen, setGraceModalOpen] = useState(false);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -371,19 +373,25 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const combinedUsers = useMemo(() => {
         return secrets.map(secret => {
             const customer = customers.find(c => c.username === secret.name);
-            let subscription = { plan: 'N/A', dueDate: 'No Info' };
+            let subscription = { plan: 'N/A', dueDate: 'No Info' } as { plan: string; dueDate: string };
+            let billingType: 'prepaid' | 'postpaid' | undefined = undefined;
+            let nonPaymentProfile: string | undefined = undefined;
             if (secret.comment) {
                 try { 
                     const parsedComment = JSON.parse(secret.comment);
                     subscription.plan = parsedComment.plan || 'N/A';
                     subscription.dueDate = parsedComment.dueDate || 'No Info';
+                    billingType = parsedComment.billingType;
+                    nonPaymentProfile = parsedComment.nonPaymentProfile;
                 } catch (e) { /* ignore */ }
             }
             return {
                 ...secret,
                 customer,
-                subscription
-            };
+                subscription,
+                billingType,
+                nonPaymentProfile,
+            } as PppSecret & { customer?: Customer; subscription: { plan: string; dueDate: string }; billingType?: 'prepaid' | 'postpaid'; nonPaymentProfile?: string };
         });
     }, [secrets, customers]);
     
@@ -430,7 +438,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             if (existingCustomer) {
                 await updateCustomer({ ...existingCustomer, ...customerData });
             } else {
-                const hasCustomerInfo = Object.values(customerData).some(val => val && String(val).trim() !== '');
+                const hasCustomerInfo = Object.values(customerData).some val => val && String(val).trim() !== '');
                 if (hasCustomerInfo) {
                     await addCustomer({ 
                         routerId: selectedRouter.id, 
@@ -461,12 +469,118 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const handlePayment = async ({ sale, payment }: any) => {
         if (!selectedSecret) return false;
         try {
+            // Determine billing policy from user's stored comment JSON
+            let commentJson: any = {};
+            try {
+                if (selectedSecret.comment) {
+                    commentJson = JSON.parse(selectedSecret.comment);
+                }
+            } catch (_) { /* ignore malformed comment */ }
+
+            const billingType: 'prepaid' | 'postpaid' =
+                commentJson.billingType === 'postpaid' ? 'postpaid' : 'prepaid';
+
+            const originalDueDate: string | undefined = commentJson.dueDate; // YYYY-MM-DD
+            // Policy application:
+            // - Prepaid: new due date becomes the payment date
+            // - Postpaid: keep the original activation due date (no shift)
+            const newDueDate: string =
+                billingType === 'prepaid'
+                    ? payment.paymentDate // YYYY-MM-DD from PaymentModal
+                    : (originalDueDate || payment.paymentDate);
+
+            // Update the user's comment JSON with the new/retained due date
+            commentJson.dueDate = newDueDate;
+
+            const secretData: PppSecretData = {
+                name: selectedSecret.name,
+                service: 'pppoe',
+                profile: selectedSecret.profile,
+                comment: JSON.stringify(commentJson),
+                disabled: selectedSecret.disabled || 'false',
+            };
+
+            // Ask backend to update scheduler/profile handling based on the due date and non-payment profile
+            await savePppUser(selectedRouter, {
+                initialSecret: selectedSecret,
+                secretData,
+                subscriptionData: {
+                    dueDate: newDueDate,
+                    nonPaymentProfile: payment.nonPaymentProfile,
+                },
+            });
+
+            // Persist the chosen non-payment profile in comment for future grace handling
+            if (payment?.nonPaymentProfile) {
+                try {
+                    const parsed = JSON.parse(secretData.comment || '{}');
+                    parsed.nonPaymentProfile = payment.nonPaymentProfile;
+                    secretData.comment = JSON.stringify(parsed);
+                } catch (_) { /* ignore */ }
+            }
+
+            // Register the payment and record the sale
             await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
             await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString() });
             await fetchData();
             return true;
         } catch (err) {
             alert(`Payment failed: ${(err as Error).message}`);
+            return false;
+        }
+    };
+
+    const handleGrantGrace = async ({ graceDays }: { graceDays: number }) => {
+        if (!selectedSecret) return false;
+        try {
+            // Parse existing comment JSON to get dueDate and billingType
+            let parsed: any = {};
+            try {
+                if (selectedSecret.comment) parsed = JSON.parse(selectedSecret.comment);
+            } catch (_) { /* ignore malformed */ }
+
+            const billingType: 'prepaid' | 'postpaid' = parsed.billingType === 'postpaid' ? 'postpaid' : 'prepaid';
+            if (billingType !== 'postpaid') {
+                alert('Grace period is only applicable to postpaid clients.');
+                return false;
+            }
+
+            const baseDue = parsed.dueDate || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+            const baseDate = new Date(`${baseDue}T00:00:00`);
+            const extendedMs = baseDate.getTime() + graceDays * 24 * 60 * 60 * 1000;
+            const extendedDateIso = new Date(extendedMs).toISOString().split('T')[0];
+
+            // Update comment JSON
+            parsed.dueDate = extendedDateIso;
+            parsed.graceDays = graceDays;
+            parsed.graceGrantedOn = new Date().toISOString();
+
+            const secretData: PppSecretData = {
+                name: selectedSecret.name,
+                service: 'pppoe',
+                profile: selectedSecret.profile,
+                comment: JSON.stringify(parsed),
+                disabled: selectedSecret.disabled || 'false',
+            };
+
+            // Use stored nonPaymentProfile if available
+            const nonPaymentProfile = parsed.nonPaymentProfile || '';
+
+            await savePppUser(selectedRouter, {
+                initialSecret: selectedSecret,
+                secretData,
+                subscriptionData: {
+                    dueDate: extendedDateIso,
+                    nonPaymentProfile,
+                },
+            });
+
+            setGraceModalOpen(false);
+            setSelectedSecret(null);
+            await fetchData();
+            return true;
+        } catch (err) {
+            alert(`Failed to grant grace period: ${(err as Error).message}`);
             return false;
         }
     };
@@ -487,6 +601,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 isSubmitting={isSubmitting}
             />
             <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />
+            <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} secret={selectedSecret} onSave={handleGrantGrace} />
 
              <div className="flex justify-end mb-4">
                 <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>
@@ -502,7 +617,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         </tr>
                     </thead>
                     <tbody>
-                        {combinedUsers.map(user => (
+                        {combinedUsers.map user => (
                             <tr key={user.id} className={`border-b dark:border-slate-700 ${user.disabled === 'true' ? 'opacity-50' : ''}`}>
                                 <td className="px-6 py-4 font-medium">
                                     <p className="text-slate-900 dark:text-slate-100">{user.name}</p>
@@ -518,6 +633,15 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     >
                                         Pay
                                     </button>
+                                    {user.billingType === 'postpaid' && (
+                                        <button
+                                            onClick={() => { setSelectedSecret(user); setGraceModalOpen(true); }}
+                                            className="px-3 py-1 text-sm bg-indigo-600 text-white rounded-md font-semibold hover:bg-indigo-700 transition-colors"
+                                            title="Grant Grace Period"
+                                        >
+                                            Grant Grace
+                                        </button>
+                                    )}
                                     <button
                                         onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }}
                                         className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700 transition-colors"
@@ -655,7 +779,7 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
                 getPppProfiles(selectedRouter),
             ]);
             setServers(serversData);
-            setInterfaces(interfacesData.filter(i => i.type === 'bridge' || i.type === 'ether' || i.type === 'vlan'));
+            setInterfaces(interfacesData.filter i => i.type === 'bridge' || i.type === 'ether' || i.type === 'vlan'));
             setProfiles(profilesData);
         } catch (err) {
             setError(`Could not fetch data: ${(err as Error).message}`);
@@ -745,10 +869,10 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
                             <h3 className="text-xl font-bold mb-4">{initialData ? t('pppoe.edit_server') : t('pppoe.add_new_server')}</h3>
                             <div className="space-y-4">
                                 <div><label>{t('pppoe.service_name')}</label><input value={server['service-name']} onChange={e => setServer(s => ({...s, 'service-name': e.target.value}))} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2" /></div>
-                                <div><label>{t('pppoe.interface')}</label><select value={server.interface} onChange={e => setServer(s => ({...s, interface: e.target.value}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">{interfaces.map(i => <option key={i.name} value={i.name}>{i.name}</option>)}</select></div>
-                                <div><label>{t('pppoe.default_profile')}</label><select value={server['default-profile']} onChange={e => setServer(s => ({...s, 'default-profile': e.target.value}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">{profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
+                                <div><label>{t('pppoe.interface')}</label><select value={server.interface} onChange={e => setServer(s => ({...s, interface: e.target.value}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">{interfaces.map i => <option key={i.name} value={i.name}>{i.name}</option>)}</select></div>
+                                <div><label>{t('pppoe.default_profile')}</label><select value={server['default-profile']} onChange={e => setServer(s => ({...s, 'default-profile': e.target.value}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">{profiles.map p => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
                                 <div><label>{t('pppoe.authentication')}</label><div className="flex flex-wrap gap-4 mt-2">
-                                    {['pap','chap','mschap1','mschap2'].map(method => (
+                                    {['pap','chap','mschap1','mschap2'].map method => (
                                         <label key={method} className="flex items-center gap-2"><input type="checkbox" checked={server.authentication.includes(method as any)} onChange={e => handleAuthChange(method, e.target.checked)} />{method}</label>
                                     ))}
                                 </div></div>
@@ -772,7 +896,7 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
                 <table className="w-full text-sm"><thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                     <tr><th className="px-6 py-3">Service</th><th className="px-6 py-3">Interface</th><th className="px-6 py-3">Default Profile</th><th className="px-6 py-3">Status</th><th className="px-6 py-3 text-right">Actions</th></tr></thead>
-                    <tbody>{servers.map(s => (
+                    <tbody>{servers.map s => (
                         <tr key={s.id} className={`border-b dark:border-slate-700 ${s.disabled === 'true' ? 'opacity-50' : ''}`}>
                             <td className="px-6 py-4 font-medium">{s['service-name']}</td><td className="px-6 py-4">{s.interface}</td><td className="px-6 py-4">{s['default-profile']}</td>
                             <td className="px-6 py-4">{s.disabled === 'true' ? <span className="text-red-500">Disabled</span> : <span className="text-green-500">Enabled</span>}</td>
