@@ -21,7 +21,8 @@ export const useDhcpBillingPlans = (routerId: string | null) => {
             const data = await dbApi.get<DhcpBillingPlanWithId[]>(`/dhcp-billing-plans?routerId=${routerId}`);
             const dataWithFallback = data.map(plan => ({
                 ...plan,
-                currency: plan.currency || 'USD'
+                currency: plan.currency || 'USD',
+                billingType: (plan as any).billingType || 'prepaid',
             }));
             setPlans(dataWithFallback);
         } catch (err) {
@@ -43,6 +44,7 @@ export const useDhcpBillingPlans = (routerId: string | null) => {
                 id: `dhcp_plan_${Date.now()}`,
                 routerId: routerId,
                 currency: planConfig.currency || currency,
+                billingType: (planConfig as any).billingType || 'prepaid',
             };
             await dbApi.post('/dhcp-billing-plans', newPlan);
             await fetchPlans();
