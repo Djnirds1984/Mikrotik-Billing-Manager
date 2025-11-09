@@ -438,7 +438,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             if (existingCustomer) {
                 await updateCustomer({ ...existingCustomer, ...customerData });
             } else {
-                const hasCustomerInfo = Object.values(customerData).some val => val && String(val).trim() !== '');
+                const hasCustomerInfo = Object.values(customerData).some(val => val && String(val).trim() !== '');
                 if (hasCustomerInfo) {
                     await addCustomer({ 
                         routerId: selectedRouter.id, 
@@ -617,7 +617,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         </tr>
                     </thead>
                     <tbody>
-                        {combinedUsers.map user => (
+                        {combinedUsers.map(user => (
                             <tr key={user.id} className={`border-b dark:border-slate-700 ${user.disabled === 'true' ? 'opacity-50' : ''}`}>
                                 <td className="px-6 py-4 font-medium">
                                     <p className="text-slate-900 dark:text-slate-100">{user.name}</p>
@@ -779,7 +779,7 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
                 getPppProfiles(selectedRouter),
             ]);
             setServers(serversData);
-            setInterfaces(interfacesData.filter i => i.type === 'bridge' || i.type === 'ether' || i.type === 'vlan'));
+            setInterfaces(interfacesData.filter(i => i.type === 'bridge' || i.type === 'ether' || i.type === 'vlan'));
             setProfiles(profilesData);
         } catch (err) {
             setError(`Could not fetch data: ${(err as Error).message}`);
@@ -869,10 +869,10 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
                             <h3 className="text-xl font-bold mb-4">{initialData ? t('pppoe.edit_server') : t('pppoe.add_new_server')}</h3>
                             <div className="space-y-4">
                                 <div><label>{t('pppoe.service_name')}</label><input value={server['service-name']} onChange={e => setServer(s => ({...s, 'service-name': e.target.value}))} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2" /></div>
-                                <div><label>{t('pppoe.interface')}</label><select value={server.interface} onChange={e => setServer(s => ({...s, interface: e.target.value}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">{interfaces.map i => <option key={i.name} value={i.name}>{i.name}</option>)}</select></div>
-                                <div><label>{t('pppoe.default_profile')}</label><select value={server['default-profile']} onChange={e => setServer(s => ({...s, 'default-profile': e.target.value}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">{profiles.map p => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
+                                <div><label>{t('pppoe.interface')}</label><select value={server.interface} onChange={e => setServer(s => ({...s, interface: e.target.value}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">{interfaces.map(i => <option key={i.name} value={i.name}>{i.name}</option>)}</select></div>
+                                <div><label>{t('pppoe.default_profile')}</label><select value={server['default-profile']} onChange={e => setServer(s => ({...s, 'default-profile': e.target.value}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">{profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
                                 <div><label>{t('pppoe.authentication')}</label><div className="flex flex-wrap gap-4 mt-2">
-                                    {['pap','chap','mschap1','mschap2'].map method => (
+                                    {['pap','chap','mschap1','mschap2'].map(method => (
                                         <label key={method} className="flex items-center gap-2"><input type="checkbox" checked={server.authentication.includes(method as any)} onChange={e => handleAuthChange(method, e.target.checked)} />{method}</label>
                                     ))}
                                 </div></div>
@@ -896,7 +896,7 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
                 <table className="w-full text-sm"><thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                     <tr><th className="px-6 py-3">Service</th><th className="px-6 py-3">Interface</th><th className="px-6 py-3">Default Profile</th><th className="px-6 py-3">Status</th><th className="px-6 py-3 text-right">Actions</th></tr></thead>
-                    <tbody>{servers.map s => (
+                    <tbody>{servers.map(s => (
                         <tr key={s.id} className={`border-b dark:border-slate-700 ${s.disabled === 'true' ? 'opacity-50' : ''}`}>
                             <td className="px-6 py-4 font-medium">{s['service-name']}</td><td className="px-6 py-4">{s.interface}</td><td className="px-6 py-4">{s['default-profile']}</td>
                             <td className="px-6 py-4">{s.disabled === 'true' ? <span className="text-red-500">Disabled</span> : <span className="text-green-500">Enabled</span>}</td>
