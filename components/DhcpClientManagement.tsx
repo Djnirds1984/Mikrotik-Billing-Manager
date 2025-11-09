@@ -376,3 +376,113 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
             });
             setEditModalOpen(false);
             await fetchData();
+        } catch (err) {
+            alert(`Failed to save client: ${(err as Error).message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    const handleDeactivateOrDelete = async (client: DhcpClient) => {
+         if (window.confirm(`Are you sure you want to ${client.status === 'active' ? 'deactivate' : 'delete'} this client?`)) {
+            try {
+                await deleteDhcpClient(selectedRouter, client);
+                await fetchData();
+            } catch (err) { alert(`Failed to perform action: ${(err as Error).message}`); }
+         }
+    };
+    
+    if ((isLoading || isLoadingPlans) && clients.length === 0) return <div className="flex justify-center p-8"><Loader /></div>;
+    if (error) return <div className="p-4 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-md">{error}</div>;
+
+    return (
+        <div className="space-y-6">
+            <ActivationPaymentModal 
+                isOpen={isPaymentModalOpen} 
+                onClose={() => setPaymentModalOpen(false)} 
+                onSave={handleSavePayment} 
+                client={selectedClient} 
+                plans={plans}
+                isSubmitting={isSubmitting}
+                dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
+            />
+            <EditClientModal
+                isOpen={isEditModalOpen}
+                onClose={() => setEditModalOpen(false)}
+                onSave={handleSaveEdit}
+                client={selectedClient}
+                isSubmitting={isSubmitting}
+                dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
+            />
+
+            <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
+
+            {isLegacyApi && (
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 rounded-lg flex items-start gap-3">
+                    <ExclamationTriangleIcon className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-1" />
+                    <div>
+                        <h4 className="font-bold">Legacy API Mode</h4>
+                        <p className="text-sm">Client management features (Activate, Renew, Edit, Deactivate) are disabled because this router is configured to use the legacy API (RouterOS v6). These features require the REST API (RouterOS v7+).</p>
+                    </div>
+                </div>
+            )}
+
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-900/50">
+                            <tr>
+                                <th className="px-6 py-3">Status</th>
+                                <th className="px-6 py-3">IP Address</th>
+                                <th className="px-6 py-3">MAC Address</th>
+                                <th className="px-6 py-3">Customer Info</th>
+                                <th className="px-6 py-3">Expires In</th>
+                                <th className="px-6 py-3 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {combinedClients.map(client => (
+                                <tr key={client.id} className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                    <td className="px-6 py-4">
+                                        {client.status === 'active' ? 
+                                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400">Active</span> : 
+                                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-400">Pending</span>
+                                        }
+                                    </td>
+                                    <td className="px-6 py-4 font-mono">{client.address}</td>
+                                    <td className="px-6 py-4 font-mono">{client.macAddress}</td>
+                                    <td className="px-6 py-4">
+                                        <p className="font-semibold text-slate-800 dark:text-slate-200">{client.customerInfo || client.hostName}</p>
+                                        <p className="text-xs text-slate-500">{client.contactNumber}</p>
+                                    </td>
+                                    <td className="px-6 py-4 font-mono text-sm text-slate-500 dark:text-slate-400">
+                                        {client.status === 'active' ? client.timeout || 'N/A' : 'N/A'}
+                                    </td>
+                                    <td className="px-6 py-4 text-right space-x-1">
+                                         {client.status === 'pending' ? (
+                                             <>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Activate Client"}>Activate</button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed" title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Delete from pending list"} disabled={isLegacyApi}><TrashIcon className="w-5 h-5"/></button>
+                                             </>
+                                         ) : (
+                                            <>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Pay/Renew"}>Pay/Renew</button>
+                                                <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500 disabled:opacity-50 disabled:cursor-not-allowed" title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Edit Client"} disabled={isLegacyApi}><EditIcon className="w-5 h-5"/></button>
+                                                <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Deactivate"}>Deactivate</button>
+                                            </>
+                                         )}
+                                    </td>
+                                </tr>
+                            ))}
+                             {combinedClients.length === 0 && (
+                                <tr>
+                                    <td colSpan={7} className="text-center py-8 text-slate-500">No DHCP clients found.</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
