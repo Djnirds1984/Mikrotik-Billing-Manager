@@ -23,7 +23,7 @@ const ActivationPaymentModal: React.FC<{
     const [contactNumber, setContactNumber] = useState('');
     const [email, setEmail] = useState('');
     const [selectedPlanId, setSelectedPlanId] = useState('');
-    const [downtimeDays, setDowntimeDays] = useState('0');
+    const [dueDateTime, setDueDateTime] = useState('');
 
     useEffect(() => {
         if (isOpen && client) {
@@ -32,7 +32,17 @@ const ActivationPaymentModal: React.FC<{
             setCustomerInfo(initialData.customerInfo || initialData.hostName || '');
             setContactNumber(initialData.contactNumber || '');
             setEmail(initialData.email || '');
-            setDowntimeDays('0');
+            // Initialize due date/time from existing comment if available
+            let initialDueDateTime = '';
+            if (client.comment) {
+                try {
+                    const parsed = JSON.parse(client.comment);
+                    if (parsed.dueDate) {
+                        initialDueDateTime = `${parsed.dueDate}T23:59`;
+                    }
+                } catch(e) {}
+            }
+            setDueDateTime(initialDueDateTime);
 
             if (plans.length > 0) {
                 // Try to find a plan that matches the last known plan for this client
@@ -45,20 +55,10 @@ const ActivationPaymentModal: React.FC<{
 
     const selectedPlan = useMemo(() => plans.find(p => p.id === selectedPlanId), [plans, selectedPlanId]);
     
-    const pricePerDay = useMemo(() => {
-        if (!selectedPlan || !selectedPlan.cycle_days || selectedPlan.cycle_days === 0) return 0;
-        return selectedPlan.price / selectedPlan.cycle_days;
-    }, [selectedPlan]);
-
-    const discountAmount = useMemo(() => {
-        const days = parseInt(downtimeDays, 10) || 0;
-        return pricePerDay * days;
-    }, [downtimeDays, pricePerDay]);
-
     const finalAmount = useMemo(() => {
         if (!selectedPlan) return 0;
-        return Math.max(0, selectedPlan.price - discountAmount);
-    }, [selectedPlan, discountAmount]);
+        return selectedPlan.price;
+    }, [selectedPlan]);
 
     if (!isOpen || !client) return null;
 
@@ -72,8 +72,10 @@ const ActivationPaymentModal: React.FC<{
             customerInfo,
             contactNumber,
             email,
+            // Send plan for UI sale info but we will use manual due date for update
             plan: selectedPlan,
-            downtimeDays: parseInt(downtimeDays, 10) || 0,
+            expiresAt: dueDateTime,
+            speedLimit: selectedPlan?.speedLimit,
         });
     };
 
@@ -101,21 +103,20 @@ const ActivationPaymentModal: React.FC<{
                             </div>
                             <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                     <div>
+                                    <div>
                                         <label className="block text-sm font-medium">Billing Plan</label>
                                         <select value={selectedPlanId} onChange={e => setSelectedPlanId(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
                                             {plans.length > 0 ? plans.map(p => <option key={p.id} value={p.id}>{p.name} ({formatCurrency(p.price)})</option>) : <option>No plans found</option>}
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium">Downtime Discount (Days)</label>
-                                        <input type="number" value={downtimeDays} onChange={e => setDowntimeDays(e.target.value)} min="0" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                        <label className="block text-sm font-medium">Due Date & Time</label>
+                                        <input type="datetime-local" value={dueDateTime} onChange={e => setDueDateTime(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                                     </div>
                                 </div>
                                 {selectedPlan && (
                                 <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-md space-y-1 text-sm">
                                     <div className="flex justify-between"><span>Plan Price:</span> <span>{formatCurrency(selectedPlan.price)}</span></div>
-                                    <div className="flex justify-between text-yellow-600 dark:text-yellow-400"><span>Discount:</span> <span>- {formatCurrency(discountAmount)}</span></div>
                                     <div className="flex justify-between font-bold text-lg pt-1 border-t border-slate-200 dark:border-slate-600"><span>Total Due:</span> <span>{formatCurrency(finalAmount)}</span></div>
                                 </div>
                                 )}
@@ -285,11 +286,18 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
         if (!selectedClient || !params.plan) return;
         setIsSubmitting(true);
         try {
-            await updateDhcpClientDetails(selectedRouter, selectedClient, params);
+            // Use manual due date/time, avoid plan-based auto-add of cycle days
+            const paramsForUpdate: DhcpClientActionParams = {
+                customerInfo: params.customerInfo,
+                contactNumber: params.contactNumber,
+                email: params.email,
+                expiresAt: params.expiresAt,
+                speedLimit: params.speedLimit,
+            };
+            await updateDhcpClientDetails(selectedRouter, selectedClient, paramsForUpdate);
 
-            const pricePerDay = params.plan.cycle_days > 0 ? params.plan.price / params.plan.cycle_days : 0;
-            const discountAmount = pricePerDay * (params.downtimeDays || 0);
-            const finalAmount = Math.max(0, params.plan.price - discountAmount);
+            const discountAmount = 0;
+            const finalAmount = params.plan.price;
 
             await addSale({
                 clientName: params.customerInfo,
