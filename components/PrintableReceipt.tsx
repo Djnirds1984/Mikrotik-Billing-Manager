@@ -82,7 +82,7 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
             
             <footer className="mt-8 pt-4 border-t-2 border-dashed border-black text-center">
                 <p className="font-bold">Thank you for your payment!</p>
-                <p className="text-xs mt-2">This is an official receipt.</p>
+                <p className="text-xs mt-2">This is acknowledgement receipt only.</p>
             </footer>
         </div>
     );
