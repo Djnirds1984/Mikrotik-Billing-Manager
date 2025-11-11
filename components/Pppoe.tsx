@@ -409,7 +409,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             } catch (e) { /* ignore malformed comment */ }
 
             if (subscriptionData.dueDate) {
-                commentJson.dueDate = subscriptionData.dueDate.split('T')[0]; // Store only YYYY-MM-DD
+                commentJson.dueDate = subscriptionData.dueDate; // Preserve full date-time (YYYY-MM-DDTHH:mm)
             } else {
                 delete commentJson.dueDate; // Remove due date if field is cleared
             }
@@ -424,6 +424,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 commentJson.plan = selectedPlan.name;
                 commentJson.price = selectedPlan.price;
                 commentJson.currency = selectedPlan.currency;
+                // Track the intended active profile to enable restoration after grace
+                commentJson.originalProfile = selectedPlan.pppoeProfile;
             }
             secretData.comment = JSON.stringify(commentJson);
 
@@ -481,14 +483,15 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             const billingType: 'prepaid' | 'postpaid' =
                 commentJson.billingType === 'postpaid' ? 'postpaid' : 'prepaid';
 
-            const originalDueDate: string | undefined = commentJson.dueDate; // YYYY-MM-DD
+            const originalDueDate: string | undefined = commentJson.dueDate; // May be YYYY-MM-DD or YYYY-MM-DDTHH:mm
             // Policy application:
             // - Prepaid: new due date becomes the payment date
             // - Postpaid: keep the original activation due date (no shift)
+            const normalizeDateTime = (d: string) => d.includes('T') ? d : `${d}T23:59`;
             const newDueDate: string =
                 billingType === 'prepaid'
-                    ? payment.paymentDate // YYYY-MM-DD from PaymentModal
-                    : (originalDueDate || payment.paymentDate);
+                    ? normalizeDateTime(payment.paymentDate) // Add end-of-day time if only date was provided
+                    : normalizeDateTime(originalDueDate || payment.paymentDate);
 
             // Update the user's comment JSON with the new/retained due date
             commentJson.dueDate = newDueDate;
@@ -547,20 +550,28 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 return false;
             }
 
-            const baseDue = parsed.dueDate || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-            const baseDate = new Date(`${baseDue}T00:00:00`);
+            const baseDue = parsed.dueDate || new Date().toISOString().slice(0, 16); // Prefer full datetime
+            const baseDate = new Date(baseDue.includes('T') ? baseDue : `${baseDue}T23:59`);
             const extendedMs = baseDate.getTime() + graceDays * 24 * 60 * 60 * 1000;
-            const extendedDateIso = new Date(extendedMs).toISOString().split('T')[0];
+            const extendedDateIso = new Date(extendedMs).toISOString().slice(0, 16); // Keep minutes precision
 
             // Update comment JSON
             parsed.dueDate = extendedDateIso;
             parsed.graceDays = graceDays;
             parsed.graceGrantedOn = new Date().toISOString();
 
+            // Determine the profile to restore during grace
+            let restoreProfile: string | undefined = parsed.originalProfile;
+            if (!restoreProfile && parsed.plan) {
+                const planMatch = plans.find(p => p.name === parsed.plan);
+                if (planMatch) restoreProfile = planMatch.pppoeProfile;
+            }
+            if (!restoreProfile) restoreProfile = selectedSecret.profile; // Fallback
+
             const secretData: PppSecretData = {
                 name: selectedSecret.name,
                 service: 'pppoe',
-                profile: selectedSecret.profile,
+                profile: restoreProfile,
                 comment: JSON.stringify(parsed),
                 disabled: selectedSecret.disabled || 'false',
             };
@@ -627,7 +638,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     <p className="text-xs text-slate-500">{user.customer?.fullName}</p>
                                 </td>
                                 <td>{user.profile}</td>
-                                <td>{user.subscription.dueDate}</td>
+                                <td>{(user.subscription.dueDate || '').replace('T', ' ')}</td>
                                 <td className="px-6 py-4 text-right space-x-2">
                                     <button
                                         onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }}

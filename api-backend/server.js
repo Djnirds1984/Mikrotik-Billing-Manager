@@ -415,12 +415,17 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
         const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
         const schedulerTime = "23:59:59"; // Run at the end of the day
 
-        // 2. Create new comment
+        // 2. Create new comment including time (23:59 at due day)
+        const yyyy = dueDate.getFullYear();
+        const mm = String(dueDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(dueDate.getDate()).padStart(2, '0');
+        const dueDateWithTime = `${yyyy}-${mm}-${dd}T23:59`;
+
         const newComment = JSON.stringify({
             plan: plan.name,
             price: plan.price,
             currency: plan.currency,
-            dueDate: dueDate.toISOString().split('T')[0],
+            dueDate: dueDateWithTime,
             paidDate: paymentDate
         });
 
@@ -559,7 +564,16 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
                 await req.routerInstance.delete(`/system/scheduler/${existingSchedulers[0].id}`);
             }
         } else { // If due date is set, create or update scheduler
-            const dueDate = new Date(subscriptionData.dueDate);
+            // Ensure due date has a time component; default to end-of-day if only a date is provided
+            const rawDue = subscriptionData.dueDate || '';
+            const dueWithTime = rawDue.includes('T') ? rawDue : `${rawDue}T23:59:00`;
+            let dueDate = new Date(dueWithTime);
+            // If the computed due date/time is in the past, push it slightly into the future
+            // to guarantee the scheduler will trigger.
+            const now = new Date();
+            if (!isNaN(dueDate.getTime()) && dueDate.getTime() <= now.getTime()) {
+                dueDate = new Date(now.getTime() + 60 * 1000); // +1 minute
+            }
             const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
             const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
             const schedulerTime = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}:${String(dueDate.getSeconds()).padStart(2, '0')}`;
