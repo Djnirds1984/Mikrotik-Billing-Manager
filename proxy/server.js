@@ -624,6 +624,20 @@ async function initDb() {
             user_version = 19;
         }
 
+        if (user_version < 20) {
+            console.log('Applying migration v20 (Add billingType to billing plans)...');
+            const bpCols = await db.all("PRAGMA table_info(billing_plans);");
+            if (!bpCols.some(c => c.name === 'billingType')) {
+                await db.exec("ALTER TABLE billing_plans ADD COLUMN billingType TEXT NOT NULL DEFAULT 'prepaid';");
+            }
+            const dhcpCols = await db.all("PRAGMA table_info(dhcp_billing_plans);");
+            if (!dhcpCols.some(c => c.name === 'billingType')) {
+                await db.exec("ALTER TABLE dhcp_billing_plans ADD COLUMN billingType TEXT NOT NULL DEFAULT 'prepaid';");
+            }
+            await db.exec('PRAGMA user_version = 20;');
+            user_version = 20;
+        }
+
 
     } catch (err) {
         console.error('Failed to initialize database:', err);
@@ -1233,10 +1247,42 @@ app.use(async (req, res, next) => {
 
 // Host Status
 app.get('/api/host-status', protect, (req, res) => {
-    const getCpuUsage = () => new Promise(resolve => {
-        exec("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'", (err, stdout) => {
-            resolve(parseFloat(stdout.trim()) || 0);
+    // More robust CPU computation using /proc/stat deltas
+    const readProcStat = () => new Promise((resolve, reject) => {
+        fs.readFile('/proc/stat', 'utf8', (err, data) => {
+            if (err) return reject(err);
+            const line = data.split('\n').find(l => l.startsWith('cpu '));
+            if (!line) return reject(new Error('Could not read /proc/stat cpu line'));
+            const parts = line.trim().split(/\s+/).slice(1).map(n => parseInt(n, 10));
+            const [user, nice, sys, idle, iowait, irq, softirq, steal] = parts;
+            const idleAll = idle + iowait;
+            const nonIdle = user + nice + sys + irq + softirq + steal;
+            const total = idleAll + nonIdle;
+            resolve({ idle: idleAll, total });
         });
+    });
+
+    const getCpuUsage = () => new Promise(async (resolve) => {
+        try {
+            const start = await readProcStat();
+            setTimeout(async () => {
+                try {
+                    const end = await readProcStat();
+                    const idleDelta = end.idle - start.idle;
+                    const totalDelta = end.total - start.total;
+                    const usage = totalDelta > 0 ? (100 * (1 - idleDelta / totalDelta)) : 0;
+                    resolve(Number(usage.toFixed(1)));
+                } catch {
+                    resolve(0);
+                }
+            }, 500);
+        } catch {
+            // Fallback to top parsing in case /proc/stat is unavailable
+            exec("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'", (err, stdout) => {
+                const value = parseFloat(String(stdout).trim());
+                resolve(Number.isFinite(value) ? value : 0);
+            });
+        }
     });
 
     const getMemoryUsage = () => new Promise(resolve => {

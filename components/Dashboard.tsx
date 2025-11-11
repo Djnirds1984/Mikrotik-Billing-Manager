@@ -81,8 +81,20 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
 
     useEffect(() => {
         fetchHostData();
-        const interval = setInterval(fetchHostData, 5000); // Poll every 5 seconds
-        return () => clearInterval(interval);
+        // Adaptive polling: poll less often when tab not visible
+        let hostInterval: number | null = null;
+        const startHostPolling = () => {
+            if (hostInterval) clearInterval(hostInterval);
+            const delay = document.visibilityState === 'visible' ? 10000 : 20000; // 10s when visible, 20s when hidden
+            hostInterval = window.setInterval(fetchHostData, delay);
+        };
+        startHostPolling();
+        const onVisibility = () => startHostPolling();
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+            if (hostInterval) clearInterval(hostInterval);
+        };
     }, [fetchHostData]);
 
 
@@ -173,16 +185,27 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     useEffect(() => {
         if (selectedRouter) {
             fetchRouterData(true);
-            intervalRef.current = window.setInterval(() => fetchRouterData(false), 2000);
+            const startRouterPolling = () => {
+                if (intervalRef.current) clearInterval(intervalRef.current);
+                const delay = document.visibilityState === 'visible' ? 5000 : 20000; // 5s when visible, 20s when hidden
+                intervalRef.current = window.setInterval(() => fetchRouterData(false), delay);
+            };
+            startRouterPolling();
+            const onVisibility = () => startRouterPolling();
+            document.addEventListener('visibilitychange', onVisibility);
+
+            return () => {
+                document.removeEventListener('visibilitychange', onVisibility);
+                if (intervalRef.current) clearInterval(intervalRef.current);
+            };
         } else {
             setIsLoading(false);
             setSystemInfo(null);
             setInterfaces([]);
+            return () => {
+                if (intervalRef.current) clearInterval(intervalRef.current);
+            };
         }
-
-        return () => {
-            if (intervalRef.current) clearInterval(intervalRef.current);
-        };
     }, [selectedRouter, fetchRouterData]);
     
     // --- Memos and Effects for UI ---
