@@ -625,6 +625,44 @@ export const listFiles = (router: RouterConfigWithId): Promise<MikroTikFile[]> =
     return fetchMikrotikData<MikroTikFile[]>(router, '/file');
 };
 
+// --- WAN Failover (Netwatch) ---
+export const setupWanFailoverNetwatch = (
+    router: RouterConfigWithId,
+    params: { wanInterfaces: string[]; host?: string; interval?: string }
+): Promise<{ message: string }> => {
+    return fetchMikrotikData<{ message: string }>(router, '/netwatch/failover/setup', {
+        method: 'POST',
+        body: JSON.stringify(params)
+    });
+};
+
+export const removeWanFailoverNetwatch = (
+    router: RouterConfigWithId,
+    params: { wanInterfaces: string[] }
+): Promise<{ message: string }> => {
+    return fetchMikrotikData<{ message: string }>(router, '/netwatch/failover/remove', {
+        method: 'POST',
+        body: JSON.stringify(params)
+    });
+};
+
+// --- Dual-WAN Merge (PCC) ---
+export const setupDualWanPCC = (
+    router: RouterConfigWithId,
+    params: {
+        wan1Interface: string;
+        wan2Interface: string;
+        lanInterface: string;
+        wan1Gateway: string;
+        wan2Gateway: string;
+    }
+): Promise<{ message: string }> => {
+    return fetchMikrotikData<{ message: string }>(router, '/multiwan/pcc-setup', {
+        method: 'POST',
+        body: JSON.stringify(params)
+    });
+};
+
 export const getFileContent = async (router: RouterConfigWithId, fileId: string): Promise<{ contents: string }> => {
     // The path needs to be different for legacy vs REST APIs.
     // REST (v7+) uses `?=.id=...`

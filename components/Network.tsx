@@ -6,7 +6,8 @@ import {
     setRouteProperty, configureWanFailover,
     getDhcpServers, addDhcpServer, updateDhcpServer, deleteDhcpServer,
     getDhcpLeases, makeLeaseStatic, deleteDhcpLease, runDhcpSetup, getIpPools,
-    addIpPool, updateIpPool, deleteIpPool
+    addIpPool, updateIpPool, deleteIpPool,
+    setupWanFailoverNetwatch, removeWanFailoverNetwatch, setupDualWanPCC
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
@@ -498,6 +499,18 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     const [isToggling, setIsToggling] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Interfaces for Netwatch/PCC setup
+    const [interfaces, setInterfaces] = useState<Interface[]>([]);
+    const [selectedWans, setSelectedWans] = useState<string[]>([]);
+    const [healthHost, setHealthHost] = useState('8.8.8.8');
+    const [healthInterval, setHealthInterval] = useState('00:00:10');
+
+    const [wan1Interface, setWan1Interface] = useState('');
+    const [wan2Interface, setWan2Interface] = useState('');
+    const [lanInterface, setLanInterface] = useState('');
+    const [wan1Gateway, setWan1Gateway] = useState('');
+    const [wan2Gateway, setWan2Gateway] = useState('');
+
     const fetchData = useCallback(async () => {
         // Don't set loading to true on refetch, only on initial load
         if (!wanRoutes.length) setIsLoading(true);
@@ -521,6 +534,19 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
         const interval = setInterval(fetchData, 5000); // Poll for status updates
         return () => clearInterval(interval);
     }, [fetchData]);
+
+    useEffect(() => {
+        const loadInterfaces = async () => {
+            try {
+                const data = await getInterfaces(selectedRouter);
+                setInterfaces(data);
+            } catch (err) {
+                // Non-fatal for the page; log in console
+                console.warn('Failed to load interfaces for WAN setup:', (err as Error).message);
+            }
+        };
+        loadInterfaces();
+    }, [selectedRouter]);
 
     const handleToggleRoute = async (routeId: string, isDisabled: boolean) => {
         try {
@@ -547,6 +573,54 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
         }
     };
 
+    const handleNetwatchSetup = async () => {
+        if (selectedWans.length < 1) {
+            alert('Select at least one WAN interface.');
+            return;
+        }
+        setIsToggling(true);
+        try {
+            await setupWanFailoverNetwatch(selectedRouter, { wanInterfaces: selectedWans, host: healthHost, interval: healthInterval });
+            alert('Netwatch failover configured.');
+        } catch (err) {
+            alert(`Failed to configure Netwatch: ${(err as Error).message}`);
+        } finally {
+            setIsToggling(false);
+        }
+    };
+
+    const handleNetwatchRemove = async () => {
+        if (selectedWans.length < 1) {
+            alert('Select the WAN interfaces to remove failover entries for.');
+            return;
+        }
+        setIsToggling(true);
+        try {
+            await removeWanFailoverNetwatch(selectedRouter, { wanInterfaces: selectedWans });
+            alert('Netwatch failover entries removed.');
+        } catch (err) {
+            alert(`Failed to remove Netwatch entries: ${(err as Error).message}`);
+        } finally {
+            setIsToggling(false);
+        }
+    };
+
+    const handlePccSetup = async () => {
+        if (!wan1Interface || !wan2Interface || !lanInterface || !wan1Gateway || !wan2Gateway) {
+            alert('Fill WAN1, WAN2, LAN, and both gateway IPs.');
+            return;
+        }
+        setIsToggling(true);
+        try {
+            await setupDualWanPCC(selectedRouter, { wan1Interface, wan2Interface, lanInterface, wan1Gateway, wan2Gateway });
+            alert('Dual-WAN PCC setup applied.');
+        } catch (err) {
+            alert(`Failed to set up PCC: ${(err as Error).message}`);
+        } finally {
+            setIsToggling(false);
+        }
+    };
+
     if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
     if (error) return <div className="p-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg">{error}</div>;
 
@@ -564,6 +638,92 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                 >
                     {isToggling ? 'Working...' : (failoverStatus?.enabled ? 'Disable All' : 'Enable All')}
                 </button>
+            </div>
+
+            {/* Netwatch Auto-Disable Setup */}
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Automatic WAN Disable (Netwatch)</h3>
+                </div>
+                <div className="p-4 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="text-sm">Health Host</label>
+                            <input value={healthHost} onChange={e=>setHealthHost(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="8.8.8.8" />
+                        </div>
+                        <div>
+                            <label className="text-sm">Interval (hh:mm:ss)</label>
+                            <input value={healthInterval} onChange={e=>setHealthInterval(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="00:00:10" />
+                        </div>
+                        <div>
+                            <label className="text-sm">WAN Interfaces</label>
+                            <div className="mt-1 bg-slate-100 dark:bg-slate-700 rounded-md p-2 max-h-36 overflow-y-auto">
+                                {interfaces.filter(i=>i.type==='ether').map(intf=>{
+                                    const checked = selectedWans.includes(intf.name);
+                                    return (
+                                        <label key={intf.id} className="flex items-center gap-2 text-sm py-1">
+                                            <input type="checkbox" checked={checked} onChange={()=>{
+                                                setSelectedWans(prev=> checked ? prev.filter(n=>n!==intf.name) : [...prev, intf.name]);
+                                            }} />
+                                            <span className="font-mono">{intf.name}</span>
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                        <button onClick={handleNetwatchRemove} disabled={isToggling} className="px-4 py-2 bg-slate-200 dark:bg-slate-600 rounded-lg disabled:opacity-50">Remove</button>
+                        <button onClick={handleNetwatchSetup} disabled={isToggling} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-lg disabled:opacity-50">Apply</button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Dual-WAN Merge (PCC) */}
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Dual-WAN Merge (PCC)</h3>
+                    <p className="text-sm text-slate-500">Mark connections and load-balance traffic across two WANs.</p>
+                </div>
+                <div className="p-4 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="text-sm">WAN1 Interface</label>
+                            <select value={wan1Interface} onChange={e=>setWan1Interface(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                <option value="">Select</option>
+                                {interfaces.filter(i=>i.type==='ether').map(i=> <option key={i.id} value={i.name}>{i.name}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-sm">WAN2 Interface</label>
+                            <select value={wan2Interface} onChange={e=>setWan2Interface(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                <option value="">Select</option>
+                                {interfaces.filter(i=>i.type==='ether').map(i=> <option key={i.id} value={i.name}>{i.name}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-sm">LAN Interface</label>
+                            <select value={lanInterface} onChange={e=>setLanInterface(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                <option value="">Select</option>
+                                {interfaces.filter(i=> i.type==='bridge' || i.type==='ether').map(i=> <option key={i.id} value={i.name}>{i.name}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-sm">WAN1 Gateway IP</label>
+                            <input value={wan1Gateway} onChange={e=>setWan1Gateway(e.target.value)} placeholder="192.168.1.1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                        </div>
+                        <div>
+                            <label className="text-sm">WAN2 Gateway IP</label>
+                            <input value={wan2Gateway} onChange={e=>setWan2Gateway(e.target.value)} placeholder="192.168.2.1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                        </div>
+                    </div>
+                    <div className="flex justify-end">
+                        <button onClick={handlePccSetup} disabled={isToggling} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-lg disabled:opacity-50">Apply PCC Setup</button>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                        Tip: If FastTrack is enabled, disable it for proper PCC behavior.
+                    </div>
+                </div>
             </div>
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
                  <div className="p-4 border-b border-slate-200 dark:border-slate-700">

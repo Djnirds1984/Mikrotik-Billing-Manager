@@ -1214,3 +1214,173 @@ wss.on('connection', (ws) => {
 server.listen(PORT, () => {
     console.log(`Mikrotik Billling Management API backend server running on http://localhost:${PORT}`);
 });
+
+// --- Netwatch-based WAN Failover (Interface Auto Disable/Enable) ---
+// Setup Netwatch entries that disable specified WAN interfaces when connectivity to a health host fails
+app.post('/mt-api/:routerId/netwatch/failover/setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { wanInterfaces, host = '8.8.8.8', interval = '00:00:10' } = req.body || {};
+        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 1) {
+            throw new Error('wanInterfaces array is required.');
+        }
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                for (const wan of wanInterfaces) {
+                    // Create unique entry per interface by comment
+                    await writeLegacySafe(client, [
+                        '/tool/netwatch/add',
+                        `=host=${host}`,
+                        `=interval=${interval}`,
+                        `=comment=failover-${wan}`,
+                        `=timeout=1000ms`,
+                        `=down=/interface disable ${wan}`,
+                        `=up=/interface enable ${wan}`
+                    ]);
+                }
+            } finally {
+                await client.close();
+            }
+        } else {
+            for (const wan of wanInterfaces) {
+                await req.routerInstance.post('/tool/netwatch', {
+                    host,
+                    interval,
+                    comment: `failover-${wan}`,
+                    timeout: '1000ms',
+                    down: `/interface disable ${wan}`,
+                    up: `/interface enable ${wan}`,
+                });
+            }
+        }
+        return { message: `Netwatch failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
+    });
+});
+
+// Remove Netwatch failover entries created by the setup endpoint
+app.post('/mt-api/:routerId/netwatch/failover/remove', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { wanInterfaces } = req.body || {};
+        const filterPrefix = 'failover-';
+        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 1) {
+            throw new Error('wanInterfaces array is required.');
+        }
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                let entries = await writeLegacySafe(client, '/tool/netwatch/print');
+                entries = entries.map(normalizeLegacyObject);
+                const toDelete = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
+                for (const e of toDelete) {
+                    await writeLegacySafe(client, ['/tool/netwatch/remove', `=.id=${e.id}`]);
+                }
+            } finally {
+                await client.close();
+            }
+        } else {
+            const response = await req.routerInstance.get('/tool/netwatch');
+            const entries = response.data || [];
+            const toDelete = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
+            for (const e of toDelete) {
+                await req.routerInstance.delete(`/tool/netwatch/${encodeURIComponent(e.id)}`);
+            }
+        }
+        return { message: `Removed Netwatch failover entries for ${wanInterfaces.join(', ')}.` };
+    });
+});
+
+// --- Dual-WAN Merge (PCC) Setup ---
+// Configure PCC load-balancing across two WANs with NAT and routing marks
+app.post('/mt-api/:routerId/multiwan/pcc-setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { wan1Interface, wan2Interface, lanInterface, wan1Gateway, wan2Gateway } = req.body || {};
+        if (!wan1Interface || !wan2Interface || !lanInterface || !wan1Gateway || !wan2Gateway) {
+            throw new Error('wan1Interface, wan2Interface, lanInterface, wan1Gateway, and wan2Gateway are required.');
+        }
+
+        const mangleRules = [
+            {
+                chain: 'prerouting',
+                'in-interface': lanInterface,
+                'connection-mark': 'no-mark',
+                action: 'mark-connection',
+                'new-connection-mark': 'WAN1_conn',
+                passthrough: 'yes',
+                'per-connection-classifier': 'both-addresses-and-ports:2/0'
+            },
+            {
+                chain: 'prerouting',
+                'in-interface': lanInterface,
+                'connection-mark': 'no-mark',
+                action: 'mark-connection',
+                'new-connection-mark': 'WAN2_conn',
+                passthrough: 'yes',
+                'per-connection-classifier': 'both-addresses-and-ports:2/1'
+            },
+            {
+                chain: 'prerouting',
+                'in-interface': lanInterface,
+                'connection-mark': 'WAN1_conn',
+                action: 'mark-routing',
+                'new-routing-mark': 'to_WAN1',
+                passthrough: 'yes'
+            },
+            {
+                chain: 'prerouting',
+                'in-interface': lanInterface,
+                'connection-mark': 'WAN2_conn',
+                action: 'mark-routing',
+                'new-routing-mark': 'to_WAN2',
+                passthrough: 'yes'
+            }
+        ];
+
+        const natRules = [
+            { chain: 'srcnat', 'out-interface': wan1Interface, action: 'masquerade' },
+            { chain: 'srcnat', 'out-interface': wan2Interface, action: 'masquerade' }
+        ];
+
+        const routes = [
+            { 'dst-address': '0.0.0.0/0', gateway: wan1Gateway, 'routing-mark': 'to_WAN1', 'check-gateway': 'ping' },
+            { 'dst-address': '0.0.0.0/0', gateway: wan2Gateway, 'routing-mark': 'to_WAN2', 'check-gateway': 'ping' }
+        ];
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // Add mangle rules
+                for (const r of mangleRules) {
+                    const cmd = ['/ip/firewall/mangle/add'];
+                    for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
+                    await writeLegacySafe(client, cmd);
+                }
+                // Add NAT rules
+                for (const r of natRules) {
+                    const cmd = ['/ip/firewall/nat/add'];
+                    for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
+                    await writeLegacySafe(client, cmd);
+                }
+                // Add routes for marks
+                for (const r of routes) {
+                    const cmd = ['/ip/route/add'];
+                    for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
+                    await writeLegacySafe(client, cmd);
+                }
+            } finally {
+                await client.close();
+            }
+        } else {
+            // Add rules via REST
+            for (const r of mangleRules) await req.routerInstance.post('/ip/firewall/mangle', r);
+            for (const r of natRules) await req.routerInstance.post('/ip/firewall/nat', r);
+            for (const r of routes) await req.routerInstance.post('/ip/route', r);
+        }
+
+        return { message: 'Dual-WAN PCC setup applied. Verify connectivity and active routes.' };
+    });
+});
