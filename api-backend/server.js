@@ -561,9 +561,12 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
         // If due date is cleared, delete existing scheduler
         if (!subscriptionData?.dueDate) {
             if (existingSchedulers.length > 0) {
-                await req.routerInstance.delete(`/system/scheduler/${existingSchedulers[0].id}`);
+                // Delete all existing schedulers with this name to avoid duplicates
+                for (const sch of existingSchedulers) {
+                    await req.routerInstance.delete(`/system/scheduler/${sch.id}`);
+                }
             }
-        } else { // If due date is set, create or update scheduler
+        } else { // If due date is set, delete old scheduler and create a fresh one
             // Ensure due date has a time component; default to end-of-day if only a date is provided
             const rawDue = subscriptionData.dueDate || '';
             const dueWithTime = rawDue.includes('T') ? rawDue : `${rawDue}T23:59:00`;
@@ -586,15 +589,17 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
                 'on-event': scriptSource
             };
 
+            // Always delete existing schedulers first, then create a new one
             if (existingSchedulers.length > 0) {
-                await req.routerInstance.patch(`/system/scheduler/${existingSchedulers[0].id}`, schedulerPayload);
-            } else {
-                await req.routerInstance.put('/system/scheduler', {
-                    name: schedulerName,
-                    interval: '0',
-                    ...schedulerPayload
-                });
+                for (const sch of existingSchedulers) {
+                    await req.routerInstance.delete(`/system/scheduler/${sch.id}`);
+                }
             }
+            await req.routerInstance.put('/system/scheduler', {
+                name: schedulerName,
+                interval: '0',
+                ...schedulerPayload
+            });
         }
         
         // 3. Kick user if they are active to apply changes and requested
