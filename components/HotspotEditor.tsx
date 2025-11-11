@@ -85,11 +85,25 @@ export const HotspotEditor: React.FC<{ selectedRouter: RouterConfigWithId }> = (
                 const { contents } = await getFileContent(selectedRouter, item.original.id);
                 setContent(contents);
                 setView('editor');
-                setStatus('browsing');
+                setStatus('editing');
             } catch (err) {
                 setError(`Failed to load content for '${item.name}': ${(err as Error).message}`);
                 setStatus('error');
             }
+        }
+    };
+
+    const handleReload = async () => {
+        if (!selectedFile) return;
+        setStatus('loading_content');
+        setError(null);
+        try {
+            const { contents } = await getFileContent(selectedRouter, selectedFile.id);
+            setContent(contents);
+            setStatus('editing');
+        } catch (err) {
+            setError(`Failed to reload '${selectedFile.name}': ${(err as Error).message}`);
+            setStatus('error');
         }
     };
 
@@ -160,6 +174,7 @@ export const HotspotEditor: React.FC<{ selectedRouter: RouterConfigWithId }> = (
                     </div>
                     <div className="flex items-center gap-2">
                         <button onClick={() => setView('browser')} disabled={status === 'saving'} className="px-4 py-2 text-sm bg-slate-200 rounded-lg">Back</button>
+                        <button onClick={handleReload} disabled={status === 'saving' || status === 'loading_content'} className="px-4 py-2 text-sm bg-slate-200 rounded-lg disabled:opacity-50">Reload</button>
                         <button onClick={handleSave} disabled={status === 'saving'} className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg disabled:opacity-50">
                             {status === 'saving' ? 'Saving...' : 'Save'}
                         </button>
@@ -169,8 +184,10 @@ export const HotspotEditor: React.FC<{ selectedRouter: RouterConfigWithId }> = (
                 <textarea
                     value={content}
                     onChange={e => setContent(e.target.value)}
-                    className="w-full flex-grow p-2 font-mono text-xs bg-white dark:bg-slate-900 border rounded-md resize-none"
+                    className="w-full flex-grow min-h-[50vh] p-2 font-mono text-xs bg-white dark:bg-slate-900 border rounded-md resize-none overflow-auto"
                     spellCheck="false"
+                    placeholder={status === 'editing' && content.length === 0 ? 'This file appears to be empty. You can start typing to add content.' : undefined}
+                    autoFocus
                 />
             </div>
         );
