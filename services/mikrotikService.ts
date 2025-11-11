@@ -326,6 +326,7 @@ export const savePppUser = (router: RouterConfigWithId, payload: {
     initialSecret: PppSecret | null;
     secretData: PppSecretData;
     subscriptionData: { dueDate: string; nonPaymentProfile: string };
+    kickUser?: boolean;
 }): Promise<any> => {
     return fetchMikrotikData(router, '/ppp/user/save', { method: 'POST', body: JSON.stringify(payload) });
 };

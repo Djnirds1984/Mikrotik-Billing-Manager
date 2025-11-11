@@ -394,7 +394,7 @@ app.post('/mt-api/:routerId/ip/wan-failover', getRouterConfig, async (req, res) 
 
 app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
-        const { secret, plan, nonPaymentProfile, discountDays, paymentDate } = req.body;
+        const { secret, plan, nonPaymentProfile, discountDays, paymentDate, kickUser } = req.body;
 
         if (!secret || !plan || !nonPaymentProfile || !paymentDate) {
             throw new Error('Missing required payment data.');
@@ -424,8 +424,8 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
             paidDate: paymentDate
         });
 
-        // 3. Define script to run on scheduler
-        const scriptSource = `:log info "Subscription expired for ${secret.name}, changing profile."; /ppp secret set [find name="${secret.name}"] profile=${nonPaymentProfile};`;
+        // 3. Define script to run on scheduler (also kick active session to apply changes)
+        const scriptSource = `:log info "Subscription expired for ${secret.name}, changing profile."; /ppp secret set [find name="${secret.name}"] profile=${nonPaymentProfile}; :delay 1; :if ([:len [/ppp active find name="${secret.name}"]] > 0) do={ /ppp active remove [find name="${secret.name}"] }`;
         const schedulerName = `disable-${secret.name.replace(/[^a-zA-Z0-9]/g, '_')}`; // Sanitize name for scheduler
 
         let kickMessage = '';
@@ -464,11 +464,13 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
                         `=on-event=${scriptSource}`
                     ]);
                 }
-                // 5. Kick user to apply new profile
-                const activeConnections = await writeLegacySafe(client, ['/ppp/active/print', `?name=${secret.name}`]);
-                if (activeConnections.length > 0) {
-                    await writeLegacySafe(client, ['/ppp/active/remove', `=.id=${activeConnections[0]['.id']}`]);
-                    kickMessage = "User was kicked to apply new profile.";
+                // 5. Kick user to apply new profile if requested
+                if (kickUser) {
+                    const activeConnections = await writeLegacySafe(client, ['/ppp/active/print', `?name=${secret.name}`]);
+                    if (activeConnections.length > 0) {
+                        await writeLegacySafe(client, ['/ppp/active/remove', `=.id=${activeConnections[0]['.id']}`]);
+                        kickMessage = "User was kicked to apply new profile.";
+                    }
                 }
             } finally {
                 await client.close();
@@ -502,11 +504,13 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
                     'on-event': scriptSource
                 });
             }
-            // 5. Kick user to apply new profile
-            const response = await req.routerInstance.get(`/ppp/active?name=${secret.name}`);
-            if (response.data.length > 0) {
-                await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
-                kickMessage = "User was kicked to apply new profile.";
+            // 5. Kick user to apply new profile if requested
+            if (kickUser) {
+                const response = await req.routerInstance.get(`/ppp/active?name=${secret.name}`);
+                if (response.data.length > 0) {
+                    await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
+                    kickMessage = "User was kicked to apply new profile.";
+                }
             }
         }
         
@@ -516,7 +520,7 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
 
 app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
-        const { initialSecret, secretData, subscriptionData } = req.body;
+        const { initialSecret, secretData, subscriptionData, kickUser } = req.body;
         const isUpdate = !!initialSecret?.id;
 
         if (req.routerConfig.api_type === 'legacy') {
@@ -560,7 +564,7 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
             const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
             const schedulerTime = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}:${String(dueDate.getSeconds()).padStart(2, '0')}`;
             
-            const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile};`;
+            const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile}; :delay 1; :if ([:len [/ppp active find name="${secretData.name}"]] > 0) do={ /ppp active remove [find name="${secretData.name}"] }`;
 
             const schedulerPayload = {
                 'start-date': schedulerDate,
@@ -579,13 +583,15 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
             }
         }
         
-        // 3. Kick user if they are active to apply changes
+        // 3. Kick user if they are active to apply changes and requested
         let kickMessage = '';
         try {
-            const response = await req.routerInstance.get(`/ppp/active?name=${secretData.name}`);
-            if (response.data.length > 0) {
-                await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
-                kickMessage = "User was kicked to apply changes.";
+            if (kickUser) {
+                const response = await req.routerInstance.get(`/ppp/active?name=${secretData.name}`);
+                if (response.data.length > 0) {
+                    await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
+                    kickMessage = "User was kicked to apply changes.";
+                }
             }
         } catch (kickError) {
             // Don't fail the whole operation if kick fails.

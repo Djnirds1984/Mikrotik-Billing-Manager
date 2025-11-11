@@ -432,6 +432,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 initialSecret: selectedSecret,
                 secretData,
                 subscriptionData,
+                kickUser: true,
             });
 
             // Update local customer DB
@@ -508,6 +509,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     dueDate: newDueDate,
                     nonPaymentProfile: payment.nonPaymentProfile,
                 },
+                kickUser: true,
             });
 
             // Persist the chosen non-payment profile in comment for future grace handling
@@ -520,7 +522,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             }
 
             // Register the payment and record the sale
-            await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
+            await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment, kickUser: true });
             await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString() });
             await fetchData();
             return true;
@@ -573,6 +575,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     dueDate: extendedDateIso,
                     nonPaymentProfile,
                 },
+                kickUser: true,
             });
 
             setGraceModalOpen(false);
