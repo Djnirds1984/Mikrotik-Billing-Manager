@@ -65,8 +65,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
   const { user } = useAuth();
   const { t } = useLocalization();
   const { unreadCount } = useNotifications();
-  
-  const navItems = useMemo(() => [
+
+  // Compute labels per render to reflect up-to-date translations
+  const navItems = [
     { id: 'dashboard', label: t('sidebar.dashboard'), icon: <EthernetIcon className="w-6 h-6" /> },
     { id: 'notifications', label: t('sidebar.notifications'), icon: <BellIcon className="w-6 h-6" />, badge: unreadCount },
     { id: 'scripting', label: t('sidebar.ai_scripting'), icon: <EditIcon className="w-6 h-6" /> },
@@ -90,7 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'logs', label: t('sidebar.logs'), icon: <CodeBracketIcon className="w-6 h-6" /> },
     { id: 'license', label: t('sidebar.license'), icon: <KeyIcon className="w-6 h-6" /> },
     { id: 'super_admin', label: t('sidebar.super_admin'), icon: <LockClosedIcon className="w-6 h-6" /> },
-  ], [t, unreadCount]);
+  ];
 
   const filteredNavItems = useMemo(() => {
     if (!user) return [];
