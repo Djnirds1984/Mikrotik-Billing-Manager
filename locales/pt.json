@@ -23,7 +23,8 @@
         "panel_roles": "Funções do Painel",
         "mikrotik_files": "Arquivos Mikrotik",
         "license": "Licença",
-        "super_admin": "Super Admin"
+        "super_admin": "Super Admin",
+        "database": "Configurações de Banco de Dados"
     },
     "titles": {
         "dashboard": "Painel",
@@ -46,7 +47,8 @@
         "panel_roles": "Gerenciamento de Funções do Painel",
         "mikrotik_files": "Editor de Arquivos Mikrotik",
         "license": "Licenciamento de Aplicativo",
-        "super_admin": "Super Admin: Gerador de Licença"
+        "super_admin": "Super Admin: Gerador de Licença",
+        "database": "Configurações de Banco de Dados"
     },
     "topbar": {
         "add_router_title": "Vá para a página de Roteadores para adicionar um novo roteador",

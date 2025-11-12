@@ -24,6 +24,7 @@
         "mikrotik_files": "Archivos Mikrotik",
         "license": "Licencia",
         "super_admin": "Super Admin",
+        "database": "Configuración de Base de Datos",
         "notifications": "Notificaciones"
     },
     "titles": {
@@ -48,6 +49,7 @@
         "mikrotik_files": "Editor de Archivos Mikrotik",
         "license": "Licencia de Aplicación",
         "super_admin": "Super Admin: Generador de Licencias",
+        "database": "Configuración de Base de Datos",
         "notifications": "Notificaciones del Sistema"
     },
     "topbar": {

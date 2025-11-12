@@ -16,6 +16,7 @@ export type View =
   | 'remote'
   | 'company'
   | 'system'
+  | 'database'
   | 'updater'
   | 'logs'
   | 'panel_roles'
@@ -410,6 +411,13 @@ export interface PanelHostStatus {
 export interface PanelSettings {
     language: 'en' | 'fil' | 'es' | 'pt';
     currency: 'USD' | 'PHP' | 'EUR' | 'BRL';
+    // Optional database configuration (stored in panel_settings key-value table)
+    databaseEngine?: 'sqlite' | 'mariadb';
+    dbHost?: string;
+    dbPort?: number;
+    dbUser?: string;
+    dbPassword?: string;
+    dbName?: string;
 }
 
 export interface PanelNtpStatus {

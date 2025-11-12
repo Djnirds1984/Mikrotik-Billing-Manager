@@ -23,7 +23,8 @@
         "panel_roles": "Mga Tungkulin ng Panel",
         "mikrotik_files": "Mga File ng Mikrotik",
         "license": "Lisensya",
-        "super_admin": "Super Admin"
+        "super_admin": "Super Admin",
+        "database": "Mga Setting ng Database"
     },
     "titles": {
         "dashboard": "Dashboard",
@@ -46,7 +47,8 @@
         "panel_roles": "Pamamahala ng Tungkulin ng Panel",
         "mikrotik_files": "Editor ng File ng Mikrotik",
         "license": "Paglilisensya ng Application",
-        "super_admin": "Super Admin: Tagabuo ng Lisensya"
+        "super_admin": "Super Admin: Tagabuo ng Lisensya",
+        "database": "Mga Setting ng Database"
     },
     "topbar": {
         "add_router_title": "Pumunta sa pahina ng Mga Router para magdagdag ng bagong router",
