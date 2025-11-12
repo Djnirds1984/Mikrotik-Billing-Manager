@@ -529,7 +529,107 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
         const isUpdate = !!initialSecret?.id;
 
         if (req.routerConfig.api_type === 'legacy') {
-            throw new Error("This feature requires the REST API (RouterOS v7+) and is not supported for legacy API connections.");
+            // Legacy API implementation for PPP secret save and scheduler management
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // 1. Save the secret (add or update)
+                let legacySecretId = null;
+                // Always try to locate by name to get the correct legacy ID
+                const foundSecrets = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${secretData.name}`]);
+                if (Array.isArray(foundSecrets) && foundSecrets.length > 0) {
+                    legacySecretId = foundSecrets[0]['.id'] || foundSecrets[0].id;
+                }
+
+                if (legacySecretId) {
+                    // Update existing secret, only send provided fields
+                    const query = ['/ppp/secret/set', `=.id=${legacySecretId}`];
+                    Object.entries(secretData || {}).forEach(([key, value]) => {
+                        if (value !== undefined && value !== null) {
+                            query.push(`=${key}=${value}`);
+                        }
+                    });
+                    await writeLegacySafe(client, query);
+                } else {
+                    // Add new secret
+                    const addQuery = ['/ppp/secret/add'];
+                    Object.entries(secretData || {}).forEach(([key, value]) => {
+                        if (value !== undefined && value !== null) {
+                            addQuery.push(`=${key}=${value}`);
+                        }
+                    });
+                    await writeLegacySafe(client, addQuery);
+                    // Re-fetch to get the new ID
+                    const recheck = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${secretData.name}`]);
+                    if (Array.isArray(recheck) && recheck.length > 0) {
+                        legacySecretId = recheck[0]['.id'] || recheck[0].id;
+                    }
+                }
+
+                // 2. Manage the scheduler
+                const schedulerName = `disable-${secretData.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                const existingSchedulers = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedulerName}`]);
+                // If due date is cleared, delete existing scheduler
+                if (!subscriptionData?.dueDate) {
+                    if (Array.isArray(existingSchedulers) && existingSchedulers.length > 0) {
+                        for (const sch of existingSchedulers) {
+                            const schId = sch['.id'] || sch.id;
+                            await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${schId}`]);
+                        }
+                    }
+                } else {
+                    // If due date is set, delete old scheduler and create a fresh one
+                    const rawDue = subscriptionData.dueDate || '';
+                    const dueWithTime = rawDue.includes('T') ? rawDue : `${rawDue}T23:59:00`;
+                    let dueDate = new Date(dueWithTime);
+                    const now = new Date();
+                    if (!isNaN(dueDate.getTime()) && dueDate.getTime() <= now.getTime()) {
+                        dueDate = new Date(now.getTime() + 60 * 1000); // +1 minute
+                    }
+                    const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+                    const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
+                    const schedulerTime = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}:${String(dueDate.getSeconds()).padStart(2, '0')}`;
+
+                    const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile}; :delay 1; :if ([:len [/ppp active find name="${secretData.name}"]] > 0) do={ /ppp active remove [find name="${secretData.name}"] }`;
+
+                    // Always delete existing schedulers first, then create a new one
+                    if (Array.isArray(existingSchedulers) && existingSchedulers.length > 0) {
+                        for (const sch of existingSchedulers) {
+                            const schId = sch['.id'] || sch.id;
+                            await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${schId}`]);
+                        }
+                    }
+                    const addScheduler = [
+                        '/system/scheduler/add',
+                        `=name=${schedulerName}`,
+                        `=interval=0`,
+                        `=start-date=${schedulerDate}`,
+                        `=start-time=${schedulerTime}`,
+                        `=on-event=${scriptSource}`
+                    ];
+                    await writeLegacySafe(client, addScheduler);
+                }
+
+                // 3. Kick user if requested
+                let kickMessage = '';
+                try {
+                    if (kickUser) {
+                        const activeList = await writeLegacySafe(client, ['/ppp/active/print', `?name=${secretData.name}`]);
+                        if (Array.isArray(activeList) && activeList.length > 0) {
+                            const activeId = activeList[0]['.id'] || activeList[0].id;
+                            await writeLegacySafe(client, ['/ppp/active/remove', `=.id=${activeId}`]);
+                            kickMessage = "User was kicked to apply changes.";
+                        }
+                    }
+                } catch (kickError) {
+                    console.error(`Could not kick user ${secretData.name}: ${kickError.message}`);
+                    kickMessage = "Could not kick user; they may need to reconnect manually.";
+                }
+
+                return { message: `User saved and subscription scheduled successfully. ${kickMessage}`.trim() };
+            } finally {
+                await client.close();
+            }
         }
 
         // 1. Save the secret (add or update)
@@ -989,7 +1089,63 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
         };
 
         if (req.routerConfig.api_type === 'legacy') {
-            throw new Error("This feature is not supported for the legacy API.");
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // 1. Find the lease
+                const leases = await writeLegacySafe(client, ['/ip/dhcp-server/lease/print', `?mac-address=${macAddress}`]);
+                if (!Array.isArray(leases) || leases.length === 0) {
+                    throw new Error(`No DHCP lease found for MAC address ${macAddress}. The client may have disconnected. Please refresh.`);
+                }
+                const lease = leases[0];
+                const leaseId = lease['.id'] || lease.id;
+
+                // 2. Make lease static if it's dynamic
+                if (lease.dynamic === 'true' || lease.dynamic === true) {
+                    await writeLegacySafe(client, ['/ip/dhcp-server/lease/make-static', `?.id=${leaseId}`]);
+                }
+
+                // 3. Set rate limit on the static lease
+                const speed = speedLimit && !isNaN(parseFloat(speedLimit)) ? parseFloat(speedLimit) : 0;
+                const rateLimitValue = speed > 0 ? `${speed}M/${speed}M` : '';
+                const setLease = ['/ip/dhcp-server/lease/set', `=.id=${leaseId}`];
+                // empty value is allowed to clear the rate-limit
+                setLease.push(`=rate-limit=${rateLimitValue}`);
+                await writeLegacySafe(client, setLease);
+
+                // 4. Update Address List entry (remove from pending, add/update in authorized)
+                const pendingList = await writeLegacySafe(client, ['/ip/firewall/address-list/print', `?address=${address}`, '?list=pending-dhcp-users']);
+                if (Array.isArray(pendingList) && pendingList.length > 0) {
+                    for (const p of pendingList) {
+                        const pid = p['.id'] || p.id;
+                        await writeLegacySafe(client, ['/ip/firewall/address-list/remove', `=.id=${pid}`]);
+                    }
+                }
+
+                const authList = await writeLegacySafe(client, ['/ip/firewall/address-list/print', `?address=${address}`, '?list=authorized-dhcp-users']);
+                if (Array.isArray(authList) && authList.length > 0) {
+                    const aid = authList[0]['.id'] || authList[0].id;
+                    const setAuth = ['/ip/firewall/address-list/set', `=.id=${aid}`, `=list=authorized-dhcp-users`, `=address=${address}`, `=comment=${JSON.stringify(commentData)}`];
+                    await writeLegacySafe(client, setAuth);
+                } else {
+                    const addAuth = ['/ip/firewall/address-list/add', `=list=authorized-dhcp-users`, `=address=${address}`, `=comment=${JSON.stringify(commentData)}`];
+                    await writeLegacySafe(client, addAuth);
+                }
+
+                // 5. Manage Scheduler
+                const schedulers = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedulerName}`]);
+                if (Array.isArray(schedulers) && schedulers.length > 0) {
+                    const sid = schedulers[0]['.id'] || schedulers[0].id;
+                    const setSched = ['/system/scheduler/set', `=.id=${sid}`, `=start-date=${schedulerDate}`, `=start-time=${schedulerTime}`, `=on-event=${scriptSource}`];
+                    await writeLegacySafe(client, setSched);
+                } else {
+                    const addSched = ['/system/scheduler/add', `=name=${schedulerName}`, `=start-date=${schedulerDate}`, `=start-time=${schedulerTime}`, `=interval=0`, `=on-event=${scriptSource}`];
+                    await writeLegacySafe(client, addSched);
+                }
+                return { message: 'Client updated successfully with scheduler-based deactivation.' };
+            } finally {
+                await client.close();
+            }
         }
 
         // 1. Find the lease
@@ -1052,7 +1208,62 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
         const address = client.address;
 
         if (req.routerConfig.api_type === 'legacy') {
-            throw new Error("This action is not supported for the legacy API.");
+            const legacyClient = req.routerInstance;
+            await legacyClient.connect();
+            try {
+                // 1. If client is active, remove its scheduler.
+                if (client.status === 'active') {
+                    try {
+                        const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
+                        const schedulers = await writeLegacySafe(legacyClient, ['/system/scheduler/print', `?name=${schedulerName}`]);
+                        for (const scheduler of (Array.isArray(schedulers) ? schedulers : [])) {
+                            const sid = scheduler['.id'] || scheduler.id;
+                            await writeLegacySafe(legacyClient, ['/system/scheduler/remove', `=.id=${sid}`]);
+                        }
+                    } catch (e) { console.warn(`Could not remove scheduler for ${address}: ${e.message}`); }
+                }
+
+                // 2. Remove active connections to force re-evaluation by firewall.
+                try {
+                    const connections = await writeLegacySafe(legacyClient, ['/ip/firewall/connection/print', `?src-address=${address}`]);
+                    for (const c of (Array.isArray(connections) ? connections : [])) {
+                        const cid = c['.id'] || c.id;
+                        await writeLegacySafe(legacyClient, ['/ip/firewall/connection/remove', `=.id=${cid}`]);
+                    }
+                } catch (e) { console.warn(`Could not remove connections for ${address}: ${e.message}`); }
+
+                // 3. Clear any rate-limit from the static lease.
+                try {
+                    const leases = await writeLegacySafe(legacyClient, ['/ip/dhcp-server/lease/print', `?mac-address=${client.macAddress}`]);
+                    if (Array.isArray(leases) && leases.length > 0) {
+                        const lid = leases[0]['.id'] || leases[0].id;
+                        await writeLegacySafe(legacyClient, ['/ip/dhcp-server/lease/set', `=.id=${lid}`, `=rate-limit=`]);
+                    }
+                } catch (e) { console.warn(`Could not clear rate-limit for ${client.macAddress}: ${e.message}`); }
+                
+                // 4. Remove the client's current address list entry (from either 'authorized' or 'pending' list).
+                // We don't have the entry ID, so locate and remove by address across both lists.
+                const authEntries = await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/print', `?address=${client.address}`, '?list=authorized-dhcp-users']);
+                for (const ae of (Array.isArray(authEntries) ? authEntries : [])) {
+                    const aid = ae['.id'] || ae.id;
+                    await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/remove', `=.id=${aid}`]);
+                }
+                const pendingEntries = await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/print', `?address=${client.address}`, '?list=pending-dhcp-users']);
+                for (const pe of (Array.isArray(pendingEntries) ? pendingEntries : [])) {
+                    const pid = pe['.id'] || pe.id;
+                    await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/remove', `=.id=${pid}`]);
+                }
+
+                // 5. If the client was active, add them back to the 'pending' list to reflect the "deactivated" state.
+                if (client.status === 'active') {
+                    await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/add', `=list=pending-dhcp-users`, `=address=${client.address}`, `=comment=${client.macAddress}`, `=timeout=1d`]);
+                    return { message: 'Client has been deactivated and moved to the pending list.' };
+                } else {
+                    return { message: 'Pending client has been removed.' };
+                }
+            } finally {
+                await legacyClient.close();
+            }
         }
 
         // --- Deactivation/Deletion Logic ---
