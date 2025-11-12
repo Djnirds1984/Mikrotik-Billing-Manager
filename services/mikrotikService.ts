@@ -663,6 +663,21 @@ export const setupDualWanPCC = (
     });
 };
 
+// --- Multi-WAN Merge (PCC up to 10 WANs) ---
+export const setupMultiWanPCC = (
+    router: RouterConfigWithId,
+    params: {
+        wanInterfaces: string[];
+        lanInterface: string;
+        wanGateways: Record<string, string> | string[];
+    }
+): Promise<{ message: string }> => {
+    return fetchMikrotikData<{ message: string }>(router, '/multiwan/pcc-setup', {
+        method: 'POST',
+        body: JSON.stringify(params)
+    });
+};
+
 export const getFileContent = async (router: RouterConfigWithId, fileId: string): Promise<{ contents: string }> => {
     // The path needs to be different for legacy vs REST APIs.
     // REST (v7+) uses `?=.id=...`

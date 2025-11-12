@@ -1297,75 +1297,94 @@ app.post('/mt-api/:routerId/netwatch/failover/remove', getRouterConfig, async (r
 // Configure PCC load-balancing across two WANs with NAT and routing marks
 app.post('/mt-api/:routerId/multiwan/pcc-setup', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
-        const { wan1Interface, wan2Interface, lanInterface, wan1Gateway, wan2Gateway } = req.body || {};
-        if (!wan1Interface || !wan2Interface || !lanInterface || !wan1Gateway || !wan2Gateway) {
-            throw new Error('wan1Interface, wan2Interface, lanInterface, wan1Gateway, and wan2Gateway are required.');
+        const body = req.body || {};
+
+        // Support two styles:
+        // 1) Dual-WAN (backward compatible)
+        // 2) Multi-WAN: { wanInterfaces: string[], lanInterface: string, wanGateways: Record<string,string> | string[] }
+        let wanInterfaces = body.wanInterfaces as string[] | undefined;
+        let lanInterface = body.lanInterface as string | undefined;
+        let wanGateways = body.wanGateways as Record<string, string> | string[] | undefined;
+
+        if (!wanInterfaces) {
+            // Fallback to dual-wan style
+            const { wan1Interface, wan2Interface, lanInterface: li, wan1Gateway, wan2Gateway } = body;
+            if (!wan1Interface || !wan2Interface || !li || !wan1Gateway || !wan2Gateway) {
+                throw new Error('Provide either multi-wan payload or dual-wan fields (wan1Interface, wan2Interface, lanInterface, wan1Gateway, wan2Gateway).');
+            }
+            wanInterfaces = [wan1Interface, wan2Interface];
+            lanInterface = li;
+            wanGateways = [wan1Gateway, wan2Gateway];
         }
 
-        const mangleRules = [
-            {
-                chain: 'prerouting',
-                'in-interface': lanInterface,
-                'connection-mark': 'no-mark',
-                action: 'mark-connection',
-                'new-connection-mark': 'WAN1_conn',
-                passthrough: 'yes',
-                'per-connection-classifier': 'both-addresses-and-ports:2/0'
-            },
-            {
-                chain: 'prerouting',
-                'in-interface': lanInterface,
-                'connection-mark': 'no-mark',
-                action: 'mark-connection',
-                'new-connection-mark': 'WAN2_conn',
-                passthrough: 'yes',
-                'per-connection-classifier': 'both-addresses-and-ports:2/1'
-            },
-            {
-                chain: 'prerouting',
-                'in-interface': lanInterface,
-                'connection-mark': 'WAN1_conn',
-                action: 'mark-routing',
-                'new-routing-mark': 'to_WAN1',
-                passthrough: 'yes'
-            },
-            {
-                chain: 'prerouting',
-                'in-interface': lanInterface,
-                'connection-mark': 'WAN2_conn',
-                action: 'mark-routing',
-                'new-routing-mark': 'to_WAN2',
-                passthrough: 'yes'
+        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 2) {
+            throw new Error('wanInterfaces must be an array with at least 2 interfaces.');
+        }
+        if (!lanInterface) throw new Error('lanInterface is required.');
+        const K = Math.min(Math.max(wanInterfaces.length, 2), 10);
+
+        const getGateway = (wanName, idx) => {
+            if (!wanGateways) throw new Error('wanGateways is required.');
+            if (Array.isArray(wanGateways)) {
+                if (!wanGateways[idx]) throw new Error(`Missing gateway for index ${idx} (${wanName}).`);
+                return wanGateways[idx];
             }
-        ];
+            const gw = wanGateways[wanName];
+            if (!gw) throw new Error(`Missing gateway for WAN ${wanName}.`);
+            return gw;
+        };
 
-        const natRules = [
-            { chain: 'srcnat', 'out-interface': wan1Interface, action: 'masquerade' },
-            { chain: 'srcnat', 'out-interface': wan2Interface, action: 'masquerade' }
-        ];
+        // Build PCC mangle rules, NAT, and routes for K WANs
+        const mangleRules = [];
+        const natRules = [];
+        const routes = [];
 
-        const routes = [
-            { 'dst-address': '0.0.0.0/0', gateway: wan1Gateway, 'routing-mark': 'to_WAN1', 'check-gateway': 'ping' },
-            { 'dst-address': '0.0.0.0/0', gateway: wan2Gateway, 'routing-mark': 'to_WAN2', 'check-gateway': 'ping' }
-        ];
+        for (let i = 0; i < K; i++) {
+            const wanName = wanInterfaces[i];
+            const connMark = `WAN${i + 1}_conn`;
+            const routingMark = `to_WAN${i + 1}`;
+            const classifier = `both-addresses-and-ports:${K}/${i}`;
+            const gateway = getGateway(wanName, i);
+
+            // Mark connections deterministically across K buckets
+            mangleRules.push({
+                chain: 'prerouting',
+                'in-interface': lanInterface,
+                'connection-mark': 'no-mark',
+                action: 'mark-connection',
+                'new-connection-mark': connMark,
+                passthrough: 'yes',
+                'per-connection-classifier': classifier,
+            });
+            // Mark routing based on connection mark
+            mangleRules.push({
+                chain: 'prerouting',
+                'in-interface': lanInterface,
+                'connection-mark': connMark,
+                action: 'mark-routing',
+                'new-routing-mark': routingMark,
+                passthrough: 'yes',
+            });
+            // NAT per WAN interface
+            natRules.push({ chain: 'srcnat', 'out-interface': wanName, action: 'masquerade' });
+            // Route for marked traffic
+            routes.push({ 'dst-address': '0.0.0.0/0', gateway, 'routing-mark': routingMark, 'check-gateway': 'ping' });
+        }
 
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
-                // Add mangle rules
                 for (const r of mangleRules) {
                     const cmd = ['/ip/firewall/mangle/add'];
                     for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
                     await writeLegacySafe(client, cmd);
                 }
-                // Add NAT rules
                 for (const r of natRules) {
                     const cmd = ['/ip/firewall/nat/add'];
                     for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
                     await writeLegacySafe(client, cmd);
                 }
-                // Add routes for marks
                 for (const r of routes) {
                     const cmd = ['/ip/route/add'];
                     for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
@@ -1375,12 +1394,11 @@ app.post('/mt-api/:routerId/multiwan/pcc-setup', getRouterConfig, async (req, re
                 await client.close();
             }
         } else {
-            // Add rules via REST
             for (const r of mangleRules) await req.routerInstance.post('/ip/firewall/mangle', r);
             for (const r of natRules) await req.routerInstance.post('/ip/firewall/nat', r);
             for (const r of routes) await req.routerInstance.post('/ip/route', r);
         }
 
-        return { message: 'Dual-WAN PCC setup applied. Verify connectivity and active routes.' };
+        return { message: `PCC setup applied for ${K} WAN(s). Verify connectivity and active routes.` };
     });
 });
