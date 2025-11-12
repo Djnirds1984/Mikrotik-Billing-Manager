@@ -1,7 +1,14 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useNotifications } from '../contexts/NotificationContext.tsx';
 import type { View, Notification } from '../types.ts';
 import { BellIcon, TrashIcon } from '../constants.tsx';
+import { useRouters } from '../hooks/useRouters.ts';
+import { getPanelSettings } from '../services/databaseService.ts';
+import {
+    generatePppoeNotifications,
+    generateDhcpPortalNotifications,
+    generateNetworkNotifications,
+} from '../services/notificationGenerators.ts';
 
 interface NotificationsPageProps {
     setCurrentView: (view: View) => void;
@@ -9,6 +16,9 @@ interface NotificationsPageProps {
 
 export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrentView }) => {
     const { notifications, unreadCount, markAllAsRead, clearNotifications, markAsRead } = useNotifications();
+    const { routers } = useRouters();
+    const [notifSettings, setNotifSettings] = React.useState<import('../types.ts').PanelSettings['notificationSettings'] | undefined>(undefined);
+    const generatingRef = useRef(false);
 
     const handleNotificationClick = (notification: Notification) => {
         if (notification.is_read === 0) {
@@ -18,6 +28,54 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
             setCurrentView(notification.link_to);
         }
     };
+
+    // Load notification settings
+    useEffect(() => {
+        (async () => {
+            try {
+                const settings = await getPanelSettings();
+                setNotifSettings(settings.notificationSettings);
+            } catch (e) {
+                console.warn('Failed to load panel settings:', e);
+            }
+        })();
+    }, []);
+
+    // Auto-generate notifications for PPPoE/DHCP expirations, network issues, and billed events
+    useEffect(() => {
+        const runGenerators = async () => {
+            if (generatingRef.current) return;
+            generatingRef.current = true;
+            try {
+                if (routers && routers.length > 0) {
+                    const ns = notifSettings || {};
+                    if (ns.enablePppoe !== false) {
+                        await generatePppoeNotifications(routers, notifications, ns);
+                    }
+                    if (ns.enableDhcpPortal !== false) {
+                        await generateDhcpPortalNotifications(routers, notifications, ns);
+                    }
+                    if (ns.enableNetwork !== false) {
+                        await generateNetworkNotifications(routers, notifications, ns);
+                    }
+                    if (ns.enableBilled) {
+                        const { generateBilledNotifications } = await import('../services/notificationGenerators.ts');
+                        await generateBilledNotifications(routers, notifications, ns);
+                    }
+                }
+            } catch (e) {
+                console.error('Notification generators failed:', e);
+            } finally {
+                generatingRef.current = false;
+            }
+        };
+
+        // Run once on mount and then on a schedule
+        runGenerators();
+        const intervalSeconds = notifSettings?.generatorIntervalSeconds ?? 30;
+        const interval = setInterval(runGenerators, intervalSeconds * 1000);
+        return () => clearInterval(interval);
+    }, [routers, notifications, notifSettings]);
 
     return (
         <div className="max-w-4xl mx-auto">

@@ -418,6 +418,16 @@ export interface PanelSettings {
     dbUser?: string;
     dbPassword?: string;
     dbName?: string;
+    // Notification generator settings
+    notificationSettings?: {
+        enablePppoe?: boolean;
+        enableDhcpPortal?: boolean;
+        enableNetwork?: boolean;
+        enableBilled?: boolean;
+        dhcpNearExpiryHours?: number; // e.g., 24 default
+        generatorIntervalSeconds?: number; // e.g., 30 default
+        debounceMinutes?: number; // e.g., 15 default to avoid spam
+    };
 }
 
 export interface PanelNtpStatus {
