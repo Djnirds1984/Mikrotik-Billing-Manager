@@ -653,7 +653,14 @@ async function initDb() {
 async function readPanelSetting(key) {
     try {
         const row = await db.get('SELECT value FROM panel_settings WHERE key = ?', key);
-        return row ? row.value : null;
+        if (!row) return null;
+        try {
+            // Values are saved as JSON strings; parse to get the actual value
+            return JSON.parse(row.value);
+        } catch (_) {
+            // Fallback: return raw if it isn't valid JSON
+            return row.value;
+        }
     } catch (e) {
         return null;
     }
