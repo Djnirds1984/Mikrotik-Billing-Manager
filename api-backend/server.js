@@ -1302,9 +1302,10 @@ app.post('/mt-api/:routerId/multiwan/pcc-setup', getRouterConfig, async (req, re
         // Support two styles:
         // 1) Dual-WAN (backward compatible)
         // 2) Multi-WAN: { wanInterfaces: string[], lanInterface: string, wanGateways: Record<string,string> | string[] }
-        let wanInterfaces = body.wanInterfaces as string[] | undefined;
-        let lanInterface = body.lanInterface as string | undefined;
-        let wanGateways = body.wanGateways as Record<string, string> | string[] | undefined;
+        // Accept both dual-WAN and multi-WAN payloads; no TypeScript assertions in JS
+        let wanInterfaces = body.wanInterfaces;
+        let lanInterface = body.lanInterface;
+        let wanGateways = body.wanGateways;
 
         if (!wanInterfaces) {
             // Fallback to dual-wan style
