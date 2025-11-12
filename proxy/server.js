@@ -724,7 +724,22 @@ const supportedMariaTables = new Set([
     'notifications'
 ]);
 
+// Tables that must remain in SQLite to protect panel integrity
+const sqliteCriticalTables = new Set([
+    'users',
+    'user_security_questions',
+    'roles',
+    'permissions',
+    'role_permissions',
+    'license',
+    'superadmin',
+    'panel_settings',
+    'company_settings'
+]);
+
 function useMaria(tableName) {
+    // Never route critical panel tables to MariaDB
+    if (sqliteCriticalTables.has(tableName)) return false;
     return dbEngine === 'mariadb' && mysqlPool && supportedMariaTables.has(tableName);
 }
 
@@ -1656,6 +1671,34 @@ app.post('/api/db/migrate/sqlite-to-mariadb', protect, async (req, res) => {
             }
         }
         res.json({ message: 'Migration completed for supported tables.' });
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
+});
+
+// Engine status and routing visibility
+app.get('/api/db/engine-status', protect, async (req, res) => {
+    try {
+        let mariaPing = false;
+        if (dbEngine === 'mariadb' && mysqlPool) {
+            try { await mysqlPool.query('SELECT 1'); mariaPing = true; } catch (_) { mariaPing = false; }
+        }
+        const status = {
+            engine: dbEngine,
+            mariadb: {
+                configured: !!mysqlConfig,
+                poolActive: !!mysqlPool,
+                pingOk: mariaPing,
+                host: mysqlConfig ? mysqlConfig.host : null,
+                port: mysqlConfig ? mysqlConfig.port : null,
+                database: mysqlConfig ? mysqlConfig.database : null
+            },
+            routing: {
+                mariaTables: Array.from(supportedMariaTables),
+                sqliteCriticalTables: Array.from(sqliteCriticalTables)
+            }
+        };
+        res.json(status);
     } catch (e) {
         res.status(500).json({ message: e.message });
     }
