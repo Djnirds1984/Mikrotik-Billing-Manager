@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { CircleStackIcon } from '../constants.tsx';
-import { getPanelSettings, savePanelSettings } from '../services/databaseService.ts';
+import { getPanelSettings, savePanelSettings, initMariaDb, migrateSqliteToMariaDb } from '../services/databaseService.ts';
 import type { PanelSettings } from '../types.ts';
 
 export const DatabaseSettings: React.FC = () => {
@@ -10,6 +10,8 @@ export const DatabaseSettings: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [migrationMsg, setMigrationMsg] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -50,6 +52,26 @@ export const DatabaseSettings: React.FC = () => {
       setError((e as Error).message);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleMigrate = async () => {
+    if (!settings) return;
+    setIsMigrating(true);
+    setError(null);
+    setMigrationMsg(null);
+    try {
+      if (settings.databaseEngine !== 'mariadb') {
+        setMigrationMsg('Migration is available when MariaDB is selected.');
+        return;
+      }
+      const initRes = await initMariaDb();
+      const migRes = await migrateSqliteToMariaDb();
+      setMigrationMsg(`${initRes.message} \n${migRes.message}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsMigrating(false);
     }
   };
 
@@ -167,10 +189,19 @@ export const DatabaseSettings: React.FC = () => {
             >
               {isSaving ? 'Saving…' : t('common.save')}
             </button>
+            <button
+              onClick={handleMigrate}
+              disabled={isMigrating || settings?.databaseEngine !== 'mariadb'}
+              className="px-4 py-2 rounded-md bg-slate-600 hover:bg-slate-700 text-white font-semibold disabled:opacity-50"
+            >
+              {isMigrating ? 'Migrating…' : 'Run Migration'}
+            </button>
           </div>
+          {migrationMsg && (
+            <p className="text-xs text-slate-500 mt-2 whitespace-pre-wrap">{migrationMsg}</p>
+          )}
         </div>
       </div>
     </div>
   );
 };
-
