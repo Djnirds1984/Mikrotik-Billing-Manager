@@ -307,6 +307,156 @@ app.post('/mt-api/:routerId/system/reboot', getRouterConfig, async (req, res) =>
     });
 });
 
+// Router health diagnostics: check REST vs legacy availability and basic permissions
+app.get('/mt-api/:routerId/health', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const config = req.routerConfig;
+        const host = config.host;
+        const username = config.user;
+        const password = config.password || '';
+
+        const result = {
+            apiType: config.api_type || 'rest',
+            rest: {
+                tested: [],
+                reachable: false,
+                identityOk: false,
+                clockReadable: false,
+                clockResourceKind: 'unknown',
+                canPatchProbe: 'unknown',
+                baseURL: null,
+            },
+            legacy: {
+                tested: [],
+                reachable: false,
+                canPrint: false,
+                port: null,
+                tls: false,
+            },
+            timestamp: new Date().toISOString(),
+        };
+
+        // --- REST checks ---
+        const restPorts = [];
+        if (config.api_type === 'rest' && typeof config.port === 'number') restPorts.push(config.port);
+        // Probe common REST ports
+        if (!restPorts.includes(80)) restPorts.push(80);
+        if (!restPorts.includes(443)) restPorts.push(443);
+
+        for (const port of restPorts) {
+            const protocol = port === 443 ? 'https' : 'http';
+            const baseURL = `${protocol}://${host}:${port}/rest`;
+            result.rest.tested.push(baseURL);
+            try {
+                const axiosClient = require('axios').create({
+                    baseURL,
+                    auth: { username, password },
+                    httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' }),
+                    timeout: 6000,
+                });
+
+                // Identity GET
+                try {
+                    const idResp = await axiosClient.get('/system/identity');
+                    if (idResp && idResp.status === 200) {
+                        result.rest.reachable = true;
+                        result.rest.identityOk = true;
+                        result.rest.baseURL = baseURL;
+                    }
+                } catch (_) { /* ignore */ }
+
+                // Clock GET
+                try {
+                    const clockResp = await axiosClient.get('/system/clock');
+                    if (clockResp && clockResp.status === 200) {
+                        result.rest.reachable = true;
+                        result.rest.clockReadable = true;
+                        const data = clockResp.data;
+                        if (Array.isArray(data)) {
+                            result.rest.clockResourceKind = data.length && data[0]?.id ? 'id' : 'singleton';
+                        } else if (data && typeof data === 'object') {
+                            result.rest.clockResourceKind = data.id ? 'id' : 'singleton';
+                        }
+                        result.rest.baseURL = baseURL;
+                    }
+                } catch (_) { /* ignore */ }
+
+                // OPTIONS probe for allowed methods (if supported)
+                try {
+                    const optResp = await axiosClient.options('/system/clock');
+                    const allow = optResp.headers && (optResp.headers['allow'] || optResp.headers['Allow']);
+                    if (allow) {
+                        result.rest.canPatchProbe = /\bPATCH\b/i.test(allow) ? 'allowed' : 'blocked';
+                    } else {
+                        result.rest.canPatchProbe = 'unknown';
+                    }
+                } catch (_) {
+                    // Some RouterOS builds may not support OPTIONS; leave unknown
+                }
+
+                if (result.rest.reachable) break; // we found a working REST port
+            } catch (_) {
+                // try next port
+            }
+        }
+
+        // --- Legacy checks ---
+        const legacyPorts = [];
+        if (config.api_type === 'legacy' && typeof config.port === 'number') legacyPorts.push(config.port);
+        // Probe common legacy ports
+        if (!legacyPorts.includes(8728)) legacyPorts.push(8728);
+        if (!legacyPorts.includes(8729)) legacyPorts.push(8729);
+
+        const { RouterOSAPI } = require('node-routeros-v2');
+        for (const lport of legacyPorts) {
+            const tls = lport === 8729;
+            const client = new RouterOSAPI({
+                host,
+                user: username,
+                password,
+                port: lport,
+                timeout: 8000,
+                tls,
+                tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
+            });
+            result.legacy.tested.push(lport);
+            try {
+                await client.connect();
+                try {
+                    const resp = await require('./server').writeLegacySafe
+                        ? await require('./server').writeLegacySafe(client, ['/system/resource/print'])
+                        : await client.write(['/system/resource/print']);
+                    if (resp) {
+                        result.legacy.reachable = true;
+                        result.legacy.canPrint = true;
+                        result.legacy.port = lport;
+                        result.legacy.tls = tls;
+                    }
+                } finally {
+                    await client.close();
+                }
+                if (result.legacy.reachable) break;
+            } catch (_) {
+                // try next port
+            }
+        }
+
+        // Suggestions based on findings
+        const suggestions = [];
+        if (!result.rest.reachable) {
+            suggestions.push('Enable REST service on the router and ensure port 80/443 is reachable.');
+        } else if (result.rest.canPatchProbe === 'blocked') {
+            suggestions.push('REST user may be read-only; grant write permissions if PATCH operations are needed.');
+        }
+        if (!result.legacy.reachable) {
+            suggestions.push('Enable legacy API on ports 8728/8729 or ensure they are reachable if using legacy.');
+        }
+        result.suggestions = suggestions;
+
+        return result;
+    });
+});
+
 
 app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
