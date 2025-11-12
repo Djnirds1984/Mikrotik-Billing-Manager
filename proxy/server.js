@@ -1633,7 +1633,15 @@ app.post('/api/db/mariadb/init', protect, async (req, res) => {
             return res.status(400).json({ message: 'MariaDB engine not active. Set engine to MariaDB in Database Settings.' });
         }
         // Create minimal supported tables
-        await mariaQuery('CREATE TABLE IF NOT EXISTS routers (id VARCHAR(255) PRIMARY KEY, name TEXT, host TEXT, user TEXT, password TEXT, port INT, routerId TEXT)');
+        // Align routers schema with SQLite and UI expectations (include api_type, no routerId)
+        await mariaQuery('CREATE TABLE IF NOT EXISTS routers (id VARCHAR(255) PRIMARY KEY, name TEXT, host TEXT, user TEXT, password TEXT, port INT, api_type TEXT NOT NULL DEFAULT "rest")');
+        // Backfill: if an older schema exists without api_type, add it.
+        try {
+            const cols = await mariaQuery('SHOW COLUMNS FROM routers LIKE "api_type"');
+            if (!cols || cols.length === 0) {
+                await mariaQuery('ALTER TABLE routers ADD COLUMN api_type TEXT NOT NULL DEFAULT "rest"');
+            }
+        } catch (_) { /* ignore */ }
         await mariaQuery('CREATE TABLE IF NOT EXISTS billing_plans (id VARCHAR(255) PRIMARY KEY, name TEXT, price DOUBLE, cycle TEXT, pppoeProfile TEXT, description TEXT, currency TEXT, routerId TEXT)');
         await mariaQuery('CREATE TABLE IF NOT EXISTS sales_records (id VARCHAR(255) PRIMARY KEY, date TEXT, clientName TEXT, planName TEXT, planPrice DOUBLE, discountAmount DOUBLE, finalAmount DOUBLE, routerName TEXT, clientAddress TEXT, clientContact TEXT, clientEmail TEXT, currency TEXT, routerId TEXT)');
         await mariaQuery('CREATE TABLE IF NOT EXISTS customers (id VARCHAR(255) PRIMARY KEY, name TEXT, address TEXT, contact TEXT, email TEXT, routerId TEXT)');
