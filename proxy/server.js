@@ -5,6 +5,7 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const sqlite3 = require('@vscode/sqlite3');
 const { open } = require('sqlite');
+const mysql = require('mysql2/promise');
 const esbuild = require('esbuild');
 const archiver = require('archiver');
 const fsExtra = require('fs-extra');
@@ -117,8 +118,11 @@ app.use((req, res, next) => {
 // Ensure backup directory exists
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
-let db;
-let superadminDb;
+ let db;
+ let superadminDb;
+ let mysqlPool = null;
+ let dbEngine = 'sqlite';
+ let mysqlConfig = null;
 
 // --- Database Initialization and Migrations ---
 async function initSuperadminDb() {
@@ -643,6 +647,83 @@ async function initDb() {
         console.error('Failed to initialize database:', err);
         process.exit(1);
     }
+}
+
+// --- Database Engine Switching (SQLite <-> MariaDB) ---
+async function readPanelSetting(key) {
+    try {
+        const row = await db.get('SELECT value FROM panel_settings WHERE key = ?', key);
+        return row ? row.value : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function updateDbEngineFromSettings() {
+    // Default to sqlite if any issues arise
+    try {
+        const engine = await readPanelSetting('databaseEngine');
+        const host = await readPanelSetting('dbHost');
+        const portStr = await readPanelSetting('dbPort');
+        const user = await readPanelSetting('dbUser');
+        const password = await readPanelSetting('dbPassword');
+        const database = await readPanelSetting('dbName');
+
+        const port = portStr ? Number(portStr) : 3306;
+
+        if (engine && engine.toLowerCase() === 'mariadb' && host && user && database) {
+            const newConfig = { host, port, user, password: password || '', database, waitForConnections: true, connectionLimit: 10, queueLimit: 0 };
+            // If config changed or pool missing, recreate pool
+            const configChanged = JSON.stringify(newConfig) !== JSON.stringify(mysqlConfig);
+            if (!mysqlPool || configChanged) {
+                if (mysqlPool) {
+                    try { await mysqlPool.end(); } catch (_) {}
+                }
+                mysqlPool = await mysql.createPool(newConfig);
+                mysqlConfig = newConfig;
+            }
+            dbEngine = 'mariadb';
+            console.log('[DB] Engine set to MariaDB with host', host, 'database', database);
+        } else {
+            // Fallback to sqlite
+            if (mysqlPool) {
+                try { await mysqlPool.end(); } catch (_) {}
+            }
+            mysqlPool = null;
+            mysqlConfig = null;
+            dbEngine = 'sqlite';
+            console.log('[DB] Engine set to SQLite');
+        }
+    } catch (err) {
+        console.error('[DB] Failed to update engine from settings:', err.message);
+        // Keep using sqlite on failure
+        dbEngine = 'sqlite';
+    }
+}
+
+const supportedMariaTables = new Set([
+    'routers',
+    'billing_plans',
+    'sales_records',
+    'customers',
+    'inventory',
+    // Expanded coverage
+    'voucher_plans',
+    'dhcp_clients',
+    'dhcp_billing_plans',
+    'employees',
+    'employee_benefits',
+    'time_records',
+    'notifications'
+]);
+
+function useMaria(tableName) {
+    return dbEngine === 'mariadb' && mysqlPool && supportedMariaTables.has(tableName);
+}
+
+async function mariaQuery(query, params = []) {
+    const [rows] = await mysqlPool.query(query, params);
+    return rows;
 }
 
 // --- Auth Helper ---
@@ -1355,71 +1436,120 @@ dbRouter.use('/:table', (req, res, next) => {
 dbRouter.get('/:table', async (req, res) => {
     try {
         const { routerId } = req.query;
-        let query = `SELECT * FROM ${req.tableName}`;
-        const params = [];
-
-        const cols = await db.all(`PRAGMA table_info(${req.tableName});`);
-        const hasRouterId = cols.some(c => c.name === 'routerId');
-
-        if (hasRouterId) {
+        const tableName = req.tableName;
+        if (useMaria(tableName)) {
+            // MariaDB path
+            let query = 'SELECT * FROM ??';
+            const params = [tableName];
             if (routerId) {
                 query += ' WHERE routerId = ?';
                 params.push(routerId);
             } else {
-                // If the table is router-specific but no routerId is provided, return an empty array.
-                return res.json([]);
+                // If table is router-specific but routerId is missing, mimic SQLite behavior by checking schema
+                const cols = await db.all(`PRAGMA table_info(${tableName});`);
+                const hasRouterId = cols.some(c => c.name === 'routerId');
+                if (hasRouterId) return res.json([]);
             }
+            const rows = await mariaQuery(query, params);
+            return res.json(rows);
+        } else {
+            // SQLite path
+            let query = `SELECT * FROM ${tableName}`;
+            const params = [];
+            const cols = await db.all(`PRAGMA table_info(${tableName});`);
+            const hasRouterId = cols.some(c => c.name === 'routerId');
+            if (hasRouterId) {
+                if (routerId) {
+                    query += ' WHERE routerId = ?';
+                    params.push(routerId);
+                } else {
+                    return res.json([]);
+                }
+            }
+            const items = await db.all(query, params);
+            return res.json(items);
         }
-        
-        const items = await db.all(query, params);
-        res.json(items);
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 // ... more generic routes
 dbRouter.post('/:table', async (req, res) => {
     try {
-        const columns = Object.keys(req.body).join(', ');
-        const placeholders = Object.keys(req.body).map(() => '?').join(', ');
+        const tableName = req.tableName;
+        const columnsArr = Object.keys(req.body);
         const values = Object.values(req.body);
-        await db.run(`INSERT INTO ${req.tableName} (${columns}) VALUES (${placeholders})`, values);
+        if (useMaria(tableName)) {
+            const placeholders = columnsArr.map(() => '?').join(', ');
+            const columns = columnsArr.map(() => '??').join(', ');
+            const params = [];
+            // identifiers first
+            for (const col of columnsArr) params.push(col);
+            // then values
+            for (const v of values) params.push(v);
+            await mariaQuery(`INSERT INTO ?? (${columns}) VALUES (${placeholders})`, [tableName, ...params]);
+        } else {
+            const columns = columnsArr.join(', ');
+            const placeholders = columnsArr.map(() => '?').join(', ');
+            await db.run(`INSERT INTO ${tableName} (${columns}) VALUES (${placeholders})`, values);
+        }
         res.status(201).json({ message: 'Created' });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
 dbRouter.patch('/:table/:id', async (req, res) => {
      try {
-        const updates = Object.keys(req.body).map(key => `${key} = ?`).join(', ');
-        const values = [...Object.values(req.body), req.params.id];
-        await db.run(`UPDATE ${req.tableName} SET ${updates} WHERE id = ?`, values);
+        const tableName = req.tableName;
+        const columnsArr = Object.keys(req.body);
+        const values = Object.values(req.body);
+        if (useMaria(tableName)) {
+            const setClause = columnsArr.map(() => '?? = ?').join(', ');
+            const params = [];
+            columnsArr.forEach((c, i) => { params.push(c, values[i]); });
+            params.push(req.params.id);
+            await mariaQuery(`UPDATE ?? SET ${setClause} WHERE id = ?`, [tableName, ...params]);
+        } else {
+            const updates = columnsArr.map(key => `${key} = ?`).join(', ');
+            await db.run(`UPDATE ${tableName} SET ${updates} WHERE id = ?`, [...values, req.params.id]);
+        }
         res.json({ message: 'Updated' });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 dbRouter.delete('/:table/:id', async (req, res) => {
     try {
-        await db.run(`DELETE FROM ${req.tableName} WHERE id = ?`, req.params.id);
+        const tableName = req.tableName;
+        if (useMaria(tableName)) {
+            await mariaQuery('DELETE FROM ?? WHERE id = ?', [tableName, req.params.id]);
+        } else {
+            await db.run(`DELETE FROM ${tableName} WHERE id = ?`, req.params.id);
+        }
         res.status(204).send();
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 dbRouter.post('/:table/clear-all', async (req, res) => {
     try {
         const { routerId } = req.body;
-        let query = `DELETE FROM ${req.tableName}`;
-        const params = [];
-
-        const cols = await db.all(`PRAGMA table_info(${req.tableName});`);
-        const hasRouterId = cols.some(c => c.name === 'routerId');
-
-        if (hasRouterId) {
-            if (routerId) {
-                 query += ' WHERE routerId = ?';
-                 params.push(routerId);
-            } else {
-                // If routerId is required but not provided, do nothing and return error
-                return res.status(400).json({ message: 'routerId is required to clear this table.' });
+        const tableName = req.tableName;
+        if (useMaria(tableName)) {
+            let query = 'DELETE FROM ??';
+            const params = [tableName];
+            if (routerId) { query += ' WHERE routerId = ?'; params.push(routerId); }
+            else {
+                // Mirror SQLite behavior by checking if routerId column exists; if so, require routerId
+                const cols = await db.all(`PRAGMA table_info(${tableName});`);
+                const hasRouterId = cols.some(c => c.name === 'routerId');
+                if (hasRouterId) return res.status(400).json({ message: 'routerId is required to clear this table.' });
             }
+            await mariaQuery(query, params);
+        } else {
+            let query = `DELETE FROM ${tableName}`;
+            const params = [];
+            const cols = await db.all(`PRAGMA table_info(${tableName});`);
+            const hasRouterId = cols.some(c => c.name === 'routerId');
+            if (hasRouterId) {
+                if (routerId) { query += ' WHERE routerId = ?'; params.push(routerId); }
+                else { return res.status(400).json({ message: 'routerId is required to clear this table.' }); }
+            }
+            await db.run(query, params);
         }
-        
-        await db.run(query, params);
         res.status(204).send();
     } catch(e) { res.status(500).json({ message: e.message }); }
 });
@@ -1458,12 +1588,71 @@ const createSettingsSaver = (tableName) => async (req, res) => {
 };
 
 app.get('/api/db/panel-settings', protect, createSettingsHandler('panel_settings'));
-app.post('/api/db/panel-settings', protect, createSettingsSaver('panel_settings'));
+// Wrap saver to re-evaluate engine after changes
+app.post('/api/db/panel-settings', protect, async (req, res, next) => {
+    try {
+        await createSettingsSaver('panel_settings')(req, res);
+        // If response is already sent by saver, reconfigure in background
+        await updateDbEngineFromSettings();
+    } catch (e) {
+        return next(e);
+    }
+});
 // Make GET public for login page logo, but keep POST protected.
 app.get('/api/db/company-settings', createSettingsHandler('company_settings'));
 app.post('/api/db/company-settings', protect, createSettingsSaver('company_settings'));
 
 app.use('/api/db', protect, dbRouter);
+
+// --- MariaDB init and migration helpers ---
+app.post('/api/db/mariadb/init', protect, async (req, res) => {
+    try {
+        if (dbEngine !== 'mariadb' || !mysqlPool) {
+            return res.status(400).json({ message: 'MariaDB engine not active. Set engine to MariaDB in Database Settings.' });
+        }
+        // Create minimal supported tables
+        await mariaQuery('CREATE TABLE IF NOT EXISTS routers (id VARCHAR(255) PRIMARY KEY, name TEXT, host TEXT, user TEXT, password TEXT, port INT, routerId TEXT)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS billing_plans (id VARCHAR(255) PRIMARY KEY, name TEXT, price DOUBLE, cycle TEXT, pppoeProfile TEXT, description TEXT, currency TEXT, routerId TEXT)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS sales_records (id VARCHAR(255) PRIMARY KEY, date TEXT, clientName TEXT, planName TEXT, planPrice DOUBLE, discountAmount DOUBLE, finalAmount DOUBLE, routerName TEXT, clientAddress TEXT, clientContact TEXT, clientEmail TEXT, currency TEXT, routerId TEXT)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS customers (id VARCHAR(255) PRIMARY KEY, name TEXT, address TEXT, contact TEXT, email TEXT, routerId TEXT)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS inventory (id VARCHAR(255) PRIMARY KEY, name TEXT, description TEXT, quantity INT, unit TEXT, routerId TEXT)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS voucher_plans (id VARCHAR(255) PRIMARY KEY, routerId TEXT NOT NULL, name TEXT NOT NULL, duration_minutes INT NOT NULL, price DOUBLE NOT NULL, currency TEXT NOT NULL, mikrotik_profile_name TEXT NOT NULL)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS notifications (id VARCHAR(255) PRIMARY KEY, type TEXT NOT NULL, message TEXT NOT NULL, is_read TINYINT NOT NULL DEFAULT 0, timestamp TEXT NOT NULL, link_to TEXT, context_json TEXT)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS dhcp_clients (id VARCHAR(255) PRIMARY KEY, routerId TEXT NOT NULL, macAddress TEXT NOT NULL, customerInfo TEXT, contactNumber TEXT, email TEXT, speedLimit TEXT, lastSeen TEXT, UNIQUE KEY uniq_router_mac (routerId, macAddress))');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS dhcp_billing_plans (id VARCHAR(255) PRIMARY KEY, routerId TEXT NOT NULL, name TEXT NOT NULL, price DOUBLE NOT NULL, cycle_days INT NOT NULL, speedLimit TEXT, currency TEXT NOT NULL, billingType TEXT NOT NULL DEFAULT "prepaid")');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS employees (id VARCHAR(255) PRIMARY KEY, fullName TEXT NOT NULL, role TEXT, hireDate TEXT, salaryType TEXT NOT NULL, rate DOUBLE NOT NULL)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS employee_benefits (id VARCHAR(255) PRIMARY KEY, employeeId TEXT NOT NULL, sss INT NOT NULL DEFAULT 0, philhealth INT NOT NULL DEFAULT 0, pagibig INT NOT NULL DEFAULT 0)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS time_records (id VARCHAR(255) PRIMARY KEY, employeeId TEXT NOT NULL, date TEXT NOT NULL, timeIn TEXT, timeOut TEXT, UNIQUE KEY uniq_employee_date (employeeId, date))');
+        res.json({ message: 'MariaDB tables initialized.' });
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
+});
+
+app.post('/api/db/migrate/sqlite-to-mariadb', protect, async (req, res) => {
+    try {
+        if (dbEngine !== 'mariadb' || !mysqlPool) {
+            return res.status(400).json({ message: 'MariaDB engine not active. Set engine to MariaDB in Database Settings.' });
+        }
+        const tables = ['routers','billing_plans','sales_records','customers','inventory','voucher_plans','notifications','dhcp_clients','dhcp_billing_plans','employees','employee_benefits','time_records'];
+        for (const t of tables) {
+            const rows = await db.all(`SELECT * FROM ${t}`);
+            for (const row of rows) {
+                const columnsArr = Object.keys(row);
+                const values = Object.values(row);
+                const placeholders = columnsArr.map(() => '?').join(', ');
+                const columns = columnsArr.map(() => '??').join(', ');
+                const params = [];
+                for (const col of columnsArr) params.push(col);
+                for (const v of values) params.push(v);
+                await mariaQuery(`INSERT INTO ?? (${columns}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE id=id`, [t, ...params]);
+            }
+        }
+        res.json({ message: 'Migration completed for supported tables.' });
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
+});
 
 
 // --- ZeroTier CLI ---
@@ -2623,7 +2812,8 @@ app.get('*', (req, res) => {
 });
 
 // --- Start Server ---
-Promise.all([initDb(), initSuperadminDb()]).then(() => {
+Promise.all([initDb(), initSuperadminDb()]).then(async () => {
+    await updateDbEngineFromSettings();
     app.listen(PORT, () => {
         console.log(`Mikrotik Billling Management UI server running. Listening on http://localhost:${PORT}`);
     });
