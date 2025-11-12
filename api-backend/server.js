@@ -241,19 +241,46 @@ app.post('/mt-api/:routerId/system/clock/sync-time', getRouterConfig, async (req
                 await client.close();
             }
         } else {
-            // REST API requires patching the specific clock resource, not the collection.
-            // 1. Get the clock resource to find its ID.
-            const response = await req.routerInstance.get('/system/clock');
-            // The response for a resource that can only have one item can be a single object or an array with one object.
+            // REST-first with fallbacks: patch by id, patch singleton, then legacy.
+            const axiosClient = req.routerInstance;
+            const response = await axiosClient.get('/system/clock');
             const clockResource = Array.isArray(response.data) ? response.data[0] : response.data;
+            const clockId = clockResource && (clockResource.id || clockResource['.id']);
+            let restSucceeded = false;
 
-            if (!clockResource || !clockResource.id) {
-                throw new Error('Could not find system clock resource on the router.');
+            try {
+                if (clockId) {
+                    await axiosClient.patch(`/system/clock/${encodeURIComponent(clockId)}`, payload);
+                    restSucceeded = true;
+                } else {
+                    // Some RouterOS versions expose a singleton resource without id.
+                    await axiosClient.patch('/system/clock', payload);
+                    restSucceeded = true;
+                }
+            } catch (restErr) {
+                console.warn('REST clock sync failed; attempting legacy fallback:', restErr.message);
             }
-            const clockId = clockResource.id;
 
-            // 2. Patch the resource by its ID.
-            await req.routerInstance.patch(`/system/clock/${encodeURIComponent(clockId)}`, payload);
+            if (!restSucceeded) {
+                // Fallback to legacy even when api_type === 'rest' (for routers with REST quirks)
+                const { host, user, password } = req.routerConfig;
+                const isTlsLegacy = req.routerConfig.port === 8729;
+                const legacyClient = new RouterOSAPI({
+                    host,
+                    user,
+                    password: password || '',
+                    port: isTlsLegacy ? 8729 : 8728,
+                    timeout: 15,
+                    tls: isTlsLegacy,
+                    tlsOptions: isTlsLegacy ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
+                });
+                await legacyClient.connect();
+                try {
+                    await writeLegacySafe(legacyClient, ['/system/clock/set', `=date=${payload.date}`, `=time=${payload.time}`]);
+                } finally {
+                    await legacyClient.close();
+                }
+            }
         }
 
         return { message: 'Router time synchronized successfully with the panel server.' };
