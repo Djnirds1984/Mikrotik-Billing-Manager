@@ -192,7 +192,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
       case 'company':
           return <Company settings={companySettings} onSave={updateCompanySettings} />;
       case 'system':
-          return <SystemSettings />;
+          return <SystemSettings licenseStatus={licenseStatus} />;
       case 'database':
           return <DatabaseSettings />;
       case 'updater':
