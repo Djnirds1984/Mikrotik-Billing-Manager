@@ -3,7 +3,7 @@ import { useNotifications } from '../contexts/NotificationContext.tsx';
 import type { View, Notification } from '../types.ts';
 import { BellIcon, TrashIcon } from '../constants.tsx';
 import { useRouters } from '../hooks/useRouters.ts';
-import { getPanelSettings } from '../services/databaseService.ts';
+import { getPanelSettings, savePanelSettings } from '../services/databaseService.ts';
 import {
     generatePppoeNotifications,
     generateDhcpPortalNotifications,
@@ -18,6 +18,8 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
     const { notifications, unreadCount, markAllAsRead, clearNotifications, markAsRead } = useNotifications();
     const { routers } = useRouters();
     const [notifSettings, setNotifSettings] = React.useState<import('../types.ts').PanelSettings['notificationSettings'] | undefined>(undefined);
+    const [editSettings, setEditSettings] = React.useState<import('../types.ts').PanelSettings['notificationSettings'] | undefined>(undefined);
+    const [saving, setSaving] = React.useState(false);
     const generatingRef = useRef(false);
 
     const handleNotificationClick = (notification: Notification) => {
@@ -35,11 +37,31 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
             try {
                 const settings = await getPanelSettings();
                 setNotifSettings(settings.notificationSettings);
+                setEditSettings(settings.notificationSettings || {});
             } catch (e) {
                 console.warn('Failed to load panel settings:', e);
             }
         })();
     }, []);
+
+    const handleSaveSettings = async () => {
+        if (!editSettings) return;
+        setSaving(true);
+        try {
+            const current = await getPanelSettings();
+            const newSettings = {
+                ...current,
+                notificationSettings: { ...(current.notificationSettings || {}), ...editSettings },
+            };
+            await savePanelSettings(newSettings);
+            setNotifSettings(editSettings);
+            alert('Notification settings saved');
+        } catch (e) {
+            alert(`Failed to save: ${(e as Error).message}`);
+        } finally {
+            setSaving(false);
+        }
+    };
 
     // Auto-generate notifications for PPPoE/DHCP expirations, network issues, and billed events
     useEffect(() => {
@@ -79,6 +101,51 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
 
     return (
         <div className="max-w-4xl mx-auto">
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md mb-6">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+                    <BellIcon className="w-6 h-6" />
+                    <h3 className="text-lg font-semibold text-[--color-primary-500] dark:text-[--color-primary-400]">Notification Settings</h3>
+                </div>
+                <div className="p-6 space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Enable PPPoE notifications</span>
+                            <input type="checkbox" checked={(editSettings?.enablePppoe ?? true)} onChange={e => setEditSettings(s => ({ ...(s || {}), enablePppoe: e.target.checked }))} />
+                        </label>
+                        <label className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Enable DHCP Portal notifications</span>
+                            <input type="checkbox" checked={(editSettings?.enableDhcpPortal ?? true)} onChange={e => setEditSettings(s => ({ ...(s || {}), enableDhcpPortal: e.target.checked }))} />
+                        </label>
+                        <label className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Enable Network notifications</span>
+                            <input type="checkbox" checked={(editSettings?.enableNetwork ?? true)} onChange={e => setEditSettings(s => ({ ...(s || {}), enableNetwork: e.target.checked }))} />
+                        </label>
+                        <label className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Enable Billed notifications</span>
+                            <input type="checkbox" checked={(editSettings?.enableBilled ?? false)} onChange={e => setEditSettings(s => ({ ...(s || {}), enableBilled: e.target.checked }))} />
+                        </label>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">DHCP near-expiry hours</label>
+                            <input type="number" min={1} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" value={(editSettings?.dhcpNearExpiryHours ?? 24)} onChange={e => setEditSettings(s => ({ ...(s || {}), dhcpNearExpiryHours: Number(e.target.value) }))} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Generator interval (seconds)</label>
+                            <input type="number" min={5} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" value={(editSettings?.generatorIntervalSeconds ?? 30)} onChange={e => setEditSettings(s => ({ ...(s || {}), generatorIntervalSeconds: Number(e.target.value) }))} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Debounce minutes</label>
+                            <input type="number" min={1} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" value={(editSettings?.debounceMinutes ?? 15)} onChange={e => setEditSettings(s => ({ ...(s || {}), debounceMinutes: Number(e.target.value) }))} />
+                        </div>
+                    </div>
+                    <div className="flex justify-end pt-4 border-t border-slate-200 dark:border-slate-700">
+                        <button onClick={handleSaveSettings} disabled={saving} className="px-4 py-2 bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-semibold rounded-lg disabled:opacity-50">
+                            {saving ? 'Saving...' : 'Save Notification Settings'}
+                        </button>
+                    </div>
+                </div>
+            </div>
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
                 <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-3">
                     <BellIcon className="w-8 h-8"/> Notifications

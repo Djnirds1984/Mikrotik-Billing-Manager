@@ -279,7 +279,7 @@ const DatabaseManager: React.FC = () => {
         <div className="space-y-4">
             <button onClick={handleCreateBackup} disabled={!!isActioning} className="w-full px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2">
                 {isActioning === 'create' ? <Loader /> : <CircleStackIcon className="w-5 h-5" />}
-                {isActioning === 'create' ? 'Backing up...' : 'Create New Backup'}
+                {isActioning === 'create' ? 'Backing up...' : 'Backup Now'}
             </button>
             <div className="pt-4">
                 <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Available Backups</h4>
