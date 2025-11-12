@@ -33,7 +33,8 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
             }
             
             setMessage({ type: 'success', text: 'License activated successfully! Reloading panel...' });
-            setTimeout(() => window.location.reload(), 1500);
+            onLicenseChange();          // tell parent to refresh license status immediately
+            setTimeout(() => window.location.reload(), 700);
         } catch (err) {
             setMessage({ type: 'error', text: (err as Error).message });
         } finally {
@@ -54,7 +55,8 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
             if (!res.ok) throw new Error(data.message);
             
             setMessage({ type: 'success', text: 'License revoked. Reloading...' });
-            setTimeout(() => window.location.reload(), 1500);
+            onLicenseChange();          // tell parent to refresh license status immediately
+            setTimeout(() => window.location.reload(), 700);
         } catch (err) {
             setMessage({ type: 'error', text: (err as Error).message });
         } finally {
