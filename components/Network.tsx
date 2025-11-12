@@ -7,7 +7,7 @@ import {
     getDhcpServers, addDhcpServer, updateDhcpServer, deleteDhcpServer,
     getDhcpLeases, makeLeaseStatic, deleteDhcpLease, runDhcpSetup, getIpPools,
     addIpPool, updateIpPool, deleteIpPool,
-    setupWanFailoverNetwatch, removeWanFailoverNetwatch, setupDualWanPCC
+    setupWanFailoverNetwatch, removeWanFailoverNetwatch, setupDualWanPCC, setupMultiWanPCC
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
@@ -511,6 +511,10 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     const [wan1Gateway, setWan1Gateway] = useState('');
     const [wan2Gateway, setWan2Gateway] = useState('');
 
+    // Multi-WAN PCC state (up to 10 WANs)
+    const [pccSelectedWans, setPccSelectedWans] = useState<string[]>([]);
+    const [pccWanGateways, setPccWanGateways] = useState<Record<string, string>>({});
+
     const fetchData = useCallback(async () => {
         // Don't set loading to true on refetch, only on initial load
         if (!wanRoutes.length) setIsLoading(true);
@@ -621,6 +625,33 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
         }
     };
 
+    const handleMultiPccSetup = async () => {
+        if (!lanInterface || pccSelectedWans.length < 2) {
+            alert('Select LAN and at least two WAN interfaces.');
+            return;
+        }
+        // Ensure each selected WAN has a gateway defined
+        for (const w of pccSelectedWans) {
+            if (!pccWanGateways[w]) {
+                alert(`Missing gateway IP for ${w}.`);
+                return;
+            }
+        }
+        setIsToggling(true);
+        try {
+            await setupMultiWanPCC(selectedRouter, {
+                wanInterfaces: pccSelectedWans.slice(0, 10),
+                lanInterface,
+                wanGateways: pccWanGateways,
+            });
+            alert(`Multi-WAN PCC setup applied for ${pccSelectedWans.length} WANs.`);
+        } catch (err) {
+            alert(`Failed to set up Multi-WAN PCC: ${(err as Error).message}`);
+        } finally {
+            setIsToggling(false);
+        }
+    };
+
     if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
     if (error) return <div className="p-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg">{error}</div>;
 
@@ -722,6 +753,65 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                     </div>
                     <div className="text-xs text-slate-500">
                         Tip: If FastTrack is enabled, disable it for proper PCC behavior.
+                    </div>
+                </div>
+            </div>
+
+            {/* Multi-WAN Merge (PCC up to 10 WANs) */}
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Multi-WAN Merge (PCC up to 10)</h3>
+                    <p className="text-sm text-slate-500">Select multiple WANs, set gateways, and apply PCC across all.</p>
+                </div>
+                <div className="p-4 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="text-sm">LAN Interface</label>
+                            <select value={lanInterface} onChange={e=>setLanInterface(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                <option value="">Select</option>
+                                {interfaces.filter(i=> i.type==='bridge' || i.type==='ether').map(i=> <option key={i.id} value={i.name}>{i.name}</option>)}
+                            </select>
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="text-sm">WAN Interfaces (select up to 10)</label>
+                            <div className="mt-1 bg-slate-100 dark:bg-slate-700 rounded-md p-2 max-h-36 overflow-y-auto">
+                                {interfaces.filter(i=>i.type==='ether').map(intf=>{
+                                    const checked = pccSelectedWans.includes(intf.name);
+                                    return (
+                                        <label key={intf.id} className="flex items-center gap-2 text-sm py-1">
+                                            <input type="checkbox" checked={checked} onChange={()=>{
+                                                setPccSelectedWans(prev=> {
+                                                    const next = checked ? prev.filter(n=>n!==intf.name) : [...prev, intf.name];
+                                                    return next.slice(0, 10);
+                                                });
+                                            }} />
+                                            <span className="font-mono">{intf.name}</span>
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                    {pccSelectedWans.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {pccSelectedWans.map(w=> (
+                                <div key={w}>
+                                    <label className="text-sm">Gateway for {w}</label>
+                                    <input
+                                        value={pccWanGateways[w] || ''}
+                                        onChange={e=> setPccWanGateways(prev=> ({ ...prev, [w]: e.target.value }))}
+                                        placeholder="x.x.x.x"
+                                        className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <div className="flex justify-end">
+                        <button onClick={handleMultiPccSetup} disabled={isToggling} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-lg disabled:opacity-50">Apply Multi-WAN PCC</button>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                        Tip: Disable FastTrack if present; ensure each WAN gateway is reachable.
                     </div>
                 </div>
             </div>
