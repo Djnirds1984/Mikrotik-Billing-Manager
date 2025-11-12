@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { RouterConfigWithId, VlanInterface, Interface, IpAddress, IpRoute, IpRouteData, WanRoute, FailoverStatus, DhcpServer, DhcpLease, IpPool, DhcpServerData, DhcpServerSetupParams } from '../types.ts';
 import { 
     getVlans, addVlan, deleteVlan, getInterfaces, getIpAddresses, getIpRoutes, 
@@ -498,6 +498,10 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     const [isLoading, setIsLoading] = useState(true);
     const [isToggling, setIsToggling] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const [autoRefresh, setAutoRefresh] = useState(true);
+    const [isEditing, setIsEditing] = useState(false);
+    const hasLoadedRef = useRef(false);
 
     // Interfaces for Netwatch/PCC setup
     const [interfaces, setInterfaces] = useState<Interface[]>([]);
@@ -516,8 +520,11 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     const [pccWanGateways, setPccWanGateways] = useState<Record<string, string>>({});
 
     const fetchData = useCallback(async () => {
-        // Don't set loading to true on refetch, only on initial load
-        if (!wanRoutes.length) setIsLoading(true);
+        if (!hasLoadedRef.current) {
+            setIsLoading(true);
+        } else {
+            setIsRefreshing(true);
+        }
         setError(null);
         try {
             const [routes, status] = await Promise.all([
@@ -529,15 +536,21 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
         } catch (err) {
             setError((err as Error).message);
         } finally {
+            hasLoadedRef.current = true;
             setIsLoading(false);
+            setIsRefreshing(false);
         }
-    }, [selectedRouter, wanRoutes.length]);
+    }, [selectedRouter]);
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 5000); // Poll for status updates
-        return () => clearInterval(interval);
     }, [fetchData]);
+
+    useEffect(() => {
+        if (!autoRefresh || isEditing) return;
+        const interval = setInterval(fetchData, 5000);
+        return () => clearInterval(interval);
+    }, [fetchData, autoRefresh, isEditing]);
 
     useEffect(() => {
         const loadInterfaces = async () => {
@@ -652,11 +665,21 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
         }
     };
 
-    if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
+    if (isLoading && !hasLoadedRef.current) return <div className="flex justify-center p-8"><Loader /></div>;
     if (error) return <div className="p-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg">{error}</div>;
 
     return (
         <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                    {isRefreshing ? 'Refreshing status…' : 'Status up to date.'}
+                    {isEditing ? ' Editing paused auto-refresh.' : ''}
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-600 dark:text-slate-300">Auto-refresh</span>
+                    <ToggleSwitch checked={autoRefresh && !isEditing} onChange={() => setAutoRefresh(prev => !prev)} />
+                </div>
+            </div>
             <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 flex justify-between items-center">
                 <div>
                     <h4 className="font-semibold text-lg text-slate-800 dark:text-slate-200">Master Failover Switch</h4>
@@ -680,11 +703,11 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label className="text-sm">Health Host</label>
-                            <input value={healthHost} onChange={e=>setHealthHost(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="8.8.8.8" />
+                            <input value={healthHost} onChange={e=>{ setHealthHost(e.target.value); setIsEditing(true); }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="8.8.8.8" />
                         </div>
                         <div>
                             <label className="text-sm">Interval (hh:mm:ss)</label>
-                            <input value={healthInterval} onChange={e=>setHealthInterval(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="00:00:10" />
+                            <input value={healthInterval} onChange={e=>{ setHealthInterval(e.target.value); setIsEditing(true); }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="00:00:10" />
                         </div>
                         <div>
                             <label className="text-sm">WAN Interfaces</label>
@@ -695,6 +718,7 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                                         <label key={intf.id} className="flex items-center gap-2 text-sm py-1">
                                             <input type="checkbox" checked={checked} onChange={()=>{
                                                 setSelectedWans(prev=> checked ? prev.filter(n=>n!==intf.name) : [...prev, intf.name]);
+                                                setIsEditing(true);
                                             }} />
                                             <span className="font-mono">{intf.name}</span>
                                         </label>
@@ -720,32 +744,32 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label className="text-sm">WAN1 Interface</label>
-                            <select value={wan1Interface} onChange={e=>setWan1Interface(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                            <select value={wan1Interface} onChange={e=>{ setWan1Interface(e.target.value); setIsEditing(true); }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
                                 <option value="">Select</option>
                                 {interfaces.filter(i=>i.type==='ether').map(i=> <option key={i.id} value={i.name}>{i.name}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className="text-sm">WAN2 Interface</label>
-                            <select value={wan2Interface} onChange={e=>setWan2Interface(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                            <select value={wan2Interface} onChange={e=>{ setWan2Interface(e.target.value); setIsEditing(true); }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
                                 <option value="">Select</option>
                                 {interfaces.filter(i=>i.type==='ether').map(i=> <option key={i.id} value={i.name}>{i.name}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className="text-sm">LAN Interface</label>
-                            <select value={lanInterface} onChange={e=>setLanInterface(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                            <select value={lanInterface} onChange={e=>{ setLanInterface(e.target.value); setIsEditing(true); }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
                                 <option value="">Select</option>
                                 {interfaces.filter(i=> i.type==='bridge' || i.type==='ether').map(i=> <option key={i.id} value={i.name}>{i.name}</option>)}
                             </select>
                         </div>
                         <div>
                             <label className="text-sm">WAN1 Gateway IP</label>
-                            <input value={wan1Gateway} onChange={e=>setWan1Gateway(e.target.value)} placeholder="192.168.1.1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                            <input value={wan1Gateway} onChange={e=>{ setWan1Gateway(e.target.value); setIsEditing(true); }} placeholder="192.168.1.1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                         </div>
                         <div>
                             <label className="text-sm">WAN2 Gateway IP</label>
-                            <input value={wan2Gateway} onChange={e=>setWan2Gateway(e.target.value)} placeholder="192.168.2.1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                            <input value={wan2Gateway} onChange={e=>{ setWan2Gateway(e.target.value); setIsEditing(true); }} placeholder="192.168.2.1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                         </div>
                     </div>
                     <div className="flex justify-end">
@@ -767,7 +791,7 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label className="text-sm">LAN Interface</label>
-                            <select value={lanInterface} onChange={e=>setLanInterface(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                            <select value={lanInterface} onChange={e=>{ setLanInterface(e.target.value); setIsEditing(true); }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
                                 <option value="">Select</option>
                                 {interfaces.filter(i=> i.type==='bridge' || i.type==='ether').map(i=> <option key={i.id} value={i.name}>{i.name}</option>)}
                             </select>
@@ -784,6 +808,7 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                                                     const next = checked ? prev.filter(n=>n!==intf.name) : [...prev, intf.name];
                                                     return next.slice(0, 10);
                                                 });
+                                                setIsEditing(true);
                                             }} />
                                             <span className="font-mono">{intf.name}</span>
                                         </label>
@@ -799,7 +824,7 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                                     <label className="text-sm">Gateway for {w}</label>
                                     <input
                                         value={pccWanGateways[w] || ''}
-                                        onChange={e=> setPccWanGateways(prev=> ({ ...prev, [w]: e.target.value }))}
+                                        onChange={e=> { setPccWanGateways(prev=> ({ ...prev, [w]: e.target.value })); setIsEditing(true); }}
                                         placeholder="x.x.x.x"
                                         className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md"
                                     />

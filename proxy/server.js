@@ -16,7 +16,7 @@ const fsPromises = require('fs').promises;
 const crypto = require('crypto');
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 const DB_PATH = path.join(__dirname, 'panel.db');
 const SUPERADMIN_DB_PATH = path.join(__dirname, 'superadmin.db');
 const BACKUP_DIR = path.join(__dirname, 'backups');
