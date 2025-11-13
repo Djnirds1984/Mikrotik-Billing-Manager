@@ -1819,14 +1819,21 @@ app.get('/public/routers', async (req, res) => {
 });
 
 app.get('/public/ppp/status', async (req, res) => {
-    const { routerId, username } = req.query || {};
+    const routerId = req.query?.routerId || '';
+    const username = req.query?.username || '';
     const routerName = req.query?.routerName || '';
-    if (!routerId || !username) {
-        return res.status(400).json({ message: 'routerId and username are required' });
+    if ((!routerId && !routerName) || !username) {
+        return res.status(400).json({ message: 'routerId or routerName and username are required' });
     }
     try {
-        const config = await fetchRouterConfigByIdPublic(routerId, routerName);
-        if (!config) return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
+        let config = await fetchRouterConfigByIdPublic(routerId, routerName);
+        if (!config) {
+            // Try UI server public endpoint
+            const url = `${DB_SERVER_URL}/api/public/router-config?${new URLSearchParams({ routerId, routerName }).toString()}`;
+            const resp = await axios.get(url);
+            config = resp.data;
+        }
+        if (!config) return res.status(404).json({ message: `Router config for ID ${routerId || routerName} not found.` });
         const instance = createRouterInstance(config);
         let secrets = [];
         let active = [];

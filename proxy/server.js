@@ -1239,6 +1239,42 @@ app.get('/api/public/routers', async (req, res) => {
     }
 });
 
+app.get('/api/public/router-config', async (req, res) => {
+    try {
+        const { routerId, routerName } = req.query;
+        let row = null;
+        if (useMaria('routers')) {
+            if (routerId) {
+                const rows = await mariaQuery('SELECT * FROM routers WHERE id = ?', [routerId]);
+                row = rows && rows[0] ? rows[0] : null;
+            }
+            if (!row && routerName) {
+                const rowsByName = await mariaQuery('SELECT * FROM routers WHERE name = ?', [routerName]);
+                row = rowsByName && rowsByName[0] ? rowsByName[0] : null;
+            }
+        } else {
+            if (routerId) {
+                row = await db.get('SELECT * FROM routers WHERE id = ?', routerId);
+            }
+            if (!row && routerName) {
+                row = await db.get('SELECT * FROM routers WHERE name = ?', routerName);
+            }
+        }
+        if (!row) return res.status(404).json({ message: 'Router not found' });
+        return res.json({
+            id: row.id,
+            name: row.name,
+            host: row.host || row.address || row.hostname,
+            user: row.user || row.username || row.login,
+            password: row.password,
+            port: row.port || row.api_port || row.rest_port,
+            api_type: row.api_type || row.apiType || row.type || 'rest',
+            tls: row.tls ?? false
+        });
+    } catch (e) {
+        return res.status(500).json({ message: e.message });
+    }
+});
 app.get('/api/public/ppp/status', async (req, res) => {
     try {
         const qs = new URLSearchParams({ routerId: req.query.routerId || '', routerName: req.query.routerName || '', username: req.query.username || '' }).toString();
