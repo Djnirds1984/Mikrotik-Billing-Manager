@@ -7,6 +7,7 @@ import type {
   WanRoute,
   PanelSettings
 } from '../types.ts';
+import { sendTelegramNotification } from './telegramNotifications.ts';
 import {
   getPppSecrets,
   getDhcpClients,
@@ -43,7 +44,8 @@ const hasRecentMessage = (existing: Notification[], candidateMsg: string, within
 export const generatePppoeNotifications = async (
   routers: RouterConfigWithId[],
   existingNotifications: Notification[],
-  settings?: PanelSettings['notificationSettings']
+  settings?: PanelSettings['notificationSettings'],
+  panelSettings?: PanelSettings
 ): Promise<void> => {
   for (const router of routers) {
     let secrets: PppSecret[] = [];
@@ -72,6 +74,10 @@ export const generatePppoeNotifications = async (
         };
         try {
           await dbApi.post('/notifications', notif);
+          const ts = panelSettings?.telegramSettings;
+          if (ts?.enabled && ts.enableClientDisconnected) {
+            await sendTelegramNotification(msg, ts);
+          }
         } catch (err) {
           console.error('Failed to create PPPoE notification:', err);
         }
@@ -84,7 +90,8 @@ export const generatePppoeNotifications = async (
 export const generateDhcpPortalNotifications = async (
   routers: RouterConfigWithId[],
   existingNotifications: Notification[],
-  settings?: PanelSettings['notificationSettings']
+  settings?: PanelSettings['notificationSettings'],
+  panelSettings?: PanelSettings
 ): Promise<void> => {
   for (const router of routers) {
     let clients: DhcpClient[] = [];
@@ -115,6 +122,10 @@ export const generateDhcpPortalNotifications = async (
         };
         try {
           await dbApi.post('/notifications', notif);
+          const ts = panelSettings?.telegramSettings;
+          if (ts?.enabled && ts.enableClientDueDate) {
+            await sendTelegramNotification(msg, ts);
+          }
         } catch (err) {
           console.error('Failed to create DHCP portal notification:', err);
         }
@@ -132,6 +143,10 @@ export const generateDhcpPortalNotifications = async (
         };
         try {
           await dbApi.post('/notifications', notif);
+          const ts = panelSettings?.telegramSettings;
+          if (ts?.enabled && ts.enableClientDueDate) {
+            await sendTelegramNotification(msg, ts);
+          }
         } catch (err) {
           console.error('Failed to create DHCP near-expiry notification:', err);
         }
@@ -144,7 +159,8 @@ export const generateDhcpPortalNotifications = async (
 export const generateNetworkNotifications = async (
   routers: RouterConfigWithId[],
   existingNotifications: Notification[],
-  settings?: PanelSettings['notificationSettings']
+  settings?: PanelSettings['notificationSettings'],
+  panelSettings?: PanelSettings
 ): Promise<void> => {
   for (const router of routers) {
     try {
@@ -170,6 +186,10 @@ export const generateNetworkNotifications = async (
         };
         try {
           await dbApi.post('/notifications', notif);
+          const ts = panelSettings?.telegramSettings;
+          if (ts?.enabled && ts.enableInterfaceDisconnected) {
+            await sendTelegramNotification(msg, ts);
+          }
         } catch (err) {
           console.error('Failed to create network notification:', err);
         }
@@ -184,7 +204,8 @@ export const generateNetworkNotifications = async (
 export const generateBilledNotifications = async (
   routers: RouterConfigWithId[],
   existingNotifications: Notification[],
-  settings?: PanelSettings['notificationSettings']
+  settings?: PanelSettings['notificationSettings'],
+  panelSettings?: PanelSettings
 ): Promise<void> => {
   try {
     // Fetch all sales; filter by last 24h
@@ -221,7 +242,13 @@ export const generateBilledNotifications = async (
         link_to: link,
         context_json: JSON.stringify({ routerId: router.id, clientName, saleId: sale.id })
       };
-      try { await dbApi.post('/notifications', notif); } catch (err) { console.error('Failed to create billed notification:', err); }
+      try { 
+        await dbApi.post('/notifications', notif);
+        const ts = panelSettings?.telegramSettings;
+        if (ts?.enabled && ts.enableUserPaid) {
+          await sendTelegramNotification(msg, ts);
+        }
+      } catch (err) { console.error('Failed to create billed notification:', err); }
     }
   } catch (e) {
     console.warn('Failed to generate billed notifications:', e);
