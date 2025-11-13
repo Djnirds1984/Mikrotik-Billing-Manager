@@ -1742,16 +1742,25 @@ app.get('/api/internal/router-config/:id', async (req, res) => {
         return res.status(403).json({ message: 'Forbidden' });
     }
     try {
+        let row;
         if (useMaria('routers')) {
-            const rows = await mariaQuery('SELECT id, name, host, user, password, port, api_type FROM routers WHERE id = ?', [req.params.id]);
-            const row = rows && rows[0];
-            if (!row) return res.status(404).json({ message: 'Router not found' });
-            res.json(row);
+            const rows = await mariaQuery('SELECT * FROM routers WHERE id = ?', [req.params.id]);
+            row = rows && rows[0];
         } else {
-            const row = await db.get('SELECT id, name, host, user, password, port, api_type as api_type FROM routers WHERE id = ?', req.params.id);
-            if (!row) return res.status(404).json({ message: 'Router not found' });
-            res.json(row);
+            row = await db.get('SELECT * FROM routers WHERE id = ?', req.params.id);
         }
+        if (!row) return res.status(404).json({ message: 'Router not found' });
+        const normalized = {
+            id: row.id,
+            name: row.name,
+            host: row.host || row.address || row.hostname,
+            user: row.user || row.username || row.login,
+            password: row.password,
+            port: row.port || row.api_port || row.rest_port,
+            api_type: row.api_type || row.apiType || row.type || 'rest',
+            tls: row.tls ?? false
+        };
+        return res.json(normalized);
     } catch (e) {
         res.status(500).json({ message: e.message });
     }
