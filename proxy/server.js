@@ -1742,12 +1742,19 @@ app.get('/api/internal/router-config/:id', async (req, res) => {
         return res.status(403).json({ message: 'Forbidden' });
     }
     try {
-        let row;
-        if (useMaria('routers')) {
-            const rows = await mariaQuery('SELECT * FROM routers WHERE id = ?', [req.params.id]);
-            row = rows && rows[0];
-        } else {
-            row = await db.get('SELECT * FROM routers WHERE id = ?', req.params.id);
+        let row = null;
+        // Try MariaDB first if pool is available
+        if (mysqlPool) {
+            try {
+                const rows = await mariaQuery('SELECT * FROM routers WHERE id = ?', [req.params.id]);
+                row = rows && rows[0] ? rows[0] : null;
+            } catch (_) {}
+        }
+        // Fallback to SQLite if not found
+        if (!row) {
+            try {
+                row = await db.get('SELECT * FROM routers WHERE id = ?', req.params.id);
+            } catch (_) {}
         }
         if (!row) return res.status(404).json({ message: 'Router not found' });
         const normalized = {
