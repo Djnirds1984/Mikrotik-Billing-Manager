@@ -1735,7 +1735,8 @@ app.get('/api/public/routers', async (req, res) => {
 });
 
 // Internal-only: return full router config when called from localhost
-app.get('/api/internal/router-config/:id', async (req, res) => {
+// Unauthenticated internal route (no /api prefix) to avoid admin protect chain
+app.get('/internal/router-config/:id', async (req, res) => {
     const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || '') + '';
     const allowed = /127\.0\.0\.1|::1|::ffff:127\.0\.0\.1/.test(ip) || req.hostname === 'localhost';
     if (!allowed) {

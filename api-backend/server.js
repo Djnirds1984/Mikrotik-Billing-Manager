@@ -1804,7 +1804,7 @@ const fetchRoutersPublic = async () => {
 
 const fetchRouterConfigByIdPublic = async (routerId, routerName) => {
     try {
-        const url = `${DB_SERVER_URL}/api/internal/router-config/${encodeURIComponent(routerId)}${routerName ? `?name=${encodeURIComponent(routerName)}` : ''}`;
+    const url = `${DB_SERVER_URL}/internal/router-config/${encodeURIComponent(routerId)}${routerName ? `?name=${encodeURIComponent(routerName)}` : ''}`;
         const response = await axios.get(url);
         return response.data || null;
     } catch (e) {
