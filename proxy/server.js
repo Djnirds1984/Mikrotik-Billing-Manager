@@ -1206,6 +1206,34 @@ licenseRouter.post('/generate', requireAdmin, (req, res) => {
 app.use('/api/license', licenseRouter);
 
 
+// --- Public API (must come BEFORE panelAdminRouter to avoid auth) ---
+app.get('/api/public/routers', async (req, res) => {
+    try {
+        if (useMaria('routers')) {
+            const rows = await mysqlPool.query('SELECT id, name FROM routers');
+            const data = Array.isArray(rows[0]) ? rows[0] : [];
+            return res.json(data.map(r => ({ id: r.id, name: r.name })));
+        } else {
+            const rows = await db.all('SELECT id, name FROM routers');
+            return res.json(rows.map(r => ({ id: r.id, name: r.name })));
+        }
+    } catch (e) {
+        return res.status(500).json({ message: e.message });
+    }
+});
+
+app.get('/api/public/ppp/status', async (req, res) => {
+    try {
+        const qs = new URLSearchParams({ routerId: req.query.routerId || '', username: req.query.username || '' }).toString();
+        const resp = await fetch(`http://localhost:3002/public/ppp/status?${qs}`);
+        const data = await resp.json();
+        if (!resp.ok) return res.status(resp.status).json(data);
+        return res.json(data);
+    } catch (e) {
+        return res.status(500).json({ message: e.message });
+    }
+});
+
 // --- Panel User & Role Management ---
 const panelAdminRouter = express.Router();
 panelAdminRouter.use(protect);
