@@ -1592,14 +1592,13 @@ dbRouter.post('/:table', async (req, res) => {
         const columnsArr = Object.keys(req.body);
         const values = Object.values(req.body);
         if (useMaria(tableName)) {
+            // Ensure required columns exist (idempotent)
+            for (const col of columnsArr) {
+                try { await mariaQuery(`ALTER TABLE ${tableName} ADD COLUMN ${col} TEXT`); } catch {}
+            }
             const placeholders = columnsArr.map(() => '?').join(', ');
-            const columns = columnsArr.map(() => '??').join(', ');
-            const params = [];
-            // identifiers first
-            for (const col of columnsArr) params.push(col);
-            // then values
-            for (const v of values) params.push(v);
-            await mariaQuery(`INSERT INTO ?? (${columns}) VALUES (${placeholders})`, [tableName, ...params]);
+            const columns = columnsArr.join(', ');
+            await mariaQuery(`INSERT INTO ${tableName} (${columns}) VALUES (${placeholders})`, values);
         } else {
             const columns = columnsArr.join(', ');
             const placeholders = columnsArr.map(() => '?').join(', ');
@@ -1615,11 +1614,12 @@ dbRouter.patch('/:table/:id', async (req, res) => {
         const columnsArr = Object.keys(req.body);
         const values = Object.values(req.body);
         if (useMaria(tableName)) {
-            const setClause = columnsArr.map(() => '?? = ?').join(', ');
-            const params = [];
-            columnsArr.forEach((c, i) => { params.push(c, values[i]); });
-            params.push(req.params.id);
-            await mariaQuery(`UPDATE ?? SET ${setClause} WHERE id = ?`, [tableName, ...params]);
+            // Ensure required columns exist (idempotent)
+            for (const col of columnsArr) {
+                try { await mariaQuery(`ALTER TABLE ${tableName} ADD COLUMN ${col} TEXT`); } catch {}
+            }
+            const setClause = columnsArr.map(c => `${c} = ?`).join(', ');
+            await mariaQuery(`UPDATE ${tableName} SET ${setClause} WHERE id = ?`, [...values, req.params.id]);
         } else {
             const updates = columnsArr.map(key => `${key} = ?`).join(', ');
             await db.run(`UPDATE ${tableName} SET ${updates} WHERE id = ?`, [...values, req.params.id]);
