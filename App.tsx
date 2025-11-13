@@ -268,6 +268,17 @@ const AppRouter: React.FC = () => {
         );
     }
 
+    // Public client portal (no admin auth required)
+    if (window.location.pathname.startsWith('/portal')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <ClientPortal selectedRouter={null} />
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
     const checkLicense = useCallback(async () => {
         try {
             const res = await fetch('/api/license/status', { headers: getAuthHeader() });

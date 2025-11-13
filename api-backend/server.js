@@ -1791,3 +1791,72 @@ app.post('/mt-api/:routerId/multiwan/pcc-setup', getRouterConfig, async (req, re
         return { message: `PCC setup applied for ${K} WAN(s). Verify connectivity and active routes.` };
     });
 });
+// --- Public Client Portal Helpers ---
+const fetchRoutersPublic = async () => {
+    try {
+        const response = await axios.get(`${DB_SERVER_URL}/api/db/routers`);
+        const routers = Array.isArray(response.data) ? response.data : [];
+        return routers.map(r => ({ id: r.id, name: r.name }));
+    } catch (e) {
+        return [];
+    }
+};
+
+const fetchRouterConfigByIdPublic = async (routerId) => {
+    try {
+        const response = await axios.get(`${DB_SERVER_URL}/api/db/routers`);
+        const config = (Array.isArray(response.data) ? response.data : []).find(r => r.id === routerId);
+        return config || null;
+    } catch (e) {
+        return null;
+    }
+};
+
+// --- Public Endpoints: Routers list and PPP status ---
+app.get('/public/routers', async (req, res) => {
+    const routers = await fetchRoutersPublic();
+    res.json(routers);
+});
+
+app.get('/public/ppp/status', async (req, res) => {
+    const { routerId, username } = req.query || {};
+    if (!routerId || !username) {
+        return res.status(400).json({ message: 'routerId and username are required' });
+    }
+    try {
+        const config = await fetchRouterConfigByIdPublic(routerId);
+        if (!config) return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
+        const instance = createRouterInstance(config);
+        let secrets = [];
+        let active = [];
+        if (config.api_type === 'legacy') {
+            const client = instance;
+            await client.connect();
+            try {
+                secrets = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${username}`]);
+                secrets = Array.isArray(secrets) ? secrets.map(normalizeLegacyObject) : [];
+                active = await writeLegacySafe(client, ['/ppp/active/print', `?name=${username}`]);
+                active = Array.isArray(active) ? active.map(normalizeLegacyObject) : [];
+            } finally {
+                await client.close();
+            }
+        } else {
+            const respSecrets = await instance.get(`/ppp/secret?name=${encodeURIComponent(username)}`);
+            secrets = respSecrets.data || [];
+            const respActive = await instance.get(`/ppp/active?name=${encodeURIComponent(username)}`);
+            active = respActive.data || [];
+        }
+        const s = secrets[0] || null;
+        const status = {
+            exists: !!s,
+            active: Array.isArray(active) && active.length > 0,
+            profile: s ? s.profile : null,
+            disabled: s ? s.disabled : null,
+            comment: s ? s.comment : null,
+            lastLoggedOut: s ? s['last-logged-out'] || null : null,
+        };
+        return res.json(status);
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+});

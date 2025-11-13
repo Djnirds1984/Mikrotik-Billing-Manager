@@ -1,8 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import type { RouterConfigWithId } from '../types.ts';
-import { useRouters } from '../hooks/useRouters.ts';
-import { getPppSecrets, getPppActiveConnections } from '../services/mikrotikService.ts';
-import { dbApi } from '../services/databaseService.ts';
 
 const hashPassword = async (password: string): Promise<string> => {
   const enc = new TextEncoder();
@@ -13,7 +10,7 @@ const hashPassword = async (password: string): Promise<string> => {
 };
 
 export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
-  const { routers } = useRouters();
+  const [routers, setRouters] = useState<{id: string, name: string}[]>([]);
   const [routerId, setRouterId] = useState<string | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -23,59 +20,30 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [status, setStatus] = useState<any | null>(null);
 
   useEffect(() => {
-    setRouterId(selectedRouter?.id || routers[0]?.id || null);
-  }, [selectedRouter, routers]);
+    const loadRouters = async () => {
+      try {
+        const res = await fetch('/public/routers');
+        const data = await res.json();
+        setRouters(Array.isArray(data) ? data : []);
+        setRouterId(selectedRouter?.id || data[0]?.id || null);
+      } catch {}
+    };
+    loadRouters();
+  }, [selectedRouter]);
 
   const handleRegister = async () => {
-    if (!routerId || !username || !password) { setFeedback('Please fill router, username, and password'); return; }
-    setError(null); setFeedback(null);
-    try {
-      const hashed = await hashPassword(password);
-      const existing = await dbApi.get<any[]>(`/client_portal_accounts?username=${encodeURIComponent(username)}&routerId=${encodeURIComponent(routerId)}`);
-      if (Array.isArray(existing) && existing.length > 0) {
-        setError('Account already exists');
-        return;
-      }
-      await dbApi.post('/client_portal_accounts', {
-        routerId,
-        username,
-        password_hash: hashed,
-        created_at: new Date().toISOString(),
-      });
-      setFeedback('Account registered. You can now log in.');
-      setMode('login');
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    setFeedback('Registration is not available on public portal. Please contact admin.');
   };
 
   const handleLogin = async () => {
     if (!routerId || !username || !password) { setFeedback('Please fill router, username, and password'); return; }
     setError(null); setFeedback(null); setStatus(null);
     try {
-      const hashed = await hashPassword(password);
-      const rows = await dbApi.get<any[]>(`/client_portal_accounts?username=${encodeURIComponent(username)}&routerId=${encodeURIComponent(routerId)}`);
-      if (!Array.isArray(rows) || rows.length === 0) { setError('Account not found'); return; }
-      const account = rows[0];
-      if (account.password_hash !== hashed) { setError('Invalid credentials'); return; }
+      const res = await fetch(`/public/ppp/status?routerId=${encodeURIComponent(routerId)}&username=${encodeURIComponent(username)}`);
+      const data = await res.json();
+      if (!res.ok) { setError(data.message || 'Failed to query status'); return; }
       setFeedback('Login successful');
-      const router = routers.find(r => r.id === routerId);
-      if (router) {
-        const secrets = await getPppSecrets(router);
-        const secret = secrets.find(s => s.name === username);
-        const active = await getPppActiveConnections(router);
-        const isActive = active.some(a => a.name === username);
-        setStatus({
-          exists: !!secret,
-          active: isActive,
-          profile: secret?.profile,
-          comment: secret?.comment,
-          disabled: secret?.disabled,
-          lastLoggedOut: secret?.['last-logged-out'],
-        });
-      } else {
-        setFeedback('Router not selected');
-      }
+      setStatus(data);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -128,4 +96,3 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     </div>
   );
 };
-
