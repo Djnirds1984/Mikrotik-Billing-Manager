@@ -1777,7 +1777,7 @@ app.post('/api/db/panel-settings', protect, async (req, res, next) => {
 });
 // Make GET public for login page logo, but keep POST protected.
 app.get('/api/db/company-settings', createSettingsHandler('company_settings'));
-app.post('/api/db/company-settings', protect, createSettingsSaver('company_settings'));
+app.post('/api/db/company-settings', createSettingsSaver('company_settings'));
 
 app.use('/api/db', protect, dbRouter);
 
