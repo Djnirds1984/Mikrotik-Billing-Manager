@@ -22,11 +22,11 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   useEffect(() => {
     const loadRouters = async () => {
       try {
-        const res = await fetch('/public/routers');
+        const res = await fetch('/api/public/routers');
         const data = await res.json();
         setRouters(Array.isArray(data) ? data : []);
         setRouterId(selectedRouter?.id || data[0]?.id || null);
-      } catch {}
+      } catch (e) { setError('Failed to load routers'); }
     };
     loadRouters();
   }, [selectedRouter]);
@@ -39,7 +39,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     if (!routerId || !username || !password) { setFeedback('Please fill router, username, and password'); return; }
     setError(null); setFeedback(null); setStatus(null);
     try {
-      const res = await fetch(`/public/ppp/status?routerId=${encodeURIComponent(routerId)}&username=${encodeURIComponent(username)}`);
+      const res = await fetch(`/api/public/ppp/status?routerId=${encodeURIComponent(routerId)}&username=${encodeURIComponent(username)}`);
       const data = await res.json();
       if (!res.ok) { setError(data.message || 'Failed to query status'); return; }
       setFeedback('Login successful');
