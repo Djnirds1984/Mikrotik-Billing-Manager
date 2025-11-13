@@ -1,5 +1,4 @@
 import { dbApi } from './databaseService.ts';
-import axios from 'axios';
 import type {
   RouterConfigWithId,
   Notification,
@@ -40,26 +39,19 @@ const hasRecentMessage = (existing: Notification[], candidateMsg: string, within
   return existing.some(n => n.message === candidateMsg && (now - new Date(n.timestamp).getTime()) <= thresholdMs);
 };
 
-// Telegram notification functions
+// Telegram notification functions (Frontend version - logs only)
 export const sendTelegramNotification = async (
   message: string,
   settings?: PanelSettings['telegramSettings']
 ): Promise<void> => {
   if (!settings?.enabled || !settings.botToken || !settings.chatId) {
-    return; // Telegram not configured or disabled
+    console.log('Telegram notification skipped - not configured or disabled');
+    return;
   }
 
-  try {
-    const telegramApiUrl = `https://api.telegram.org/bot${settings.botToken}/sendMessage`;
-    await axios.post(telegramApiUrl, {
-      chat_id: settings.chatId,
-      text: message,
-      parse_mode: 'HTML'
-    });
-    console.log('Telegram notification sent successfully');
-  } catch (error) {
-    console.error('Failed to send Telegram notification:', error.response?.data || error.message);
-  }
+  // Frontend version - just log the intention to send
+  // Actual Telegram sending will be handled by backend
+  console.log(`Telegram notification would be sent: ${message}`);
 };
 
 // Enhanced notification generators with Telegram support

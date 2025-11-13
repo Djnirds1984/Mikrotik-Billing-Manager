@@ -14,6 +14,10 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const { RouterOSAPI } = require('node-routeros-v2');
 
+// Import Telegram Service
+const TelegramService = require('./telegramService.js');
+const telegramService = new TelegramService();
+
 const app = express();
 const PORT = 3002;
 const DB_SERVER_URL = 'http://localhost:3001';
