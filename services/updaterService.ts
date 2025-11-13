@@ -44,6 +44,9 @@ export const deleteBackup = (backupFile: string) => fetchData('/api/delete-backu
     method: 'POST',
     body: JSON.stringify({ backupFile }),
 });
+export const executeGitCommand = (command: string) => fetchData<any>(`/api/git/${command}`, {
+    method: 'POST',
+});
 
 
 // --- Streaming Logic using Fetch API ---
