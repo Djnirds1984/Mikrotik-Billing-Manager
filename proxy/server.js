@@ -1239,6 +1239,32 @@ app.get('/api/public/routers', async (req, res) => {
     }
 });
 
+// Public payments for client portal
+app.get('/api/public/client/payments', async (req, res) => {
+    try {
+        const { routerId, routerName, username } = req.query;
+        if (!username) return res.json([]);
+        let rows = [];
+        if (useMaria('sales_records')) {
+            let query = 'SELECT date, finalAmount, planPrice, planName, routerName, clientName, months, newExpiry FROM sales_records WHERE clientName = ?';
+            const params = [username];
+            if (routerId) { query += ' AND routerId = ?'; params.push(routerId); }
+            else if (routerName) { query += ' AND routerName = ?'; params.push(routerName); }
+            query += ' ORDER BY date DESC LIMIT 20';
+            rows = await mariaQuery(query, params);
+        } else {
+            let query = 'SELECT date, finalAmount, planPrice, planName, routerName, clientName, months, newExpiry FROM sales_records WHERE clientName = ?';
+            const params = [username];
+            if (routerId) { query += ' AND routerId = ?'; params.push(routerId); }
+            else if (routerName) { query += ' AND routerName = ?'; params.push(routerName); }
+            query += ' ORDER BY date DESC LIMIT 20';
+            rows = await db.all(query, params);
+        }
+        return res.json(rows);
+    } catch (e) {
+        return res.status(500).json({ message: e.message });
+    }
+});
 app.get('/api/public/router-config', async (req, res) => {
     try {
         const { routerId, routerName } = req.query;

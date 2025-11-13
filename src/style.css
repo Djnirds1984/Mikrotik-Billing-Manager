@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme variables (kept from index.html) */
+:root { font-family: Inter, sans-serif; }
+.theme-orange { --color-primary-500: #f97316; }
+.theme-sky { --color-primary-500: #0ea5e9; }
+.theme-emerald { --color-primary-500: #10b981; }
+.theme-violet { --color-primary-500: #8b5cf6; }

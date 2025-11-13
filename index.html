@@ -20,20 +20,7 @@
       const colorTheme = localStorage.getItem('colorTheme') || 'orange';
       document.documentElement.classList.add(`theme-${colorTheme}`);
     </script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      // Configure Tailwind CSS for class-based dark mode
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            },
-          },
-        },
-      };
-    </script>
+    <link href="/style.css" rel="stylesheet" />
   <script type="importmap">
 {
   "imports": {
