@@ -428,6 +428,30 @@ export interface PanelSettings {
         generatorIntervalSeconds?: number; // e.g., 30 default
         debounceMinutes?: number; // e.g., 15 default to avoid spam
     };
+    // AI Provider settings
+    aiProvider?: 'openai' | 'anthropic' | 'gemini';
+    aiApiKey?: string;
+    aiEnabled?: boolean;
+    // Notification preferences
+    emailNotifications?: boolean;
+    smsNotifications?: boolean;
+    pushNotifications?: boolean;
+    // Debug and logging
+    debugMode?: boolean;
+    autoUpdates?: boolean;
+    logLevel?: 'error' | 'warn' | 'info' | 'debug';
+    // Telegram notification settings
+    telegramSettings?: {
+        enabled?: boolean;
+        botToken?: string;
+        chatId?: string;
+        enableClientDueDate?: boolean;
+        enableClientDisconnected?: boolean;
+        enableInterfaceDisconnected?: boolean;
+        enablePanelOffline?: boolean;
+        enablePanelOnline?: boolean;
+        enableUserPaid?: boolean;
+    };
 }
 
 export interface PanelNtpStatus {

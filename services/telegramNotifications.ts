@@ -1,4 +1,4 @@
-import { dbApi } from '../services/databaseService.ts';
+import { dbApi } from './databaseService.ts';
 import axios from 'axios';
 import type {
   RouterConfigWithId,
@@ -40,11 +40,33 @@ const hasRecentMessage = (existing: Notification[], candidateMsg: string, within
   return existing.some(n => n.message === candidateMsg && (now - new Date(n.timestamp).getTime()) <= thresholdMs);
 };
 
-// Generate PPPoE expired/disabled notifications
-export const generatePppoeNotifications = async (
+// Telegram notification functions
+export const sendTelegramNotification = async (
+  message: string,
+  settings?: PanelSettings['telegramSettings']
+): Promise<void> => {
+  if (!settings?.enabled || !settings.botToken || !settings.chatId) {
+    return; // Telegram not configured or disabled
+  }
+
+  try {
+    const telegramApiUrl = `https://api.telegram.org/bot${settings.botToken}/sendMessage`;
+    await axios.post(telegramApiUrl, {
+      chat_id: settings.chatId,
+      text: message,
+      parse_mode: 'HTML'
+    });
+    console.log('Telegram notification sent successfully');
+  } catch (error) {
+    console.error('Failed to send Telegram notification:', error.response?.data || error.message);
+  }
+};
+
+// Enhanced notification generators with Telegram support
+export const generatePppoeNotificationsWithTelegram = async (
   routers: RouterConfigWithId[],
   existingNotifications: Notification[],
-  settings?: PanelSettings['notificationSettings']
+  settings?: PanelSettings
 ): Promise<void> => {
   for (const router of routers) {
     let secrets: PppSecret[] = [];
@@ -59,9 +81,10 @@ export const generatePppoeNotifications = async (
       const commentLower = (s.comment || '').toLowerCase();
       const mentionsExpired = commentLower.includes('expired') || commentLower.includes('due:');
       if (isDisabled || mentionsExpired) {
-        const msg = `PPPoE user '${s.name}' is expired/disabled on ${router.name}.`;
-        const debounceMin = settings?.debounceMinutes ?? 15;
+        const msg = `PPPoE user '${s.name}' is expired/disconnected on ${router.name}.`;
+        const debounceMin = settings?.notificationSettings?.debounceMinutes ?? 15;
         if (hasDuplicateMessage(existingNotifications, msg) || hasRecentMessage(existingNotifications, msg, debounceMin)) continue;
+        
         const notif: Notification = {
           id: makeId(),
           type: 'pppoe-expired',
@@ -73,6 +96,11 @@ export const generatePppoeNotifications = async (
         };
         try {
           await dbApi.post('/notifications', notif);
+          
+          // Send Telegram notification if enabled
+          if (settings?.telegramSettings?.enableClientDisconnected) {
+            await sendTelegramNotification(msg, settings.telegramSettings);
+          }
         } catch (err) {
           console.error('Failed to create PPPoE notification:', err);
         }
@@ -81,11 +109,10 @@ export const generatePppoeNotifications = async (
   }
 };
 
-// Generate DHCP portal expiration/near-expiration notifications
-export const generateDhcpPortalNotifications = async (
+export const generateDhcpPortalNotificationsWithTelegram = async (
   routers: RouterConfigWithId[],
   existingNotifications: Notification[],
-  settings?: PanelSettings['notificationSettings']
+  settings?: PanelSettings
 ): Promise<void> => {
   for (const router of routers) {
     let clients: DhcpClient[] = [];
@@ -99,12 +126,14 @@ export const generateDhcpPortalNotifications = async (
       // If authorized with a timeout and close to zero, treat as expired/near-expiry
       const secs = parseDurationToSeconds(c.timeout);
       if (secs === null) continue;
-      const nearHours = settings?.dhcpNearExpiryHours ?? 24;
+      const nearHours = settings?.notificationSettings?.dhcpNearExpiryHours ?? 24;
       const nearSecs = nearHours * 3600;
-      const debounceMin = settings?.debounceMinutes ?? 15;
+      const debounceMin = settings?.notificationSettings?.debounceMinutes ?? 15;
+      
       if (secs <= 0) {
         const msg = `DHCP portal client ${c.hostName || c.macAddress} has expired on ${router.name}.`;
         if (hasDuplicateMessage(existingNotifications, msg) || hasRecentMessage(existingNotifications, msg, debounceMin)) continue;
+        
         const notif: Notification = {
           id: makeId(),
           type: 'info',
@@ -116,12 +145,18 @@ export const generateDhcpPortalNotifications = async (
         };
         try {
           await dbApi.post('/notifications', notif);
+          
+          // Send Telegram notification if enabled
+          if (settings?.telegramSettings?.enableClientDueDate) {
+            await sendTelegramNotification(msg, settings.telegramSettings);
+          }
         } catch (err) {
           console.error('Failed to create DHCP portal notification:', err);
         }
       } else if (secs <= nearSecs) {
         const msg = `DHCP portal client ${c.hostName || c.macAddress} expires soon (<24h) on ${router.name}.`;
         if (hasDuplicateMessage(existingNotifications, msg) || hasRecentMessage(existingNotifications, msg, debounceMin)) continue;
+        
         const notif: Notification = {
           id: makeId(),
           type: 'info',
@@ -133,6 +168,11 @@ export const generateDhcpPortalNotifications = async (
         };
         try {
           await dbApi.post('/notifications', notif);
+          
+          // Send Telegram notification if enabled
+          if (settings?.telegramSettings?.enableClientDueDate) {
+            await sendTelegramNotification(msg, settings.telegramSettings);
+          }
         } catch (err) {
           console.error('Failed to create DHCP near-expiry notification:', err);
         }
@@ -141,11 +181,10 @@ export const generateDhcpPortalNotifications = async (
   }
 };
 
-// Generate network/WAN notifications (disabled interface or route down/no internet)
-export const generateNetworkNotifications = async (
+export const generateNetworkNotificationsWithTelegram = async (
   routers: RouterConfigWithId[],
   existingNotifications: Notification[],
-  settings?: PanelSettings['notificationSettings']
+  settings?: PanelSettings
 ): Promise<void> => {
   for (const router of routers) {
     try {
@@ -158,8 +197,9 @@ export const generateNetworkNotifications = async (
         const gw = r.gateway || 'unknown';
         const reason = r.disabled === 'true' ? 'disabled' : 'down';
         const msg = `WAN route ${gw} is ${reason} on ${router.name}.`;
-        const debounceMin = settings?.debounceMinutes ?? 15;
+        const debounceMin = settings?.notificationSettings?.debounceMinutes ?? 15;
         if (hasDuplicateMessage(existingNotifications, msg) || hasRecentMessage(existingNotifications, msg, debounceMin)) continue;
+        
         const notif: Notification = {
           id: makeId(),
           type: 'info',
@@ -171,6 +211,11 @@ export const generateNetworkNotifications = async (
         };
         try {
           await dbApi.post('/notifications', notif);
+          
+          // Send Telegram notification if enabled
+          if (settings?.telegramSettings?.enableInterfaceDisconnected) {
+            await sendTelegramNotification(msg, settings.telegramSettings);
+          }
         } catch (err) {
           console.error('Failed to create network notification:', err);
         }
@@ -181,11 +226,10 @@ export const generateNetworkNotifications = async (
   }
 };
 
-// Optionally generate billed notifications from sales_records; links decided heuristically.
-export const generateBilledNotifications = async (
+export const generateBilledNotificationsWithTelegram = async (
   routers: RouterConfigWithId[],
   existingNotifications: Notification[],
-  settings?: PanelSettings['notificationSettings']
+  settings?: PanelSettings
 ): Promise<void> => {
   try {
     // Fetch all sales; filter by last 24h
@@ -194,7 +238,7 @@ export const generateBilledNotifications = async (
       const t = new Date(s.date).getTime();
       return Date.now() - t <= 24 * 3600 * 1000;
     });
-    const debounceMin = settings?.debounceMinutes ?? 15;
+    const debounceMin = settings?.notificationSettings?.debounceMinutes ?? 15;
     for (const sale of recentSales) {
       const router = routers.find(r => r.id === sale.routerId || r.name === sale.routerName);
       const clientName = sale.clientName?.trim();
@@ -213,6 +257,7 @@ export const generateBilledNotifications = async (
       }
       const msg = `Client ${clientName} billed for '${sale.planName}' on ${router.name}.`;
       if (hasDuplicateMessage(existingNotifications, msg) || hasRecentMessage(existingNotifications, msg, debounceMin)) continue;
+      
       const notif: Notification = {
         id: makeId(),
         type: 'info',
@@ -222,10 +267,18 @@ export const generateBilledNotifications = async (
         link_to: link,
         context_json: JSON.stringify({ routerId: router.id, clientName, saleId: sale.id })
       };
-      try { await dbApi.post('/notifications', notif); } catch (err) { console.error('Failed to create billed notification:', err); }
+      try { 
+        await dbApi.post('/notifications', notif); 
+        
+        // Send Telegram notification if enabled
+        if (settings?.telegramSettings?.enableUserPaid) {
+          await sendTelegramNotification(msg, settings.telegramSettings);
+        }
+      } catch (err) { 
+        console.error('Failed to create billed notification:', err); 
+      }
     }
   } catch (e) {
     console.warn('Failed to generate billed notifications:', e);
   }
 };
-

@@ -5,10 +5,11 @@ import { BellIcon, TrashIcon } from '../constants.tsx';
 import { useRouters } from '../hooks/useRouters.ts';
 import { getPanelSettings, savePanelSettings } from '../services/databaseService.ts';
 import {
-    generatePppoeNotifications,
-    generateDhcpPortalNotifications,
-    generateNetworkNotifications,
-} from '../services/notificationGenerators.ts';
+    generatePppoeNotificationsWithTelegram,
+    generateDhcpPortalNotificationsWithTelegram,
+    generateNetworkNotificationsWithTelegram,
+    generateBilledNotificationsWithTelegram,
+} from '../services/telegramNotifications.ts';
 
 interface NotificationsPageProps {
     setCurrentView: (view: View) => void;
@@ -44,6 +45,20 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
         })();
     }, []);
 
+    const [panelSettings, setPanelSettings] = React.useState<import('../types.ts').PanelSettings | undefined>(undefined);
+
+    // Load full panel settings for Telegram integration
+    useEffect(() => {
+        (async () => {
+            try {
+                const settings = await getPanelSettings();
+                setPanelSettings(settings);
+            } catch (e) {
+                console.warn('Failed to load panel settings for Telegram:', e);
+            }
+        })();
+    }, []);
+
     const handleSaveSettings = async () => {
         if (!editSettings) return;
         setSaving(true);
@@ -72,17 +87,16 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
                 if (routers && routers.length > 0) {
                     const ns = notifSettings || {};
                     if (ns.enablePppoe !== false) {
-                        await generatePppoeNotifications(routers, notifications, ns);
+                        await generatePppoeNotificationsWithTelegram(routers, notifications, panelSettings);
                     }
                     if (ns.enableDhcpPortal !== false) {
-                        await generateDhcpPortalNotifications(routers, notifications, ns);
+                        await generateDhcpPortalNotificationsWithTelegram(routers, notifications, panelSettings);
                     }
                     if (ns.enableNetwork !== false) {
-                        await generateNetworkNotifications(routers, notifications, ns);
+                        await generateNetworkNotificationsWithTelegram(routers, notifications, panelSettings);
                     }
                     if (ns.enableBilled) {
-                        const { generateBilledNotifications } = await import('../services/notificationGenerators.ts');
-                        await generateBilledNotifications(routers, notifications, ns);
+                        await generateBilledNotificationsWithTelegram(routers, notifications, panelSettings);
                     }
                 }
             } catch (e) {
@@ -97,7 +111,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
         const intervalSeconds = notifSettings?.generatorIntervalSeconds ?? 30;
         const interval = setInterval(runGenerators, intervalSeconds * 1000);
         return () => clearInterval(interval);
-    }, [routers, notifications, notifSettings]);
+    }, [routers, notifications, notifSettings, panelSettings]);
 
     return (
         <div className="max-w-4xl mx-auto">
