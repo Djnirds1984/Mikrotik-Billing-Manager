@@ -25,7 +25,8 @@ export type View =
   | 'license'
   | 'super_admin'
   | 'dhcp-portal'
-  | 'notifications';
+  | 'notifications'
+  | 'client_portal';
 
 export interface Notification {
   id: string;

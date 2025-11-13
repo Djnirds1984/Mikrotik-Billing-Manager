@@ -31,6 +31,7 @@ import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
 import { DhcpPortal } from './components/DhcpPortal.tsx';
 import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
 import { NotificationsPage } from './components/NotificationsPage.tsx';
+import { ClientPortal } from './components/ClientPortal.tsx';
 import { Payroll } from './components/Payroll.tsx';
 import { useRouters } from './hooks/useRouters.ts';
 import { useSalesData } from './hooks/useSalesData.ts';
@@ -205,6 +206,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
       case 'super_admin':
           return <SuperAdmin />;
+      case 'client_portal':
+          return <ClientPortal selectedRouter={selectedRouter} />;
       default:
         return <Dashboard selectedRouter={selectedRouter} />;
     }
