@@ -9,7 +9,7 @@ import { createDatabaseBackup, listDatabaseBackups, deleteDatabaseBackup, getPan
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { Loader } from './Loader.tsx';
 // FIX: Import ClockIcon from constants
-import { KeyIcon, CogIcon, PowerIcon, RouterIcon, CircleStackIcon, ArrowPathIcon, TrashIcon, UsersIcon, DataplicityIcon, ClockIcon, TelegramIcon } from '../constants.tsx';
+import { KeyIcon, CogIcon, PowerIcon, RouterIcon, CircleStackIcon, ArrowPathIcon, TrashIcon, UsersIcon, DataplicityIcon, ClockIcon, BellIcon } from '../constants.tsx';
 import { SudoInstructionBox } from './SudoInstructionBox.tsx';
 
 // --- Icon Components ---
@@ -642,7 +642,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({ selectedRouter, 
                 </div>
             </SettingsCard>
 
-            <SettingsCard title="Telegram Manager" icon={<TelegramIcon className="w-6 h-6" />}>
+            <SettingsCard title="Telegram Manager" icon={<BellIcon className="w-6 h-6" />}>
                 <TelegramManager />
             </SettingsCard>
 
