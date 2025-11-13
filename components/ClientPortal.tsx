@@ -47,7 +47,8 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     if (!routerId || !username || !password) { setFeedback('Please fill router, username, and password'); return; }
     setError(null); setFeedback(null); setStatus(null);
     try {
-      const res = await fetch(`/api/public/ppp/status?routerId=${encodeURIComponent(routerId)}&username=${encodeURIComponent(username)}`);
+      const routerName = routers.find(r => r.id === routerId)?.name || '';
+      const res = await fetch(`/api/public/ppp/status?routerId=${encodeURIComponent(routerId)}&routerName=${encodeURIComponent(routerName)}&username=${encodeURIComponent(username)}`);
       const data = await res.json();
       if (!res.ok) { setError(data.message || 'Failed to query status'); return; }
       setFeedback('Login successful');

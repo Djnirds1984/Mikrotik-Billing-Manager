@@ -1241,7 +1241,7 @@ app.get('/api/public/routers', async (req, res) => {
 
 app.get('/api/public/ppp/status', async (req, res) => {
     try {
-        const qs = new URLSearchParams({ routerId: req.query.routerId || '', username: req.query.username || '' }).toString();
+        const qs = new URLSearchParams({ routerId: req.query.routerId || '', routerName: req.query.routerName || '', username: req.query.username || '' }).toString();
         const resp = await fetch(`http://localhost:3002/public/ppp/status?${qs}`);
         const data = await resp.json();
         if (!resp.ok) return res.status(resp.status).json(data);
@@ -1755,6 +1755,18 @@ app.get('/api/internal/router-config/:id', async (req, res) => {
             try {
                 row = await db.get('SELECT * FROM routers WHERE id = ?', req.params.id);
             } catch (_) {}
+        }
+        if (!row && req.query.name) {
+            // Fallback lookup by name
+            if (mysqlPool) {
+                try {
+                    const rowsByName = await mariaQuery('SELECT * FROM routers WHERE name = ?', [req.query.name]);
+                    row = rowsByName && rowsByName[0] ? rowsByName[0] : null;
+                } catch(_){}
+            }
+            if (!row) {
+                try { row = await db.get('SELECT * FROM routers WHERE name = ?', req.query.name); } catch(_){}
+            }
         }
         if (!row) return res.status(404).json({ message: 'Router not found' });
         const normalized = {

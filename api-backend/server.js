@@ -1802,9 +1802,10 @@ const fetchRoutersPublic = async () => {
     }
 };
 
-const fetchRouterConfigByIdPublic = async (routerId) => {
+const fetchRouterConfigByIdPublic = async (routerId, routerName) => {
     try {
-        const response = await axios.get(`${DB_SERVER_URL}/api/internal/router-config/${encodeURIComponent(routerId)}`);
+        const url = `${DB_SERVER_URL}/api/internal/router-config/${encodeURIComponent(routerId)}${routerName ? `?name=${encodeURIComponent(routerName)}` : ''}`;
+        const response = await axios.get(url);
         return response.data || null;
     } catch (e) {
         return null;
@@ -1819,11 +1820,12 @@ app.get('/public/routers', async (req, res) => {
 
 app.get('/public/ppp/status', async (req, res) => {
     const { routerId, username } = req.query || {};
+    const routerName = req.query?.routerName || '';
     if (!routerId || !username) {
         return res.status(400).json({ message: 'routerId and username are required' });
     }
     try {
-        const config = await fetchRouterConfigByIdPublic(routerId);
+        const config = await fetchRouterConfigByIdPublic(routerId, routerName);
         if (!config) return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
         const instance = createRouterInstance(config);
         let secrets = [];
