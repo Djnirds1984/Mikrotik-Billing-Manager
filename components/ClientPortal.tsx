@@ -47,13 +47,6 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     if (!routerId || !username || !password) { setFeedback('Please fill router, username, and password'); return; }
     setError(null); setFeedback(null); setStatus(null);
     try {
-      const auth = await fetch('/api/public/client-portal/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ routerId, username, password })
-      });
-      const authData = await auth.json();
-      if (!auth.ok) { setError(authData.message || 'Invalid credentials'); return; }
       const res = await fetch(`/api/public/ppp/status?routerId=${encodeURIComponent(routerId)}&username=${encodeURIComponent(username)}`);
       const data = await res.json();
       if (!res.ok) { setError(data.message || 'Failed to query status'); return; }
