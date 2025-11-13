@@ -1,13 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { RouterConfigWithId } from '../types.ts';
 
-const hashPassword = async (password: string): Promise<string> => {
-  const enc = new TextEncoder();
-  const data = enc.encode(password);
-  const digest = await window.crypto.subtle.digest('SHA-256', data);
-  const bytes = Array.from(new Uint8Array(digest));
-  return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
-};
+// Password hashing handled server-side
 
 export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
   const [routers, setRouters] = useState<{id: string, name: string}[]>([]);
@@ -32,13 +26,34 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   }, [selectedRouter]);
 
   const handleRegister = async () => {
-    setFeedback('Registration is not available on public portal. Please contact admin.');
+    if (!routerId || !username || !password) { setFeedback('Please fill router, username, and password'); return; }
+    setError(null); setFeedback(null);
+    try {
+      const resp = await fetch('/api/public/client-portal/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routerId, username, password })
+      });
+      const data = await resp.json();
+      if (!resp.ok) { setError(data.message || 'Registration failed'); return; }
+      setFeedback('Account registered. You can now log in.');
+      setMode('login');
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const handleLogin = async () => {
     if (!routerId || !username || !password) { setFeedback('Please fill router, username, and password'); return; }
     setError(null); setFeedback(null); setStatus(null);
     try {
+      const auth = await fetch('/api/public/client-portal/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routerId, username, password })
+      });
+      const authData = await auth.json();
+      if (!auth.ok) { setError(authData.message || 'Invalid credentials'); return; }
       const res = await fetch(`/api/public/ppp/status?routerId=${encodeURIComponent(routerId)}&username=${encodeURIComponent(username)}`);
       const data = await res.json();
       if (!res.ok) { setError(data.message || 'Failed to query status'); return; }

@@ -260,6 +260,22 @@ async function initDb() {
             await db.exec('PRAGMA user_version = 4;');
             user_version = 4;
         }
+
+        if (user_version < 15) {
+            console.log('Applying migration v15 (Client Portal Accounts)...');
+            await db.exec(`
+                CREATE TABLE IF NOT EXISTS client_portal_accounts (
+                    id TEXT PRIMARY KEY,
+                    routerId TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(routerId, username)
+                );
+            `);
+            await db.exec('PRAGMA user_version = 15;');
+            user_version = 15;
+        }
         
         if (user_version < 5) {
             console.log('Applying migration v5 (Force-fix settings table schemas)...');
@@ -1229,6 +1245,48 @@ app.get('/api/public/ppp/status', async (req, res) => {
         const data = await resp.json();
         if (!resp.ok) return res.status(resp.status).json(data);
         return res.json(data);
+    } catch (e) {
+        return res.status(500).json({ message: e.message });
+    }
+});
+
+app.post('/api/public/client-portal/register', async (req, res) => {
+    try {
+        const { routerId, username, password } = req.body || {};
+        if (!routerId || !username || !password) {
+            return res.status(400).json({ message: 'routerId, username and password are required' });
+        }
+        const password_hash = await bcrypt.hash(String(password), 10);
+        const id = `cp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        if (useMaria('client_portal_accounts')) {
+            await mariaQuery('CREATE TABLE IF NOT EXISTS client_portal_accounts (id VARCHAR(255) PRIMARY KEY, routerId TEXT, username TEXT, password_hash TEXT, created_at TEXT, UNIQUE KEY uniq_router_user (routerId, username))');
+            await mariaQuery('INSERT INTO client_portal_accounts (id, routerId, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username=username', [id, routerId, username, password_hash, new Date().toISOString()]);
+        } else {
+            await db.run('INSERT OR IGNORE INTO client_portal_accounts (id, routerId, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)', id, routerId, username, password_hash, new Date().toISOString());
+        }
+        return res.json({ message: 'Registered successfully' });
+    } catch (e) {
+        return res.status(500).json({ message: e.message });
+    }
+});
+
+app.post('/api/public/client-portal/login', async (req, res) => {
+    try {
+        const { routerId, username, password } = req.body || {};
+        if (!routerId || !username || !password) {
+            return res.status(400).json({ message: 'routerId, username and password are required' });
+        }
+        let account;
+        if (useMaria('client_portal_accounts')) {
+            const rows = await mariaQuery('SELECT password_hash FROM client_portal_accounts WHERE routerId = ? AND username = ? LIMIT 1', [routerId, username]);
+            account = rows && rows[0];
+        } else {
+            account = await db.get('SELECT password_hash FROM client_portal_accounts WHERE routerId = ? AND username = ? LIMIT 1', routerId, username);
+        }
+        if (!account) return res.status(404).json({ message: 'Account not found' });
+        const ok = await bcrypt.compare(String(password), String(account.password_hash));
+        if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
+        return res.json({ message: 'Login successful' });
     } catch (e) {
         return res.status(500).json({ message: e.message });
     }
