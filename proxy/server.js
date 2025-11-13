@@ -1629,8 +1629,13 @@ app.use('/api/db', protect, dbRouter);
 // --- Public (read-only) endpoints for client portal ---
 app.get('/api/public/routers', async (req, res) => {
     try {
-        const rows = await db.all('SELECT id, name FROM routers');
-        res.json(rows.map(r => ({ id: r.id, name: r.name })));
+        if (useMaria('routers')) {
+            const rows = await mariaQuery('SELECT id, name FROM routers');
+            res.json(rows.map(r => ({ id: r.id, name: r.name })));
+        } else {
+            const rows = await db.all('SELECT id, name FROM routers');
+            res.json(rows.map(r => ({ id: r.id, name: r.name })));
+        }
     } catch (e) {
         res.status(500).json({ message: e.message });
     }
@@ -1644,9 +1649,16 @@ app.get('/api/internal/router-config/:id', async (req, res) => {
         return res.status(403).json({ message: 'Forbidden' });
     }
     try {
-        const row = await db.get('SELECT id, name, host, user, password, port, api_type as api_type FROM routers WHERE id = ?', req.params.id);
-        if (!row) return res.status(404).json({ message: 'Router not found' });
-        res.json(row);
+        if (useMaria('routers')) {
+            const rows = await mariaQuery('SELECT id, name, host, user, password, port, api_type FROM routers WHERE id = ?', [req.params.id]);
+            const row = rows && rows[0];
+            if (!row) return res.status(404).json({ message: 'Router not found' });
+            res.json(row);
+        } else {
+            const row = await db.get('SELECT id, name, host, user, password, port, api_type as api_type FROM routers WHERE id = ?', req.params.id);
+            if (!row) return res.status(404).json({ message: 'Router not found' });
+            res.json(row);
+        }
     } catch (e) {
         res.status(500).json({ message: e.message });
     }
