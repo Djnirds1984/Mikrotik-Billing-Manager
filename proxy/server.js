@@ -1626,6 +1626,32 @@ app.post('/api/db/company-settings', protect, createSettingsSaver('company_setti
 
 app.use('/api/db', protect, dbRouter);
 
+// --- Public (read-only) endpoints for client portal ---
+app.get('/api/public/routers', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT id, name FROM routers');
+        res.json(rows.map(r => ({ id: r.id, name: r.name })));
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
+});
+
+// Internal-only: return full router config when called from localhost
+app.get('/api/internal/router-config/:id', async (req, res) => {
+    const ip = req.ip || req.connection?.remoteAddress || '';
+    const allowed = ip.includes('127.0.0.1') || ip.includes('::1');
+    if (!allowed) {
+        return res.status(403).json({ message: 'Forbidden' });
+    }
+    try {
+        const row = await db.get('SELECT id, name, host, user, password, port, api_type as api_type FROM routers WHERE id = ?', req.params.id);
+        if (!row) return res.status(404).json({ message: 'Router not found' });
+        res.json(row);
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
+});
+
 // --- MariaDB init and migration helpers ---
 app.post('/api/db/mariadb/init', protect, async (req, res) => {
     try {

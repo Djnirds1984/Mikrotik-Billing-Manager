@@ -1794,7 +1794,7 @@ app.post('/mt-api/:routerId/multiwan/pcc-setup', getRouterConfig, async (req, re
 // --- Public Client Portal Helpers ---
 const fetchRoutersPublic = async () => {
     try {
-        const response = await axios.get(`${DB_SERVER_URL}/api/db/routers`);
+        const response = await axios.get(`${DB_SERVER_URL}/api/public/routers`);
         const routers = Array.isArray(response.data) ? response.data : [];
         return routers.map(r => ({ id: r.id, name: r.name }));
     } catch (e) {
@@ -1804,9 +1804,8 @@ const fetchRoutersPublic = async () => {
 
 const fetchRouterConfigByIdPublic = async (routerId) => {
     try {
-        const response = await axios.get(`${DB_SERVER_URL}/api/db/routers`);
-        const config = (Array.isArray(response.data) ? response.data : []).find(r => r.id === routerId);
-        return config || null;
+        const response = await axios.get(`${DB_SERVER_URL}/api/internal/router-config/${encodeURIComponent(routerId)}`);
+        return response.data || null;
     } catch (e) {
         return null;
     }
