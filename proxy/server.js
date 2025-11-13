@@ -1250,8 +1250,11 @@ app.get('/api/public/ppp/status', async (req, res) => {
     }
 });
 
-app.post('/api/public/client-portal/register', async (req, res) => {
+app.all('/api/public/client-portal/register', async (req, res) => {
     try {
+        if (req.method !== 'POST') {
+            return res.json({ message: 'Use POST with routerId, username, password' });
+        }
         const { routerId, username, password } = req.body || {};
         if (!routerId || !username || !password) {
             return res.status(400).json({ message: 'routerId, username and password are required' });
@@ -1270,8 +1273,11 @@ app.post('/api/public/client-portal/register', async (req, res) => {
     }
 });
 
-app.post('/api/public/client-portal/login', async (req, res) => {
+app.all('/api/public/client-portal/login', async (req, res) => {
     try {
+        if (req.method !== 'POST') {
+            return res.json({ message: 'Use POST with routerId, username, password' });
+        }
         const { routerId, username, password } = req.body || {};
         if (!routerId || !username || !password) {
             return res.status(400).json({ message: 'routerId, username and password are required' });
