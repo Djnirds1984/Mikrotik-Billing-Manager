@@ -17,6 +17,7 @@ interface NotificationsPageProps {
 export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrentView }) => {
     const { notifications, unreadCount, markAllAsRead, clearNotifications, markAsRead } = useNotifications();
     const { routers } = useRouters();
+    const [panelSettings, setPanelSettings] = React.useState<import('../types.ts').PanelSettings | undefined>(undefined);
     const [notifSettings, setNotifSettings] = React.useState<import('../types.ts').PanelSettings['notificationSettings'] | undefined>(undefined);
     const [editSettings, setEditSettings] = React.useState<import('../types.ts').PanelSettings['notificationSettings'] | undefined>(undefined);
     const [saving, setSaving] = React.useState(false);
@@ -36,6 +37,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
         (async () => {
             try {
                 const settings = await getPanelSettings();
+                setPanelSettings(settings);
                 setNotifSettings(settings.notificationSettings);
                 setEditSettings(settings.notificationSettings || {});
             } catch (e) {
@@ -72,17 +74,17 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ setCurrent
                 if (routers && routers.length > 0) {
                     const ns = notifSettings || {};
                     if (ns.enablePppoe !== false) {
-                        await generatePppoeNotifications(routers, notifications, ns);
+                        await generatePppoeNotifications(routers, notifications, ns, panelSettings);
                     }
                     if (ns.enableDhcpPortal !== false) {
-                        await generateDhcpPortalNotifications(routers, notifications, ns);
+                        await generateDhcpPortalNotifications(routers, notifications, ns, panelSettings);
                     }
                     if (ns.enableNetwork !== false) {
-                        await generateNetworkNotifications(routers, notifications, ns);
+                        await generateNetworkNotifications(routers, notifications, ns, panelSettings);
                     }
                     if (ns.enableBilled) {
                         const { generateBilledNotifications } = await import('../services/notificationGenerators.ts');
-                        await generateBilledNotifications(routers, notifications, ns);
+                        await generateBilledNotifications(routers, notifications, ns, panelSettings);
                     }
                 }
             } catch (e) {
