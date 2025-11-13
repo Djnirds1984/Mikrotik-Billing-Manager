@@ -1768,7 +1768,14 @@ app.post('/api/db/mariadb/init', protect, async (req, res) => {
         } catch (_) { /* ignore */ }
         await mariaQuery('CREATE TABLE IF NOT EXISTS billing_plans (id VARCHAR(255) PRIMARY KEY, name TEXT, price DOUBLE, cycle TEXT, pppoeProfile TEXT, description TEXT, currency TEXT, routerId TEXT)');
         await mariaQuery('CREATE TABLE IF NOT EXISTS sales_records (id VARCHAR(255) PRIMARY KEY, date TEXT, clientName TEXT, planName TEXT, planPrice DOUBLE, discountAmount DOUBLE, finalAmount DOUBLE, routerName TEXT, clientAddress TEXT, clientContact TEXT, clientEmail TEXT, currency TEXT, routerId TEXT)');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS customers (id VARCHAR(255) PRIMARY KEY, name TEXT, address TEXT, contact TEXT, email TEXT, routerId TEXT)');
+        await mariaQuery('CREATE TABLE IF NOT EXISTS customers (id VARCHAR(255) PRIMARY KEY, username TEXT, routerId TEXT, fullName TEXT, address TEXT, contactNumber TEXT, email TEXT)');
+        // Backward compatibility: add missing columns if table was created with old schema
+        try { await mariaQuery('ALTER TABLE customers ADD COLUMN username TEXT'); } catch {}
+        try { await mariaQuery('ALTER TABLE customers ADD COLUMN routerId TEXT'); } catch {}
+        try { await mariaQuery('ALTER TABLE customers ADD COLUMN fullName TEXT'); } catch {}
+        try { await mariaQuery('ALTER TABLE customers ADD COLUMN address TEXT'); } catch {}
+        try { await mariaQuery('ALTER TABLE customers ADD COLUMN contactNumber TEXT'); } catch {}
+        try { await mariaQuery('ALTER TABLE customers ADD COLUMN email TEXT'); } catch {}
         await mariaQuery('CREATE TABLE IF NOT EXISTS inventory (id VARCHAR(255) PRIMARY KEY, name TEXT, description TEXT, quantity INT, unit TEXT, routerId TEXT)');
         await mariaQuery('CREATE TABLE IF NOT EXISTS voucher_plans (id VARCHAR(255) PRIMARY KEY, routerId TEXT NOT NULL, name TEXT NOT NULL, duration_minutes INT NOT NULL, price DOUBLE NOT NULL, currency TEXT NOT NULL, mikrotik_profile_name TEXT NOT NULL)');
         await mariaQuery('CREATE TABLE IF NOT EXISTS notifications (id VARCHAR(255) PRIMARY KEY, type TEXT NOT NULL, message TEXT NOT NULL, is_read TINYINT NOT NULL DEFAULT 0, timestamp TEXT NOT NULL, link_to TEXT, context_json TEXT)');
