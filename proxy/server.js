@@ -737,7 +737,8 @@ const supportedMariaTables = new Set([
     'employees',
     'employee_benefits',
     'time_records',
-    'notifications'
+    'notifications',
+    'client_portal_accounts'
 ]);
 
 // Tables that must remain in SQLite to protect panel integrity
