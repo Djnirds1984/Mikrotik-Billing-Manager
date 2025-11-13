@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
     getCurrentVersion, listBackups, deleteBackup, 
-    streamUpdateStatus, streamUpdateApp, streamRollbackApp, executeGitCommand
+    streamUpdateStatus, streamUpdateApp, streamRollbackApp 
 } from '../services/updaterService.ts';
 import { UpdateIcon, CloudArrowUpIcon, CheckCircleIcon, ExclamationTriangleIcon, TrashIcon } from '../constants.tsx';
 import { Loader } from './Loader.tsx';
@@ -76,7 +76,6 @@ export const Updater: React.FC = () => {
     const [newVersionInfo, setNewVersionInfo] = useState<NewVersionInfo | null>(null);
     const [isLoadingCurrentVersion, setIsLoadingCurrentVersion] = useState(true);
     const [isDeleting, setIsDeleting] = useState<string | null>(null);
-    const [isGitStashing, setIsGitStashing] = useState(false);
 
 
     const fetchBackups = useCallback(async () => {
@@ -106,20 +105,6 @@ export const Updater: React.FC = () => {
         fetchCurrentVersion();
         fetchBackups();
     }, [fetchBackups]);
-
-    const handleGitStash = async () => {
-        if (!window.confirm('Are you sure you want to stash local changes? This will save your uncommitted changes temporarily.')) return;
-
-        setIsGitStashing(true);
-        try {
-            const result = await executeGitCommand('stash');
-            alert(`Git stash successful: ${result.message || 'Changes have been stashed'}`);
-        } catch (error) {
-            alert(`Git stash failed: ${(error as Error).message}`);
-        } finally {
-            setIsGitStashing(false);
-        }
-    };
 
     const handleCheckForUpdates = () => {
         setLogs([]);
@@ -231,7 +216,7 @@ export const Updater: React.FC = () => {
         }
     };
     
-    const isWorking = ['checking', 'updating', 'restarting', 'rollingback'].includes(statusInfo.status) || !!isDeleting || isGitStashing;
+    const isWorking = ['checking', 'updating', 'restarting', 'rollingback'].includes(statusInfo.status) || !!isDeleting;
 
     return (
         <div className="max-w-4xl mx-auto space-y-8">
@@ -249,9 +234,6 @@ export const Updater: React.FC = () => {
                             Install Update
                         </button>
                     )}
-                    <button onClick={handleGitStash} disabled={isGitStashing} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold disabled:opacity-50">
-                        {isGitStashing ? 'Stashing...' : 'Git Stash'}
-                    </button>
                 </div>
             </div>
             

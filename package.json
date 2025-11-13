@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@google/genai": "^1.15.0",
-    "axios": "^1.7.2",
     "chart.js": "^4.5.0",
     "path": "^0.12.7",
     "react": "^19.2.0",

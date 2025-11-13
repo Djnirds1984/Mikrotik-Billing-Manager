@@ -1,5 +1,4 @@
 import { dbApi } from '../services/databaseService.ts';
-import axios from 'axios';
 import type {
   RouterConfigWithId,
   Notification,
