@@ -710,13 +710,14 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                 </button>
             </div>
 
-            {/* Netwatch Auto-Disable Setup */}
+            {/* Automatic WAN Failover (Routing-Based) */}
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
-                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Automatic WAN Disable (Netwatch)</h3>
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Automatic WAN Failover (Routing-Based)</h3>
+                    <p className="text-sm text-slate-500">Configure automatic failover using distance-based routing with gateway health checking.</p>
                 </div>
                 <div className="p-4 space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div>
                             <label className="text-sm">Health Host</label>
                             <input value={healthHost} onChange={e=>{ setHealthHost(e.target.value); setIsEditing(true); }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="8.8.8.8" />
@@ -726,7 +727,17 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                             <input value={healthInterval} onChange={e=>{ setHealthInterval(e.target.value); setIsEditing(true); }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="00:00:10" />
                         </div>
                         <div>
-                            <label className="text-sm">WAN Interfaces</label>
+                            <label className="text-sm">Primary WAN Gateway</label>
+                            <input value={wan1Gateway} onChange={e=>{ setWan1Gateway(e.target.value); setIsEditing(true); }} placeholder="192.168.1.1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                        </div>
+                        <div>
+                            <label className="text-sm">Backup WAN Gateway</label>
+                            <input value={wan2Gateway} onChange={e=>{ setWan2Gateway(e.target.value); setIsEditing(true); }} placeholder="192.168.2.1" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
+                        <div>
+                            <label className="text-sm">WAN Interfaces (select 2 for failover)</label>
                             <div className="mt-1 bg-slate-100 dark:bg-slate-700 rounded-md p-2 max-h-36 overflow-y-auto">
                                 {interfaces.filter(i=>i.type==='ether').map(intf=>{
                                     const checked = selectedWans.includes(intf.name);
@@ -746,6 +757,9 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                     <div className="flex gap-2 justify-end">
                         <button onClick={handleNetwatchRemove} disabled={isToggling} className="px-4 py-2 bg-slate-200 dark:bg-slate-600 rounded-lg disabled:opacity-50">Remove</button>
                         <button onClick={handleNetwatchSetup} disabled={isToggling} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-lg disabled:opacity-50">Apply</button>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                        Tip: Select 2 WAN interfaces and provide their gateway IPs. The primary route (distance 1) will be used normally, and the backup route (distance 2) will activate if the primary gateway fails health checks.
                     </div>
                 </div>
             </div>
