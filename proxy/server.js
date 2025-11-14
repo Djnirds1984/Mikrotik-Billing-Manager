@@ -1580,9 +1580,37 @@ app.get('/api/host-status', protect, (req, res) => {
             resolve(JSON.parse(stdout));
         });
     });
+    const getCpuTemp = () => new Promise(resolve => {
+        const tryFiles = async () => {
+            try {
+                const dir = '/sys/class/thermal';
+                const entries = await fs.promises.readdir(dir).catch(() => []);
+                const temps = [];
+                for (const e of entries) {
+                    if (!e.startsWith('thermal_zone')) continue;
+                    const p = `${dir}/${e}/temp`;
+                    try {
+                        const raw = await fs.promises.readFile(p, 'utf8');
+                        const v = parseFloat(String(raw).trim());
+                        if (Number.isFinite(v)) temps.push(v / 1000);
+                    } catch {}
+                }
+                if (temps.length > 0) return Number(Math.max(...temps).toFixed(1));
+            } catch {}
+            return null;
+        };
+        tryFiles().then(fileTemp => {
+            if (fileTemp !== null) return resolve(fileTemp);
+            exec('which vcgencmd && vcgencmd measure_temp', (err, stdout) => {
+                if (err) return resolve(null);
+                const m = String(stdout).match(/temp=([0-9.]+)/);
+                resolve(m ? Number(parseFloat(m[1]).toFixed(1)) : null);
+            });
+        });
+    });
     
-    Promise.all([getCpuUsage(), getMemoryUsage(), getDiskUsage()]).then(([cpu, mem, disk]) => {
-        res.json({ cpuUsage: cpu, memory: mem, disk });
+    Promise.all([getCpuUsage(), getMemoryUsage(), getDiskUsage(), getCpuTemp()]).then(([cpu, mem, disk, temp]) => {
+        res.json({ cpuUsage: cpu, memory: mem, disk, cpuTemp: temp });
     }).catch(err => res.status(500).json({ message: err.message }));
 });
 

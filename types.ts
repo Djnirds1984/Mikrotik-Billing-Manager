@@ -67,6 +67,7 @@ export interface SystemInfo {
   uptime: string;
   memoryUsage: number;
   totalMemory: string;
+  cpuTemperature?: number | null;
 }
 
 export interface Interface {
@@ -407,6 +408,7 @@ export interface PanelHostStatus {
         free: string;
         percent: number;
     };
+    cpuTemp?: number | null;
 }
 
 export interface PanelSettings {

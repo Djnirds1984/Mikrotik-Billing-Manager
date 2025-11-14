@@ -461,12 +461,21 @@ app.get('/mt-api/:routerId/health', getRouterConfig, async (req, res) => {
 app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
         let resource;
+        let cpuTemp = null;
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
                 const result = await writeLegacySafe(client, '/system/resource/print');
                 resource = result.length > 0 ? normalizeLegacyObject(result[0]) : null;
+                const t = resource && (resource['cpu-temperature'] || resource['temperature']);
+                if (t) cpuTemp = Number(parseFloat(String(t)).toFixed(1));
+                if (cpuTemp === null) {
+                    const health = await writeLegacySafe(client, '/system/health/print');
+                    const h = Array.isArray(health) && health[0] ? normalizeLegacyObject(health[0]) : {};
+                    const ht = h['temperature'] || h['cpu-temperature'];
+                    if (ht) cpuTemp = Number(parseFloat(String(ht)).toFixed(1));
+                }
             } finally {
                 await client.close();
             }
@@ -474,6 +483,16 @@ app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) =
             const response = await req.routerInstance.get('/system/resource');
             // The REST API for /system/resource returns a single object, not an array.
             resource = response.data;
+            const rt = resource && (resource['cpu-temperature'] || resource['temperature']);
+            if (rt) cpuTemp = Number(parseFloat(String(rt)).toFixed(1));
+            if (cpuTemp === null) {
+                try {
+                    const healthResp = await req.routerInstance.get('/system/health');
+                    const healthData = Array.isArray(healthResp.data) ? healthResp.data[0] : healthResp.data;
+                    const ht = healthData && (healthData['temperature'] || healthData['cpu-temperature']);
+                    if (ht) cpuTemp = Number(parseFloat(String(ht)).toFixed(1));
+                } catch (_) {}
+            }
         }
 
         if (!resource || Object.keys(resource).length === 0) {
@@ -492,6 +511,7 @@ app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) =
             uptime: resource.uptime,
             memoryUsage: parseFloat(memoryUsage.toFixed(1)),
             totalMemory: formatBytes(totalMemoryBytes),
+            cpuTemperature: cpuTemp,
         };
     });
 });

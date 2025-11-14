@@ -237,11 +237,12 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                  <StatCard title="Host Panel Status">
                      {hostError && <p className="text-yellow-600 dark:text-yellow-400 text-sm">{hostError}</p>}
                      {!hostStatus && !hostError && <div className="flex items-center justify-center h-24"><Loader /></div>}
-                     {hostStatus && <>
-                        <StatItem label="CPU Usage" value={`${hostStatus.cpuUsage.toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage} colorClass="bg-green-500" /></StatItem>
-                        <StatItem label="RAM Usage" value={`${hostStatus.memory.percent.toFixed(1)}%`} subtext={`(${hostStatus.memory.used} / ${hostStatus.memory.total})`}><ProgressBar percent={hostStatus.memory.percent} colorClass="bg-sky-500" /></StatItem>
-                        <StatItem label="SD Card Usage" value={`${hostStatus.disk.percent}%`} subtext={`(${hostStatus.disk.used} / ${hostStatus.disk.total})`}><ProgressBar percent={hostStatus.disk.percent} colorClass="bg-amber-500" /></StatItem>
-                     </>}
+                         {hostStatus && <>
+                            <StatItem label="CPU Usage" value={`${hostStatus.cpuUsage.toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage} colorClass="bg-green-500" /></StatItem>
+                            {typeof hostStatus.cpuTemp === 'number' && <StatItem label="CPU Temp" value={`${hostStatus.cpuTemp}°C`} />}
+                            <StatItem label="RAM Usage" value={`${hostStatus.memory.percent.toFixed(1)}%`} subtext={`(${hostStatus.memory.used} / ${hostStatus.memory.total})`}><ProgressBar percent={hostStatus.memory.percent} colorClass="bg-sky-500" /></StatItem>
+                            <StatItem label="SD Card Usage" value={`${hostStatus.disk.percent}%`} subtext={`(${hostStatus.disk.used} / ${hostStatus.disk.total})`}><ProgressBar percent={hostStatus.disk.percent} colorClass="bg-amber-500" /></StatItem>
+                         </>}
                  </StatCard>
                  <div className="flex flex-col items-center justify-center h-full text-center py-16">
                     <RouterIcon className="w-24 h-24 text-slate-300 dark:text-slate-700 mb-4" />
@@ -293,6 +294,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                          {!hostStatus && !hostError && <div className="flex items-center justify-center h-24"><Loader /></div>}
                          {hostStatus && <>
                             <StatItem label="CPU Usage" value={`${hostStatus.cpuUsage.toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage} colorClass="bg-green-500" /></StatItem>
+                            {typeof hostStatus.cpuTemp === 'number' && <StatItem label="CPU Temp" value={`${hostStatus.cpuTemp}°C`} />}
                             <StatItem label="RAM Usage" value={`${hostStatus.memory.percent.toFixed(1)}%`} subtext={`(${hostStatus.memory.used}/${hostStatus.memory.total})`}><ProgressBar percent={hostStatus.memory.percent} colorClass="bg-sky-500" /></StatItem>
                             <StatItem label="SD Card" value={`${hostStatus.disk.percent}%`} subtext={`(${hostStatus.disk.used}/${hostStatus.disk.total})`}><ProgressBar percent={hostStatus.disk.percent} colorClass="bg-amber-500" /></StatItem>
                          </>}
@@ -302,6 +304,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                              <StatItem label="Board Name" value={systemInfo.boardName} icon={<ChipIcon className="w-5 h-5 text-slate-400"/>} />
                              <StatItem label="Uptime" value={systemInfo.uptime} />
                              <StatItem label="CPU Load" value={`${systemInfo.cpuLoad}%`}><ProgressBar percent={systemInfo.cpuLoad} colorClass="bg-green-500" /></StatItem>
+                             {typeof systemInfo.cpuTemperature === 'number' && <StatItem label="CPU Temp" value={`${systemInfo.cpuTemperature}°C`} />}
                              <StatItem label="Memory" value={`${systemInfo.memoryUsage}%`} subtext={`of ${systemInfo.totalMemory}`}><ProgressBar percent={systemInfo.memoryUsage} colorClass="bg-sky-500" /></StatItem>
                              <StatItem label="Active PPPoE" value={pppoeCount} icon={<UsersIcon className="w-5 h-5 text-slate-400" />} />
                          </> : <div className="flex items-center justify-center h-24"><Loader /></div>}
