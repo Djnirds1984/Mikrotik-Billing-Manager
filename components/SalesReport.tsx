@@ -68,10 +68,12 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
 
     const handlePrintReceipt = (sale: SaleRecord) => {
         setReceiptToPrint(sale);
+        setThermalReceiptToPrint(null); // Clear thermal receipt to avoid conflicts
     };
 
     const handlePrintThermalReceipt = (sale: SaleRecord) => {
         setThermalReceiptToPrint(sale);
+        setReceiptToPrint(null); // Clear regular receipt to avoid conflicts
     };
 
     useEffect(() => {
@@ -83,7 +85,40 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
 
     useEffect(() => {
         if (thermalReceiptToPrint) {
-            const timer = setTimeout(() => window.print(), 100);
+            const timer = setTimeout(() => {
+                // Create a new window for thermal printing
+                const printWindow = window.open('', '_blank', 'width=300,height=600');
+                if (printWindow) {
+                    const thermalContent = document.querySelector('.thermal-receipt')?.outerHTML;
+                    if (thermalContent) {
+                        printWindow.document.write(`
+                            <!DOCTYPE html>
+                            <html>
+                            <head>
+                                <title>Thermal Receipt</title>
+                                <style>
+                                    body { margin: 0; padding: 0; font-family: monospace; }
+                                    .thermal-receipt { width: 280px; margin: 0 auto; font-size: 12px; }
+                                    @media print { 
+                                        @page { margin: 0; size: 80mm 297mm; }
+                                        body { margin: 0; }
+                                    }
+                                </style>
+                            </head>
+                            <body>
+                                ${thermalContent}
+                            </body>
+                            </html>
+                        `);
+                        printWindow.document.close();
+                        printWindow.focus();
+                        setTimeout(() => {
+                            printWindow.print();
+                            printWindow.close();
+                        }, 250);
+                    }
+                }
+            }, 100);
             return () => clearTimeout(timer);
         }
     }, [thermalReceiptToPrint]);
