@@ -160,6 +160,52 @@ const handleApiRequest = async (req, res, action) => {
 };
 
 // --- Middleware ---
+// Auto-resolve API type (REST vs Legacy) for a given config
+const autoResolveApiType = async (cfg) => {
+    const host = cfg.host;
+    const username = cfg.user;
+    const password = cfg.password || '';
+    // Try REST on configured port, then common ports
+    const restPorts = [];
+    if (typeof cfg.port === 'number') restPorts.push(cfg.port);
+    if (!restPorts.includes(443)) restPorts.push(443);
+    if (!restPorts.includes(80)) restPorts.push(80);
+    for (const p of restPorts) {
+        try {
+            const protocol = p === 443 ? 'https' : 'http';
+            const baseURL = `${protocol}://${host}:${p}/rest`;
+            const client = require('axios').create({
+                baseURL,
+                auth: { username, password },
+                httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' }),
+                timeout: 5000,
+            });
+            const resp = await client.get('/system/identity');
+            if (resp && (resp.status === 200 || resp.status === 204)) {
+                return { ...cfg, api_type: 'rest', port: p };
+            }
+        } catch (_) { /* try next port */ }
+    }
+    // Try Legacy on common ports
+    const legacyPorts = [8729, 8728];
+    const { RouterOSAPI } = require('node-routeros-v2');
+    for (const lp of legacyPorts) {
+        const tls = lp === 8729;
+        const client = new RouterOSAPI({ host, user: username, password, port: lp, timeout: 5000, tls, tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined });
+        try {
+            await client.connect();
+            try {
+                const result = await client.write(['/system/resource/print']);
+                if (result) {
+                    return { ...cfg, api_type: 'legacy', port: lp };
+                }
+            } finally { await client.close(); }
+        } catch (_) { /* try next port */ }
+    }
+    // No change if neither reachable
+    return cfg;
+};
+
 const getRouterConfig = async (req, res, next) => {
     const routerId = req.params.routerId || req.body.id;
     const authHeader = req.headers.authorization;
@@ -179,8 +225,9 @@ const getRouterConfig = async (req, res, next) => {
             return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
         }
 
-        routerConfigCache.set(routerId, config);
-        req.routerConfig = config;
+        const resolved = await autoResolveApiType(config);
+        routerConfigCache.set(routerId, resolved);
+        req.routerConfig = resolved;
         req.routerInstance = createRouterInstance(req.routerConfig);
         next();
     } catch (error) {
