@@ -1512,6 +1512,32 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
 
 
 
+// Ensure specific failover routes are registered BEFORE generic handler
+// (duplicate guard; Express processes in order, this guarantees our explicit endpoints are not shadowed)
+// Route-based failover (REST-only)
+app.post('/mt-api/:routerId/failover/routes/setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const body = req.body || {};
+        const specs = Array.isArray(body.routes) ? body.routes : null;
+        const checkGateway = body.checkGateway || 'ping';
+        if (!specs || specs.length < 1) throw new Error('routes array is required.');
+        let routes = [];
+        try { const resp = await req.routerInstance.get('/ip/route'); routes = resp.data || []; } catch {}
+        for (const spec of specs) {
+            const gw = String(spec.gateway || '').trim(); if (!gw) throw new Error('gateway is required.');
+            const dist = Number(spec.distance || 1);
+            const comment = spec.comment || `failover-route-${gw}`;
+            const match = routes.find(r => r['dst-address'] === '0.0.0.0/0' && (r.gateway === gw || r.comment === comment));
+            if (match && match.id) {
+                await req.routerInstance.patch(`/ip/route/${encodeURIComponent(match.id)}`, { distance: dist, 'check-gateway': checkGateway, disabled: false });
+            } else {
+                await req.routerInstance.post('/ip/route', { 'dst-address': '0.0.0.0/0', gateway: gw, distance: dist, 'check-gateway': checkGateway, comment });
+            }
+        }
+        return { message: 'Route-based failover configured using check-gateway.' };
+    });
+});
+
 // Generic proxy handler for all other requests
 app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
@@ -1643,42 +1669,10 @@ app.post('/mt-api/:routerId/failover/scheduler/setup', getRouterConfig, async (r
                 await client.close();
             }
         } else {
-            let restWorked = true;
-            try {
-                for (const wan of wanInterfaces) {
-                    const name = `failover-ping-${wan}`;
-                    await req.routerInstance.post('/system/script', { name, source: makeScript(wan) });
-                    await req.routerInstance.post('/system/scheduler', { name, interval, 'on-event': name });
-                }
-            } catch (e) {
-                restWorked = false;
-            }
-            if (!restWorked) {
-                const { RouterOSAPI } = require('node-routeros-v2');
-                const { host: rHost, user, password } = req.routerConfig;
-                const tryPorts = [8729, 8728];
-                let done = false, lastErr = null;
-                for (const p of tryPorts) {
-                    const tls = p === 8729;
-                    const client = new RouterOSAPI({ host: rHost, user, password, port: p, timeout: 8000, tls, tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined });
-                    try {
-                        await client.connect();
-                        try {
-                            for (const wan of wanInterfaces) {
-                                const name = `failover-ping-${wan}`;
-                                await writeLegacySafe(client, ['/system/script/add', `=name=${name}`, `=source=${makeScript(wan)}`]);
-                                await writeLegacySafe(client, ['/system/scheduler/add', `=name=${name}`, `=interval=${interval}`, `=on-event=${name}`]);
-                            }
-                            done = true;
-                            break;
-                        } finally { await client.close(); }
-                    } catch (err) { lastErr = err; }
-                }
-                if (!done) {
-                    const hint = 'Legacy API is not reachable on ports 8729/8728. Enable IP→Services “api”/“api-ssl” and allow the panel host through the firewall.';
-                    const err = new Error(`${lastErr?.message || 'Legacy API connection failed.'} ${hint}`);
-                    throw err;
-                }
+            for (const wan of wanInterfaces) {
+                const name = `failover-ping-${wan}`;
+                await req.routerInstance.post('/system/script', { name, source: makeScript(wan) });
+                await req.routerInstance.post('/system/scheduler', { name, interval, 'on-event': name });
             }
         }
         return { message: `Scheduler failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
@@ -1704,42 +1698,12 @@ app.post('/mt-api/:routerId/failover/scheduler/remove', getRouterConfig, async (
                 for (const sc of scheds) { if (names.includes(String(sc.name))) { await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${sc.id}`]); } }
             } finally { await client.close(); }
         } else {
-            let restWorked = true;
-            try {
-                const sResp = await req.routerInstance.get('/system/script');
-                const scripts = sResp.data || [];
-                for (const s of scripts) { if (names.includes(String(s.name))) { await req.routerInstance.delete(`/system/script/${encodeURIComponent(s.id)}`); } }
-                const schResp = await req.routerInstance.get('/system/scheduler');
-                const scheds = schResp.data || [];
-                for (const sc of scheds) { if (names.includes(String(sc.name))) { await req.routerInstance.delete(`/system/scheduler/${encodeURIComponent(sc.id)}`); } }
-            } catch (e) { restWorked = false; }
-            if (!restWorked) {
-                const { RouterOSAPI } = require('node-routeros-v2');
-                const { host: rHost, user, password } = req.routerConfig;
-                const tryPorts = [8729, 8728];
-                let removed = false, lastErr = null;
-                for (const p of tryPorts) {
-                    const tls = p === 8729;
-                    const client = new RouterOSAPI({ host: rHost, user, password, port: p, timeout: 8000, tls, tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined });
-                    try {
-                        await client.connect();
-                        try {
-                            let scripts = await writeLegacySafe(client, ['/system/script/print']);
-                            scripts = scripts.map(normalizeLegacyObject);
-                            for (const s of scripts) { if (names.includes(String(s.name))) { await writeLegacySafe(client, ['/system/script/remove', `=.id=${s.id}`]); } }
-                            let scheds = await writeLegacySafe(client, ['/system/scheduler/print']);
-                            scheds = scheds.map(normalizeLegacyObject);
-                            for (const sc of scheds) { if (names.includes(String(sc.name))) { await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${sc.id}`]); } }
-                            removed = true; break;
-                        } finally { await client.close(); }
-                    } catch (err) { lastErr = err; }
-                }
-                if (!removed) {
-                    const hint = 'Legacy API is not reachable on ports 8729/8728. Enable IP→Services “api”/“api-ssl” and allow the panel host through the firewall.';
-                    const err = new Error(`${lastErr?.message || 'Legacy API connection failed.'} ${hint}`);
-                    throw err;
-                }
-            }
+            const sResp = await req.routerInstance.get('/system/script');
+            const scripts = sResp.data || [];
+            for (const s of scripts) { if (names.includes(String(s.name))) { await req.routerInstance.delete(`/system/script/${encodeURIComponent(s.id)}`); } }
+            const schResp = await req.routerInstance.get('/system/scheduler');
+            const scheds = schResp.data || [];
+            for (const sc of scheds) { if (names.includes(String(sc.name))) { await req.routerInstance.delete(`/system/scheduler/${encodeURIComponent(sc.id)}`); } }
         }
         return { message: `Removed scheduler failover entries for ${wanInterfaces.join(', ')}.` };
     });
@@ -1773,63 +1737,7 @@ app.post('/mt-api/:routerId/netwatch/failover/setup', getRouterConfig, async (re
                 await client.close();
             }
         } else {
-            let restWorked = true;
-            try {
-                for (const wan of wanInterfaces) {
-                    await req.routerInstance.post('/tool/netwatch', {
-                        host,
-                        interval,
-                        comment: `failover-${wan}`,
-                        timeout: '1000ms',
-                        down: `/interface disable ${wan}`,
-                        up: `/interface enable ${wan}`,
-                    });
-                }
-            } catch (e) {
-                restWorked = false;
-            }
-            if (!restWorked) {
-                const { RouterOSAPI } = require('node-routeros-v2');
-                const { host: rHost, user, password } = req.routerConfig;
-                const tryPorts = [8729, 8728];
-                let done = false, lastErr = null;
-                for (const p of tryPorts) {
-                    const tls = p === 8729;
-                    const client = new RouterOSAPI({
-                        host: rHost,
-                        user,
-                        password,
-                        port: p,
-                        timeout: 8000,
-                        tls,
-                        tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
-                    });
-                    try {
-                        await client.connect();
-                        try {
-                            for (const wan of wanInterfaces) {
-                                await writeLegacySafe(client, [
-                                    '/tool/netwatch/add',
-                                    `=host=${host}`,
-                                    `=interval=${interval}`,
-                                    `=comment=failover-${wan}`,
-                                    `=timeout=1000ms`,
-                                    `=down=/interface disable ${wan}`,
-                                    `=up=/interface enable ${wan}`
-                                ]);
-                            }
-                            done = true;
-                            break;
-                        } finally {
-                            await client.close();
-                        }
-                    } catch (e) {
-                        lastErr = e;
-                        // try next port
-                    }
-                }
-                if (!done && lastErr) throw lastErr;
-            }
+            throw new Error('Netwatch is not supported by this panel in REST-only mode. Please use route-based failover.');
         }
         return { message: `Netwatch failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
     });
@@ -1858,54 +1766,7 @@ app.post('/mt-api/:routerId/netwatch/failover/remove', getRouterConfig, async (r
                 await client.close();
             }
         } else {
-            let entries = [];
-            try {
-                const response = await req.routerInstance.get('/tool/netwatch');
-                entries = response.data || [];
-            } catch (e) {
-                const { RouterOSAPI } = require('node-routeros-v2');
-                const { host: rHost, user, password } = req.routerConfig;
-                const tryPorts = [8729, 8728];
-                let removed = false, lastErr = null;
-                for (const p of tryPorts) {
-                    const tls = p === 8729;
-                    const client = new RouterOSAPI({
-                        host: rHost,
-                        user,
-                        password,
-                        port: p,
-                        timeout: 8000,
-                        tls,
-                        tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
-                    });
-                    try {
-                        await client.connect();
-                        try {
-                            const legacyEntries = await writeLegacySafe(client, '/tool/netwatch/print');
-                            entries = legacyEntries.map(normalizeLegacyObject);
-                            const toDeleteLegacy = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
-                            for (const e of toDeleteLegacy) {
-                                await writeLegacySafe(client, ['/tool/netwatch/remove', `=.id=${e.id}`]);
-                            }
-                            removed = true;
-                            break;
-                        } finally {
-                            await client.close();
-                        }
-                    } catch (err) {
-                        lastErr = err;
-                        // try next port
-                    }
-                }
-                if (removed) {
-                    return { message: `Removed Netwatch failover entries for ${wanInterfaces.join(', ')}.` };
-                }
-                if (lastErr) throw lastErr;
-            }
-            const toDelete = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
-            for (const e of toDelete) {
-                await req.routerInstance.delete(`/tool/netwatch/${encodeURIComponent(e.id)}`);
-            }
+            throw new Error('Netwatch is not supported by this panel in REST-only mode. Please use route-based failover.');
         }
         return { message: `Removed Netwatch failover entries for ${wanInterfaces.join(', ')}.` };
     });

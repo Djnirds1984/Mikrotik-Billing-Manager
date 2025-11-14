@@ -597,29 +597,20 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
         }
         setIsToggling(true);
         try {
-            await setupWanFailoverNetwatch(selectedRouter, { wanInterfaces: selectedWans, host: healthHost, interval: healthInterval });
-            alert('Netwatch failover configured.');
-        } catch (err) {
-            try {
-                const msg = (err as Error).message || '';
+            // Prefer route-based failover via check-gateway (REST-only)
+            if (wan1Gateway && wan2Gateway) {
+                await setupFailoverRoutes(selectedRouter, { routes: [
+                    { gateway: wan1Gateway, distance: 1, comment: `failover-route-${wan1Gateway}` },
+                    { gateway: wan2Gateway, distance: 2, comment: `failover-route-${wan2Gateway}` },
+                ], checkGateway: 'ping' });
+                alert('Configured route-based failover using check-gateway.');
+            } else {
+                // Fallback to scheduler-based (REST-only) if gateways are not provided
                 await setupWanFailoverScheduler(selectedRouter, { wanInterfaces: selectedWans, host: healthHost, interval: healthInterval });
-                alert('Netwatch is unavailable. Scheduler-based failover has been configured instead.');
-        } catch (err2) {
-                // Try route-based failover using check-gateway if gateways are provided
-                try {
-                    if (wan1Gateway && wan2Gateway) {
-                        await setupFailoverRoutes(selectedRouter, { routes: [
-                            { gateway: wan1Gateway, distance: 1, comment: `failover-route-${wan1Gateway}` },
-                            { gateway: wan2Gateway, distance: 2, comment: `failover-route-${wan2Gateway}` },
-                        ], checkGateway: 'ping' });
-                        alert('Configured route-based failover using check-gateway.');
-                    } else {
-                        throw new Error('Gateways not provided for route-based failover.');
-                    }
-                } catch (err3) {
-                    alert(`Failed to configure failover: ${(err3 as Error).message}`);
-                }
+                alert('Configured scheduler-based failover.');
             }
+        } catch (err) {
+            alert(`Failed to configure failover: ${(err as Error).message}`);
         } finally {
             setIsToggling(false);
         }
