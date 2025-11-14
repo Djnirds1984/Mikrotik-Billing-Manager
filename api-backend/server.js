@@ -1652,15 +1652,50 @@ app.post('/mt-api/:routerId/netwatch/failover/setup', getRouterConfig, async (re
                 await client.close();
             }
         } else {
-            for (const wan of wanInterfaces) {
-                await req.routerInstance.post('/tool/netwatch', {
-                    host,
-                    interval,
-                    comment: `failover-${wan}`,
-                    timeout: '1000ms',
-                    down: `/interface disable ${wan}`,
-                    up: `/interface enable ${wan}`,
+            let restWorked = true;
+            try {
+                for (const wan of wanInterfaces) {
+                    await req.routerInstance.post('/tool/netwatch', {
+                        host,
+                        interval,
+                        comment: `failover-${wan}`,
+                        timeout: '1000ms',
+                        down: `/interface disable ${wan}`,
+                        up: `/interface enable ${wan}`,
+                    });
+                }
+            } catch (e) {
+                restWorked = false;
+            }
+            if (!restWorked) {
+                const { RouterOSAPI } = require('node-routeros-v2');
+                const { host: rHost, user, password, port } = req.routerConfig;
+                const tls = Number(port) === 8729;
+                const client = new RouterOSAPI({
+                    host: rHost,
+                    user,
+                    password,
+                    port: port || (tls ? 8729 : 8728),
+                    timeout: 8000,
+                    tls,
+                    tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
                 });
+                await client.connect();
+                try {
+                    for (const wan of wanInterfaces) {
+                        await writeLegacySafe(client, [
+                            '/tool/netwatch/add',
+                            `=host=${host}`,
+                            `=interval=${interval}`,
+                            `=comment=failover-${wan}`,
+                            `=timeout=1000ms`,
+                            `=down=/interface disable ${wan}`,
+                            `=up=/interface enable ${wan}`
+                        ]);
+                    }
+                } finally {
+                    await client.close();
+                }
             }
         }
         return { message: `Netwatch failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
@@ -1690,8 +1725,36 @@ app.post('/mt-api/:routerId/netwatch/failover/remove', getRouterConfig, async (r
                 await client.close();
             }
         } else {
-            const response = await req.routerInstance.get('/tool/netwatch');
-            const entries = response.data || [];
+            let entries = [];
+            try {
+                const response = await req.routerInstance.get('/tool/netwatch');
+                entries = response.data || [];
+            } catch (e) {
+                const { RouterOSAPI } = require('node-routeros-v2');
+                const { host: rHost, user, password, port } = req.routerConfig;
+                const tls = Number(port) === 8729;
+                const client = new RouterOSAPI({
+                    host: rHost,
+                    user,
+                    password,
+                    port: port || (tls ? 8729 : 8728),
+                    timeout: 8000,
+                    tls,
+                    tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
+                });
+                await client.connect();
+                try {
+                    const legacyEntries = await writeLegacySafe(client, '/tool/netwatch/print');
+                    entries = legacyEntries.map(normalizeLegacyObject);
+                    const toDeleteLegacy = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
+                    for (const e of toDeleteLegacy) {
+                        await writeLegacySafe(client, ['/tool/netwatch/remove', `=.id=${e.id}`]);
+                    }
+                    return { message: `Removed Netwatch failover entries for ${wanInterfaces.join(', ')}.` };
+                } finally {
+                    await client.close();
+                }
+            }
             const toDelete = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
             for (const e of toDelete) {
                 await req.routerInstance.delete(`/tool/netwatch/${encodeURIComponent(e.id)}`);
