@@ -3105,3 +3105,35 @@ Promise.all([initDb(), initSuperadminDb()]).then(async () => {
         console.log(`Mikrotik Billling Management UI server running. Listening on http://localhost:${PORT}`);
     });
 });
+// --- Public endpoints for Company Settings (must be BEFORE admin router) ---
+app.get('/api/db/company-settings', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT key, value FROM company_settings');
+        const out = {};
+        for (const r of rows) {
+            try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
+        }
+        return res.json(out);
+    } catch (e) {
+        return res.status(500).json({ message: e.message });
+    }
+});
+
+app.post('/api/db/company-settings', async (req, res) => {
+    let transactionStarted = false;
+    try {
+        await db.exec('BEGIN TRANSACTION;');
+        transactionStarted = true;
+        for (const [key, value] of Object.entries(req.body || {})) {
+            await db.run(`INSERT OR REPLACE INTO company_settings (key, value) VALUES (?, ?);`, key, JSON.stringify(value));
+        }
+        await db.exec('COMMIT;');
+        transactionStarted = false;
+        return res.json({ message: 'Settings saved.' });
+    } catch (e) {
+        if (transactionStarted) {
+            try { await db.exec('ROLLBACK;'); } catch (_) {}
+        }
+        return res.status(500).json({ message: e.message });
+    }
+});
