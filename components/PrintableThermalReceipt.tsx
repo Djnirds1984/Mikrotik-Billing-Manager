@@ -33,6 +33,7 @@ export const PrintableThermalReceipt: React.FC<PrintableThermalReceiptProps> = (
                 {companySettings.contactNumber && <div style={{ fontSize: '10px', marginBottom: '2px' }}>{companySettings.contactNumber}</div>}
                 {companySettings.email && <div style={{ fontSize: '10px' }}>{companySettings.email}</div>}
             </div>
+            <div style={{ textAlign: 'center', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '6px' }}>ACKNOWLEDGMENT RECEIPT ONLY</div>
             
             <div style={{ borderTop: '1px solid black', margin: '8px 0' }} />
             
@@ -44,7 +45,13 @@ export const PrintableThermalReceipt: React.FC<PrintableThermalReceiptProps> = (
                     <span>Date:</span><span>{dateStr}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Client:</span><span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sale.clientName}</span>
+                    <span>Full Name:</span><span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sale.clientName || ''}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Address:</span><span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sale.clientAddress || ''}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Contact:</span><span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sale.clientContact || ''}</span>
                 </div>
             </div>
             
@@ -74,4 +81,3 @@ export const PrintableThermalReceipt: React.FC<PrintableThermalReceiptProps> = (
         </div>
     );
 };
-
