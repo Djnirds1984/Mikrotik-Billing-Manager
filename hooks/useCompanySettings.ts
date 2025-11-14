@@ -22,7 +22,7 @@ export const useCompanySettings = () => {
             // FIX: Use a direct fetch call for this public resource to avoid
             // the authenticated dbApi which can cause a reload loop on 401 errors
             // when an expired token is present on the login page.
-            const response = await fetch('/api/db/company-settings');
+            const response = await fetch('/public/company-settings');
             if (!response.ok) {
                 throw new Error('Failed to fetch company settings.');
             }
@@ -42,7 +42,7 @@ export const useCompanySettings = () => {
 
     const updateSettings = async (updatedSettings: CompanySettings) => {
         try {
-            const resp = await fetch('/api/db/company-settings', {
+            const resp = await fetch('/public/company-settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedSettings),

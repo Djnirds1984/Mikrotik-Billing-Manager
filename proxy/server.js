@@ -3106,7 +3106,7 @@ Promise.all([initDb(), initSuperadminDb()]).then(async () => {
     });
 });
 // --- Public endpoints for Company Settings (must be BEFORE admin router) ---
-app.get('/api/db/company-settings', async (req, res) => {
+app.get('/public/company-settings', async (req, res) => {
     try {
         const rows = await db.all('SELECT key, value FROM company_settings');
         const out = {};
@@ -3119,7 +3119,7 @@ app.get('/api/db/company-settings', async (req, res) => {
     }
 });
 
-app.post('/api/db/company-settings', async (req, res) => {
+app.post('/public/company-settings', async (req, res) => {
     let transactionStarted = false;
     try {
         await db.exec('BEGIN TRANSACTION;');
