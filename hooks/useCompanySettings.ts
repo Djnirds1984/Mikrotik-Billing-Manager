@@ -42,12 +42,18 @@ export const useCompanySettings = () => {
 
     const updateSettings = async (updatedSettings: CompanySettings) => {
         try {
-            // Saving settings still uses the protected dbApi endpoint.
-            await dbApi.post('/company-settings', updatedSettings);
-            await fetchSettings(); // Re-fetch to confirm changes
+            const resp = await fetch('/api/db/company-settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedSettings),
+            });
+            if (!resp.ok) {
+                const msg = await resp.text();
+                throw new Error(msg || 'Failed to save company settings');
+            }
+            await fetchSettings();
         } catch (err) {
-            console.error("Failed to update company settings:", err);
-            // Optionally, re-throw or handle error in UI
+            console.error('Failed to update company settings:', err);
             throw err;
         }
     };
