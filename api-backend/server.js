@@ -1623,6 +1623,119 @@ server.listen(PORT, () => {
     console.log(`Mikrotik Billling Management API backend server running on http://localhost:${PORT}`);
 });
 
+app.post('/mt-api/:routerId/failover/scheduler/setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { wanInterfaces, host = '8.8.8.8', interval = '00:00:10' } = req.body || {};
+        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 1) {
+            throw new Error('wanInterfaces array is required.');
+        }
+        const makeScript = (wan) => `:local p [/ping address=${host} count=3 interval=1s];\n:if ($p = 0) do={ /interface disable ${wan} } else={ /interface enable ${wan} }`;
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                for (const wan of wanInterfaces) {
+                    const name = `failover-ping-${wan}`;
+                    await writeLegacySafe(client, ['/system/script/add', `=name=${name}`, `=source=${makeScript(wan)}`]);
+                    await writeLegacySafe(client, ['/system/scheduler/add', `=name=${name}`, `=interval=${interval}`, `=on-event=${name}`]);
+                }
+            } finally {
+                await client.close();
+            }
+        } else {
+            let restWorked = true;
+            try {
+                for (const wan of wanInterfaces) {
+                    const name = `failover-ping-${wan}`;
+                    await req.routerInstance.post('/system/script', { name, source: makeScript(wan) });
+                    await req.routerInstance.post('/system/scheduler', { name, interval, 'on-event': name });
+                }
+            } catch (e) {
+                restWorked = false;
+            }
+            if (!restWorked) {
+                const { RouterOSAPI } = require('node-routeros-v2');
+                const { host: rHost, user, password } = req.routerConfig;
+                const tryPorts = [8729, 8728];
+                let done = false, lastErr = null;
+                for (const p of tryPorts) {
+                    const tls = p === 8729;
+                    const client = new RouterOSAPI({ host: rHost, user, password, port: p, timeout: 8000, tls, tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined });
+                    try {
+                        await client.connect();
+                        try {
+                            for (const wan of wanInterfaces) {
+                                const name = `failover-ping-${wan}`;
+                                await writeLegacySafe(client, ['/system/script/add', `=name=${name}`, `=source=${makeScript(wan)}`]);
+                                await writeLegacySafe(client, ['/system/scheduler/add', `=name=${name}`, `=interval=${interval}`, `=on-event=${name}`]);
+                            }
+                            done = true;
+                            break;
+                        } finally { await client.close(); }
+                    } catch (err) { lastErr = err; }
+                }
+                if (!done && lastErr) throw lastErr;
+            }
+        }
+        return { message: `Scheduler failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
+    });
+});
+
+app.post('/mt-api/:routerId/failover/scheduler/remove', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { wanInterfaces } = req.body || {};
+        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 1) {
+            throw new Error('wanInterfaces array is required.');
+        }
+        const names = wanInterfaces.map(w => `failover-ping-${w}`);
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                let scripts = await writeLegacySafe(client, ['/system/script/print']);
+                scripts = scripts.map(normalizeLegacyObject);
+                for (const s of scripts) { if (names.includes(String(s.name))) { await writeLegacySafe(client, ['/system/script/remove', `=.id=${s.id}`]); } }
+                let scheds = await writeLegacySafe(client, ['/system/scheduler/print']);
+                scheds = scheds.map(normalizeLegacyObject);
+                for (const sc of scheds) { if (names.includes(String(sc.name))) { await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${sc.id}`]); } }
+            } finally { await client.close(); }
+        } else {
+            let restWorked = true;
+            try {
+                const sResp = await req.routerInstance.get('/system/script');
+                const scripts = sResp.data || [];
+                for (const s of scripts) { if (names.includes(String(s.name))) { await req.routerInstance.delete(`/system/script/${encodeURIComponent(s.id)}`); } }
+                const schResp = await req.routerInstance.get('/system/scheduler');
+                const scheds = schResp.data || [];
+                for (const sc of scheds) { if (names.includes(String(sc.name))) { await req.routerInstance.delete(`/system/scheduler/${encodeURIComponent(sc.id)}`); } }
+            } catch (e) { restWorked = false; }
+            if (!restWorked) {
+                const { RouterOSAPI } = require('node-routeros-v2');
+                const { host: rHost, user, password } = req.routerConfig;
+                const tryPorts = [8729, 8728];
+                let removed = false, lastErr = null;
+                for (const p of tryPorts) {
+                    const tls = p === 8729;
+                    const client = new RouterOSAPI({ host: rHost, user, password, port: p, timeout: 8000, tls, tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined });
+                    try {
+                        await client.connect();
+                        try {
+                            let scripts = await writeLegacySafe(client, ['/system/script/print']);
+                            scripts = scripts.map(normalizeLegacyObject);
+                            for (const s of scripts) { if (names.includes(String(s.name))) { await writeLegacySafe(client, ['/system/script/remove', `=.id=${s.id}`]); } }
+                            let scheds = await writeLegacySafe(client, ['/system/scheduler/print']);
+                            scheds = scheds.map(normalizeLegacyObject);
+                            for (const sc of scheds) { if (names.includes(String(sc.name))) { await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${sc.id}`]); } }
+                            removed = true; break;
+                        } finally { await client.close(); }
+                    } catch (err) { lastErr = err; }
+                }
+                if (!removed && lastErr) throw lastErr;
+            }
+        }
+        return { message: `Removed scheduler failover entries for ${wanInterfaces.join(', ')}.` };
+    });
+});
 // --- Netwatch-based WAN Failover (Interface Auto Disable/Enable) ---
 // Setup Netwatch entries that disable specified WAN interfaces when connectivity to a health host fails
 app.post('/mt-api/:routerId/netwatch/failover/setup', getRouterConfig, async (req, res) => {
@@ -1669,33 +1782,45 @@ app.post('/mt-api/:routerId/netwatch/failover/setup', getRouterConfig, async (re
             }
             if (!restWorked) {
                 const { RouterOSAPI } = require('node-routeros-v2');
-                const { host: rHost, user, password, port } = req.routerConfig;
-                const tls = Number(port) === 8729;
-                const client = new RouterOSAPI({
-                    host: rHost,
-                    user,
-                    password,
-                    port: port || (tls ? 8729 : 8728),
-                    timeout: 8000,
-                    tls,
-                    tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
-                });
-                await client.connect();
-                try {
-                    for (const wan of wanInterfaces) {
-                        await writeLegacySafe(client, [
-                            '/tool/netwatch/add',
-                            `=host=${host}`,
-                            `=interval=${interval}`,
-                            `=comment=failover-${wan}`,
-                            `=timeout=1000ms`,
-                            `=down=/interface disable ${wan}`,
-                            `=up=/interface enable ${wan}`
-                        ]);
+                const { host: rHost, user, password } = req.routerConfig;
+                const tryPorts = [8729, 8728];
+                let done = false, lastErr = null;
+                for (const p of tryPorts) {
+                    const tls = p === 8729;
+                    const client = new RouterOSAPI({
+                        host: rHost,
+                        user,
+                        password,
+                        port: p,
+                        timeout: 8000,
+                        tls,
+                        tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
+                    });
+                    try {
+                        await client.connect();
+                        try {
+                            for (const wan of wanInterfaces) {
+                                await writeLegacySafe(client, [
+                                    '/tool/netwatch/add',
+                                    `=host=${host}`,
+                                    `=interval=${interval}`,
+                                    `=comment=failover-${wan}`,
+                                    `=timeout=1000ms`,
+                                    `=down=/interface disable ${wan}`,
+                                    `=up=/interface enable ${wan}`
+                                ]);
+                            }
+                            done = true;
+                            break;
+                        } finally {
+                            await client.close();
+                        }
+                    } catch (e) {
+                        lastErr = e;
+                        // try next port
                     }
-                } finally {
-                    await client.close();
                 }
+                if (!done && lastErr) throw lastErr;
             }
         }
         return { message: `Netwatch failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
@@ -1731,29 +1856,43 @@ app.post('/mt-api/:routerId/netwatch/failover/remove', getRouterConfig, async (r
                 entries = response.data || [];
             } catch (e) {
                 const { RouterOSAPI } = require('node-routeros-v2');
-                const { host: rHost, user, password, port } = req.routerConfig;
-                const tls = Number(port) === 8729;
-                const client = new RouterOSAPI({
-                    host: rHost,
-                    user,
-                    password,
-                    port: port || (tls ? 8729 : 8728),
-                    timeout: 8000,
-                    tls,
-                    tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
-                });
-                await client.connect();
-                try {
-                    const legacyEntries = await writeLegacySafe(client, '/tool/netwatch/print');
-                    entries = legacyEntries.map(normalizeLegacyObject);
-                    const toDeleteLegacy = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
-                    for (const e of toDeleteLegacy) {
-                        await writeLegacySafe(client, ['/tool/netwatch/remove', `=.id=${e.id}`]);
+                const { host: rHost, user, password } = req.routerConfig;
+                const tryPorts = [8729, 8728];
+                let removed = false, lastErr = null;
+                for (const p of tryPorts) {
+                    const tls = p === 8729;
+                    const client = new RouterOSAPI({
+                        host: rHost,
+                        user,
+                        password,
+                        port: p,
+                        timeout: 8000,
+                        tls,
+                        tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
+                    });
+                    try {
+                        await client.connect();
+                        try {
+                            const legacyEntries = await writeLegacySafe(client, '/tool/netwatch/print');
+                            entries = legacyEntries.map(normalizeLegacyObject);
+                            const toDeleteLegacy = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
+                            for (const e of toDeleteLegacy) {
+                                await writeLegacySafe(client, ['/tool/netwatch/remove', `=.id=${e.id}`]);
+                            }
+                            removed = true;
+                            break;
+                        } finally {
+                            await client.close();
+                        }
+                    } catch (err) {
+                        lastErr = err;
+                        // try next port
                     }
-                    return { message: `Removed Netwatch failover entries for ${wanInterfaces.join(', ')}.` };
-                } finally {
-                    await client.close();
                 }
+                if (removed) {
+                    return { message: `Removed Netwatch failover entries for ${wanInterfaces.join(', ')}.` };
+                }
+                if (lastErr) throw lastErr;
             }
             const toDelete = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
             for (const e of toDelete) {

@@ -7,7 +7,7 @@ import {
     getDhcpServers, addDhcpServer, updateDhcpServer, deleteDhcpServer,
     getDhcpLeases, makeLeaseStatic, deleteDhcpLease, runDhcpSetup, getIpPools,
     addIpPool, updateIpPool, deleteIpPool,
-    setupWanFailoverNetwatch, removeWanFailoverNetwatch, setupDualWanPCC, setupMultiWanPCC
+    setupWanFailoverNetwatch, removeWanFailoverNetwatch, setupWanFailoverScheduler, removeWanFailoverScheduler, setupDualWanPCC, setupMultiWanPCC
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
@@ -600,7 +600,13 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
             await setupWanFailoverNetwatch(selectedRouter, { wanInterfaces: selectedWans, host: healthHost, interval: healthInterval });
             alert('Netwatch failover configured.');
         } catch (err) {
-            alert(`Failed to configure Netwatch: ${(err as Error).message}`);
+            try {
+                const msg = (err as Error).message || '';
+                await setupWanFailoverScheduler(selectedRouter, { wanInterfaces: selectedWans, host: healthHost, interval: healthInterval });
+                alert('Netwatch is unavailable. Scheduler-based failover has been configured instead.');
+            } catch (err2) {
+                alert(`Failed to configure failover: ${(err2 as Error).message}`);
+            }
         } finally {
             setIsToggling(false);
         }
@@ -616,7 +622,12 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
             await removeWanFailoverNetwatch(selectedRouter, { wanInterfaces: selectedWans });
             alert('Netwatch failover entries removed.');
         } catch (err) {
-            alert(`Failed to remove Netwatch entries: ${(err as Error).message}`);
+            try {
+                await removeWanFailoverScheduler(selectedRouter, { wanInterfaces: selectedWans });
+                alert('Scheduler-based failover entries removed.');
+            } catch (err2) {
+                alert(`Failed to remove failover entries: ${(err2 as Error).message}`);
+            }
         } finally {
             setIsToggling(false);
         }
