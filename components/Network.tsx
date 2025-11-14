@@ -7,7 +7,7 @@ import {
     getDhcpServers, addDhcpServer, updateDhcpServer, deleteDhcpServer,
     getDhcpLeases, makeLeaseStatic, deleteDhcpLease, runDhcpSetup, getIpPools,
     addIpPool, updateIpPool, deleteIpPool,
-    setupWanFailoverNetwatch, removeWanFailoverNetwatch, setupWanFailoverScheduler, removeWanFailoverScheduler, setupFailoverRoutes, setupDualWanPCC, setupMultiWanPCC
+    setupFailoverRoutes, removeFailoverRoutes, setupDualWanPCC, setupMultiWanPCC
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
@@ -595,20 +595,18 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
             alert('Select at least one WAN interface.');
             return;
         }
+        if (!wan1Gateway || !wan2Gateway) {
+            alert('Please provide gateway IP addresses for both WAN interfaces.');
+            return;
+        }
         setIsToggling(true);
         try {
-            // Prefer route-based failover via check-gateway (REST-only)
-            if (wan1Gateway && wan2Gateway) {
-                await setupFailoverRoutes(selectedRouter, { routes: [
-                    { gateway: wan1Gateway, distance: 1, comment: `failover-route-${wan1Gateway}` },
-                    { gateway: wan2Gateway, distance: 2, comment: `failover-route-${wan2Gateway}` },
-                ], checkGateway: 'ping' });
-                alert('Configured route-based failover using check-gateway.');
-            } else {
-                // Fallback to scheduler-based (REST-only) if gateways are not provided
-                await setupWanFailoverScheduler(selectedRouter, { wanInterfaces: selectedWans, host: healthHost, interval: healthInterval });
-                alert('Configured scheduler-based failover.');
-            }
+            // Use only routing-based failover with check-gateway (universal compatibility)
+            await setupFailoverRoutes(selectedRouter, { routes: [
+                { gateway: wan1Gateway, distance: 1, comment: `failover-route-${wan1Gateway}` },
+                { gateway: wan2Gateway, distance: 2, comment: `failover-route-${wan2Gateway}` },
+            ], checkGateway: 'ping' });
+            alert('Configured route-based failover using check-gateway.');
         } catch (err) {
             alert(`Failed to configure failover: ${(err as Error).message}`);
         } finally {
@@ -621,17 +619,20 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
             alert('Select the WAN interfaces to remove failover entries for.');
             return;
         }
+        if (!wan1Gateway && !wan2Gateway) {
+            alert('No gateway information available to remove failover entries.');
+            return;
+        }
         setIsToggling(true);
         try {
-            await removeWanFailoverNetwatch(selectedRouter, { wanInterfaces: selectedWans });
-            alert('Netwatch failover entries removed.');
+            // Remove only route-based entries
+            const targets = [] as string[];
+            if (wan1Gateway) targets.push(wan1Gateway, `failover-route-${wan1Gateway}`);
+            if (wan2Gateway) targets.push(wan2Gateway, `failover-route-${wan2Gateway}`);
+            await removeFailoverRoutes(selectedRouter, { targets });
+            alert('Route-based failover entries removed.');
         } catch (err) {
-            try {
-                await removeWanFailoverScheduler(selectedRouter, { wanInterfaces: selectedWans });
-                alert('Scheduler-based failover entries removed.');
-            } catch (err2) {
-                alert(`Failed to remove failover entries: ${(err2 as Error).message}`);
-            }
+            alert(`Failed to remove failover entries: ${(err as Error).message}`);
         } finally {
             setIsToggling(false);
         }

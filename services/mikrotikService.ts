@@ -646,25 +646,7 @@ export const removeWanFailoverNetwatch = (
     });
 };
 
-export const setupWanFailoverScheduler = (
-    router: RouterConfigWithId,
-    params: { wanInterfaces: string[]; host?: string; interval?: string }
-): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/failover/scheduler/setup', {
-        method: 'POST',
-        body: JSON.stringify(params)
-    });
-};
 
-export const removeWanFailoverScheduler = (
-    router: RouterConfigWithId,
-    params: { wanInterfaces: string[] }
-): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/failover/scheduler/remove', {
-        method: 'POST',
-        body: JSON.stringify(params)
-    });
-};
 
 // --- Dual-WAN Merge (PCC) ---
 export const setupDualWanPCC = (
@@ -704,6 +686,16 @@ export const setupFailoverRoutes = (
     params: { routes: { gateway: string; distance?: number; comment?: string }[]; checkGateway?: 'ping' | 'arp' }
 ): Promise<{ message: string }> => {
     return fetchMikrotikData<{ message: string }>(router, '/failover/routes/setup', {
+        method: 'POST',
+        body: JSON.stringify(params)
+    });
+};
+
+export const removeFailoverRoutes = (
+    router: RouterConfigWithId,
+    params: { targets: string[] }
+): Promise<{ message: string }> => {
+    return fetchMikrotikData<{ message: string }>(router, '/failover/routes/remove', {
         method: 'POST',
         body: JSON.stringify(params)
     });

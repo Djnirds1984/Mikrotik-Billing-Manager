@@ -1559,32 +1559,6 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
 
 
 
-// Ensure specific failover routes are registered BEFORE generic handler
-// (duplicate guard; Express processes in order, this guarantees our explicit endpoints are not shadowed)
-// Route-based failover (REST-only)
-app.post('/mt-api/:routerId/failover/routes/setup', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const body = req.body || {};
-        const specs = Array.isArray(body.routes) ? body.routes : null;
-        const checkGateway = body.checkGateway || 'ping';
-        if (!specs || specs.length < 1) throw new Error('routes array is required.');
-        let routes = [];
-        try { const resp = await req.routerInstance.get('/ip/route'); routes = resp.data || []; } catch {}
-        for (const spec of specs) {
-            const gw = String(spec.gateway || '').trim(); if (!gw) throw new Error('gateway is required.');
-            const dist = Number(spec.distance || 1);
-            const comment = spec.comment || `failover-route-${gw}`;
-            const match = routes.find(r => r['dst-address'] === '0.0.0.0/0' && (r.gateway === gw || r.comment === comment));
-            if (match && match.id) {
-                await req.routerInstance.patch(`/ip/route/${encodeURIComponent(match.id)}`, { distance: dist, 'check-gateway': checkGateway, disabled: false });
-            } else {
-                await req.routerInstance.post('/ip/route', { 'dst-address': '0.0.0.0/0', gateway: gw, distance: dist, 'check-gateway': checkGateway, comment });
-            }
-        }
-        return { message: 'Route-based failover configured using check-gateway.' };
-    });
-});
-
 // Generic proxy handler for all other requests
 app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
@@ -1984,6 +1958,40 @@ app.post('/mt-api/:routerId/failover/routes/setup', getRouterConfig, async (req,
             }
         }
         return { message: 'Route-based failover configured using check-gateway.' };
+    });
+});
+
+// Remove route-based failover entries by comment or gateway
+app.post('/mt-api/:routerId/failover/routes/remove', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const body = req.body || {};
+        const targets = Array.isArray(body.targets) ? body.targets : [];
+        if (targets.length < 1) throw new Error('targets array is required (gateway or comment match).');
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                let routes = await writeLegacySafe(client, ['/ip/route/print']);
+                routes = routes.map(normalizeLegacyObject);
+                const toDelete = routes.filter(r => r['dst-address'] === '0.0.0.0/0' && (
+                    targets.includes(String(r.gateway)) || targets.includes(String(r.comment))
+                ));
+                for (const r of toDelete) {
+                    await writeLegacySafe(client, ['/ip/route/remove', `=.id=${r.id}`]);
+                }
+            } finally { await client.close(); }
+        } else {
+            const resp = await req.routerInstance.get('/ip/route');
+            const routes = resp.data || [];
+            const toDelete = routes.filter(r => r['dst-address'] === '0.0.0.0/0' && (
+                targets.includes(String(r.gateway)) || targets.includes(String(r.comment))
+            ));
+            for (const r of toDelete) {
+                await req.routerInstance.delete(`/ip/route/${encodeURIComponent(r.id)}`);
+            }
+        }
+        return { message: 'Route-based failover entries removed.' };
     });
 });
 // --- Public Client Portal Helpers ---
