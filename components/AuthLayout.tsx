@@ -11,7 +11,7 @@ export const AuthLayout: React.FC<{ children: React.ReactNode }> = ({ children }
                 // This endpoint is public. Use a direct fetch to avoid the
                 // authenticated dbApi which can cause a reload loop on 401 errors
                 // when an expired token is present on the login page.
-                const response = await fetch('/api/db/company-settings');
+                const response = await fetch('/public/company-settings');
                 if (!response.ok) {
                     // Don't throw, just log the error to avoid breaking the page
                     console.error("Failed to fetch company settings for login page:", response.statusText);
