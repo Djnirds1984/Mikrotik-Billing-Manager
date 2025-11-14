@@ -7,7 +7,7 @@ import {
     getDhcpServers, addDhcpServer, updateDhcpServer, deleteDhcpServer,
     getDhcpLeases, makeLeaseStatic, deleteDhcpLease, runDhcpSetup, getIpPools,
     addIpPool, updateIpPool, deleteIpPool,
-    setupWanFailoverNetwatch, removeWanFailoverNetwatch, setupWanFailoverScheduler, removeWanFailoverScheduler, setupDualWanPCC, setupMultiWanPCC
+    setupWanFailoverNetwatch, removeWanFailoverNetwatch, setupWanFailoverScheduler, removeWanFailoverScheduler, setupFailoverRoutes, setupDualWanPCC, setupMultiWanPCC
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
@@ -604,8 +604,21 @@ const WanFailoverManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                 const msg = (err as Error).message || '';
                 await setupWanFailoverScheduler(selectedRouter, { wanInterfaces: selectedWans, host: healthHost, interval: healthInterval });
                 alert('Netwatch is unavailable. Scheduler-based failover has been configured instead.');
-            } catch (err2) {
-                alert(`Failed to configure failover: ${(err2 as Error).message}`);
+        } catch (err2) {
+                // Try route-based failover using check-gateway if gateways are provided
+                try {
+                    if (wan1Gateway && wan2Gateway) {
+                        await setupFailoverRoutes(selectedRouter, { routes: [
+                            { gateway: wan1Gateway, distance: 1, comment: `failover-route-${wan1Gateway}` },
+                            { gateway: wan2Gateway, distance: 2, comment: `failover-route-${wan2Gateway}` },
+                        ], checkGateway: 'ping' });
+                        alert('Configured route-based failover using check-gateway.');
+                    } else {
+                        throw new Error('Gateways not provided for route-based failover.');
+                    }
+                } catch (err3) {
+                    alert(`Failed to configure failover: ${(err3 as Error).message}`);
+                }
             }
         } finally {
             setIsToggling(false);

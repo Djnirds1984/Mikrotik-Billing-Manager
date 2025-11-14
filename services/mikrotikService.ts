@@ -698,6 +698,17 @@ export const setupMultiWanPCC = (
     });
 };
 
+// --- Route-based Failover using check-gateway ---
+export const setupFailoverRoutes = (
+    router: RouterConfigWithId,
+    params: { routes: { gateway: string; distance?: number; comment?: string }[]; checkGateway?: 'ping' | 'arp' }
+): Promise<{ message: string }> => {
+    return fetchMikrotikData<{ message: string }>(router, '/failover/routes/setup', {
+        method: 'POST',
+        body: JSON.stringify(params)
+    });
+};
+
 export const getFileContent = async (router: RouterConfigWithId, fileId: string): Promise<{ contents: string }> => {
     // The path needs to be different for legacy vs REST APIs.
     // REST (v7+) uses `?=.id=...`

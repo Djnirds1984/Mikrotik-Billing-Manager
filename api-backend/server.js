@@ -1674,7 +1674,11 @@ app.post('/mt-api/:routerId/failover/scheduler/setup', getRouterConfig, async (r
                         } finally { await client.close(); }
                     } catch (err) { lastErr = err; }
                 }
-                if (!done && lastErr) throw lastErr;
+                if (!done) {
+                    const hint = 'Legacy API is not reachable on ports 8729/8728. Enable IP→Services “api”/“api-ssl” and allow the panel host through the firewall.';
+                    const err = new Error(`${lastErr?.message || 'Legacy API connection failed.'} ${hint}`);
+                    throw err;
+                }
             }
         }
         return { message: `Scheduler failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
@@ -1730,7 +1734,11 @@ app.post('/mt-api/:routerId/failover/scheduler/remove', getRouterConfig, async (
                         } finally { await client.close(); }
                     } catch (err) { lastErr = err; }
                 }
-                if (!removed && lastErr) throw lastErr;
+                if (!removed) {
+                    const hint = 'Legacy API is not reachable on ports 8729/8728. Enable IP→Services “api”/“api-ssl” and allow the panel host through the firewall.';
+                    const err = new Error(`${lastErr?.message || 'Legacy API connection failed.'} ${hint}`);
+                    throw err;
+                }
             }
         }
         return { message: `Removed scheduler failover entries for ${wanInterfaces.join(', ')}.` };
@@ -2011,6 +2019,63 @@ app.post('/mt-api/:routerId/multiwan/pcc-setup', getRouterConfig, async (req, re
         }
 
         return { message: `PCC setup applied for ${K} WAN(s). Verify connectivity and active routes.` };
+    });
+});
+
+// --- Route-based Failover using check-gateway ---
+// Configure default routes with distance and check-gateway for failover
+app.post('/mt-api/:routerId/failover/routes/setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const body = req.body || {};
+        const specs = Array.isArray(body.routes) ? body.routes : null;
+        const checkGateway = body.checkGateway || 'ping';
+        if (!specs || specs.length < 1) {
+            throw new Error('routes array is required. Each entry must include gateway and optional distance/comment.');
+        }
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                let existing = await writeLegacySafe(client, ['/ip/route/print']);
+                existing = existing.map(normalizeLegacyObject);
+                for (const spec of specs) {
+                    const gw = String(spec.gateway || '').trim();
+                    if (!gw) throw new Error('gateway is required in routes spec.');
+                    const dist = Number(spec.distance || 1);
+                    const comment = spec.comment || `failover-route-${gw}`;
+                    const match = existing.find(r => r['dst-address'] === '0.0.0.0/0' && (r.gateway === gw || r.comment === comment));
+                    if (match) {
+                        await writeLegacySafe(client, ['/ip/route/set', `=.id=${match.id}`, `=distance=${dist}`, `=check-gateway=${checkGateway}`, `=disabled=no`]);
+                    } else {
+                        await writeLegacySafe(client, ['/ip/route/add', `=dst-address=0.0.0.0/0`, `=gateway=${gw}`, `=distance=${dist}`, `=check-gateway=${checkGateway}`, `=comment=${comment}`]);
+                    }
+                }
+            } finally {
+                await client.close();
+            }
+        } else {
+            let routes = [];
+            try {
+                const resp = await req.routerInstance.get('/ip/route');
+                routes = resp.data || [];
+            } catch (e) {
+                // proceed with POSTs regardless
+            }
+            for (const spec of specs) {
+                const gw = String(spec.gateway || '').trim();
+                if (!gw) throw new Error('gateway is required in routes spec.');
+                const dist = Number(spec.distance || 1);
+                const comment = spec.comment || `failover-route-${gw}`;
+                const match = routes.find(r => r['dst-address'] === '0.0.0.0/0' && (r.gateway === gw || r.comment === comment));
+                if (match && match.id) {
+                    await req.routerInstance.patch(`/ip/route/${encodeURIComponent(match.id)}`, { distance: dist, 'check-gateway': checkGateway, disabled: false });
+                } else {
+                    await req.routerInstance.post('/ip/route', { 'dst-address': '0.0.0.0/0', gateway: gw, distance: dist, 'check-gateway': checkGateway, comment });
+                }
+            }
+        }
+        return { message: 'Route-based failover configured using check-gateway.' };
     });
 });
 // --- Public Client Portal Helpers ---
