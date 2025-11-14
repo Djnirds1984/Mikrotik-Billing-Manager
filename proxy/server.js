@@ -1478,6 +1478,32 @@ panelAdminRouter.put('/roles/:roleId/permissions', requireAdmin, async (req, res
 });
 
 
+// Ensure /api/db/company-settings is public BEFORE admin router
+app.all('/api/db/company-settings', async (req, res) => {
+    try {
+        if (req.method === 'GET') {
+            const rows = await db.all('SELECT key, value FROM company_settings');
+            const out = {};
+            for (const r of rows) {
+                try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
+            }
+            return res.json(out);
+        }
+        if (req.method === 'POST') {
+            await db.exec('BEGIN TRANSACTION;');
+            for (const [key, value] of Object.entries(req.body || {})) {
+                await db.run('INSERT OR REPLACE INTO company_settings (key, value) VALUES (?, ?);', key, JSON.stringify(value));
+            }
+            await db.exec('COMMIT;');
+            return res.json({ message: 'Settings saved.' });
+        }
+        return res.status(405).json({ message: 'Method not allowed' });
+    } catch (e) {
+        try { await db.exec('ROLLBACK;'); } catch (_) {}
+        return res.status(500).json({ message: e.message });
+    }
+});
+
 app.use('/api', panelAdminRouter);
 
 
@@ -1779,9 +1805,50 @@ app.post('/api/db/panel-settings', protect, async (req, res, next) => {
 app.get('/api/db/company-settings', createSettingsHandler('company_settings'));
 app.post('/api/db/company-settings', createSettingsSaver('company_settings'));
 
-app.use('/api/db', protect, dbRouter);
+// Bypass auth for company-settings to allow public save/fetch
+app.use('/api/db', (req, res, next) => {
+    try {
+        const p = req.path || '';
+        if (p.startsWith('/company-settings')) return next();
+        return protect(req, res, next);
+    } catch (_) {
+        return protect(req, res, next);
+    }
+}, dbRouter);
 
 // --- Public (read-only) endpoints for client portal ---
+app.get('/public/company-settings', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT key, value FROM company_settings');
+        const out = {};
+        for (const r of rows) {
+            try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
+        }
+        return res.json(out);
+    } catch (e) {
+        return res.status(500).json({ message: e.message });
+    }
+});
+
+app.post('/public/company-settings', async (req, res) => {
+    let transactionStarted = false;
+    try {
+        await db.exec('BEGIN TRANSACTION;');
+        transactionStarted = true;
+        for (const [key, value] of Object.entries(req.body || {})) {
+            await db.run(`INSERT OR REPLACE INTO company_settings (key, value) VALUES (?, ?);`, key, JSON.stringify(value));
+        }
+        await db.exec('COMMIT;');
+        transactionStarted = false;
+        return res.json({ message: 'Settings saved.' });
+    } catch (e) {
+        if (transactionStarted) {
+            try { await db.exec('ROLLBACK;'); } catch (_) {}
+        }
+        return res.status(500).json({ message: e.message });
+    }
+});
+
 app.get('/api/public/routers', async (req, res) => {
     try {
         if (useMaria('routers')) {
@@ -3106,67 +3173,3 @@ Promise.all([initDb(), initSuperadminDb()]).then(async () => {
     });
 });
 // --- Public endpoints for Company Settings (must be BEFORE admin router) ---
-app.get('/public/company-settings', async (req, res) => {
-    try {
-        const rows = await db.all('SELECT key, value FROM company_settings');
-        const out = {};
-        for (const r of rows) {
-            try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
-        }
-        return res.json(out);
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
-
-app.post('/public/company-settings', async (req, res) => {
-    let transactionStarted = false;
-    try {
-        await db.exec('BEGIN TRANSACTION;');
-        transactionStarted = true;
-        for (const [key, value] of Object.entries(req.body || {})) {
-            await db.run(`INSERT OR REPLACE INTO company_settings (key, value) VALUES (?, ?);`, key, JSON.stringify(value));
-        }
-        await db.exec('COMMIT;');
-        transactionStarted = false;
-        return res.json({ message: 'Settings saved.' });
-    } catch (e) {
-        if (transactionStarted) {
-            try { await db.exec('ROLLBACK;'); } catch (_) {}
-        }
-        return res.status(500).json({ message: e.message });
-    }
-});
-
-// Back-compat: support legacy paths used by existing UI bundles
-app.get('/api/db/company-settings', async (req, res) => {
-    try {
-        const rows = await db.all('SELECT key, value FROM company_settings');
-        const out = {};
-        for (const r of rows) {
-            try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
-        }
-        return res.json(out);
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
-
-app.post('/api/db/company-settings', async (req, res) => {
-    let transactionStarted = false;
-    try {
-        await db.exec('BEGIN TRANSACTION;');
-        transactionStarted = true;
-        for (const [key, value] of Object.entries(req.body || {})) {
-            await db.run(`INSERT OR REPLACE INTO company_settings (key, value) VALUES (?, ?);`, key, JSON.stringify(value));
-        }
-        await db.exec('COMMIT;');
-        transactionStarted = false;
-        return res.json({ message: 'Settings saved.' });
-    } catch (e) {
-        if (transactionStarted) {
-            try { await db.exec('ROLLBACK;'); } catch (_) {}
-        }
-        return res.status(500).json({ message: e.message });
-    }
-});
