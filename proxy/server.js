@@ -1128,6 +1128,12 @@ licenseRouter.get('/status', async (req, res) => {
     }
 
     try {
+        // Check if database is initialized
+        if (!db) {
+            console.error("Database not initialized during license status check");
+            return res.status(500).json({ licensed: false, deviceId, error: 'Database not ready' });
+        }
+        
         const result = await db.get("SELECT value FROM license WHERE key = 'license_key'");
         if (!result || !result.value) {
             return res.json({ licensed: false, deviceId });
@@ -1148,7 +1154,8 @@ licenseRouter.get('/status', async (req, res) => {
             return res.json({ licensed: false, deviceId });
         }
         console.error("Error during license status check:", e.message);
-        res.json({ licensed: false, deviceId, error: e.message });
+        console.error("Error stack:", e.stack);
+        res.json({ licensed: false, deviceId, error: e.message, errorType: e.constructor.name });
     }
 });
 
