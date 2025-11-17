@@ -20,7 +20,7 @@
       const colorTheme = localStorage.getItem('colorTheme') || 'orange';
       document.documentElement.classList.add(`theme-${colorTheme}`);
     </script>
-    <link href="/style.css" rel="stylesheet" />
+
   <script type="importmap">
 {
   "imports": {
@@ -268,7 +268,7 @@
 </head>
   <body>
     <div id="root"></div>
-    <script src="/env.js"></script>
+    <script type="module" src="/env.js"></script>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>
