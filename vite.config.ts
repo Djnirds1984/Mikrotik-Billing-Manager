@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => {
             target: 'http://localhost:3001',
             changeOrigin: true,
           },
+          '/public': {
+            target: 'http://localhost:3001',
+            changeOrigin: true,
+          },
           '/mt-api': {
             target: 'http://localhost:3002',
             changeOrigin: true,

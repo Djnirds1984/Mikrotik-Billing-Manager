@@ -663,6 +663,42 @@ async function initDb() {
         console.error('Failed to initialize database:', err);
         process.exit(1);
     }
+    
+    // Ensure default company settings exist
+    try {
+        const companySettingsCount = await db.get('SELECT COUNT(*) as count FROM company_settings');
+        if (companySettingsCount.count === 0) {
+            console.log('Inserting default company settings...');
+            await db.exec(`
+                INSERT INTO company_settings (key, value) VALUES 
+                ('companyName', '"Mikrotik Billing Manager"'),
+                ('companyLogo', '""'),
+                ('companyAddress', '""'),
+                ('companyContact', '""'),
+                ('companyEmail', '""');
+            `);
+            console.log('Default company settings inserted');
+        }
+    } catch (e) {
+        console.log('Company settings check skipped (may already exist)');
+    }
+    
+    // Ensure default license data exists
+    try {
+        const licenseData = await db.get("SELECT * FROM license WHERE key = 'license_key'");
+        if (!licenseData) {
+            console.log('Inserting default license data...');
+            await db.exec(`
+                INSERT INTO license (key, value) VALUES 
+                ('license_key', ''),
+                ('status', 'unlicensed'),
+                ('deviceId', '');
+            `);
+            console.log('Default license data inserted');
+        }
+    } catch (e) {
+        console.log('License data check skipped (may already exist)');
+    }
 }
 
 // --- Database Engine Switching (SQLite <-> MariaDB) ---
@@ -3193,13 +3229,16 @@ superadminRouter.get('/restore-from-backup', (req, res) => {
 app.use('/api/superadmin', superadminRouter);
 
 // --- Static file serving ---
+// IMPORTANT: API routes must be defined BEFORE static file serving
+// to prevent static middleware from intercepting API requests
+
 // Serve from dist folder for production assets
 app.use(express.static(path.join(__dirname, '..', 'dist')));
 
-// Fallback to serve from root for development files
+// Fallback to serve from root for development files  
 app.use(express.static(path.join(__dirname, '..')));
 
-// SPA Fallback:
+// SPA Fallback: This should be the LAST route to handle unmatched requests
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
 });
