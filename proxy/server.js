@@ -3193,11 +3193,15 @@ superadminRouter.get('/restore-from-backup', (req, res) => {
 app.use('/api/superadmin', superadminRouter);
 
 // --- Static file serving ---
+// Serve from dist folder for production assets
+app.use(express.static(path.join(__dirname, '..', 'dist')));
+
+// Fallback to serve from root for development files
 app.use(express.static(path.join(__dirname, '..')));
 
 // SPA Fallback:
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'index.html'));
+    res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
 });
 
 // --- Start Server ---
