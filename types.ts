@@ -347,6 +347,11 @@ export interface CompanySettings {
     contactNumber?: string;
     email?: string;
     logoBase64?: string;
+    // Xendit Payment Gateway Configuration
+    xenditSecretKey?: string;
+    xenditPublicKey?: string;
+    xenditWebhookToken?: string;
+    xenditEnabled?: boolean;
 }
 
 export interface ChatMessage {
