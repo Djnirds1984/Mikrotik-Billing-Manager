@@ -1212,7 +1212,7 @@ app.use('/api', panelAdminRouter);
 app.use(async (req, res, next) => {
     if (req.path.endsWith('.tsx') || req.path.endsWith('.ts')) {
         try {
-            const filePath = path.join(__dirname, '..', req.path);
+            const filePath = path.resolve(__dirname, '..', req.path.replace(/^\//, ''));
 
             // Bundle entry file to resolve bare imports like "react"
             if (req.path === '/index.tsx') {
