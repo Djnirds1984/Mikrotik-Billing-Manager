@@ -1224,7 +1224,9 @@ app.use(async (req, res, next) => {
                     jsx: 'automatic',
                     sourcemap: true,
                     write: false,
-                    loader: { '.ts': 'ts', '.tsx': 'tsx', '.css': 'css' },
+                    absWorkingDir: path.join(__dirname, '..'),
+                    resolveExtensions: ['.tsx', '.ts', '.jsx', '.js'],
+                    loader: { '.ts': 'ts', '.tsx': 'tsx' },
                 });
                 const js = result.outputFiles.find(f => f.path.endsWith('.js'));
                 if (!js) throw new Error('Failed to generate bundled JS for index.tsx');

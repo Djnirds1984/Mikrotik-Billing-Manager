@@ -4,7 +4,6 @@
   "description": "Frontend server for the Mikrotik Billling Management by AJC",
   "main": "server.js",
   "scripts": {
-    "preinstall": "command -v make >/dev/null 2>&1 || { echo >&2 '\\n[ERROR] Missing System Dependencies!\\n`make` command not found. This is required to build native Node.js modules.\\nPlease run the following command to install the build tools:\\n\\n  sudo apt-get update && sudo apt-get install -y build-essential\\n'; exit 1; }",
     "start": "node server.js"
   },
   "author": "",
