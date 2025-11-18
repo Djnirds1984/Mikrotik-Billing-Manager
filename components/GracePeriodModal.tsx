@@ -27,7 +27,7 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
         // ignore malformed comment
       }
     }
-  }, [secret, isOpen]);
+  }, [subject, isOpen]);
 
   if (!isOpen) return null;
 
