@@ -1213,13 +1213,13 @@ const DIST_DIR = path.join(__dirname, '..', 'dist');
 const distExists = fs.existsSync(DIST_DIR);
 
 if (distExists) {
-    // Serve built assets if available
+    console.log(`UI serving mode: dist (${DIST_DIR})`);
     app.use(express.static(DIST_DIR));
     app.get('*', (req, res) => {
         res.sendFile(path.join(DIST_DIR, 'index.html'));
     });
 } else {
-    // Fallback: On-the-fly TS/TSX handling for development
+    console.log('UI serving mode: dev bundling fallback');
     app.use(async (req, res, next) => {
         if (req.path.endsWith('.tsx') || req.path.endsWith('.ts')) {
             try {
