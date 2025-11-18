@@ -519,6 +519,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         <tr>
                             <th className="px-6 py-3">Username/Customer</th>
                             <th className="px-6 py-3">Profile</th>
+                            <th className="px-6 py-3">Plan Type</th>
                             <th className="px-6 py-3">Subscription Due</th>
                             <th className="px-6 py-3 text-right">Actions</th>
                         </tr>
@@ -531,6 +532,13 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     <p className="text-xs text-slate-500">{user.customer?.fullName}</p>
                                 </td>
                                 <td>{user.profile}</td>
+                                <td>
+                                    {user.subscription.planType === 'postpaid' ? (
+                                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300">Postpaid</span>
+                                    ) : (
+                                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">Prepaid</span>
+                                    )}
+                                </td>
                                 <td>{user.subscription.dueDate}</td>
                                 <td className="px-6 py-4 text-right space-x-2">
                                     <button
