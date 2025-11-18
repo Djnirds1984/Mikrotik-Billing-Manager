@@ -1214,6 +1214,14 @@ const distExists = fs.existsSync(DIST_DIR);
 
 if (distExists) {
     console.log(`UI serving mode: dist (${DIST_DIR})`);
+    // Serve runtime config and translations from project root
+    app.get('/env.js', (req, res) => {
+        res.sendFile(path.join(__dirname, '..', 'env.js'));
+    });
+    app.use('/locales', express.static(path.join(__dirname, '..', 'locales')));
+    app.get('/vite.svg', (req, res) => {
+        res.sendFile(path.join(__dirname, '..', 'vite.svg'));
+    });
     app.use(express.static(DIST_DIR));
     app.get('*', (req, res) => {
         res.sendFile(path.join(DIST_DIR, 'index.html'));
