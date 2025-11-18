@@ -468,20 +468,22 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         }
     };
 
-    const handleGraceSave = async ({ graceDays }: { graceDays: number }) => {
+    const handleGraceSave = async ({ graceDays, nonPaymentProfile }: { graceDays: number; nonPaymentProfile: string }) => {
         if (!selectedSecret) return false;
         try {
+            const planName = (selectedSecret as any).subscription?.plan;
+            const originalPlan = plans.find(p => p.name === planName);
             const secretData: PppSecretData = {
                 name: selectedSecret.name,
                 service: 'pppoe',
-                profile: selectedSecret.profile,
+                profile: originalPlan?.pppoeProfile || selectedSecret.profile,
                 comment: selectedSecret.comment,
                 disabled: selectedSecret.disabled,
             };
             await savePppUser(selectedRouter, {
                 initialSecret: selectedSecret,
                 secretData,
-                subscriptionData: { dueDate: '', nonPaymentProfile: '', graceDays }
+                subscriptionData: { dueDate: '', nonPaymentProfile, graceDays, planId: originalPlan?.id }
             });
             setGraceModalOpen(false);
             await fetchData();
@@ -508,7 +510,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 isSubmitting={isSubmitting}
             />
             <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />
-            <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} onSave={handleGraceSave} />
+            <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} profiles={profiles} onSave={handleGraceSave} />
 
              <div className="flex justify-end mb-4">
                 <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>

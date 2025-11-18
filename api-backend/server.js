@@ -544,38 +544,43 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
             }
         }
 
-        // 2. Manage the scheduler
         const schedulerName = `disable-${secretData.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
         const schedulersResponse = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
         const existingSchedulers = schedulersResponse.data;
-        
-        // If due date is cleared, delete existing scheduler
-        if (!subscriptionData?.dueDate) {
+        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const hasGrace = Number.isFinite(subscriptionData?.graceDays) && Number(subscriptionData?.graceDays) > 0;
+        if (hasGrace) {
             if (existingSchedulers.length > 0) {
                 await req.routerInstance.delete(`/system/scheduler/${existingSchedulers[0].id}`);
             }
-        } else { // If due date is set, create or update scheduler
+            let baseDateStr = null;
+            try {
+                const parsed = initialSecret?.comment ? JSON.parse(initialSecret.comment) : (secretData.comment ? JSON.parse(secretData.comment) : null);
+                baseDateStr = parsed && parsed.dueDate ? parsed.dueDate : null;
+            } catch (_) {}
+            const now = new Date();
+            const baseDate = baseDateStr ? new Date(`${baseDateStr}T23:59:59`) : now;
+            const target = new Date(baseDate.getTime());
+            target.setDate(target.getDate() + Number(subscriptionData.graceDays));
+            const schedulerDate = `${monthNames[target.getMonth()]}/${String(target.getDate()).padStart(2, '0')}/${target.getFullYear()}`;
+            const schedulerTime = `23:59:59`;
+            const scriptSource = `/ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile};`;
+            const schedulerPayload = { 'start-date': schedulerDate, 'start-time': schedulerTime, 'on-event': scriptSource, interval: '0' };
+            await req.routerInstance.put('/system/scheduler', { name: schedulerName, ...schedulerPayload });
+        } else if (subscriptionData?.dueDate) {
             const dueDate = new Date(subscriptionData.dueDate);
-            const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
             const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
             const schedulerTime = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}:${String(dueDate.getSeconds()).padStart(2, '0')}`;
-            
-            const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile};`;
-
-            const schedulerPayload = {
-                'start-date': schedulerDate,
-                'start-time': schedulerTime,
-                'on-event': scriptSource
-            };
-
+            const scriptSource = `/ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile};`;
+            const schedulerPayload = { 'start-date': schedulerDate, 'start-time': schedulerTime, 'on-event': scriptSource };
             if (existingSchedulers.length > 0) {
                 await req.routerInstance.patch(`/system/scheduler/${existingSchedulers[0].id}`, schedulerPayload);
             } else {
-                await req.routerInstance.put('/system/scheduler', {
-                    name: schedulerName,
-                    interval: '0',
-                    ...schedulerPayload
-                });
+                await req.routerInstance.put('/system/scheduler', { name: schedulerName, interval: '0', ...schedulerPayload });
+            }
+        } else {
+            if (existingSchedulers.length > 0) {
+                await req.routerInstance.delete(`/system/scheduler/${existingSchedulers[0].id}`);
             }
         }
         
