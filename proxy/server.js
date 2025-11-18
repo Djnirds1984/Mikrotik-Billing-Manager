@@ -1213,6 +1213,25 @@ app.use(async (req, res, next) => {
     if (req.path.endsWith('.tsx') || req.path.endsWith('.ts')) {
         try {
             const filePath = path.join(__dirname, '..', req.path);
+
+            // Bundle entry file to resolve bare imports like "react"
+            if (req.path === '/index.tsx') {
+                const result = await esbuild.build({
+                    entryPoints: [filePath],
+                    bundle: true,
+                    format: 'esm',
+                    platform: 'browser',
+                    jsx: 'automatic',
+                    sourcemap: true,
+                    write: false,
+                    loader: { '.ts': 'ts', '.tsx': 'tsx', '.css': 'css' },
+                });
+                const js = result.outputFiles.find(f => f.path.endsWith('.js'));
+                if (!js) throw new Error('Failed to generate bundled JS for index.tsx');
+                return res.type('application/javascript').send(js.text);
+            }
+
+            // Fallback: simple transform for other TS/TSX files
             const source = await fs.promises.readFile(filePath, 'utf8');
             const result = await esbuild.transform(source, {
                 loader: req.path.endsWith('.tsx') ? 'tsx' : 'ts',
