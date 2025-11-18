@@ -550,9 +550,13 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     </button>
                                     {(() => {
                                         const d = user.subscription.dueDate;
-                                        const isDue = typeof d === 'string' && d !== 'No Info' ? (new Date(`${d}T23:59:59`).getTime() <= Date.now()) : false;
+                                        const now = new Date();
+                                        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                                        const isDue = typeof d === 'string' && d !== 'No Info' ? (d <= todayStr) : false;
                                         const isPostpaid = user.subscription.planType === 'postpaid';
-                                        return (isPostpaid && isDue) ? (
+                                        const profileName = (user.profile || '').toLowerCase();
+                                        const isNonPayProfile = ['non-payment','nonpayment','cut','disable','disabled'].some(tag => profileName.includes(tag));
+                                        return (isPostpaid && (isDue || isNonPayProfile)) ? (
                                             <button
                                                 onClick={() => { setSelectedSecret(user); setGraceModalOpen(true); }}
                                                 className="px-3 py-1 text-sm bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition-colors"
