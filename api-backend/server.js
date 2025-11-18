@@ -563,7 +563,9 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
             const target = new Date(baseDate.getTime());
             target.setDate(target.getDate() + Number(subscriptionData.graceDays));
             const schedulerDate = `${monthNames[target.getMonth()]}/${String(target.getDate()).padStart(2, '0')}/${target.getFullYear()}`;
-            const schedulerTime = `23:59:59`;
+            const schedulerTime = (subscriptionData.graceTime && /^\d{2}:\d{2}$/.test(subscriptionData.graceTime))
+                ? `${subscriptionData.graceTime}:00`
+                : `23:59:59`;
             const scriptSource = `/ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile};`;
             const schedulerPayload = { 'start-date': schedulerDate, 'start-time': schedulerTime, 'on-event': scriptSource, interval: '0' };
             await req.routerInstance.put('/system/scheduler', { name: schedulerName, ...schedulerPayload });

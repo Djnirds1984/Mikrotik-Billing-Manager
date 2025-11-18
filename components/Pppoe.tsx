@@ -468,7 +468,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         }
     };
 
-    const handleGraceSave = async ({ graceDays, nonPaymentProfile }: { graceDays: number; nonPaymentProfile: string }) => {
+    const handleGraceSave = async ({ graceDays, nonPaymentProfile, graceTime }: { graceDays: number; nonPaymentProfile: string; graceTime: string }) => {
         if (!selectedSecret) return false;
         try {
             const planName = (selectedSecret as any).subscription?.plan;
@@ -483,7 +483,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             await savePppUser(selectedRouter, {
                 initialSecret: selectedSecret,
                 secretData,
-                subscriptionData: { dueDate: '', nonPaymentProfile, graceDays, planId: originalPlan?.id }
+                subscriptionData: { dueDate: '', nonPaymentProfile, graceDays, graceTime, planId: originalPlan?.id }
             });
             setGraceModalOpen(false);
             await fetchData();

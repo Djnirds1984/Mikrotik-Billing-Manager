@@ -5,7 +5,7 @@ interface GracePeriodModalProps {
   onClose: () => void;
   subject: { comment?: string } | null;
   profiles?: { id: string; name: string }[];
-  onSave: (params: { graceDays: number; nonPaymentProfile: string }) => Promise<boolean> | boolean;
+  onSave: (params: { graceDays: number; nonPaymentProfile: string; graceTime: string }) => Promise<boolean> | boolean;
 }
 
 export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onClose, subject, profiles, onSave }) => {
@@ -14,12 +14,14 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [expiryProfile, setExpiryProfile] = useState<string>('');
+  const [graceTime, setGraceTime] = useState<string>('23:59');
 
   useEffect(() => {
     setError(null);
     setGraceDays(0);
     setDueDate('');
     setExpiryProfile('');
+    setGraceTime('23:59');
     if (subject?.comment) {
       try {
         const parsed = JSON.parse(subject.comment);
@@ -27,7 +29,6 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
           setDueDate(parsed.dueDate);
         }
       } catch (_) {
-        // ignore malformed comment
       }
     }
     if (profiles && profiles.length > 0) {
@@ -51,9 +52,13 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
       setError('Please select the profile on expiry.');
       return;
     }
+    if (!/^\d{2}:\d{2}$/.test(graceTime)) {
+      setError('Please set a valid time (HH:MM).');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const ok = await onSave({ graceDays, nonPaymentProfile: expiryProfile });
+      const ok = await onSave({ graceDays, nonPaymentProfile: expiryProfile, graceTime });
       if (ok) onClose();
     } catch (err) {
       setError(String((err as Error).message || 'Failed to grant grace period.'));
@@ -86,6 +91,16 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
               required
             />
             <p className="text-xs text-slate-500 mt-1">Extends the due date by the given number of days.</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Grace End Time</label>
+            <input
+              type="time"
+              value={graceTime}
+              onChange={(e) => setGraceTime(e.target.value)}
+              className="w-full px-3 py-2 border rounded-md"
+              required
+            />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Profile on Expiry</label>
