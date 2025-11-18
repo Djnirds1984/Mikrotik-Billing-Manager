@@ -415,13 +415,19 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
         const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
         const schedulerTime = "23:59:59"; // Run at the end of the day
 
-        // 2. Create new comment
+        // 2. Create new comment, preserving existing planType and adding dueDateTime
+        let existingMeta = null;
+        try { existingMeta = secret.comment ? JSON.parse(secret.comment) : null; } catch (_) {}
+        const dueDateStr = dueDate.toISOString().split('T')[0];
+        const dueDateTimeStr = `${dueDateStr}T${schedulerTime.substring(0,5)}`; // HH:MM
         const newComment = JSON.stringify({
             plan: plan.name,
             price: plan.price,
             currency: plan.currency,
-            dueDate: dueDate.toISOString().split('T')[0],
-            paidDate: paymentDate
+            dueDate: dueDateStr,
+            dueDateTime: dueDateTimeStr,
+            paidDate: paymentDate,
+            ...(existingMeta && existingMeta.planType ? { planType: existingMeta.planType } : {})
         });
 
         // 3. Define script to run on scheduler
