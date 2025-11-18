@@ -20,41 +20,7 @@
       const colorTheme = localStorage.getItem('colorTheme') || 'orange';
       document.documentElement.classList.add(`theme-${colorTheme}`);
     </script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      // Configure Tailwind CSS for class-based dark mode
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            },
-          },
-        },
-      };
-    </script>
-  <script type="importmap">
-{
-  "imports": {
-    "react-dom/client": "https://esm.sh/react-dom@^19.1.1/client",
-    "@google/genai": "https://esm.sh/@google/genai@^1.15.0",
-    "react": "https://esm.sh/react@^19.1.1",
-    "recharts": "https://esm.sh/recharts@^2.12.7",
-    "xterm": "https://esm.sh/xterm@5.3.0",
-    "xterm-addon-fit": "https://esm.sh/xterm-addon-fit@0.8.0",
-    "xterm-addon-web-links": "https://esm.sh/xterm-addon-web-links@0.9.0",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "path": "https://aistudiocdn.com/path@^0.12.7",
-    "url": "https://aistudiocdn.com/url@^0.11.4",
-    "react-chartjs-2": "https://aistudiocdn.com/react-chartjs-2@^5.3.0",
-    "chart.js": "https://aistudiocdn.com/chart.js@^4.5.0",
-    "vite": "https://aistudiocdn.com/vite@^7.1.9",
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.0.4"
-  }
-}
-</script>
+    
 <style>
   /* Base styles */
   body {
