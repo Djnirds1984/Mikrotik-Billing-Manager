@@ -29,15 +29,13 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
                 )}
             </header>
 
-            <div className="mt-4 text-center font-bold uppercase">ACKNOWLEDGMENT RECEIPT ONLY</div>
-
             <section className="my-6">
                 <div className="flex justify-between">
                     <div>
                         <h2 className="font-bold">BILLED TO:</h2>
-                        <p className="text-sm">Full Name: {sale.clientName || ''}</p>
-                        <p className="text-sm">Address: {sale.clientAddress || ''}</p>
-                        <p className="text-sm">Contact Number: {sale.clientContact || ''}</p>
+                        <p>{sale.clientName}</p>
+                        {sale.clientAddress && <p className="text-sm text-gray-700">{sale.clientAddress}</p>}
+                        {sale.clientContact && <p className="text-sm text-gray-700">{sale.clientContact}</p>}
                     </div>
                     <div className="text-right">
                         <h2 className="font-bold">RECEIPT #: {sale.id.slice(-6).toUpperCase()}</h2>
@@ -84,7 +82,7 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
             
             <footer className="mt-8 pt-4 border-t-2 border-dashed border-black text-center">
                 <p className="font-bold">Thank you for your payment!</p>
-                <p className="text-xs mt-2">This is acknowledgement receipt only.</p>
+                <p className="text-xs mt-2">This is an official receipt.</p>
             </footer>
         </div>
     );

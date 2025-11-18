@@ -9,7 +9,7 @@ import { createDatabaseBackup, listDatabaseBackups, deleteDatabaseBackup, getPan
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { Loader } from './Loader.tsx';
 // FIX: Import ClockIcon from constants
-import { KeyIcon, CogIcon, PowerIcon, RouterIcon, CircleStackIcon, ArrowPathIcon, TrashIcon, UsersIcon, DataplicityIcon, ClockIcon, BellIcon } from '../constants.tsx';
+import { KeyIcon, CogIcon, PowerIcon, RouterIcon, CircleStackIcon, ArrowPathIcon, TrashIcon, UsersIcon, DataplicityIcon, ClockIcon } from '../constants.tsx';
 import { SudoInstructionBox } from './SudoInstructionBox.tsx';
 
 // --- Icon Components ---
@@ -279,7 +279,7 @@ const DatabaseManager: React.FC = () => {
         <div className="space-y-4">
             <button onClick={handleCreateBackup} disabled={!!isActioning} className="w-full px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2">
                 {isActioning === 'create' ? <Loader /> : <CircleStackIcon className="w-5 h-5" />}
-                {isActioning === 'create' ? 'Backing up...' : 'Backup Now'}
+                {isActioning === 'create' ? 'Backing up...' : 'Create New Backup'}
             </button>
             <div className="pt-4">
                 <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Available Backups</h4>
@@ -318,157 +318,6 @@ const DatabaseManager: React.FC = () => {
     );
 };
 
-
-const TelegramManager: React.FC = () => {
-    const { t } = useLocalization();
-    const [settings, setSettings] = useState<PanelSettings | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [isSaving, setIsSaving] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [testMessage, setTestMessage] = useState('');
-    const [isTesting, setIsTesting] = useState(false);
-    const [feedback, setFeedback] = useState<string | null>(null);
-
-    useEffect(() => {
-        (async () => {
-            try {
-                const s = await getPanelSettings();
-                setSettings({
-                    ...s,
-                    telegramSettings: s.telegramSettings || {
-                        enabled: false,
-                        botToken: '',
-                        chatId: '',
-                        enableClientDueDate: true,
-                        enableClientDisconnected: true,
-                        enableInterfaceDisconnected: true,
-                        enablePanelOffline: true,
-                        enablePanelOnline: true,
-                        enableUserPaid: true,
-                    }
-                });
-            } catch (e) {
-                setError((e as Error).message);
-            } finally {
-                setIsLoading(false);
-            }
-        })();
-    }, []);
-
-    const updateTelegramField = (field: string, value: any) => {
-        setSettings(prev => {
-            if (!prev) return prev;
-            return {
-                ...prev,
-                telegramSettings: {
-                    ...prev.telegramSettings,
-                    [field]: value
-                }
-            };
-        });
-    };
-
-    const handleSave = async () => {
-        if (!settings?.telegramSettings) return;
-        setIsSaving(true);
-        setError(null);
-        setFeedback(null);
-        try {
-            const payload = { telegramSettings: settings.telegramSettings };
-            const res = await savePanelSettings(payload);
-            setFeedback(res.message || 'Settings saved');
-            try {
-                const s = await getPanelSettings();
-                setSettings(s);
-            } catch {}
-        } catch (e) {
-            setError((e as Error).message);
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const handleTest = async () => {
-        if (!settings?.telegramSettings?.botToken || !settings?.telegramSettings?.chatId) {
-            setFeedback('Please configure bot token and chat ID first');
-            return;
-        }
-        setIsTesting(true);
-        setError(null);
-        setFeedback(null);
-        try {
-            const response = await fetch('/api/telegram/test', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    botToken: settings.telegramSettings.botToken,
-                    chatId: settings.telegramSettings.chatId,
-                    message: testMessage || 'Test message from Mikrotik Billing Manager'
-                })
-            });
-            const result = await response.json();
-            if (result.success) {
-                setFeedback('Test message sent successfully');
-            } else {
-                setError('Failed to send test message: ' + result.error);
-            }
-        } catch (e) {
-            setError('Failed to send test message: ' + (e as Error).message);
-        } finally {
-            setIsTesting(false);
-        }
-    };
-
-    if (isLoading) return <div className="text-gray-500">Loading...</div>;
-    if (error) return <div className="text-red-500">Error: {error}</div>;
-
-    const ts = settings?.telegramSettings;
-
-    return (
-        <div className="space-y-6">
-            <div className="flex items-center space-x-4">
-                <label className="flex items-center space-x-2">
-                    <input type="checkbox" checked={ts?.enabled || false} onChange={e => updateTelegramField('enabled', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                    <span className="text-sm font-medium text-gray-700">Enable Telegram Notifications</span>
-                </label>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Bot Token</label>
-                    <input type="password" value={ts?.botToken || ''} onChange={e => updateTelegramField('botToken', e.target.value)} placeholder="Enter your Telegram bot token" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={!ts?.enabled} />
-                    <p className="text-xs text-gray-500 mt-1">Get your bot token from @BotFather</p>
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Chat ID</label>
-                    <input type="text" value={ts?.chatId || ''} onChange={e => updateTelegramField('chatId', e.target.value)} placeholder="Enter your chat ID" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={!ts?.enabled} />
-                    <p className="text-xs text-gray-500 mt-1">Get your chat ID from @userinfobot</p>
-                </div>
-            </div>
-
-            <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Notification Events</label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <label className="flex items-center space-x-2"><input type="checkbox" checked={ts?.enableClientDueDate || false} onChange={e => updateTelegramField('enableClientDueDate', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" disabled={!ts?.enabled} /><span className="text-sm text-gray-700">Client Due Date</span></label>
-                    <label className="flex items-center space-x-2"><input type="checkbox" checked={ts?.enableClientDisconnected || false} onChange={e => updateTelegramField('enableClientDisconnected', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" disabled={!ts?.enabled} /><span className="text-sm text-gray-700">Client Disconnected</span></label>
-                    <label className="flex items-center space-x-2"><input type="checkbox" checked={ts?.enableInterfaceDisconnected || false} onChange={e => updateTelegramField('enableInterfaceDisconnected', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" disabled={!ts?.enabled} /><span className="text-sm text-gray-700">Interface Disconnected</span></label>
-                    <label className="flex items-center space-x-2"><input type="checkbox" checked={ts?.enablePanelOffline || false} onChange={e => updateTelegramField('enablePanelOffline', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" disabled={!ts?.enabled} /><span className="text-sm text-gray-700">Panel Offline</span></label>
-                    <label className="flex items-center space-x-2"><input type="checkbox" checked={ts?.enablePanelOnline || false} onChange={e => updateTelegramField('enablePanelOnline', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" disabled={!ts?.enabled} /><span className="text-sm text-gray-700">Panel Online</span></label>
-                    <label className="flex items-center space-x-2"><input type="checkbox" checked={ts?.enableUserPaid || false} onChange={e => updateTelegramField('enableUserPaid', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" disabled={!ts?.enabled} /><span className="text-sm text-gray-700">User Payment</span></label>
-                </div>
-            </div>
-
-            <div className="flex space-x-3">
-                <button onClick={handleSave} disabled={isSaving || !ts?.enabled} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed">{isSaving ? 'Saving...' : 'Save Settings'}</button>
-                <div className="flex space-x-2">
-                    <input type="text" value={testMessage} onChange={e => setTestMessage(e.target.value)} placeholder="Test message (optional)" className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" disabled={!ts?.enabled} />
-                    <button onClick={handleTest} disabled={isTesting || !ts?.enabled || !ts?.botToken || !ts?.chatId} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed">{isTesting ? 'Testing...' : 'Test'}</button>
-                </div>
-                {feedback && <div className="text-sm text-green-600">{feedback}</div>}
-            </div>
-        </div>
-    );
-};
 
 interface SystemSettingsProps {
     selectedRouter: RouterConfigWithId | null;
@@ -640,10 +489,6 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({ selectedRouter, 
                         {isKeySaving ? 'Saving...' : 'Save API Key'}
                     </button>
                 </div>
-            </SettingsCard>
-
-            <SettingsCard title="Telegram Manager" icon={<BellIcon className="w-6 h-6" />}>
-                <TelegramManager />
             </SettingsCard>
 
             <SettingsCard title="Time Synchronization" icon={<ClockIcon className="w-6 h-6" />}>

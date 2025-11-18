@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import type { PppSecret, BillingPlanWithId, SaleRecord, CompanySettings, PppProfile } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
-import { XenditPaymentModal } from './XenditPaymentModal.tsx';
-import { isXenditConfigured } from '../services/xenditService.ts';
 
 interface PaymentModalProps {
     isOpen: boolean;
@@ -26,8 +24,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
     const [receiptData, setReceiptData] = useState<SaleRecord | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'xendit'>('cash');
-    const [showXenditModal, setShowXenditModal] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
@@ -86,14 +82,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             alert('Please select a billing plan.');
             return;
         }
-
-        // Handle Xendit payment
-        if (paymentMethod === 'xendit') {
-            setShowXenditModal(true);
-            return;
-        }
         
-        // Handle cash payment (existing logic)
         setIsSubmitting(true);
         
         const saleData = {

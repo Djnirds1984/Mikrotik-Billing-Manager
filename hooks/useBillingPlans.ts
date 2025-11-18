@@ -18,10 +18,10 @@ export const useBillingPlans = (routerId: string | null) => {
         setError(null);
         try {
             const data = await dbApi.get<BillingPlanWithId[]>(`/billing-plans?routerId=${routerId}`);
-            // Provide a fallback currency for plans created before currency support.
+            // FIX: Provide a fallback currency for plans created before this update.
             const dataWithFallback = data.map(plan => ({
                 ...plan,
-                currency: plan.currency || 'USD',
+                currency: plan.currency || 'USD'
             }));
             setPlans(dataWithFallback);
         } catch (err) {
@@ -38,50 +38,28 @@ export const useBillingPlans = (routerId: string | null) => {
 
     const addPlan = async (planConfig: BillingPlan) => {
         if (!routerId) {
-            throw new Error('Cannot add plan without a selected router.');
+            console.error("Cannot add plan without a selected router.");
+            return;
         }
-        const newPlan: BillingPlanWithId = {
-            ...planConfig,
-            id: `plan_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            routerId: routerId,
-            // Intentionally not persisting billingType for PPPoE plan creation
-            billingType: (planConfig as any).billingType || 'prepaid',
-        };
         try {
-            // Exclude billingType from payload to decouple plans from type
-            const { billingType, ...payload } = newPlan as any;
-            await dbApi.post('/billing-plans', payload);
+            const newPlan: BillingPlanWithId = {
+                ...planConfig,
+                id: `plan_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                routerId: routerId,
+            };
+            await dbApi.post('/billing-plans', newPlan);
             await fetchPlans();
         } catch (err) {
-            // Fallback: if backend complains about unknown column, retry without billingType
-            const message = String((err as any)?.message || '');
-            if (message.includes('no column named billingType') || message.includes('unknown column') || message.includes('SQLITE_ERROR')) {
-                console.warn('[useBillingPlans] Backend missing billingType column. Retrying without it.');
-                const { billingType: _bt, ...payloadNoType } = newPlan as any;
-                await dbApi.post('/billing-plans', payloadNoType);
-                await fetchPlans();
-                return;
-            }
-            throw err;
+            console.error("Failed to add billing plan:", err);
         }
     };
 
     const updatePlan = async (updatedPlan: BillingPlanWithId) => {
         try {
-            // Exclude billingType to keep it user-level only
-            const { billingType, ...payload } = updatedPlan as any;
-            await dbApi.patch(`/billing-plans/${updatedPlan.id}`, payload);
+            await dbApi.patch(`/billing-plans/${updatedPlan.id}`, updatedPlan);
             await fetchPlans();
         } catch (err) {
-            const message = String((err as any)?.message || '');
-            if (message.includes('no column named billingType') || message.includes('unknown column') || message.includes('SQLITE_ERROR')) {
-                console.warn('[useBillingPlans] Backend missing billingType column on update. Retrying without it.');
-                const { billingType: _bt, ...payloadNoType } = updatedPlan as any;
-                await dbApi.patch(`/billing-plans/${updatedPlan.id}`, payloadNoType);
-                await fetchPlans();
-                return;
-            }
-            throw err;
+            console.error("Failed to update billing plan:", err);
         }
     };
 

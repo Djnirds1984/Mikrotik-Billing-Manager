@@ -11,7 +11,6 @@ import { Remote } from './components/Remote.tsx';
 import { Hotspot } from './components/Hotspot.tsx';
 import { Help } from './components/Help.tsx';
 import { SystemSettings } from './components/SystemSettings.tsx';
-import { DatabaseSettings } from './components/DatabaseSettings.tsx';
 import { SalesReport } from './components/SalesReport.tsx';
 import { Network } from './components/Network.tsx';
 import { Inventory } from './components/Inventory.tsx';
@@ -31,7 +30,6 @@ import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
 import { DhcpPortal } from './components/DhcpPortal.tsx';
 import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
 import { NotificationsPage } from './components/NotificationsPage.tsx';
-import { ClientPortal } from './components/ClientPortal.tsx';
 import { Payroll } from './components/Payroll.tsx';
 import { useRouters } from './hooks/useRouters.ts';
 import { useSalesData } from './hooks/useSalesData.ts';
@@ -193,9 +191,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
       case 'company':
           return <Company settings={companySettings} onSave={updateCompanySettings} />;
       case 'system':
-          return <SystemSettings licenseStatus={licenseStatus} />;
-      case 'database':
-          return <DatabaseSettings />;
+          return <SystemSettings selectedRouter={selectedRouter} licenseStatus={licenseStatus} />;
       case 'updater':
         return <Updater />;
       case 'logs':
@@ -206,8 +202,6 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
       case 'super_admin':
           return <SuperAdmin />;
-      case 'client_portal':
-          return <ClientPortal selectedRouter={selectedRouter} />;
       default:
         return <Dashboard selectedRouter={selectedRouter} />;
     }
@@ -263,17 +257,6 @@ const AppRouter: React.FC = () => {
             <ThemeProvider>
                 <LocalizationProvider>
                     <CaptivePortalPage />
-                </LocalizationProvider>
-            </ThemeProvider>
-        );
-    }
-
-    // Public client portal (no admin auth required)
-    if (window.location.pathname.startsWith('/portal')) {
-        return (
-            <ThemeProvider>
-                <LocalizationProvider>
-                    <ClientPortal selectedRouter={null} />
                 </LocalizationProvider>
             </ThemeProvider>
         );

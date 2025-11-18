@@ -12,11 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Local databases (do not track license/settings)
-database.sqlite*
-proxy/*.db
-proxy/backups/*
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

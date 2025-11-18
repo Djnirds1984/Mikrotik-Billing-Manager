@@ -16,7 +16,6 @@ export type View =
   | 'remote'
   | 'company'
   | 'system'
-  | 'database'
   | 'updater'
   | 'logs'
   | 'panel_roles'
@@ -25,8 +24,7 @@ export type View =
   | 'license'
   | 'super_admin'
   | 'dhcp-portal'
-  | 'notifications'
-  | 'client_portal';
+  | 'notifications';
 
 export interface Notification {
   id: string;
@@ -67,7 +65,6 @@ export interface SystemInfo {
   uptime: string;
   memoryUsage: number;
   totalMemory: string;
-  cpuTemperature?: number | null;
 }
 
 export interface Interface {
@@ -203,7 +200,6 @@ export interface BillingPlan {
     name: string;
     price: number;
     cycle: 'Monthly' | 'Quarterly' | 'Yearly';
-    billingType: 'prepaid' | 'postpaid';
     pppoeProfile: string;
     description: string;
     currency: string;
@@ -233,7 +229,6 @@ export interface DhcpBillingPlan {
     name: string;
     price: number;
     cycle_days: number;
-    billingType: 'prepaid' | 'postpaid';
     speedLimit?: string;
     currency: string;
 }
@@ -347,11 +342,6 @@ export interface CompanySettings {
     contactNumber?: string;
     email?: string;
     logoBase64?: string;
-    // Xendit Payment Gateway Configuration
-    xenditSecretKey?: string;
-    xenditPublicKey?: string;
-    xenditWebhookToken?: string;
-    xenditEnabled?: boolean;
 }
 
 export interface ChatMessage {
@@ -413,29 +403,11 @@ export interface PanelHostStatus {
         free: string;
         percent: number;
     };
-    cpuTemp?: number | null;
 }
 
 export interface PanelSettings {
     language: 'en' | 'fil' | 'es' | 'pt';
     currency: 'USD' | 'PHP' | 'EUR' | 'BRL';
-    // Optional database configuration (stored in panel_settings key-value table)
-    databaseEngine?: 'sqlite' | 'mariadb';
-    dbHost?: string;
-    dbPort?: number;
-    dbUser?: string;
-    dbPassword?: string;
-    dbName?: string;
-    // Notification generator settings
-    notificationSettings?: {
-        enablePppoe?: boolean;
-        enableDhcpPortal?: boolean;
-        enableNetwork?: boolean;
-        enableBilled?: boolean;
-        dhcpNearExpiryHours?: number; // e.g., 24 default
-        generatorIntervalSeconds?: number; // e.g., 30 default
-        debounceMinutes?: number; // e.g., 15 default to avoid spam
-    };
 }
 
 export interface PanelNtpStatus {
@@ -726,6 +698,4 @@ export interface DhcpClientActionParams {
     // For manual edits
     expiresAt?: string; // ISO string for datetime-local
     speedLimit?: string;
-    // Per-user billing policy (moved from plan UI)
-    billingType?: 'prepaid' | 'postpaid';
 }

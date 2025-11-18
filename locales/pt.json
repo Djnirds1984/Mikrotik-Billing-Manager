@@ -23,8 +23,7 @@
         "panel_roles": "Funções do Painel",
         "mikrotik_files": "Arquivos Mikrotik",
         "license": "Licença",
-        "super_admin": "Super Admin",
-        "database": "Configurações de Banco de Dados"
+        "super_admin": "Super Admin"
     },
     "titles": {
         "dashboard": "Painel",
@@ -47,8 +46,7 @@
         "panel_roles": "Gerenciamento de Funções do Painel",
         "mikrotik_files": "Editor de Arquivos Mikrotik",
         "license": "Licenciamento de Aplicativo",
-        "super_admin": "Super Admin: Gerador de Licença",
-        "database": "Configurações de Banco de Dados"
+        "super_admin": "Super Admin: Gerador de Licença"
     },
     "topbar": {
         "add_router_title": "Vá para a página de Roteadores para adicionar um novo roteador",
@@ -76,9 +74,6 @@
         "monthly": "Mensal",
         "quarterly": "Trimestral",
         "yearly": "Anual",
-        "type": "Tipo de cobrança",
-        "prepaid": "Pré-pago",
-        "postpaid": "Pós-pago",
         "delete_confirm": "Tem certeza de que deseja excluir este plano de cobrança?",
         "edit_plan_title": "Editar '{{name}}'",
         "add_plan_title": "Adicionar Novo Plano de Cobrança",

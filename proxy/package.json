@@ -13,11 +13,10 @@
     "@vscode/sqlite3": "^5.1.1",
     "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
-    "esbuild": "^0.25.12",
+    "esbuild": "^0.23.0",
     "express": "^4.19.2",
     "fs-extra": "^11.2.0",
     "jsonwebtoken": "^9.0.2",
-    "mysql2": "^3.15.3",
     "sqlite": "^5.1.1",
     "tar": "^7.1.0"
   }

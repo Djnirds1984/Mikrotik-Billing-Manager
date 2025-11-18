@@ -152,15 +152,6 @@ export const Routers: React.FC<RoutersProps> = ({ routers, onAddRouter, onUpdate
     const [editingRouter, setEditingRouter] = useState<RouterConfigWithId | null>(null);
     const [isAdding, setIsAdding] = useState(false);
 
-    const copyToClipboard = (text: string) => {
-        try {
-            navigator.clipboard.writeText(text);
-            alert('Copied to clipboard!');
-        } catch (e) {
-            console.error('Failed to copy:', e);
-        }
-    };
-
     const handleSave = (routerData: RouterConfig | RouterConfigWithId) => {
         if ('id' in routerData && routerData.id) {
             onUpdateRouter(routerData as RouterConfigWithId);
@@ -226,17 +217,6 @@ export const Routers: React.FC<RoutersProps> = ({ routers, onAddRouter, onUpdate
                                     <div>
                                         <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{router.name}</p>
                                         <p className="text-sm text-slate-500 dark:text-slate-400 font-mono">{router.user}@{router.host}:{router.port}</p>
-                                        <div className="mt-1 flex items-center gap-2">
-                                            <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">ID: {router.id}</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => copyToClipboard(router.id)}
-                                                className="px-2 py-1 text-xs border border-slate-300 dark:border-slate-600 rounded-md text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700"
-                                                title="Copy Router ID"
-                                            >
-                                                Copy
-                                            </button>
-                                        </div>
                                     </div>
                                 </div>
                                 <div className="flex items-center space-x-2">

@@ -24,7 +24,6 @@
         "mikrotik_files": "Mikrotik Files",
         "license": "License",
         "super_admin": "Super Admin",
-        "database": "Database Settings",
         "notifications": "Notifications"
     },
     "titles": {
@@ -49,7 +48,6 @@
         "mikrotik_files": "Mikrotik File Editor",
         "license": "Application Licensing",
         "super_admin": "Super Admin: License Generator",
-        "database": "Database Settings",
         "notifications": "System Notifications"
     },
     "topbar": {
@@ -78,9 +76,6 @@
         "monthly": "Monthly",
         "quarterly": "Quarterly",
         "yearly": "Yearly",
-        "type": "Billing Type",
-        "prepaid": "Prepaid",
-        "postpaid": "Postpaid",
         "delete_confirm": "Are you sure you want to delete this billing plan?",
         "edit_plan_title": "Edit '{{name}}'",
         "add_plan_title": "Add New Billing Plan",

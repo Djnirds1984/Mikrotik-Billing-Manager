@@ -160,52 +160,6 @@ const handleApiRequest = async (req, res, action) => {
 };
 
 // --- Middleware ---
-// Auto-resolve API type (REST vs Legacy) for a given config
-const autoResolveApiType = async (cfg) => {
-    const host = cfg.host;
-    const username = cfg.user;
-    const password = cfg.password || '';
-    // Try REST on configured port, then common ports
-    const restPorts = [];
-    if (typeof cfg.port === 'number') restPorts.push(cfg.port);
-    if (!restPorts.includes(443)) restPorts.push(443);
-    if (!restPorts.includes(80)) restPorts.push(80);
-    for (const p of restPorts) {
-        try {
-            const protocol = p === 443 ? 'https' : 'http';
-            const baseURL = `${protocol}://${host}:${p}/rest`;
-            const client = require('axios').create({
-                baseURL,
-                auth: { username, password },
-                httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' }),
-                timeout: 5000,
-            });
-            const resp = await client.get('/system/identity');
-            if (resp && (resp.status === 200 || resp.status === 204)) {
-                return { ...cfg, api_type: 'rest', port: p };
-            }
-        } catch (_) { /* try next port */ }
-    }
-    // Try Legacy on common ports
-    const legacyPorts = [8729, 8728];
-    const { RouterOSAPI } = require('node-routeros-v2');
-    for (const lp of legacyPorts) {
-        const tls = lp === 8729;
-        const client = new RouterOSAPI({ host, user: username, password, port: lp, timeout: 5000, tls, tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined });
-        try {
-            await client.connect();
-            try {
-                const result = await client.write(['/system/resource/print']);
-                if (result) {
-                    return { ...cfg, api_type: 'legacy', port: lp };
-                }
-            } finally { await client.close(); }
-        } catch (_) { /* try next port */ }
-    }
-    // No change if neither reachable
-    return cfg;
-};
-
 const getRouterConfig = async (req, res, next) => {
     const routerId = req.params.routerId || req.body.id;
     const authHeader = req.headers.authorization;
@@ -225,9 +179,8 @@ const getRouterConfig = async (req, res, next) => {
             return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
         }
 
-        const resolved = await autoResolveApiType(config);
-        routerConfigCache.set(routerId, resolved);
-        req.routerConfig = resolved;
+        routerConfigCache.set(routerId, config);
+        req.routerConfig = config;
         req.routerInstance = createRouterInstance(req.routerConfig);
         next();
     } catch (error) {
@@ -288,46 +241,19 @@ app.post('/mt-api/:routerId/system/clock/sync-time', getRouterConfig, async (req
                 await client.close();
             }
         } else {
-            // REST-first with fallbacks: patch by id, patch singleton, then legacy.
-            const axiosClient = req.routerInstance;
-            const response = await axiosClient.get('/system/clock');
+            // REST API requires patching the specific clock resource, not the collection.
+            // 1. Get the clock resource to find its ID.
+            const response = await req.routerInstance.get('/system/clock');
+            // The response for a resource that can only have one item can be a single object or an array with one object.
             const clockResource = Array.isArray(response.data) ? response.data[0] : response.data;
-            const clockId = clockResource && (clockResource.id || clockResource['.id']);
-            let restSucceeded = false;
 
-            try {
-                if (clockId) {
-                    await axiosClient.patch(`/system/clock/${encodeURIComponent(clockId)}`, payload);
-                    restSucceeded = true;
-                } else {
-                    // Some RouterOS versions expose a singleton resource without id.
-                    await axiosClient.patch('/system/clock', payload);
-                    restSucceeded = true;
-                }
-            } catch (restErr) {
-                console.warn('REST clock sync failed; attempting legacy fallback:', restErr.message);
+            if (!clockResource || !clockResource.id) {
+                throw new Error('Could not find system clock resource on the router.');
             }
+            const clockId = clockResource.id;
 
-            if (!restSucceeded) {
-                // Fallback to legacy even when api_type === 'rest' (for routers with REST quirks)
-                const { host, user, password } = req.routerConfig;
-                const isTlsLegacy = req.routerConfig.port === 8729;
-                const legacyClient = new RouterOSAPI({
-                    host,
-                    user,
-                    password: password || '',
-                    port: isTlsLegacy ? 8729 : 8728,
-                    timeout: 15,
-                    tls: isTlsLegacy,
-                    tlsOptions: isTlsLegacy ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
-                });
-                await legacyClient.connect();
-                try {
-                    await writeLegacySafe(legacyClient, ['/system/clock/set', `=date=${payload.date}`, `=time=${payload.time}`]);
-                } finally {
-                    await legacyClient.close();
-                }
-            }
+            // 2. Patch the resource by its ID.
+            await req.routerInstance.patch(`/system/clock/${encodeURIComponent(clockId)}`, payload);
         }
 
         return { message: 'Router time synchronized successfully with the panel server.' };
@@ -354,175 +280,16 @@ app.post('/mt-api/:routerId/system/reboot', getRouterConfig, async (req, res) =>
     });
 });
 
-// Router health diagnostics: check REST vs legacy availability and basic permissions
-app.get('/mt-api/:routerId/health', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const config = req.routerConfig;
-        const host = config.host;
-        const username = config.user;
-        const password = config.password || '';
-
-        const result = {
-            apiType: config.api_type || 'rest',
-            rest: {
-                tested: [],
-                reachable: false,
-                identityOk: false,
-                clockReadable: false,
-                clockResourceKind: 'unknown',
-                canPatchProbe: 'unknown',
-                baseURL: null,
-            },
-            legacy: {
-                tested: [],
-                reachable: false,
-                canPrint: false,
-                port: null,
-                tls: false,
-            },
-            timestamp: new Date().toISOString(),
-        };
-
-        // --- REST checks ---
-        const restPorts = [];
-        if (config.api_type === 'rest' && typeof config.port === 'number') restPorts.push(config.port);
-        // Probe common REST ports
-        if (!restPorts.includes(80)) restPorts.push(80);
-        if (!restPorts.includes(443)) restPorts.push(443);
-
-        for (const port of restPorts) {
-            const protocol = port === 443 ? 'https' : 'http';
-            const baseURL = `${protocol}://${host}:${port}/rest`;
-            result.rest.tested.push(baseURL);
-            try {
-                const axiosClient = require('axios').create({
-                    baseURL,
-                    auth: { username, password },
-                    httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' }),
-                    timeout: 6000,
-                });
-
-                // Identity GET
-                try {
-                    const idResp = await axiosClient.get('/system/identity');
-                    if (idResp && idResp.status === 200) {
-                        result.rest.reachable = true;
-                        result.rest.identityOk = true;
-                        result.rest.baseURL = baseURL;
-                    }
-                } catch (_) { /* ignore */ }
-
-                // Clock GET
-                try {
-                    const clockResp = await axiosClient.get('/system/clock');
-                    if (clockResp && clockResp.status === 200) {
-                        result.rest.reachable = true;
-                        result.rest.clockReadable = true;
-                        const data = clockResp.data;
-                        if (Array.isArray(data)) {
-                            result.rest.clockResourceKind = data.length && data[0]?.id ? 'id' : 'singleton';
-                        } else if (data && typeof data === 'object') {
-                            result.rest.clockResourceKind = data.id ? 'id' : 'singleton';
-                        }
-                        result.rest.baseURL = baseURL;
-                    }
-                } catch (_) { /* ignore */ }
-
-                // OPTIONS probe for allowed methods (if supported)
-                try {
-                    const optResp = await axiosClient.options('/system/clock');
-                    const allow = optResp.headers && (optResp.headers['allow'] || optResp.headers['Allow']);
-                    if (allow) {
-                        result.rest.canPatchProbe = /\bPATCH\b/i.test(allow) ? 'allowed' : 'blocked';
-                    } else {
-                        result.rest.canPatchProbe = 'unknown';
-                    }
-                } catch (_) {
-                    // Some RouterOS builds may not support OPTIONS; leave unknown
-                }
-
-                if (result.rest.reachable) break; // we found a working REST port
-            } catch (_) {
-                // try next port
-            }
-        }
-
-        // --- Legacy checks ---
-        const legacyPorts = [];
-        if (config.api_type === 'legacy' && typeof config.port === 'number') legacyPorts.push(config.port);
-        // Probe common legacy ports
-        if (!legacyPorts.includes(8728)) legacyPorts.push(8728);
-        if (!legacyPorts.includes(8729)) legacyPorts.push(8729);
-
-        const { RouterOSAPI } = require('node-routeros-v2');
-        for (const lport of legacyPorts) {
-            const tls = lport === 8729;
-            const client = new RouterOSAPI({
-                host,
-                user: username,
-                password,
-                port: lport,
-                timeout: 8000,
-                tls,
-                tlsOptions: tls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' } : undefined,
-            });
-            result.legacy.tested.push(lport);
-            try {
-                await client.connect();
-                try {
-                    const resp = await require('./server').writeLegacySafe
-                        ? await require('./server').writeLegacySafe(client, ['/system/resource/print'])
-                        : await client.write(['/system/resource/print']);
-                    if (resp) {
-                        result.legacy.reachable = true;
-                        result.legacy.canPrint = true;
-                        result.legacy.port = lport;
-                        result.legacy.tls = tls;
-                    }
-                } finally {
-                    await client.close();
-                }
-                if (result.legacy.reachable) break;
-            } catch (_) {
-                // try next port
-            }
-        }
-
-        // Suggestions based on findings
-        const suggestions = [];
-        if (!result.rest.reachable) {
-            suggestions.push('Enable REST service on the router and ensure port 80/443 is reachable.');
-        } else if (result.rest.canPatchProbe === 'blocked') {
-            suggestions.push('REST user may be read-only; grant write permissions if PATCH operations are needed.');
-        }
-        if (!result.legacy.reachable) {
-            suggestions.push('Enable legacy API on ports 8728/8729 or ensure they are reachable if using legacy.');
-        }
-        result.suggestions = suggestions;
-
-        return result;
-    });
-});
-
 
 app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
         let resource;
-        let cpuTemp = null;
         if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
                 const result = await writeLegacySafe(client, '/system/resource/print');
                 resource = result.length > 0 ? normalizeLegacyObject(result[0]) : null;
-                const t = resource && (resource['cpu-temperature'] || resource['temperature']);
-                if (t) cpuTemp = Number(parseFloat(String(t)).toFixed(1));
-                if (cpuTemp === null) {
-                    const health = await writeLegacySafe(client, '/system/health/print');
-                    const h = Array.isArray(health) && health[0] ? normalizeLegacyObject(health[0]) : {};
-                    const ht = h['temperature'] || h['cpu-temperature'];
-                    if (ht) cpuTemp = Number(parseFloat(String(ht)).toFixed(1));
-                }
             } finally {
                 await client.close();
             }
@@ -530,16 +297,6 @@ app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) =
             const response = await req.routerInstance.get('/system/resource');
             // The REST API for /system/resource returns a single object, not an array.
             resource = response.data;
-            const rt = resource && (resource['cpu-temperature'] || resource['temperature']);
-            if (rt) cpuTemp = Number(parseFloat(String(rt)).toFixed(1));
-            if (cpuTemp === null) {
-                try {
-                    const healthResp = await req.routerInstance.get('/system/health');
-                    const healthData = Array.isArray(healthResp.data) ? healthResp.data[0] : healthResp.data;
-                    const ht = healthData && (healthData['temperature'] || healthData['cpu-temperature']);
-                    if (ht) cpuTemp = Number(parseFloat(String(ht)).toFixed(1));
-                } catch (_) {}
-            }
         }
 
         if (!resource || Object.keys(resource).length === 0) {
@@ -558,7 +315,6 @@ app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) =
             uptime: resource.uptime,
             memoryUsage: parseFloat(memoryUsage.toFixed(1)),
             totalMemory: formatBytes(totalMemoryBytes),
-            cpuTemperature: cpuTemp,
         };
     });
 });
@@ -638,7 +394,7 @@ app.post('/mt-api/:routerId/ip/wan-failover', getRouterConfig, async (req, res) 
 
 app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
-        const { secret, plan, nonPaymentProfile, discountDays, paymentDate, kickUser } = req.body;
+        const { secret, plan, nonPaymentProfile, discountDays, paymentDate } = req.body;
 
         if (!secret || !plan || !nonPaymentProfile || !paymentDate) {
             throw new Error('Missing required payment data.');
@@ -659,22 +415,17 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
         const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
         const schedulerTime = "23:59:59"; // Run at the end of the day
 
-        // 2. Create new comment including time (23:59 at due day)
-        const yyyy = dueDate.getFullYear();
-        const mm = String(dueDate.getMonth() + 1).padStart(2, '0');
-        const dd = String(dueDate.getDate()).padStart(2, '0');
-        const dueDateWithTime = `${yyyy}-${mm}-${dd}T23:59`;
-
+        // 2. Create new comment
         const newComment = JSON.stringify({
             plan: plan.name,
             price: plan.price,
             currency: plan.currency,
-            dueDate: dueDateWithTime,
+            dueDate: dueDate.toISOString().split('T')[0],
             paidDate: paymentDate
         });
 
-        // 3. Define script to run on scheduler (also kick active session to apply changes)
-        const scriptSource = `:log info "Subscription expired for ${secret.name}, changing profile."; /ppp secret set [find name="${secret.name}"] profile=${nonPaymentProfile}; :delay 1; :if ([:len [/ppp active find name="${secret.name}"]] > 0) do={ /ppp active remove [find name="${secret.name}"] }`;
+        // 3. Define script to run on scheduler
+        const scriptSource = `:log info "Subscription expired for ${secret.name}, changing profile."; /ppp secret set [find name="${secret.name}"] profile=${nonPaymentProfile};`;
         const schedulerName = `disable-${secret.name.replace(/[^a-zA-Z0-9]/g, '_')}`; // Sanitize name for scheduler
 
         let kickMessage = '';
@@ -713,13 +464,11 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
                         `=on-event=${scriptSource}`
                     ]);
                 }
-                // 5. Kick user to apply new profile if requested
-                if (kickUser) {
-                    const activeConnections = await writeLegacySafe(client, ['/ppp/active/print', `?name=${secret.name}`]);
-                    if (activeConnections.length > 0) {
-                        await writeLegacySafe(client, ['/ppp/active/remove', `=.id=${activeConnections[0]['.id']}`]);
-                        kickMessage = "User was kicked to apply new profile.";
-                    }
+                // 5. Kick user to apply new profile
+                const activeConnections = await writeLegacySafe(client, ['/ppp/active/print', `?name=${secret.name}`]);
+                if (activeConnections.length > 0) {
+                    await writeLegacySafe(client, ['/ppp/active/remove', `=.id=${activeConnections[0]['.id']}`]);
+                    kickMessage = "User was kicked to apply new profile.";
                 }
             } finally {
                 await client.close();
@@ -753,13 +502,11 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
                     'on-event': scriptSource
                 });
             }
-            // 5. Kick user to apply new profile if requested
-            if (kickUser) {
-                const response = await req.routerInstance.get(`/ppp/active?name=${secret.name}`);
-                if (response.data.length > 0) {
-                    await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
-                    kickMessage = "User was kicked to apply new profile.";
-                }
+            // 5. Kick user to apply new profile
+            const response = await req.routerInstance.get(`/ppp/active?name=${secret.name}`);
+            if (response.data.length > 0) {
+                await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
+                kickMessage = "User was kicked to apply new profile.";
             }
         }
         
@@ -769,111 +516,11 @@ app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, r
 
 app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) => {
     await handleApiRequest(req, res, async () => {
-        const { initialSecret, secretData, subscriptionData, kickUser } = req.body;
+        const { initialSecret, secretData, subscriptionData } = req.body;
         const isUpdate = !!initialSecret?.id;
 
         if (req.routerConfig.api_type === 'legacy') {
-            // Legacy API implementation for PPP secret save and scheduler management
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                // 1. Save the secret (add or update)
-                let legacySecretId = null;
-                // Always try to locate by name to get the correct legacy ID
-                const foundSecrets = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${secretData.name}`]);
-                if (Array.isArray(foundSecrets) && foundSecrets.length > 0) {
-                    legacySecretId = foundSecrets[0]['.id'] || foundSecrets[0].id;
-                }
-
-                if (legacySecretId) {
-                    // Update existing secret, only send provided fields
-                    const query = ['/ppp/secret/set', `=.id=${legacySecretId}`];
-                    Object.entries(secretData || {}).forEach(([key, value]) => {
-                        if (value !== undefined && value !== null) {
-                            query.push(`=${key}=${value}`);
-                        }
-                    });
-                    await writeLegacySafe(client, query);
-                } else {
-                    // Add new secret
-                    const addQuery = ['/ppp/secret/add'];
-                    Object.entries(secretData || {}).forEach(([key, value]) => {
-                        if (value !== undefined && value !== null) {
-                            addQuery.push(`=${key}=${value}`);
-                        }
-                    });
-                    await writeLegacySafe(client, addQuery);
-                    // Re-fetch to get the new ID
-                    const recheck = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${secretData.name}`]);
-                    if (Array.isArray(recheck) && recheck.length > 0) {
-                        legacySecretId = recheck[0]['.id'] || recheck[0].id;
-                    }
-                }
-
-                // 2. Manage the scheduler
-                const schedulerName = `disable-${secretData.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                const existingSchedulers = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedulerName}`]);
-                // If due date is cleared, delete existing scheduler
-                if (!subscriptionData?.dueDate) {
-                    if (Array.isArray(existingSchedulers) && existingSchedulers.length > 0) {
-                        for (const sch of existingSchedulers) {
-                            const schId = sch['.id'] || sch.id;
-                            await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${schId}`]);
-                        }
-                    }
-                } else {
-                    // If due date is set, delete old scheduler and create a fresh one
-                    const rawDue = subscriptionData.dueDate || '';
-                    const dueWithTime = rawDue.includes('T') ? rawDue : `${rawDue}T23:59:00`;
-                    let dueDate = new Date(dueWithTime);
-                    const now = new Date();
-                    if (!isNaN(dueDate.getTime()) && dueDate.getTime() <= now.getTime()) {
-                        dueDate = new Date(now.getTime() + 60 * 1000); // +1 minute
-                    }
-                    const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-                    const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
-                    const schedulerTime = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}:${String(dueDate.getSeconds()).padStart(2, '0')}`;
-
-                    const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile}; :delay 1; :if ([:len [/ppp active find name="${secretData.name}"]] > 0) do={ /ppp active remove [find name="${secretData.name}"] }`;
-
-                    // Always delete existing schedulers first, then create a new one
-                    if (Array.isArray(existingSchedulers) && existingSchedulers.length > 0) {
-                        for (const sch of existingSchedulers) {
-                            const schId = sch['.id'] || sch.id;
-                            await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${schId}`]);
-                        }
-                    }
-                    const addScheduler = [
-                        '/system/scheduler/add',
-                        `=name=${schedulerName}`,
-                        `=interval=0`,
-                        `=start-date=${schedulerDate}`,
-                        `=start-time=${schedulerTime}`,
-                        `=on-event=${scriptSource}`
-                    ];
-                    await writeLegacySafe(client, addScheduler);
-                }
-
-                // 3. Kick user if requested
-                let kickMessage = '';
-                try {
-                    if (kickUser) {
-                        const activeList = await writeLegacySafe(client, ['/ppp/active/print', `?name=${secretData.name}`]);
-                        if (Array.isArray(activeList) && activeList.length > 0) {
-                            const activeId = activeList[0]['.id'] || activeList[0].id;
-                            await writeLegacySafe(client, ['/ppp/active/remove', `=.id=${activeId}`]);
-                            kickMessage = "User was kicked to apply changes.";
-                        }
-                    }
-                } catch (kickError) {
-                    console.error(`Could not kick user ${secretData.name}: ${kickError.message}`);
-                    kickMessage = "Could not kick user; they may need to reconnect manually.";
-                }
-
-                return { message: `User saved and subscription scheduled successfully. ${kickMessage}`.trim() };
-            } finally {
-                await client.close();
-            }
+            throw new Error("This feature requires the REST API (RouterOS v7+) and is not supported for legacy API connections.");
         }
 
         // 1. Save the secret (add or update)
@@ -905,27 +552,15 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
         // If due date is cleared, delete existing scheduler
         if (!subscriptionData?.dueDate) {
             if (existingSchedulers.length > 0) {
-                // Delete all existing schedulers with this name to avoid duplicates
-                for (const sch of existingSchedulers) {
-                    await req.routerInstance.delete(`/system/scheduler/${sch.id}`);
-                }
+                await req.routerInstance.delete(`/system/scheduler/${existingSchedulers[0].id}`);
             }
-        } else { // If due date is set, delete old scheduler and create a fresh one
-            // Ensure due date has a time component; default to end-of-day if only a date is provided
-            const rawDue = subscriptionData.dueDate || '';
-            const dueWithTime = rawDue.includes('T') ? rawDue : `${rawDue}T23:59:00`;
-            let dueDate = new Date(dueWithTime);
-            // If the computed due date/time is in the past, push it slightly into the future
-            // to guarantee the scheduler will trigger.
-            const now = new Date();
-            if (!isNaN(dueDate.getTime()) && dueDate.getTime() <= now.getTime()) {
-                dueDate = new Date(now.getTime() + 60 * 1000); // +1 minute
-            }
+        } else { // If due date is set, create or update scheduler
+            const dueDate = new Date(subscriptionData.dueDate);
             const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
             const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
             const schedulerTime = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}:${String(dueDate.getSeconds()).padStart(2, '0')}`;
             
-            const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile}; :delay 1; :if ([:len [/ppp active find name="${secretData.name}"]] > 0) do={ /ppp active remove [find name="${secretData.name}"] }`;
+            const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile};`;
 
             const schedulerPayload = {
                 'start-date': schedulerDate,
@@ -933,28 +568,24 @@ app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) =>
                 'on-event': scriptSource
             };
 
-            // Always delete existing schedulers first, then create a new one
             if (existingSchedulers.length > 0) {
-                for (const sch of existingSchedulers) {
-                    await req.routerInstance.delete(`/system/scheduler/${sch.id}`);
-                }
+                await req.routerInstance.patch(`/system/scheduler/${existingSchedulers[0].id}`, schedulerPayload);
+            } else {
+                await req.routerInstance.put('/system/scheduler', {
+                    name: schedulerName,
+                    interval: '0',
+                    ...schedulerPayload
+                });
             }
-            await req.routerInstance.put('/system/scheduler', {
-                name: schedulerName,
-                interval: '0',
-                ...schedulerPayload
-            });
         }
         
-        // 3. Kick user if they are active to apply changes and requested
+        // 3. Kick user if they are active to apply changes
         let kickMessage = '';
         try {
-            if (kickUser) {
-                const response = await req.routerInstance.get(`/ppp/active?name=${secretData.name}`);
-                if (response.data.length > 0) {
-                    await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
-                    kickMessage = "User was kicked to apply changes.";
-                }
+            const response = await req.routerInstance.get(`/ppp/active?name=${secretData.name}`);
+            if (response.data.length > 0) {
+                await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
+                kickMessage = "User was kicked to apply changes.";
             }
         } catch (kickError) {
             // Don't fail the whole operation if kick fails.
@@ -1333,63 +964,7 @@ app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, re
         };
 
         if (req.routerConfig.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                // 1. Find the lease
-                const leases = await writeLegacySafe(client, ['/ip/dhcp-server/lease/print', `?mac-address=${macAddress}`]);
-                if (!Array.isArray(leases) || leases.length === 0) {
-                    throw new Error(`No DHCP lease found for MAC address ${macAddress}. The client may have disconnected. Please refresh.`);
-                }
-                const lease = leases[0];
-                const leaseId = lease['.id'] || lease.id;
-
-                // 2. Make lease static if it's dynamic
-                if (lease.dynamic === 'true' || lease.dynamic === true) {
-                    await writeLegacySafe(client, ['/ip/dhcp-server/lease/make-static', `?.id=${leaseId}`]);
-                }
-
-                // 3. Set rate limit on the static lease
-                const speed = speedLimit && !isNaN(parseFloat(speedLimit)) ? parseFloat(speedLimit) : 0;
-                const rateLimitValue = speed > 0 ? `${speed}M/${speed}M` : '';
-                const setLease = ['/ip/dhcp-server/lease/set', `=.id=${leaseId}`];
-                // empty value is allowed to clear the rate-limit
-                setLease.push(`=rate-limit=${rateLimitValue}`);
-                await writeLegacySafe(client, setLease);
-
-                // 4. Update Address List entry (remove from pending, add/update in authorized)
-                const pendingList = await writeLegacySafe(client, ['/ip/firewall/address-list/print', `?address=${address}`, '?list=pending-dhcp-users']);
-                if (Array.isArray(pendingList) && pendingList.length > 0) {
-                    for (const p of pendingList) {
-                        const pid = p['.id'] || p.id;
-                        await writeLegacySafe(client, ['/ip/firewall/address-list/remove', `=.id=${pid}`]);
-                    }
-                }
-
-                const authList = await writeLegacySafe(client, ['/ip/firewall/address-list/print', `?address=${address}`, '?list=authorized-dhcp-users']);
-                if (Array.isArray(authList) && authList.length > 0) {
-                    const aid = authList[0]['.id'] || authList[0].id;
-                    const setAuth = ['/ip/firewall/address-list/set', `=.id=${aid}`, `=list=authorized-dhcp-users`, `=address=${address}`, `=comment=${JSON.stringify(commentData)}`];
-                    await writeLegacySafe(client, setAuth);
-                } else {
-                    const addAuth = ['/ip/firewall/address-list/add', `=list=authorized-dhcp-users`, `=address=${address}`, `=comment=${JSON.stringify(commentData)}`];
-                    await writeLegacySafe(client, addAuth);
-                }
-
-                // 5. Manage Scheduler
-                const schedulers = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedulerName}`]);
-                if (Array.isArray(schedulers) && schedulers.length > 0) {
-                    const sid = schedulers[0]['.id'] || schedulers[0].id;
-                    const setSched = ['/system/scheduler/set', `=.id=${sid}`, `=start-date=${schedulerDate}`, `=start-time=${schedulerTime}`, `=on-event=${scriptSource}`];
-                    await writeLegacySafe(client, setSched);
-                } else {
-                    const addSched = ['/system/scheduler/add', `=name=${schedulerName}`, `=start-date=${schedulerDate}`, `=start-time=${schedulerTime}`, `=interval=0`, `=on-event=${scriptSource}`];
-                    await writeLegacySafe(client, addSched);
-                }
-                return { message: 'Client updated successfully with scheduler-based deactivation.' };
-            } finally {
-                await client.close();
-            }
+            throw new Error("This feature is not supported for the legacy API.");
         }
 
         // 1. Find the lease
@@ -1452,62 +1027,7 @@ app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, re
         const address = client.address;
 
         if (req.routerConfig.api_type === 'legacy') {
-            const legacyClient = req.routerInstance;
-            await legacyClient.connect();
-            try {
-                // 1. If client is active, remove its scheduler.
-                if (client.status === 'active') {
-                    try {
-                        const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
-                        const schedulers = await writeLegacySafe(legacyClient, ['/system/scheduler/print', `?name=${schedulerName}`]);
-                        for (const scheduler of (Array.isArray(schedulers) ? schedulers : [])) {
-                            const sid = scheduler['.id'] || scheduler.id;
-                            await writeLegacySafe(legacyClient, ['/system/scheduler/remove', `=.id=${sid}`]);
-                        }
-                    } catch (e) { console.warn(`Could not remove scheduler for ${address}: ${e.message}`); }
-                }
-
-                // 2. Remove active connections to force re-evaluation by firewall.
-                try {
-                    const connections = await writeLegacySafe(legacyClient, ['/ip/firewall/connection/print', `?src-address=${address}`]);
-                    for (const c of (Array.isArray(connections) ? connections : [])) {
-                        const cid = c['.id'] || c.id;
-                        await writeLegacySafe(legacyClient, ['/ip/firewall/connection/remove', `=.id=${cid}`]);
-                    }
-                } catch (e) { console.warn(`Could not remove connections for ${address}: ${e.message}`); }
-
-                // 3. Clear any rate-limit from the static lease.
-                try {
-                    const leases = await writeLegacySafe(legacyClient, ['/ip/dhcp-server/lease/print', `?mac-address=${client.macAddress}`]);
-                    if (Array.isArray(leases) && leases.length > 0) {
-                        const lid = leases[0]['.id'] || leases[0].id;
-                        await writeLegacySafe(legacyClient, ['/ip/dhcp-server/lease/set', `=.id=${lid}`, `=rate-limit=`]);
-                    }
-                } catch (e) { console.warn(`Could not clear rate-limit for ${client.macAddress}: ${e.message}`); }
-                
-                // 4. Remove the client's current address list entry (from either 'authorized' or 'pending' list).
-                // We don't have the entry ID, so locate and remove by address across both lists.
-                const authEntries = await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/print', `?address=${client.address}`, '?list=authorized-dhcp-users']);
-                for (const ae of (Array.isArray(authEntries) ? authEntries : [])) {
-                    const aid = ae['.id'] || ae.id;
-                    await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/remove', `=.id=${aid}`]);
-                }
-                const pendingEntries = await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/print', `?address=${client.address}`, '?list=pending-dhcp-users']);
-                for (const pe of (Array.isArray(pendingEntries) ? pendingEntries : [])) {
-                    const pid = pe['.id'] || pe.id;
-                    await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/remove', `=.id=${pid}`]);
-                }
-
-                // 5. If the client was active, add them back to the 'pending' list to reflect the "deactivated" state.
-                if (client.status === 'active') {
-                    await writeLegacySafe(legacyClient, ['/ip/firewall/address-list/add', `=list=pending-dhcp-users`, `=address=${client.address}`, `=comment=${client.macAddress}`, `=timeout=1d`]);
-                    return { message: 'Client has been deactivated and moved to the pending list.' };
-                } else {
-                    return { message: 'Pending client has been removed.' };
-                }
-            } finally {
-                await legacyClient.close();
-            }
+            throw new Error("This action is not supported for the legacy API.");
         }
 
         // --- Deactivation/Deletion Logic ---
@@ -1668,406 +1188,4 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
     console.log(`Mikrotik Billling Management API backend server running on http://localhost:${PORT}`);
-});
-
-app.post('/mt-api/:routerId/failover/scheduler/setup', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const { wanInterfaces, host = '8.8.8.8', interval = '00:00:10' } = req.body || {};
-        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 1) {
-            throw new Error('wanInterfaces array is required.');
-        }
-        const makeScript = (wan) => `:local p [/ping address=${host} count=3 interval=1s];\n:if ($p = 0) do={ /interface disable ${wan} } else={ /interface enable ${wan} }`;
-        if (req.routerConfig.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                for (const wan of wanInterfaces) {
-                    const name = `failover-ping-${wan}`;
-                    await writeLegacySafe(client, ['/system/script/add', `=name=${name}`, `=source=${makeScript(wan)}`]);
-                    await writeLegacySafe(client, ['/system/scheduler/add', `=name=${name}`, `=interval=${interval}`, `=on-event=${name}`]);
-                }
-            } finally {
-                await client.close();
-            }
-        } else {
-            for (const wan of wanInterfaces) {
-                const name = `failover-ping-${wan}`;
-                await req.routerInstance.post('/system/script', { name, source: makeScript(wan) });
-                await req.routerInstance.post('/system/scheduler', { name, interval, 'on-event': name });
-            }
-        }
-        return { message: `Scheduler failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
-    });
-});
-
-app.post('/mt-api/:routerId/failover/scheduler/remove', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const { wanInterfaces } = req.body || {};
-        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 1) {
-            throw new Error('wanInterfaces array is required.');
-        }
-        const names = wanInterfaces.map(w => `failover-ping-${w}`);
-        if (req.routerConfig.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                let scripts = await writeLegacySafe(client, ['/system/script/print']);
-                scripts = scripts.map(normalizeLegacyObject);
-                for (const s of scripts) { if (names.includes(String(s.name))) { await writeLegacySafe(client, ['/system/script/remove', `=.id=${s.id}`]); } }
-                let scheds = await writeLegacySafe(client, ['/system/scheduler/print']);
-                scheds = scheds.map(normalizeLegacyObject);
-                for (const sc of scheds) { if (names.includes(String(sc.name))) { await writeLegacySafe(client, ['/system/scheduler/remove', `=.id=${sc.id}`]); } }
-            } finally { await client.close(); }
-        } else {
-            const sResp = await req.routerInstance.get('/system/script');
-            const scripts = sResp.data || [];
-            for (const s of scripts) { if (names.includes(String(s.name))) { await req.routerInstance.delete(`/system/script/${encodeURIComponent(s.id)}`); } }
-            const schResp = await req.routerInstance.get('/system/scheduler');
-            const scheds = schResp.data || [];
-            for (const sc of scheds) { if (names.includes(String(sc.name))) { await req.routerInstance.delete(`/system/scheduler/${encodeURIComponent(sc.id)}`); } }
-        }
-        return { message: `Removed scheduler failover entries for ${wanInterfaces.join(', ')}.` };
-    });
-});
-// --- Netwatch-based WAN Failover (Interface Auto Disable/Enable) ---
-// Setup Netwatch entries that disable specified WAN interfaces when connectivity to a health host fails
-app.post('/mt-api/:routerId/netwatch/failover/setup', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const { wanInterfaces, host = '8.8.8.8', interval = '00:00:10' } = req.body || {};
-        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 1) {
-            throw new Error('wanInterfaces array is required.');
-        }
-
-        if (req.routerConfig.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                for (const wan of wanInterfaces) {
-                    // Create unique entry per interface by comment
-                    await writeLegacySafe(client, [
-                        '/tool/netwatch/add',
-                        `=host=${host}`,
-                        `=interval=${interval}`,
-                        `=comment=failover-${wan}`,
-                        `=timeout=1000ms`,
-                        `=down=/interface disable ${wan}`,
-                        `=up=/interface enable ${wan}`
-                    ]);
-                }
-            } finally {
-                await client.close();
-            }
-        } else {
-            throw new Error('Netwatch is not supported by this panel in REST-only mode. Please use route-based failover.');
-        }
-        return { message: `Netwatch failover configured for ${wanInterfaces.join(', ')} (host ${host}).` };
-    });
-});
-
-// Remove Netwatch failover entries created by the setup endpoint
-app.post('/mt-api/:routerId/netwatch/failover/remove', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const { wanInterfaces } = req.body || {};
-        const filterPrefix = 'failover-';
-        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 1) {
-            throw new Error('wanInterfaces array is required.');
-        }
-
-        if (req.routerConfig.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                let entries = await writeLegacySafe(client, '/tool/netwatch/print');
-                entries = entries.map(normalizeLegacyObject);
-                const toDelete = entries.filter(e => typeof e.comment === 'string' && wanInterfaces.some(w => e.comment === `${filterPrefix}${w}`));
-                for (const e of toDelete) {
-                    await writeLegacySafe(client, ['/tool/netwatch/remove', `=.id=${e.id}`]);
-                }
-            } finally {
-                await client.close();
-            }
-        } else {
-            throw new Error('Netwatch is not supported by this panel in REST-only mode. Please use route-based failover.');
-        }
-        return { message: `Removed Netwatch failover entries for ${wanInterfaces.join(', ')}.` };
-    });
-});
-
-// --- Dual-WAN Merge (PCC) Setup ---
-// Configure PCC load-balancing across two WANs with NAT and routing marks
-app.post('/mt-api/:routerId/multiwan/pcc-setup', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const body = req.body || {};
-
-        // Support two styles:
-        // 1) Dual-WAN (backward compatible)
-        // 2) Multi-WAN: { wanInterfaces: string[], lanInterface: string, wanGateways: Record<string,string> | string[] }
-        // Accept both dual-WAN and multi-WAN payloads; no TypeScript assertions in JS
-        let wanInterfaces = body.wanInterfaces;
-        let lanInterface = body.lanInterface;
-        let wanGateways = body.wanGateways;
-
-        if (!wanInterfaces) {
-            // Fallback to dual-wan style
-            const { wan1Interface, wan2Interface, lanInterface: li, wan1Gateway, wan2Gateway } = body;
-            if (!wan1Interface || !wan2Interface || !li || !wan1Gateway || !wan2Gateway) {
-                throw new Error('Provide either multi-wan payload or dual-wan fields (wan1Interface, wan2Interface, lanInterface, wan1Gateway, wan2Gateway).');
-            }
-            wanInterfaces = [wan1Interface, wan2Interface];
-            lanInterface = li;
-            wanGateways = [wan1Gateway, wan2Gateway];
-        }
-
-        if (!Array.isArray(wanInterfaces) || wanInterfaces.length < 2) {
-            throw new Error('wanInterfaces must be an array with at least 2 interfaces.');
-        }
-        if (!lanInterface) throw new Error('lanInterface is required.');
-        const K = Math.min(Math.max(wanInterfaces.length, 2), 10);
-
-        const getGateway = (wanName, idx) => {
-            if (!wanGateways) throw new Error('wanGateways is required.');
-            if (Array.isArray(wanGateways)) {
-                if (!wanGateways[idx]) throw new Error(`Missing gateway for index ${idx} (${wanName}).`);
-                return wanGateways[idx];
-            }
-            const gw = wanGateways[wanName];
-            if (!gw) throw new Error(`Missing gateway for WAN ${wanName}.`);
-            return gw;
-        };
-
-        // Build PCC mangle rules, NAT, and routes for K WANs
-        const mangleRules = [];
-        const natRules = [];
-        const routes = [];
-
-        for (let i = 0; i < K; i++) {
-            const wanName = wanInterfaces[i];
-            const connMark = `WAN${i + 1}_conn`;
-            const routingMark = `to_WAN${i + 1}`;
-            const classifier = `both-addresses-and-ports:${K}/${i}`;
-            const gateway = getGateway(wanName, i);
-
-            // Mark connections deterministically across K buckets
-            mangleRules.push({
-                chain: 'prerouting',
-                'in-interface': lanInterface,
-                'connection-mark': 'no-mark',
-                action: 'mark-connection',
-                'new-connection-mark': connMark,
-                passthrough: 'yes',
-                'per-connection-classifier': classifier,
-            });
-            // Mark routing based on connection mark
-            mangleRules.push({
-                chain: 'prerouting',
-                'in-interface': lanInterface,
-                'connection-mark': connMark,
-                action: 'mark-routing',
-                'new-routing-mark': routingMark,
-                passthrough: 'yes',
-            });
-            // NAT per WAN interface
-            natRules.push({ chain: 'srcnat', 'out-interface': wanName, action: 'masquerade' });
-            // Route for marked traffic
-            routes.push({ 'dst-address': '0.0.0.0/0', gateway, 'routing-mark': routingMark, 'check-gateway': 'ping' });
-        }
-
-        if (req.routerConfig.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                for (const r of mangleRules) {
-                    const cmd = ['/ip/firewall/mangle/add'];
-                    for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
-                    await writeLegacySafe(client, cmd);
-                }
-                for (const r of natRules) {
-                    const cmd = ['/ip/firewall/nat/add'];
-                    for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
-                    await writeLegacySafe(client, cmd);
-                }
-                for (const r of routes) {
-                    const cmd = ['/ip/route/add'];
-                    for (const [k, v] of Object.entries(r)) cmd.push(`=${k}=${v}`);
-                    await writeLegacySafe(client, cmd);
-                }
-            } finally {
-                await client.close();
-            }
-        } else {
-            for (const r of mangleRules) await req.routerInstance.post('/ip/firewall/mangle', r);
-            for (const r of natRules) await req.routerInstance.post('/ip/firewall/nat', r);
-            for (const r of routes) await req.routerInstance.post('/ip/route', r);
-        }
-
-        return { message: `PCC setup applied for ${K} WAN(s). Verify connectivity and active routes.` };
-    });
-});
-
-// --- Route-based Failover using check-gateway ---
-// Configure default routes with distance and check-gateway for failover
-app.post('/mt-api/:routerId/failover/routes/setup', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const body = req.body || {};
-        const specs = Array.isArray(body.routes) ? body.routes : null;
-        const checkGateway = body.checkGateway || 'ping';
-        if (!specs || specs.length < 1) {
-            throw new Error('routes array is required. Each entry must include gateway and optional distance/comment.');
-        }
-
-        if (req.routerConfig.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                let existing = await writeLegacySafe(client, ['/ip/route/print']);
-                existing = existing.map(normalizeLegacyObject);
-                for (const spec of specs) {
-                    const gw = String(spec.gateway || '').trim();
-                    if (!gw) throw new Error('gateway is required in routes spec.');
-                    const dist = Number(spec.distance || 1);
-                    const comment = spec.comment || `failover-route-${gw}`;
-                    const match = existing.find(r => r['dst-address'] === '0.0.0.0/0' && (r.gateway === gw || r.comment === comment));
-                    if (match) {
-                        await writeLegacySafe(client, ['/ip/route/set', `=.id=${match.id}`, `=distance=${dist}`, `=check-gateway=${checkGateway}`, `=disabled=no`]);
-                    } else {
-                        await writeLegacySafe(client, ['/ip/route/add', `=dst-address=0.0.0.0/0`, `=gateway=${gw}`, `=distance=${dist}`, `=check-gateway=${checkGateway}`, `=comment=${comment}`]);
-                    }
-                }
-            } finally {
-                await client.close();
-            }
-        } else {
-            let routes = [];
-            try {
-                const resp = await req.routerInstance.get('/ip/route');
-                routes = resp.data || [];
-            } catch (e) {
-                // proceed with POSTs regardless
-            }
-            for (const spec of specs) {
-                const gw = String(spec.gateway || '').trim();
-                if (!gw) throw new Error('gateway is required in routes spec.');
-                const dist = Number(spec.distance || 1);
-                const comment = spec.comment || `failover-route-${gw}`;
-                const match = routes.find(r => r['dst-address'] === '0.0.0.0/0' && (r.gateway === gw || r.comment === comment));
-                if (match && match.id) {
-                    await req.routerInstance.patch(`/ip/route/${encodeURIComponent(match.id)}`, { distance: dist, 'check-gateway': checkGateway, disabled: false });
-                } else {
-                    await req.routerInstance.post('/ip/route', { 'dst-address': '0.0.0.0/0', gateway: gw, distance: dist, 'check-gateway': checkGateway, comment });
-                }
-            }
-        }
-        return { message: 'Route-based failover configured using check-gateway.' };
-    });
-});
-
-// Remove route-based failover entries by comment or gateway
-app.post('/mt-api/:routerId/failover/routes/remove', getRouterConfig, async (req, res) => {
-    await handleApiRequest(req, res, async () => {
-        const body = req.body || {};
-        const targets = Array.isArray(body.targets) ? body.targets : [];
-        if (targets.length < 1) throw new Error('targets array is required (gateway or comment match).');
-
-        if (req.routerConfig.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                let routes = await writeLegacySafe(client, ['/ip/route/print']);
-                routes = routes.map(normalizeLegacyObject);
-                const toDelete = routes.filter(r => r['dst-address'] === '0.0.0.0/0' && (
-                    targets.includes(String(r.gateway)) || targets.includes(String(r.comment))
-                ));
-                for (const r of toDelete) {
-                    await writeLegacySafe(client, ['/ip/route/remove', `=.id=${r.id}`]);
-                }
-            } finally { await client.close(); }
-        } else {
-            const resp = await req.routerInstance.get('/ip/route');
-            const routes = resp.data || [];
-            const toDelete = routes.filter(r => r['dst-address'] === '0.0.0.0/0' && (
-                targets.includes(String(r.gateway)) || targets.includes(String(r.comment))
-            ));
-            for (const r of toDelete) {
-                await req.routerInstance.delete(`/ip/route/${encodeURIComponent(r.id)}`);
-            }
-        }
-        return { message: 'Route-based failover entries removed.' };
-    });
-});
-// --- Public Client Portal Helpers ---
-const fetchRoutersPublic = async () => {
-    try {
-        const response = await axios.get(`${DB_SERVER_URL}/api/public/routers`);
-        const routers = Array.isArray(response.data) ? response.data : [];
-        return routers.map(r => ({ id: r.id, name: r.name }));
-    } catch (e) {
-        return [];
-    }
-};
-
-const fetchRouterConfigByIdPublic = async (routerId, routerName) => {
-    try {
-    const url = `${DB_SERVER_URL}/internal/router-config/${encodeURIComponent(routerId)}${routerName ? `?name=${encodeURIComponent(routerName)}` : ''}`;
-        const response = await axios.get(url);
-        return response.data || null;
-    } catch (e) {
-        return null;
-    }
-};
-
-// --- Public Endpoints: Routers list and PPP status ---
-app.get('/public/routers', async (req, res) => {
-    const routers = await fetchRoutersPublic();
-    res.json(routers);
-});
-
-app.get('/public/ppp/status', async (req, res) => {
-    const routerId = req.query?.routerId || '';
-    const username = req.query?.username || '';
-    const routerName = req.query?.routerName || '';
-    if ((!routerId && !routerName) || !username) {
-        return res.status(400).json({ message: 'routerId or routerName and username are required' });
-    }
-    try {
-        let config = await fetchRouterConfigByIdPublic(routerId, routerName);
-        if (!config) {
-            // Try UI server public endpoint
-            const url = `${DB_SERVER_URL}/api/public/router-config?${new URLSearchParams({ routerId, routerName }).toString()}`;
-            const resp = await axios.get(url);
-            config = resp.data;
-        }
-        if (!config) return res.status(404).json({ message: `Router config for ID ${routerId || routerName} not found.` });
-        const instance = createRouterInstance(config);
-        let secrets = [];
-        let active = [];
-        if (config.api_type === 'legacy') {
-            const client = instance;
-            await client.connect();
-            try {
-                secrets = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${username}`]);
-                secrets = Array.isArray(secrets) ? secrets.map(normalizeLegacyObject) : [];
-                active = await writeLegacySafe(client, ['/ppp/active/print', `?name=${username}`]);
-                active = Array.isArray(active) ? active.map(normalizeLegacyObject) : [];
-            } finally {
-                await client.close();
-            }
-        } else {
-            const respSecrets = await instance.get(`/ppp/secret?name=${encodeURIComponent(username)}`);
-            secrets = respSecrets.data || [];
-            const respActive = await instance.get(`/ppp/active?name=${encodeURIComponent(username)}`);
-            active = respActive.data || [];
-        }
-        const s = secrets[0] || null;
-        const status = {
-            exists: !!s,
-            active: Array.isArray(active) && active.length > 0,
-            profile: s ? s.profile : null,
-            disabled: s ? s.disabled : null,
-            comment: s ? s.comment : null,
-            lastLoggedOut: s ? s['last-logged-out'] || null : null,
-        };
-        return res.json(status);
-    } catch (error) {
-        return res.status(500).json({ message: error.message });
-    }
 });

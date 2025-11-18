@@ -12,7 +12,6 @@ import { useCustomers } from '../hooks/useCustomers.ts';
 import { Loader } from './Loader.tsx';
 import { RouterIcon, EditIcon, TrashIcon, ExclamationTriangleIcon, UsersIcon, SignalIcon, CurrencyDollarIcon, KeyIcon, SearchIcon, EyeIcon, EyeSlashIcon, ServerIcon } from '../constants.tsx';
 import { PaymentModal } from './PaymentModal.tsx';
-import { GracePeriodModal } from './GracePeriodModal.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -199,7 +198,6 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
     const [nonPaymentProfile, setNonPaymentProfile] = useState('');
-    const [billingType, setBillingType] = useState<'prepaid' | 'postpaid'>('prepaid');
 
 
     useEffect(() => {
@@ -226,21 +224,14 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 } else {
                     setDueDate('');
                 }
-                if (commentData.billingType === 'postpaid' || commentData.billingType === 'prepaid') {
-                    setBillingType(commentData.billingType);
-                } else {
-                    setBillingType('prepaid');
-                }
             } catch (e) {
                 setDueDate('');
-                setBillingType('prepaid');
             }
 
         } else {
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
             setCustomer({ fullName: '', address: '', contactNumber: '', email: '' });
             setDueDate('');
-            setBillingType('prepaid');
         }
         
         if (profiles.length > 0) {
@@ -277,7 +268,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer, { dueDate, nonPaymentProfile, planId: secret.profile, billingType });
+        onSave(secretPayload, customer, { dueDate, nonPaymentProfile, planId: secret.profile });
     }
 
     return (
@@ -299,14 +290,6 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             <label>Due Date & Time</label>
                             <input type="datetime-local" value={dueDate} onChange={e => setDueDate(e.target.value)} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" />
                             <p className="text-xs text-slate-500 mt-1">Leave blank for no expiration.</p>
-                        </div>
-                        <div>
-                            <label>Billing Type</label>
-                            <select value={billingType} onChange={e => setBillingType(e.target.value as 'prepaid' | 'postpaid')} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">
-                                <option value="prepaid">Prepaid</option>
-                                <option value="postpaid">Postpaid</option>
-                            </select>
-                            <p className="text-xs text-slate-500 mt-1">Choose how this user is billed.</p>
                         </div>
                         <div>
                             <label>Profile on Expiry</label>
@@ -348,7 +331,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [isUserModalOpen, setUserModalOpen] = useState(false);
     const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
     const [selectedSecret, setSelectedSecret] = useState<PppSecret | null>(null);
-    const [isGraceModalOpen, setGraceModalOpen] = useState(false);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -373,29 +355,23 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const combinedUsers = useMemo(() => {
         return secrets.map(secret => {
             const customer = customers.find(c => c.username === secret.name);
-            let subscription = { plan: 'N/A', dueDate: 'No Info' } as { plan: string; dueDate: string };
-            let billingType: 'prepaid' | 'postpaid' | undefined = undefined;
-            let nonPaymentProfile: string | undefined = undefined;
+            let subscription = { plan: 'N/A', dueDate: 'No Info' };
             if (secret.comment) {
                 try { 
                     const parsedComment = JSON.parse(secret.comment);
                     subscription.plan = parsedComment.plan || 'N/A';
                     subscription.dueDate = parsedComment.dueDate || 'No Info';
-                    billingType = parsedComment.billingType;
-                    nonPaymentProfile = parsedComment.nonPaymentProfile;
                 } catch (e) { /* ignore */ }
             }
             return {
                 ...secret,
                 customer,
-                subscription,
-                billingType,
-                nonPaymentProfile,
-            } as PppSecret & { customer?: Customer; subscription: { plan: string; dueDate: string }; billingType?: 'prepaid' | 'postpaid'; nonPaymentProfile?: string };
+                subscription
+            };
         });
     }, [secrets, customers]);
     
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string; planId: string; billingType?: 'prepaid' | 'postpaid' }) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string, planId: string }) => {
         setIsSubmitting(true);
         try {
             const existingCustomer = customers.find(c => c.username === secretData.name);
@@ -409,13 +385,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             } catch (e) { /* ignore malformed comment */ }
 
             if (subscriptionData.dueDate) {
-                commentJson.dueDate = subscriptionData.dueDate; // Preserve full date-time (YYYY-MM-DDTHH:mm)
+                commentJson.dueDate = subscriptionData.dueDate.split('T')[0]; // Store only YYYY-MM-DD
             } else {
                 delete commentJson.dueDate; // Remove due date if field is cleared
-            }
-            // Persist billing type at user level
-            if (subscriptionData.billingType) {
-                commentJson.billingType = subscriptionData.billingType;
             }
             
             const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
@@ -424,8 +396,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 commentJson.plan = selectedPlan.name;
                 commentJson.price = selectedPlan.price;
                 commentJson.currency = selectedPlan.currency;
-                // Track the intended active profile to enable restoration after grace
-                commentJson.originalProfile = selectedPlan.pppoeProfile;
             }
             secretData.comment = JSON.stringify(commentJson);
 
@@ -434,7 +404,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 initialSecret: selectedSecret,
                 secretData,
                 subscriptionData,
-                kickUser: true,
             });
 
             // Update local customer DB
@@ -472,129 +441,12 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const handlePayment = async ({ sale, payment }: any) => {
         if (!selectedSecret) return false;
         try {
-            // Determine billing policy from user's stored comment JSON
-            let commentJson: any = {};
-            try {
-                if (selectedSecret.comment) {
-                    commentJson = JSON.parse(selectedSecret.comment);
-                }
-            } catch (_) { /* ignore malformed comment */ }
-
-            const billingType: 'prepaid' | 'postpaid' =
-                commentJson.billingType === 'postpaid' ? 'postpaid' : 'prepaid';
-
-            const originalDueDate: string | undefined = commentJson.dueDate; // May be YYYY-MM-DD or YYYY-MM-DDTHH:mm
-            // Policy application:
-            // - Prepaid: new due date becomes the payment date
-            // - Postpaid: keep the original activation due date (no shift)
-            const normalizeDateTime = (d: string) => d.includes('T') ? d : `${d}T23:59`;
-            const newDueDate: string =
-                billingType === 'prepaid'
-                    ? normalizeDateTime(payment.paymentDate) // Add end-of-day time if only date was provided
-                    : normalizeDateTime(originalDueDate || payment.paymentDate);
-
-            // Update the user's comment JSON with the new/retained due date
-            commentJson.dueDate = newDueDate;
-
-            const secretData: PppSecretData = {
-                name: selectedSecret.name,
-                service: 'pppoe',
-                profile: selectedSecret.profile,
-                comment: JSON.stringify(commentJson),
-                disabled: selectedSecret.disabled || 'false',
-            };
-
-            // Ask backend to update scheduler/profile handling based on the due date and non-payment profile
-            await savePppUser(selectedRouter, {
-                initialSecret: selectedSecret,
-                secretData,
-                subscriptionData: {
-                    dueDate: newDueDate,
-                    nonPaymentProfile: payment.nonPaymentProfile,
-                },
-                kickUser: true,
-            });
-
-            // Persist the chosen non-payment profile in comment for future grace handling
-            if (payment?.nonPaymentProfile) {
-                try {
-                    const parsed = JSON.parse(secretData.comment || '{}');
-                    parsed.nonPaymentProfile = payment.nonPaymentProfile;
-                    secretData.comment = JSON.stringify(parsed);
-                } catch (_) { /* ignore */ }
-            }
-
-            // Register the payment and record the sale
-            await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment, kickUser: true });
+            await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
             await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString() });
             await fetchData();
             return true;
         } catch (err) {
             alert(`Payment failed: ${(err as Error).message}`);
-            return false;
-        }
-    };
-
-    const handleGrantGrace = async ({ graceDays }: { graceDays: number }) => {
-        if (!selectedSecret) return false;
-        try {
-            // Parse existing comment JSON to get dueDate and billingType
-            let parsed: any = {};
-            try {
-                if (selectedSecret.comment) parsed = JSON.parse(selectedSecret.comment);
-            } catch (_) { /* ignore malformed */ }
-
-            const billingType: 'prepaid' | 'postpaid' = parsed.billingType === 'postpaid' ? 'postpaid' : 'prepaid';
-            if (billingType !== 'postpaid') {
-                alert('Grace period is only applicable to postpaid clients.');
-                return false;
-            }
-
-            const baseDue = parsed.dueDate || new Date().toISOString().slice(0, 16); // Prefer full datetime
-            const baseDate = new Date(baseDue.includes('T') ? baseDue : `${baseDue}T23:59`);
-            const extendedMs = baseDate.getTime() + graceDays * 24 * 60 * 60 * 1000;
-            const extendedDateIso = new Date(extendedMs).toISOString().slice(0, 16); // Keep minutes precision
-
-            // Update comment JSON
-            parsed.dueDate = extendedDateIso;
-            parsed.graceDays = graceDays;
-            parsed.graceGrantedOn = new Date().toISOString();
-
-            // Determine the profile to restore during grace
-            let restoreProfile: string | undefined = parsed.originalProfile;
-            if (!restoreProfile && parsed.plan) {
-                const planMatch = plans.find(p => p.name === parsed.plan);
-                if (planMatch) restoreProfile = planMatch.pppoeProfile;
-            }
-            if (!restoreProfile) restoreProfile = selectedSecret.profile; // Fallback
-
-            const secretData: PppSecretData = {
-                name: selectedSecret.name,
-                service: 'pppoe',
-                profile: restoreProfile,
-                comment: JSON.stringify(parsed),
-                disabled: selectedSecret.disabled || 'false',
-            };
-
-            // Use stored nonPaymentProfile if available
-            const nonPaymentProfile = parsed.nonPaymentProfile || '';
-
-            await savePppUser(selectedRouter, {
-                initialSecret: selectedSecret,
-                secretData,
-                subscriptionData: {
-                    dueDate: extendedDateIso,
-                    nonPaymentProfile,
-                },
-                kickUser: true,
-            });
-
-            setGraceModalOpen(false);
-            setSelectedSecret(null);
-            await fetchData();
-            return true;
-        } catch (err) {
-            alert(`Failed to grant grace period: ${(err as Error).message}`);
             return false;
         }
     };
@@ -615,7 +467,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 isSubmitting={isSubmitting}
             />
             <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />
-            <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} secret={selectedSecret} onSave={handleGrantGrace} />
 
              <div className="flex justify-end mb-4">
                 <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>
@@ -638,7 +489,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     <p className="text-xs text-slate-500">{user.customer?.fullName}</p>
                                 </td>
                                 <td>{user.profile}</td>
-                                <td>{(user.subscription.dueDate || '').replace('T', ' ')}</td>
+                                <td>{user.subscription.dueDate}</td>
                                 <td className="px-6 py-4 text-right space-x-2">
                                     <button
                                         onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }}
@@ -647,15 +498,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     >
                                         Pay
                                     </button>
-                                    {user.billingType === 'postpaid' && (
-                                        <button
-                                            onClick={() => { setSelectedSecret(user); setGraceModalOpen(true); }}
-                                            className="px-3 py-1 text-sm bg-indigo-600 text-white rounded-md font-semibold hover:bg-indigo-700 transition-colors"
-                                            title="Grant Grace Period"
-                                        >
-                                            Grant Grace
-                                        </button>
-                                    )}
                                     <button
                                         onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }}
                                         className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700 transition-colors"

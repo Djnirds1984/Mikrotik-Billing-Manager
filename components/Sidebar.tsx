@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon, CloudIcon, CircleStackIcon } from '../constants.tsx';
+import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon, CloudIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { View, CompanySettings, LicenseStatus } from '../types.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -65,9 +65,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
   const { user } = useAuth();
   const { t } = useLocalization();
   const { unreadCount } = useNotifications();
-
-  // Compute labels per render to reflect up-to-date translations
-  const navItems = [
+  
+  const navItems = useMemo(() => [
     { id: 'dashboard', label: t('sidebar.dashboard'), icon: <EthernetIcon className="w-6 h-6" /> },
     { id: 'notifications', label: t('sidebar.notifications'), icon: <BellIcon className="w-6 h-6" />, badge: unreadCount },
     { id: 'scripting', label: t('sidebar.ai_scripting'), icon: <EditIcon className="w-6 h-6" /> },
@@ -85,14 +84,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'mikrotik_files', label: t('sidebar.mikrotik_files'), icon: <ArchiveBoxIcon className="w-6 h-6" /> },
     { id: 'company', label: t('sidebar.company'), icon: <BuildingOffice2Icon className="w-6 h-6" /> },
     { id: 'system', label: t('sidebar.system_settings'), icon: <CogIcon className="w-6 h-6" /> },
-    { id: 'client_portal', label: 'Client Portal', icon: <UsersIcon className="w-6 h-6" /> },
-    { id: 'database', label: t('sidebar.database'), icon: <CircleStackIcon className="w-6 h-6" /> },
     { id: 'panel_roles', label: t('sidebar.panel_roles'), icon: <KeyIcon className="w-6 h-6" /> },
     { id: 'updater', label: t('sidebar.updater'), icon: <UpdateIcon className="w-6 h-6" /> },
     { id: 'logs', label: t('sidebar.logs'), icon: <CodeBracketIcon className="w-6 h-6" /> },
     { id: 'license', label: t('sidebar.license'), icon: <KeyIcon className="w-6 h-6" /> },
     { id: 'super_admin', label: t('sidebar.super_admin'), icon: <LockClosedIcon className="w-6 h-6" /> },
-  ];
+  ], [t, unreadCount]);
 
   const filteredNavItems = useMemo(() => {
     if (!user) return [];

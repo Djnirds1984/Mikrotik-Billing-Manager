@@ -55,12 +55,3 @@ export const getPanelSettings = (): Promise<PanelSettings> => {
 export const savePanelSettings = (settings: Partial<PanelSettings>): Promise<{ message: string }> => {
     return dbApi.post<{ message: string }>('/panel-settings', settings);
 };
-
-// --- Migration Helpers ---
-export const initMariaDb = (): Promise<{ message: string }> => {
-    return dbApi.post<{ message: string }>('/mariadb/init', {});
-};
-
-export const migrateSqliteToMariaDb = (): Promise<{ message: string }> => {
-    return dbApi.post<{ message: string }>('/migrate/sqlite-to-mariadb', {});
-};

@@ -326,7 +326,6 @@ export const savePppUser = (router: RouterConfigWithId, payload: {
     initialSecret: PppSecret | null;
     secretData: PppSecretData;
     subscriptionData: { dueDate: string; nonPaymentProfile: string };
-    kickUser?: boolean;
 }): Promise<any> => {
     return fetchMikrotikData(router, '/ppp/user/save', { method: 'POST', body: JSON.stringify(payload) });
 };
@@ -623,82 +622,6 @@ export const getRouterLogs = (router: RouterConfigWithId): Promise<MikroTikLogEn
 // --- Files ---
 export const listFiles = (router: RouterConfigWithId): Promise<MikroTikFile[]> => {
     return fetchMikrotikData<MikroTikFile[]>(router, '/file');
-};
-
-// --- WAN Failover (Netwatch) ---
-export const setupWanFailoverNetwatch = (
-    router: RouterConfigWithId,
-    params: { wanInterfaces: string[]; host?: string; interval?: string }
-): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/netwatch/failover/setup', {
-        method: 'POST',
-        body: JSON.stringify(params)
-    });
-};
-
-export const removeWanFailoverNetwatch = (
-    router: RouterConfigWithId,
-    params: { wanInterfaces: string[] }
-): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/netwatch/failover/remove', {
-        method: 'POST',
-        body: JSON.stringify(params)
-    });
-};
-
-
-
-// --- Dual-WAN Merge (PCC) ---
-export const setupDualWanPCC = (
-    router: RouterConfigWithId,
-    params: {
-        wan1Interface: string;
-        wan2Interface: string;
-        lanInterface: string;
-        wan1Gateway: string;
-        wan2Gateway: string;
-    }
-): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/multiwan/pcc-setup', {
-        method: 'POST',
-        body: JSON.stringify(params)
-    });
-};
-
-// --- Multi-WAN Merge (PCC up to 10 WANs) ---
-export const setupMultiWanPCC = (
-    router: RouterConfigWithId,
-    params: {
-        wanInterfaces: string[];
-        lanInterface: string;
-        wanGateways: Record<string, string> | string[];
-    }
-): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/multiwan/pcc-setup', {
-        method: 'POST',
-        body: JSON.stringify(params)
-    });
-};
-
-// --- Route-based Failover using check-gateway ---
-export const setupFailoverRoutes = (
-    router: RouterConfigWithId,
-    params: { routes: { gateway: string; distance?: number; comment?: string }[]; checkGateway?: 'ping' | 'arp' }
-): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/failover/routes/setup', {
-        method: 'POST',
-        body: JSON.stringify(params)
-    });
-};
-
-export const removeFailoverRoutes = (
-    router: RouterConfigWithId,
-    params: { targets: string[] }
-): Promise<{ message: string }> => {
-    return fetchMikrotikData<{ message: string }>(router, '/failover/routes/remove', {
-        method: 'POST',
-        body: JSON.stringify(params)
-    });
 };
 
 export const getFileContent = async (router: RouterConfigWithId, fileId: string): Promise<{ contents: string }> => {

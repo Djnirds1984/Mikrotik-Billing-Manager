@@ -1,11 +1,9 @@
-
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
 const sqlite3 = require('@vscode/sqlite3');
 const { open } = require('sqlite');
-const mysql = require('mysql2/promise');
 const esbuild = require('esbuild');
 const archiver = require('archiver');
 const fsExtra = require('fs-extra');
@@ -17,7 +15,7 @@ const fsPromises = require('fs').promises;
 const crypto = require('crypto');
 
 const app = express();
-const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
+const PORT = 3001;
 const DB_PATH = path.join(__dirname, 'panel.db');
 const SUPERADMIN_DB_PATH = path.join(__dirname, 'superadmin.db');
 const BACKUP_DIR = path.join(__dirname, 'backups');
@@ -118,11 +116,8 @@ app.use((req, res, next) => {
 // Ensure backup directory exists
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
- let db;
- let superadminDb;
- let mysqlPool = null;
- let dbEngine = 'sqlite';
- let mysqlConfig = null;
+let db;
+let superadminDb;
 
 // --- Database Initialization and Migrations ---
 async function initSuperadminDb() {
@@ -259,22 +254,6 @@ async function initDb() {
             await fixSettingsTable('panel_settings');
             await db.exec('PRAGMA user_version = 4;');
             user_version = 4;
-        }
-
-        if (user_version < 15) {
-            console.log('Applying migration v15 (Client Portal Accounts)...');
-            await db.exec(`
-                CREATE TABLE IF NOT EXISTS client_portal_accounts (
-                    id TEXT PRIMARY KEY,
-                    routerId TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    UNIQUE(routerId, username)
-                );
-            `);
-            await db.exec('PRAGMA user_version = 15;');
-            user_version = 15;
         }
         
         if (user_version < 5) {
@@ -644,161 +623,11 @@ async function initDb() {
             user_version = 19;
         }
 
-        if (user_version < 20) {
-            console.log('Applying migration v20 (Add billingType to billing plans)...');
-            const bpCols = await db.all("PRAGMA table_info(billing_plans);");
-            if (!bpCols.some(c => c.name === 'billingType')) {
-                await db.exec("ALTER TABLE billing_plans ADD COLUMN billingType TEXT NOT NULL DEFAULT 'prepaid';");
-            }
-            const dhcpCols = await db.all("PRAGMA table_info(dhcp_billing_plans);");
-            if (!dhcpCols.some(c => c.name === 'billingType')) {
-                await db.exec("ALTER TABLE dhcp_billing_plans ADD COLUMN billingType TEXT NOT NULL DEFAULT 'prepaid';");
-            }
-            await db.exec('PRAGMA user_version = 20;');
-            user_version = 20;
-        }
-
 
     } catch (err) {
         console.error('Failed to initialize database:', err);
         process.exit(1);
     }
-    
-    // Ensure default company settings exist
-    try {
-        const companySettingsCount = await db.get('SELECT COUNT(*) as count FROM company_settings');
-        if (companySettingsCount.count === 0) {
-            console.log('Inserting default company settings...');
-            await db.exec(`
-                INSERT INTO company_settings (key, value) VALUES 
-                ('companyName', '"Mikrotik Billing Manager"'),
-                ('companyLogo', '""'),
-                ('companyAddress', '""'),
-                ('companyContact', '""'),
-                ('companyEmail', '""');
-            `);
-            console.log('Default company settings inserted');
-        }
-    } catch (e) {
-        console.log('Company settings check skipped (may already exist)');
-    }
-    
-    // Ensure default license data exists
-    try {
-        const licenseData = await db.get("SELECT * FROM license WHERE key = 'license_key'");
-        if (!licenseData) {
-            console.log('Inserting default license data...');
-            await db.exec(`
-                INSERT INTO license (key, value) VALUES 
-                ('license_key', ''),
-                ('status', 'unlicensed'),
-                ('deviceId', '');
-            `);
-            console.log('Default license data inserted');
-        }
-    } catch (e) {
-        console.log('License data check skipped (may already exist)');
-    }
-}
-
-// --- Database Engine Switching (SQLite <-> MariaDB) ---
-async function readPanelSetting(key) {
-    try {
-        const row = await db.get('SELECT value FROM panel_settings WHERE key = ?', key);
-        if (!row) return null;
-        try {
-            // Values are saved as JSON strings; parse to get the actual value
-            return JSON.parse(row.value);
-        } catch (_) {
-            // Fallback: return raw if it isn't valid JSON
-            return row.value;
-        }
-    } catch (e) {
-        return null;
-    }
-}
-
-async function updateDbEngineFromSettings() {
-    // Default to sqlite if any issues arise
-    try {
-        const engine = await readPanelSetting('databaseEngine');
-        const host = await readPanelSetting('dbHost');
-        const portStr = await readPanelSetting('dbPort');
-        const user = await readPanelSetting('dbUser');
-        const password = await readPanelSetting('dbPassword');
-        const database = await readPanelSetting('dbName');
-
-        const port = portStr ? Number(portStr) : 3306;
-
-        if (engine && engine.toLowerCase() === 'mariadb' && host && user && database) {
-            const newConfig = { host, port, user, password: password || '', database, waitForConnections: true, connectionLimit: 10, queueLimit: 0 };
-            // If config changed or pool missing, recreate pool
-            const configChanged = JSON.stringify(newConfig) !== JSON.stringify(mysqlConfig);
-            if (!mysqlPool || configChanged) {
-                if (mysqlPool) {
-                    try { await mysqlPool.end(); } catch (_) {}
-                }
-                mysqlPool = await mysql.createPool(newConfig);
-                mysqlConfig = newConfig;
-            }
-            dbEngine = 'mariadb';
-            console.log('[DB] Engine set to MariaDB with host', host, 'database', database);
-        } else {
-            // Fallback to sqlite
-            if (mysqlPool) {
-                try { await mysqlPool.end(); } catch (_) {}
-            }
-            mysqlPool = null;
-            mysqlConfig = null;
-            dbEngine = 'sqlite';
-            console.log('[DB] Engine set to SQLite');
-        }
-    } catch (err) {
-        console.error('[DB] Failed to update engine from settings:', err.message);
-        // Keep using sqlite on failure
-        dbEngine = 'sqlite';
-    }
-}
-
-const supportedMariaTables = new Set([
-    'routers',
-    'billing_plans',
-    'sales_records',
-    'customers',
-    'inventory',
-    // Expanded coverage
-    'voucher_plans',
-    'dhcp_clients',
-    'dhcp_billing_plans',
-    'employees',
-    'employee_benefits',
-    'time_records',
-    'notifications',
-    'client_portal_accounts'
-]);
-
-// Tables that must remain in SQLite to protect panel integrity
-const sqliteCriticalTables = new Set([
-    'users',
-    'user_security_questions',
-    'roles',
-    'permissions',
-    'role_permissions',
-    'license',
-    'superadmin',
-    'panel_settings',
-    'company_settings'
-]);
-
-function useMaria(tableName) {
-    // Never route critical panel tables to MariaDB
-    if (sqliteCriticalTables.has(tableName)) return false;
-    return dbEngine === 'mariadb' && mysqlPool && supportedMariaTables.has(tableName);
-}
-
-async function mariaQuery(query, params = []) {
-    const [rows] = await mysqlPool.query(query, params);
-    return rows;
 }
 
 // --- Auth Helper ---
@@ -1164,12 +993,6 @@ licenseRouter.get('/status', async (req, res) => {
     }
 
     try {
-        // Check if database is initialized
-        if (!db) {
-            console.error("Database not initialized during license status check");
-            return res.status(500).json({ licensed: false, deviceId, error: 'Database not ready' });
-        }
-        
         const result = await db.get("SELECT value FROM license WHERE key = 'license_key'");
         if (!result || !result.value) {
             return res.json({ licensed: false, deviceId });
@@ -1190,8 +1013,7 @@ licenseRouter.get('/status', async (req, res) => {
             return res.json({ licensed: false, deviceId });
         }
         console.error("Error during license status check:", e.message);
-        console.error("Error stack:", e.stack);
-        res.json({ licensed: false, deviceId, error: e.message, errorType: e.constructor.name });
+        res.json({ licensed: false, deviceId, error: e.message });
     }
 });
 
@@ -1265,144 +1087,6 @@ licenseRouter.post('/generate', requireAdmin, (req, res) => {
 
 app.use('/api/license', licenseRouter);
 
-
-// --- Public API (must come BEFORE panelAdminRouter to avoid auth) ---
-app.get('/api/public/routers', async (req, res) => {
-    try {
-        if (useMaria('routers')) {
-            const rows = await mysqlPool.query('SELECT id, name FROM routers');
-            const data = Array.isArray(rows[0]) ? rows[0] : [];
-            return res.json(data.map(r => ({ id: r.id, name: r.name })));
-        } else {
-            const rows = await db.all('SELECT id, name FROM routers');
-            return res.json(rows.map(r => ({ id: r.id, name: r.name })));
-        }
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
-
-// Public payments for client portal
-app.get('/api/public/client/payments', async (req, res) => {
-    try {
-        const { routerId, routerName, username } = req.query;
-        if (!username) return res.json([]);
-        let rows = [];
-        if (useMaria('sales_records')) {
-            let query = 'SELECT date, finalAmount, planPrice, planName, routerName, clientName, months, newExpiry FROM sales_records WHERE clientName = ?';
-            const params = [username];
-            if (routerId) { query += ' AND routerId = ?'; params.push(routerId); }
-            else if (routerName) { query += ' AND routerName = ?'; params.push(routerName); }
-            query += ' ORDER BY date DESC LIMIT 20';
-            rows = await mariaQuery(query, params);
-        } else {
-            let query = 'SELECT date, finalAmount, planPrice, planName, routerName, clientName, months, newExpiry FROM sales_records WHERE clientName = ?';
-            const params = [username];
-            if (routerId) { query += ' AND routerId = ?'; params.push(routerId); }
-            else if (routerName) { query += ' AND routerName = ?'; params.push(routerName); }
-            query += ' ORDER BY date DESC LIMIT 20';
-            rows = await db.all(query, params);
-        }
-        return res.json(rows);
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
-app.get('/api/public/router-config', async (req, res) => {
-    try {
-        const { routerId, routerName } = req.query;
-        let row = null;
-        if (useMaria('routers')) {
-            if (routerId) {
-                const rows = await mariaQuery('SELECT * FROM routers WHERE id = ?', [routerId]);
-                row = rows && rows[0] ? rows[0] : null;
-            }
-            if (!row && routerName) {
-                const rowsByName = await mariaQuery('SELECT * FROM routers WHERE name = ?', [routerName]);
-                row = rowsByName && rowsByName[0] ? rowsByName[0] : null;
-            }
-        } else {
-            if (routerId) {
-                row = await db.get('SELECT * FROM routers WHERE id = ?', routerId);
-            }
-            if (!row && routerName) {
-                row = await db.get('SELECT * FROM routers WHERE name = ?', routerName);
-            }
-        }
-        if (!row) return res.status(404).json({ message: 'Router not found' });
-        return res.json({
-            id: row.id,
-            name: row.name,
-            host: row.host || row.address || row.hostname,
-            user: row.user || row.username || row.login,
-            password: row.password,
-            port: row.port || row.api_port || row.rest_port,
-            api_type: row.api_type || row.apiType || row.type || 'rest',
-            tls: row.tls ?? false
-        });
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
-app.get('/api/public/ppp/status', async (req, res) => {
-    try {
-        const qs = new URLSearchParams({ routerId: req.query.routerId || '', routerName: req.query.routerName || '', username: req.query.username || '' }).toString();
-        const resp = await fetch(`http://localhost:3002/public/ppp/status?${qs}`);
-        const data = await resp.json();
-        if (!resp.ok) return res.status(resp.status).json(data);
-        return res.json(data);
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
-
-app.all('/api/public/client-portal/register', async (req, res) => {
-    try {
-        if (req.method !== 'POST') {
-            return res.json({ message: 'Use POST with routerId, username, password' });
-        }
-        const { routerId, username, password } = req.body || {};
-        if (!routerId || !username || !password) {
-            return res.status(400).json({ message: 'routerId, username and password are required' });
-        }
-        const password_hash = await bcrypt.hash(String(password), 10);
-        const id = `cp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        if (useMaria('client_portal_accounts')) {
-            await mariaQuery('CREATE TABLE IF NOT EXISTS client_portal_accounts (id VARCHAR(255) PRIMARY KEY, routerId TEXT, username TEXT, password_hash TEXT, created_at TEXT, UNIQUE KEY uniq_router_user (routerId, username))');
-            await mariaQuery('INSERT INTO client_portal_accounts (id, routerId, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username=username', [id, routerId, username, password_hash, new Date().toISOString()]);
-        } else {
-            await db.run('INSERT OR IGNORE INTO client_portal_accounts (id, routerId, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)', id, routerId, username, password_hash, new Date().toISOString());
-        }
-        return res.json({ message: 'Registered successfully' });
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
-
-app.all('/api/public/client-portal/login', async (req, res) => {
-    try {
-        if (req.method !== 'POST') {
-            return res.json({ message: 'Use POST with routerId, username, password' });
-        }
-        const { routerId, username, password } = req.body || {};
-        if (!routerId || !username || !password) {
-            return res.status(400).json({ message: 'routerId, username and password are required' });
-        }
-        let account;
-        if (useMaria('client_portal_accounts')) {
-            const rows = await mariaQuery('SELECT password_hash FROM client_portal_accounts WHERE routerId = ? AND username = ? LIMIT 1', [routerId, username]);
-            account = rows && rows[0];
-        } else {
-            account = await db.get('SELECT password_hash FROM client_portal_accounts WHERE routerId = ? AND username = ? LIMIT 1', routerId, username);
-        }
-        if (!account) return res.status(404).json({ message: 'Account not found' });
-        const ok = await bcrypt.compare(String(password), String(account.password_hash));
-        if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
-        return res.json({ message: 'Login successful' });
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
 
 // --- Panel User & Role Management ---
 const panelAdminRouter = express.Router();
@@ -1521,32 +1205,6 @@ panelAdminRouter.put('/roles/:roleId/permissions', requireAdmin, async (req, res
 });
 
 
-// Ensure /api/db/company-settings is public BEFORE admin router
-app.all('/api/db/company-settings', async (req, res) => {
-    try {
-        if (req.method === 'GET') {
-            const rows = await db.all('SELECT key, value FROM company_settings');
-            const out = {};
-            for (const r of rows) {
-                try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
-            }
-            return res.json(out);
-        }
-        if (req.method === 'POST') {
-            await db.exec('BEGIN TRANSACTION;');
-            for (const [key, value] of Object.entries(req.body || {})) {
-                await db.run('INSERT OR REPLACE INTO company_settings (key, value) VALUES (?, ?);', key, JSON.stringify(value));
-            }
-            await db.exec('COMMIT;');
-            return res.json({ message: 'Settings saved.' });
-        }
-        return res.status(405).json({ message: 'Method not allowed' });
-    } catch (e) {
-        try { await db.exec('ROLLBACK;'); } catch (_) {}
-        return res.status(500).json({ message: e.message });
-    }
-});
-
 app.use('/api', panelAdminRouter);
 
 
@@ -1574,42 +1232,10 @@ app.use(async (req, res, next) => {
 
 // Host Status
 app.get('/api/host-status', protect, (req, res) => {
-    // More robust CPU computation using /proc/stat deltas
-    const readProcStat = () => new Promise((resolve, reject) => {
-        fs.readFile('/proc/stat', 'utf8', (err, data) => {
-            if (err) return reject(err);
-            const line = data.split('\n').find(l => l.startsWith('cpu '));
-            if (!line) return reject(new Error('Could not read /proc/stat cpu line'));
-            const parts = line.trim().split(/\s+/).slice(1).map(n => parseInt(n, 10));
-            const [user, nice, sys, idle, iowait, irq, softirq, steal] = parts;
-            const idleAll = idle + iowait;
-            const nonIdle = user + nice + sys + irq + softirq + steal;
-            const total = idleAll + nonIdle;
-            resolve({ idle: idleAll, total });
+    const getCpuUsage = () => new Promise(resolve => {
+        exec("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'", (err, stdout) => {
+            resolve(parseFloat(stdout.trim()) || 0);
         });
-    });
-
-    const getCpuUsage = () => new Promise(async (resolve) => {
-        try {
-            const start = await readProcStat();
-            setTimeout(async () => {
-                try {
-                    const end = await readProcStat();
-                    const idleDelta = end.idle - start.idle;
-                    const totalDelta = end.total - start.total;
-                    const usage = totalDelta > 0 ? (100 * (1 - idleDelta / totalDelta)) : 0;
-                    resolve(Number(usage.toFixed(1)));
-                } catch {
-                    resolve(0);
-                }
-            }, 500);
-        } catch {
-            // Fallback to top parsing in case /proc/stat is unavailable
-            exec("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'", (err, stdout) => {
-                const value = parseFloat(String(stdout).trim());
-                resolve(Number.isFinite(value) ? value : 0);
-            });
-        }
     });
 
     const getMemoryUsage = () => new Promise(resolve => {
@@ -1623,37 +1249,9 @@ app.get('/api/host-status', protect, (req, res) => {
             resolve(JSON.parse(stdout));
         });
     });
-    const getCpuTemp = () => new Promise(resolve => {
-        const tryFiles = async () => {
-            try {
-                const dir = '/sys/class/thermal';
-                const entries = await fs.promises.readdir(dir).catch(() => []);
-                const temps = [];
-                for (const e of entries) {
-                    if (!e.startsWith('thermal_zone')) continue;
-                    const p = `${dir}/${e}/temp`;
-                    try {
-                        const raw = await fs.promises.readFile(p, 'utf8');
-                        const v = parseFloat(String(raw).trim());
-                        if (Number.isFinite(v)) temps.push(v / 1000);
-                    } catch {}
-                }
-                if (temps.length > 0) return Number(Math.max(...temps).toFixed(1));
-            } catch {}
-            return null;
-        };
-        tryFiles().then(fileTemp => {
-            if (fileTemp !== null) return resolve(fileTemp);
-            exec('which vcgencmd && vcgencmd measure_temp', (err, stdout) => {
-                if (err) return resolve(null);
-                const m = String(stdout).match(/temp=([0-9.]+)/);
-                resolve(m ? Number(parseFloat(m[1]).toFixed(1)) : null);
-            });
-        });
-    });
     
-    Promise.all([getCpuUsage(), getMemoryUsage(), getDiskUsage(), getCpuTemp()]).then(([cpu, mem, disk, temp]) => {
-        res.json({ cpuUsage: cpu, memory: mem, disk, cpuTemp: temp });
+    Promise.all([getCpuUsage(), getMemoryUsage(), getDiskUsage()]).then(([cpu, mem, disk]) => {
+        res.json({ cpuUsage: cpu, memory: mem, disk });
     }).catch(err => res.status(500).json({ message: err.message }));
 });
 
@@ -1710,120 +1308,71 @@ dbRouter.use('/:table', (req, res, next) => {
 dbRouter.get('/:table', async (req, res) => {
     try {
         const { routerId } = req.query;
-        const tableName = req.tableName;
-        if (useMaria(tableName)) {
-            // MariaDB path
-            let query = 'SELECT * FROM ??';
-            const params = [tableName];
+        let query = `SELECT * FROM ${req.tableName}`;
+        const params = [];
+
+        const cols = await db.all(`PRAGMA table_info(${req.tableName});`);
+        const hasRouterId = cols.some(c => c.name === 'routerId');
+
+        if (hasRouterId) {
             if (routerId) {
                 query += ' WHERE routerId = ?';
                 params.push(routerId);
             } else {
-                // If table is router-specific but routerId is missing, mimic SQLite behavior by checking schema
-                const cols = await db.all(`PRAGMA table_info(${tableName});`);
-                const hasRouterId = cols.some(c => c.name === 'routerId');
-                if (hasRouterId) return res.json([]);
+                // If the table is router-specific but no routerId is provided, return an empty array.
+                return res.json([]);
             }
-            const rows = await mariaQuery(query, params);
-            return res.json(rows);
-        } else {
-            // SQLite path
-            let query = `SELECT * FROM ${tableName}`;
-            const params = [];
-            const cols = await db.all(`PRAGMA table_info(${tableName});`);
-            const hasRouterId = cols.some(c => c.name === 'routerId');
-            if (hasRouterId) {
-                if (routerId) {
-                    query += ' WHERE routerId = ?';
-                    params.push(routerId);
-                } else {
-                    return res.json([]);
-                }
-            }
-            const items = await db.all(query, params);
-            return res.json(items);
         }
+        
+        const items = await db.all(query, params);
+        res.json(items);
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 // ... more generic routes
 dbRouter.post('/:table', async (req, res) => {
     try {
-        const tableName = req.tableName;
-        const columnsArr = Object.keys(req.body);
+        const columns = Object.keys(req.body).join(', ');
+        const placeholders = Object.keys(req.body).map(() => '?').join(', ');
         const values = Object.values(req.body);
-        if (useMaria(tableName)) {
-            // Ensure required columns exist (idempotent)
-            for (const col of columnsArr) {
-                try { await mariaQuery(`ALTER TABLE ${tableName} ADD COLUMN ${col} TEXT`); } catch {}
-            }
-            const placeholders = columnsArr.map(() => '?').join(', ');
-            const columns = columnsArr.join(', ');
-            await mariaQuery(`INSERT INTO ${tableName} (${columns}) VALUES (${placeholders})`, values);
-        } else {
-            const columns = columnsArr.join(', ');
-            const placeholders = columnsArr.map(() => '?').join(', ');
-            await db.run(`INSERT INTO ${tableName} (${columns}) VALUES (${placeholders})`, values);
-        }
+        await db.run(`INSERT INTO ${req.tableName} (${columns}) VALUES (${placeholders})`, values);
         res.status(201).json({ message: 'Created' });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
 dbRouter.patch('/:table/:id', async (req, res) => {
      try {
-        const tableName = req.tableName;
-        const columnsArr = Object.keys(req.body);
-        const values = Object.values(req.body);
-        if (useMaria(tableName)) {
-            // Ensure required columns exist (idempotent)
-            for (const col of columnsArr) {
-                try { await mariaQuery(`ALTER TABLE ${tableName} ADD COLUMN ${col} TEXT`); } catch {}
-            }
-            const setClause = columnsArr.map(c => `${c} = ?`).join(', ');
-            await mariaQuery(`UPDATE ${tableName} SET ${setClause} WHERE id = ?`, [...values, req.params.id]);
-        } else {
-            const updates = columnsArr.map(key => `${key} = ?`).join(', ');
-            await db.run(`UPDATE ${tableName} SET ${updates} WHERE id = ?`, [...values, req.params.id]);
-        }
+        const updates = Object.keys(req.body).map(key => `${key} = ?`).join(', ');
+        const values = [...Object.values(req.body), req.params.id];
+        await db.run(`UPDATE ${req.tableName} SET ${updates} WHERE id = ?`, values);
         res.json({ message: 'Updated' });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 dbRouter.delete('/:table/:id', async (req, res) => {
     try {
-        const tableName = req.tableName;
-        if (useMaria(tableName)) {
-            await mariaQuery('DELETE FROM ?? WHERE id = ?', [tableName, req.params.id]);
-        } else {
-            await db.run(`DELETE FROM ${tableName} WHERE id = ?`, req.params.id);
-        }
+        await db.run(`DELETE FROM ${req.tableName} WHERE id = ?`, req.params.id);
         res.status(204).send();
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 dbRouter.post('/:table/clear-all', async (req, res) => {
     try {
         const { routerId } = req.body;
-        const tableName = req.tableName;
-        if (useMaria(tableName)) {
-            let query = 'DELETE FROM ??';
-            const params = [tableName];
-            if (routerId) { query += ' WHERE routerId = ?'; params.push(routerId); }
-            else {
-                // Mirror SQLite behavior by checking if routerId column exists; if so, require routerId
-                const cols = await db.all(`PRAGMA table_info(${tableName});`);
-                const hasRouterId = cols.some(c => c.name === 'routerId');
-                if (hasRouterId) return res.status(400).json({ message: 'routerId is required to clear this table.' });
+        let query = `DELETE FROM ${req.tableName}`;
+        const params = [];
+
+        const cols = await db.all(`PRAGMA table_info(${req.tableName});`);
+        const hasRouterId = cols.some(c => c.name === 'routerId');
+
+        if (hasRouterId) {
+            if (routerId) {
+                 query += ' WHERE routerId = ?';
+                 params.push(routerId);
+            } else {
+                // If routerId is required but not provided, do nothing and return error
+                return res.status(400).json({ message: 'routerId is required to clear this table.' });
             }
-            await mariaQuery(query, params);
-        } else {
-            let query = `DELETE FROM ${tableName}`;
-            const params = [];
-            const cols = await db.all(`PRAGMA table_info(${tableName});`);
-            const hasRouterId = cols.some(c => c.name === 'routerId');
-            if (hasRouterId) {
-                if (routerId) { query += ' WHERE routerId = ?'; params.push(routerId); }
-                else { return res.status(400).json({ message: 'routerId is required to clear this table.' }); }
-            }
-            await db.run(query, params);
         }
+        
+        await db.run(query, params);
         res.status(204).send();
     } catch(e) { res.status(500).json({ message: e.message }); }
 });
@@ -1862,222 +1411,11 @@ const createSettingsSaver = (tableName) => async (req, res) => {
 };
 
 app.get('/api/db/panel-settings', protect, createSettingsHandler('panel_settings'));
-// Wrap saver to re-evaluate engine after changes
-app.post('/api/db/panel-settings', protect, async (req, res, next) => {
-    try {
-        await createSettingsSaver('panel_settings')(req, res);
-        // If response is already sent by saver, reconfigure in background
-        await updateDbEngineFromSettings();
-    } catch (e) {
-        return next(e);
-    }
-});
-// Make GET public for login page logo, but keep POST protected.
-app.get('/api/db/company-settings', createSettingsHandler('company_settings'));
-app.post('/api/db/company-settings', createSettingsSaver('company_settings'));
+app.post('/api/db/panel-settings', protect, createSettingsSaver('panel_settings'));
+app.get('/api/db/company-settings', protect, createSettingsHandler('company_settings'));
+app.post('/api/db/company-settings', protect, createSettingsSaver('company_settings'));
 
-// Bypass auth for company-settings to allow public save/fetch
-app.use('/api/db', (req, res, next) => {
-    try {
-        const p = req.path || '';
-        if (p.startsWith('/company-settings')) return next();
-        return protect(req, res, next);
-    } catch (_) {
-        return protect(req, res, next);
-    }
-}, dbRouter);
-
-// --- Public (read-only) endpoints for client portal ---
-app.get('/public/company-settings', async (req, res) => {
-    try {
-        const rows = await db.all('SELECT key, value FROM company_settings');
-        const out = {};
-        for (const r of rows) {
-            try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
-        }
-        return res.json(out);
-    } catch (e) {
-        return res.status(500).json({ message: e.message });
-    }
-});
-
-app.post('/public/company-settings', async (req, res) => {
-    let transactionStarted = false;
-    try {
-        await db.exec('BEGIN TRANSACTION;');
-        transactionStarted = true;
-        for (const [key, value] of Object.entries(req.body || {})) {
-            await db.run(`INSERT OR REPLACE INTO company_settings (key, value) VALUES (?, ?);`, key, JSON.stringify(value));
-        }
-        await db.exec('COMMIT;');
-        transactionStarted = false;
-        return res.json({ message: 'Settings saved.' });
-    } catch (e) {
-        if (transactionStarted) {
-            try { await db.exec('ROLLBACK;'); } catch (_) {}
-        }
-        return res.status(500).json({ message: e.message });
-    }
-});
-
-app.get('/api/public/routers', async (req, res) => {
-    try {
-        if (useMaria('routers')) {
-            const rows = await mariaQuery('SELECT id, name FROM routers');
-            res.json(rows.map(r => ({ id: r.id, name: r.name })));
-        } else {
-            const rows = await db.all('SELECT id, name FROM routers');
-            res.json(rows.map(r => ({ id: r.id, name: r.name })));
-        }
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-// Internal-only: return full router config when called from localhost
-// Unauthenticated internal route (no /api prefix) to avoid admin protect chain
-app.get('/internal/router-config/:id', async (req, res) => {
-    const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || '') + '';
-    const allowed = /127\.0\.0\.1|::1|::ffff:127\.0\.0\.1/.test(ip) || req.hostname === 'localhost';
-    if (!allowed) {
-        return res.status(403).json({ message: 'Forbidden' });
-    }
-    try {
-        let row = null;
-        // Try MariaDB first if pool is available
-        if (mysqlPool) {
-            try {
-                const rows = await mariaQuery('SELECT * FROM routers WHERE id = ?', [req.params.id]);
-                row = rows && rows[0] ? rows[0] : null;
-            } catch (_) {}
-        }
-        // Fallback to SQLite if not found
-        if (!row) {
-            try {
-                row = await db.get('SELECT * FROM routers WHERE id = ?', req.params.id);
-            } catch (_) {}
-        }
-        if (!row && req.query.name) {
-            // Fallback lookup by name
-            if (mysqlPool) {
-                try {
-                    const rowsByName = await mariaQuery('SELECT * FROM routers WHERE name = ?', [req.query.name]);
-                    row = rowsByName && rowsByName[0] ? rowsByName[0] : null;
-                } catch(_){}
-            }
-            if (!row) {
-                try { row = await db.get('SELECT * FROM routers WHERE name = ?', req.query.name); } catch(_){}
-            }
-        }
-        if (!row) return res.status(404).json({ message: 'Router not found' });
-        const normalized = {
-            id: row.id,
-            name: row.name,
-            host: row.host || row.address || row.hostname,
-            user: row.user || row.username || row.login,
-            password: row.password,
-            port: row.port || row.api_port || row.rest_port,
-            api_type: row.api_type || row.apiType || row.type || 'rest',
-            tls: row.tls ?? false
-        };
-        return res.json(normalized);
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-// --- MariaDB init and migration helpers ---
-app.post('/api/db/mariadb/init', protect, async (req, res) => {
-    try {
-        if (dbEngine !== 'mariadb' || !mysqlPool) {
-            return res.status(400).json({ message: 'MariaDB engine not active. Set engine to MariaDB in Database Settings.' });
-        }
-        // Create minimal supported tables
-        // Align routers schema with SQLite and UI expectations (include api_type, no routerId)
-        await mariaQuery('CREATE TABLE IF NOT EXISTS routers (id VARCHAR(255) PRIMARY KEY, name TEXT, host TEXT, user TEXT, password TEXT, port INT, api_type TEXT NOT NULL DEFAULT "rest")');
-        // Backfill: if an older schema exists without api_type, add it.
-        try {
-            const cols = await mariaQuery('SHOW COLUMNS FROM routers LIKE "api_type"');
-            if (!cols || cols.length === 0) {
-                await mariaQuery('ALTER TABLE routers ADD COLUMN api_type TEXT NOT NULL DEFAULT "rest"');
-            }
-        } catch (_) { /* ignore */ }
-        await mariaQuery('CREATE TABLE IF NOT EXISTS billing_plans (id VARCHAR(255) PRIMARY KEY, name TEXT, price DOUBLE, cycle TEXT, pppoeProfile TEXT, description TEXT, currency TEXT, routerId TEXT)');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS sales_records (id VARCHAR(255) PRIMARY KEY, date TEXT, clientName TEXT, planName TEXT, planPrice DOUBLE, discountAmount DOUBLE, finalAmount DOUBLE, routerName TEXT, clientAddress TEXT, clientContact TEXT, clientEmail TEXT, currency TEXT, routerId TEXT)');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS customers (id VARCHAR(255) PRIMARY KEY, username TEXT, routerId TEXT, fullName TEXT, address TEXT, contactNumber TEXT, email TEXT)');
-        // Backward compatibility: add missing columns if table was created with old schema
-        try { await mariaQuery('ALTER TABLE customers ADD COLUMN username TEXT'); } catch {}
-        try { await mariaQuery('ALTER TABLE customers ADD COLUMN routerId TEXT'); } catch {}
-        try { await mariaQuery('ALTER TABLE customers ADD COLUMN fullName TEXT'); } catch {}
-        try { await mariaQuery('ALTER TABLE customers ADD COLUMN address TEXT'); } catch {}
-        try { await mariaQuery('ALTER TABLE customers ADD COLUMN contactNumber TEXT'); } catch {}
-        try { await mariaQuery('ALTER TABLE customers ADD COLUMN email TEXT'); } catch {}
-        await mariaQuery('CREATE TABLE IF NOT EXISTS inventory (id VARCHAR(255) PRIMARY KEY, name TEXT, description TEXT, quantity INT, unit TEXT, routerId TEXT)');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS voucher_plans (id VARCHAR(255) PRIMARY KEY, routerId TEXT NOT NULL, name TEXT NOT NULL, duration_minutes INT NOT NULL, price DOUBLE NOT NULL, currency TEXT NOT NULL, mikrotik_profile_name TEXT NOT NULL)');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS notifications (id VARCHAR(255) PRIMARY KEY, type TEXT NOT NULL, message TEXT NOT NULL, is_read TINYINT NOT NULL DEFAULT 0, timestamp TEXT NOT NULL, link_to TEXT, context_json TEXT)');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS dhcp_clients (id VARCHAR(255) PRIMARY KEY, routerId TEXT NOT NULL, macAddress TEXT NOT NULL, customerInfo TEXT, contactNumber TEXT, email TEXT, speedLimit TEXT, lastSeen TEXT, UNIQUE KEY uniq_router_mac (routerId, macAddress))');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS dhcp_billing_plans (id VARCHAR(255) PRIMARY KEY, routerId TEXT NOT NULL, name TEXT NOT NULL, price DOUBLE NOT NULL, cycle_days INT NOT NULL, speedLimit TEXT, currency TEXT NOT NULL, billingType TEXT NOT NULL DEFAULT "prepaid")');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS employees (id VARCHAR(255) PRIMARY KEY, fullName TEXT NOT NULL, role TEXT, hireDate TEXT, salaryType TEXT NOT NULL, rate DOUBLE NOT NULL)');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS employee_benefits (id VARCHAR(255) PRIMARY KEY, employeeId TEXT NOT NULL, sss INT NOT NULL DEFAULT 0, philhealth INT NOT NULL DEFAULT 0, pagibig INT NOT NULL DEFAULT 0)');
-        await mariaQuery('CREATE TABLE IF NOT EXISTS time_records (id VARCHAR(255) PRIMARY KEY, employeeId TEXT NOT NULL, date TEXT NOT NULL, timeIn TEXT, timeOut TEXT, UNIQUE KEY uniq_employee_date (employeeId, date))');
-        res.json({ message: 'MariaDB tables initialized.' });
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-app.post('/api/db/migrate/sqlite-to-mariadb', protect, async (req, res) => {
-    try {
-        if (dbEngine !== 'mariadb' || !mysqlPool) {
-            return res.status(400).json({ message: 'MariaDB engine not active. Set engine to MariaDB in Database Settings.' });
-        }
-        const tables = ['routers','billing_plans','sales_records','customers','inventory','voucher_plans','notifications','dhcp_clients','dhcp_billing_plans','employees','employee_benefits','time_records'];
-        for (const t of tables) {
-            const rows = await db.all(`SELECT * FROM ${t}`);
-            for (const row of rows) {
-                const columnsArr = Object.keys(row);
-                const values = Object.values(row);
-                const placeholders = columnsArr.map(() => '?').join(', ');
-                const columns = columnsArr.map(() => '??').join(', ');
-                const params = [];
-                for (const col of columnsArr) params.push(col);
-                for (const v of values) params.push(v);
-                await mariaQuery(`INSERT INTO ?? (${columns}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE id=id`, [t, ...params]);
-            }
-        }
-        res.json({ message: 'Migration completed for supported tables.' });
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-// Engine status and routing visibility
-app.get('/api/db/engine-status', protect, async (req, res) => {
-    try {
-        let mariaPing = false;
-        if (dbEngine === 'mariadb' && mysqlPool) {
-            try { await mysqlPool.query('SELECT 1'); mariaPing = true; } catch (_) { mariaPing = false; }
-        }
-        const status = {
-            engine: dbEngine,
-            mariadb: {
-                configured: !!mysqlConfig,
-                poolActive: !!mysqlPool,
-                pingOk: mariaPing,
-                host: mysqlConfig ? mysqlConfig.host : null,
-                port: mysqlConfig ? mysqlConfig.port : null,
-                database: mysqlConfig ? mysqlConfig.database : null
-            },
-            routing: {
-                mariaTables: Array.from(supportedMariaTables),
-                sqliteCriticalTables: Array.from(sqliteCriticalTables)
-            }
-        };
-        res.json(status);
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
+app.use('/api/db', protect, dbRouter);
 
 
 // --- ZeroTier CLI ---
@@ -3229,25 +2567,16 @@ superadminRouter.get('/restore-from-backup', (req, res) => {
 app.use('/api/superadmin', superadminRouter);
 
 // --- Static file serving ---
-// IMPORTANT: API routes must be defined BEFORE static file serving
-// to prevent static middleware from intercepting API requests
-
-// Serve from dist folder for production assets
-app.use(express.static(path.join(__dirname, '..', 'dist')));
-
-// Fallback to serve from root for development files  
 app.use(express.static(path.join(__dirname, '..')));
 
-// SPA Fallback: This should be the LAST route to handle unmatched requests
+// SPA Fallback:
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    res.sendFile(path.join(__dirname, '..', 'index.html'));
 });
 
 // --- Start Server ---
-Promise.all([initDb(), initSuperadminDb()]).then(async () => {
-    await updateDbEngineFromSettings();
+Promise.all([initDb(), initSuperadminDb()]).then(() => {
     app.listen(PORT, () => {
         console.log(`Mikrotik Billling Management UI server running. Listening on http://localhost:${PORT}`);
     });
 });
-// --- Public endpoints for Company Settings (must be BEFORE admin router) ---

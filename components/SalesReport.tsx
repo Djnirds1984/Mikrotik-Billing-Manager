@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { SaleRecord, CompanySettings } from '../types.ts';
 import { CurrencyDollarIcon, TrashIcon, PrinterIcon } from '../constants.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
-import { PrintableThermalReceipt } from './PrintableThermalReceipt.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 
@@ -29,7 +28,6 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
-    const [thermalReceiptToPrint, setThermalReceiptToPrint] = useState<SaleRecord | null>(null);
 
     const filteredSales = useMemo(() => {
         return salesData.filter(sale => {
@@ -68,12 +66,6 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
 
     const handlePrintReceipt = (sale: SaleRecord) => {
         setReceiptToPrint(sale);
-        setThermalReceiptToPrint(null); // Clear thermal receipt to avoid conflicts
-    };
-
-    const handlePrintThermalReceipt = (sale: SaleRecord) => {
-        setThermalReceiptToPrint(sale);
-        setReceiptToPrint(null); // Clear regular receipt to avoid conflicts
     };
 
     useEffect(() => {
@@ -84,49 +76,8 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     }, [receiptToPrint]);
 
     useEffect(() => {
-        if (thermalReceiptToPrint) {
-            const timer = setTimeout(() => {
-                // Create a new window for thermal printing
-                const printWindow = window.open('', '_blank', 'width=300,height=600');
-                if (printWindow) {
-                    const thermalContent = document.querySelector('.thermal-receipt')?.outerHTML;
-                    if (thermalContent) {
-                        printWindow.document.write(`
-                            <!DOCTYPE html>
-                            <html>
-                            <head>
-                                <title>Thermal Receipt</title>
-                                <style>
-                                    body { margin: 0; padding: 0; font-family: monospace; }
-                                    .thermal-receipt { width: 280px; margin: 0 auto; font-size: 12px; }
-                                    @media print { 
-                                        @page { margin: 0; size: 80mm 297mm; }
-                                        body { margin: 0; }
-                                    }
-                                </style>
-                            </head>
-                            <body>
-                                ${thermalContent}
-                            </body>
-                            </html>
-                        `);
-                        printWindow.document.close();
-                        printWindow.focus();
-                        setTimeout(() => {
-                            printWindow.print();
-                            printWindow.close();
-                        }, 250);
-                    }
-                }
-            }, 100);
-            return () => clearTimeout(timer);
-        }
-    }, [thermalReceiptToPrint]);
-
-    useEffect(() => {
         const handleAfterPrint = () => {
             setReceiptToPrint(null);
-            setThermalReceiptToPrint(null);
         };
         window.addEventListener('afterprint', handleAfterPrint);
         return () => window.removeEventListener('afterprint', handleAfterPrint);
@@ -136,9 +87,6 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         <>
             <div className={receiptToPrint ? 'printable-area' : 'hidden'}>
                 <PrintableReceipt sale={receiptToPrint} companySettings={companySettings} />
-            </div>
-            <div className={thermalReceiptToPrint ? 'printable-area' : 'hidden'}>
-                <PrintableThermalReceipt sale={thermalReceiptToPrint} companySettings={companySettings} />
             </div>
             
             <div className={!receiptToPrint ? 'printable-area' : 'hidden'}>
@@ -207,9 +155,6 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                             <td className="px-4 py-3 text-right font-mono text-green-600 dark:text-green-400 font-bold">{formatCurrency(sale.finalAmount)}</td>
                                             <td className="px-4 py-3 text-center no-print">
                                                 <button onClick={() => handlePrintReceipt(sale)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 dark:hover:text-sky-400 rounded-md" title="Print Receipt">
-                                                    <PrinterIcon className="h-5 w-5" />
-                                                </button>
-                                                <button onClick={() => handlePrintThermalReceipt(sale)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 rounded-md" title="Print Thermal Receipt">
                                                     <PrinterIcon className="h-5 w-5" />
                                                 </button>
                                                 {hasPermission('sales_report:delete') && (

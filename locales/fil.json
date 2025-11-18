@@ -23,8 +23,7 @@
         "panel_roles": "Mga Tungkulin ng Panel",
         "mikrotik_files": "Mga File ng Mikrotik",
         "license": "Lisensya",
-        "super_admin": "Super Admin",
-        "database": "Mga Setting ng Database"
+        "super_admin": "Super Admin"
     },
     "titles": {
         "dashboard": "Dashboard",
@@ -47,8 +46,7 @@
         "panel_roles": "Pamamahala ng Tungkulin ng Panel",
         "mikrotik_files": "Editor ng File ng Mikrotik",
         "license": "Paglilisensya ng Application",
-        "super_admin": "Super Admin: Tagabuo ng Lisensya",
-        "database": "Mga Setting ng Database"
+        "super_admin": "Super Admin: Tagabuo ng Lisensya"
     },
     "topbar": {
         "add_router_title": "Pumunta sa pahina ng Mga Router para magdagdag ng bagong router",
@@ -76,9 +74,6 @@
         "monthly": "Buwanan",
         "quarterly": "Kada-tatlong buwan",
         "yearly": "Taunan",
-        "type": "Uri ng pagsingil",
-        "prepaid": "Prepaid",
-        "postpaid": "Postpaid",
         "delete_confirm": "Sigurado ka bang gusto mong burahin ang plano sa pagsingil na ito?",
         "edit_plan_title": "I-edit ang '{{name}}'",
         "add_plan_title": "Magdagdag ng Bagong Plano sa Pagsingil",
