@@ -12,6 +12,7 @@ import { useCustomers } from '../hooks/useCustomers.ts';
 import { Loader } from './Loader.tsx';
 import { RouterIcon, EditIcon, TrashIcon, ExclamationTriangleIcon, UsersIcon, SignalIcon, CurrencyDollarIcon, KeyIcon, SearchIcon, EyeIcon, EyeSlashIcon, ServerIcon } from '../constants.tsx';
 import { PaymentModal } from './PaymentModal.tsx';
+import { GracePeriodModal } from './GracePeriodModal.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -341,6 +342,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     
     const [isUserModalOpen, setUserModalOpen] = useState(false);
     const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
+    const [isGraceModalOpen, setGraceModalOpen] = useState(false);
     const [selectedSecret, setSelectedSecret] = useState<PppSecret | null>(null);
 
     const fetchData = useCallback(async () => {
@@ -366,12 +368,13 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const combinedUsers = useMemo(() => {
         return secrets.map(secret => {
             const customer = customers.find(c => c.username === secret.name);
-            let subscription = { plan: 'N/A', dueDate: 'No Info' };
+            let subscription = { plan: 'N/A', dueDate: 'No Info', planType: 'prepaid' as 'prepaid' | 'postpaid' };
             if (secret.comment) {
                 try { 
                     const parsedComment = JSON.parse(secret.comment);
                     subscription.plan = parsedComment.plan || 'N/A';
                     subscription.dueDate = parsedComment.dueDate || 'No Info';
+                    subscription.planType = parsedComment.planType === 'postpaid' ? 'postpaid' : 'prepaid';
                 } catch (e) { /* ignore */ }
             }
             return {
@@ -464,6 +467,30 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             return false;
         }
     };
+
+    const handleGraceSave = async ({ graceDays }: { graceDays: number }) => {
+        if (!selectedSecret) return false;
+        try {
+            const secretData: PppSecretData = {
+                name: selectedSecret.name,
+                service: 'pppoe',
+                profile: selectedSecret.profile,
+                comment: selectedSecret.comment,
+                disabled: selectedSecret.disabled,
+            };
+            await savePppUser(selectedRouter, {
+                initialSecret: selectedSecret,
+                secretData,
+                subscriptionData: { dueDate: '', nonPaymentProfile: '', graceDays }
+            });
+            setGraceModalOpen(false);
+            await fetchData();
+            return true;
+        } catch (err) {
+            alert(`Failed to grant grace: ${(err as Error).message}`);
+            return false;
+        }
+    };
     
     if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
     if (error) return <div className="p-4 text-red-600">{error}</div>;
@@ -481,6 +508,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 isSubmitting={isSubmitting}
             />
             <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />
+            <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} onSave={handleGraceSave} />
 
              <div className="flex justify-end mb-4">
                 <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>
@@ -512,6 +540,20 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     >
                                         Pay
                                     </button>
+                                    {(() => {
+                                        const d = user.subscription.dueDate;
+                                        const isDue = typeof d === 'string' && d !== 'No Info' ? (new Date(`${d}T23:59:59`).getTime() <= Date.now()) : false;
+                                        const isPostpaid = user.subscription.planType === 'postpaid';
+                                        return (isPostpaid && isDue) ? (
+                                            <button
+                                                onClick={() => { setSelectedSecret(user); setGraceModalOpen(true); }}
+                                                className="px-3 py-1 text-sm bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition-colors"
+                                                title="Grant Grace Period"
+                                            >
+                                                Grace
+                                            </button>
+                                        ) : null;
+                                    })()}
                                     <button
                                         onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }}
                                         className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700 transition-colors"
