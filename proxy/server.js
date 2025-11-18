@@ -1208,46 +1208,56 @@ panelAdminRouter.put('/roles/:roleId/permissions', requireAdmin, async (req, res
 app.use('/api', panelAdminRouter);
 
 
-// --- ESBuild Middleware for TS/TSX ---
-app.use(async (req, res, next) => {
-    if (req.path.endsWith('.tsx') || req.path.endsWith('.ts')) {
-        try {
-            const filePath = path.resolve(__dirname, '..', req.path.replace(/^\//, ''));
+// --- Frontend Serving Strategy ---
+const DIST_DIR = path.join(__dirname, '..', 'dist');
+const distExists = fs.existsSync(DIST_DIR);
 
-            // Bundle entry file to resolve bare imports like "react"
-            if (req.path === '/index.tsx') {
-                const result = await esbuild.build({
-                    entryPoints: [filePath],
-                    bundle: true,
-                    format: 'esm',
-                    platform: 'browser',
-                    jsx: 'automatic',
-                    sourcemap: true,
-                    write: false,
-                    absWorkingDir: path.join(__dirname, '..'),
-                    resolveExtensions: ['.tsx', '.ts', '.jsx', '.js'],
-                    loader: { '.ts': 'ts', '.tsx': 'tsx' },
+if (distExists) {
+    // Serve built assets if available
+    app.use(express.static(DIST_DIR));
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(DIST_DIR, 'index.html'));
+    });
+} else {
+    // Fallback: On-the-fly TS/TSX handling for development
+    app.use(async (req, res, next) => {
+        if (req.path.endsWith('.tsx') || req.path.endsWith('.ts')) {
+            try {
+                const filePath = path.resolve(__dirname, '..', req.path.replace(/^\//, ''));
+
+                if (req.path === '/index.tsx') {
+                    const result = await esbuild.build({
+                        entryPoints: [filePath],
+                        bundle: true,
+                        format: 'esm',
+                        platform: 'browser',
+                        jsx: 'automatic',
+                        sourcemap: true,
+                        write: false,
+                        absWorkingDir: path.join(__dirname, '..'),
+                        resolveExtensions: ['.tsx', '.ts', '.jsx', '.js'],
+                        loader: { '.ts': 'ts', '.tsx': 'tsx' },
+                    });
+                    const js = result.outputFiles.find(f => f.path.endsWith('.js'));
+                    if (!js) throw new Error('Failed to generate bundled JS for index.tsx');
+                    return res.type('application/javascript').send(js.text);
+                }
+
+                const source = await fs.promises.readFile(filePath, 'utf8');
+                const result = await esbuild.transform(source, {
+                    loader: req.path.endsWith('.tsx') ? 'tsx' : 'ts',
+                    format: 'esm'
                 });
-                const js = result.outputFiles.find(f => f.path.endsWith('.js'));
-                if (!js) throw new Error('Failed to generate bundled JS for index.tsx');
-                return res.type('application/javascript').send(js.text);
+                res.type('application/javascript').send(result.code);
+            } catch (error) {
+                console.error(`esbuild error: ${error}`);
+                res.status(500).send('Error compiling TypeScript file.');
             }
-
-            // Fallback: simple transform for other TS/TSX files
-            const source = await fs.promises.readFile(filePath, 'utf8');
-            const result = await esbuild.transform(source, {
-                loader: req.path.endsWith('.tsx') ? 'tsx' : 'ts',
-                format: 'esm'
-            });
-            res.type('application/javascript').send(result.code);
-        } catch (error) {
-            console.error(`esbuild error: ${error}`);
-            res.status(500).send('Error compiling TypeScript file.');
+        } else {
+            next();
         }
-    } else {
-        next();
-    }
-});
+    });
+}
 
 // --- API Endpoints ---
 
@@ -2587,13 +2597,13 @@ superadminRouter.get('/restore-from-backup', (req, res) => {
 
 app.use('/api/superadmin', superadminRouter);
 
-// --- Static file serving ---
-app.use(express.static(path.join(__dirname, '..')));
-
-// SPA Fallback:
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'index.html'));
-});
+// When no dist, serve project root static files to support index.html and assets
+if (!distExists) {
+    app.use(express.static(path.join(__dirname, '..')));
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, '..', 'index.html'));
+    });
+}
 
 // --- Start Server ---
 Promise.all([initDb(), initSuperadminDb()]).then(() => {
