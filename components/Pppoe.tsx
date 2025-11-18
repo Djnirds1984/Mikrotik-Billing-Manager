@@ -198,6 +198,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
     const [nonPaymentProfile, setNonPaymentProfile] = useState('');
+    const [planType, setPlanType] = useState<'prepaid' | 'postpaid'>('prepaid');
 
 
     useEffect(() => {
@@ -224,14 +225,17 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 } else {
                     setDueDate('');
                 }
+                setPlanType((commentData.planType === 'postpaid' ? 'postpaid' : 'prepaid'));
             } catch (e) {
                 setDueDate('');
+                setPlanType('prepaid');
             }
 
         } else {
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
             setCustomer({ fullName: '', address: '', contactNumber: '', email: '' });
             setDueDate('');
+            setPlanType('prepaid');
         }
         
         if (profiles.length > 0) {
@@ -268,7 +272,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer, { dueDate, nonPaymentProfile, planId: secret.profile });
+        onSave(secretPayload, customer, { dueDate, nonPaymentProfile, planId: secret.profile, planType });
     }
 
     return (
@@ -290,6 +294,13 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             <label>Due Date & Time</label>
                             <input type="datetime-local" value={dueDate} onChange={e => setDueDate(e.target.value)} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" />
                             <p className="text-xs text-slate-500 mt-1">Leave blank for no expiration.</p>
+                        </div>
+                        <div>
+                            <label>Plan Type</label>
+                            <select value={planType} onChange={e => setPlanType(e.target.value as 'prepaid' | 'postpaid')} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">
+                                <option value="prepaid">Prepaid</option>
+                                <option value="postpaid">Postpaid</option>
+                            </select>
                         </div>
                         <div>
                             <label>Profile on Expiry</label>
@@ -371,7 +382,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         });
     }, [secrets, customers]);
     
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string, planId: string }) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string; planId: string; planType?: 'prepaid' | 'postpaid' }) => {
         setIsSubmitting(true);
         try {
             const existingCustomer = customers.find(c => c.username === secretData.name);
@@ -396,6 +407,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 commentJson.plan = selectedPlan.name;
                 commentJson.price = selectedPlan.price;
                 commentJson.currency = selectedPlan.currency;
+            }
+            if (subscriptionData.planType) {
+                commentJson.planType = subscriptionData.planType;
             }
             secretData.comment = JSON.stringify(commentJson);
 
