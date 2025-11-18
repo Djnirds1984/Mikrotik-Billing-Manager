@@ -25,8 +25,16 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
     if (subject?.comment) {
       try {
         const parsed = JSON.parse(subject.comment);
-        if (parsed?.dueDate) {
-          setDueDate(parsed.dueDate);
+        if (parsed?.dueDateTime) {
+          const dt = new Date(parsed.dueDateTime);
+          const y = dt.getFullYear();
+          const m = String(dt.getMonth() + 1).padStart(2, '0');
+          const d = String(dt.getDate()).padStart(2, '0');
+          const hh = String(dt.getHours()).padStart(2, '0');
+          const mm = String(dt.getMinutes()).padStart(2, '0');
+          setDueDate(`${y}-${m}-${d} ${hh}:${mm}`);
+        } else if (parsed?.dueDate) {
+          setDueDate(`${parsed.dueDate} 23:59`);
         }
       } catch (_) {
       }

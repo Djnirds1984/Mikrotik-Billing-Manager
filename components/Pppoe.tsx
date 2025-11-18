@@ -220,8 +220,10 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             });
             try {
                 const commentData = JSON.parse(initialData.comment);
-                if (commentData.dueDate) {
-                    const dateTime = commentData.dueDate.includes('T') ? commentData.dueDate : `${commentData.dueDate}T23:59`;
+                if (commentData.dueDateTime) {
+                    setDueDate(commentData.dueDateTime);
+                } else if (commentData.dueDate) {
+                    const dateTime = `${commentData.dueDate}T23:59`;
                     setDueDate(dateTime);
                 } else {
                     setDueDate('');
@@ -373,7 +375,17 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 try { 
                     const parsedComment = JSON.parse(secret.comment);
                     subscription.plan = parsedComment.plan || 'N/A';
-                    subscription.dueDate = parsedComment.dueDate || 'No Info';
+                    if (parsedComment.dueDateTime) {
+                        const dt = new Date(parsedComment.dueDateTime);
+                        const y = dt.getFullYear();
+                        const m = String(dt.getMonth() + 1).padStart(2, '0');
+                        const d = String(dt.getDate()).padStart(2, '0');
+                        const hh = String(dt.getHours()).padStart(2, '0');
+                        const mm = String(dt.getMinutes()).padStart(2, '0');
+                        subscription.dueDate = `${y}-${m}-${d} ${hh}:${mm}`;
+                    } else {
+                        subscription.dueDate = parsedComment.dueDate || 'No Info';
+                    }
                     subscription.planType = parsedComment.planType === 'postpaid' ? 'postpaid' : 'prepaid';
                 } catch (e) { /* ignore */ }
             }
@@ -399,9 +411,11 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             } catch (e) { /* ignore malformed comment */ }
 
             if (subscriptionData.dueDate) {
-                commentJson.dueDate = subscriptionData.dueDate.split('T')[0]; // Store only YYYY-MM-DD
+                commentJson.dueDate = subscriptionData.dueDate.split('T')[0];
+                commentJson.dueDateTime = subscriptionData.dueDate;
             } else {
                 delete commentJson.dueDate; // Remove due date if field is cleared
+                delete commentJson.dueDateTime;
             }
             
             const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
@@ -551,11 +565,19 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                         Pay
                                     </button>
                                     {(() => {
-                                        const d = user.subscription.dueDate;
-                                        const now = new Date();
-                                        const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-                                        const isDue = typeof d === 'string' && d !== 'No Info' ? (d <= todayStr) : false;
                                         const isPostpaid = user.subscription.planType === 'postpaid';
+                                        let isDue = false;
+                                        try {
+                                            if (user.comment) {
+                                                const parsed = JSON.parse(user.comment);
+                                                if (parsed.dueDateTime) {
+                                                    isDue = new Date(parsed.dueDateTime).getTime() <= Date.now();
+                                                } else if (parsed.dueDate) {
+                                                    const dt = new Date(`${parsed.dueDate}T23:59:59`);
+                                                    isDue = dt.getTime() <= Date.now();
+                                                }
+                                            }
+                                        } catch (_) {}
                                         const profileName = (user.profile || '').toLowerCase();
                                         const isNonPayProfile = ['non-payment','nonpayment','cut','disable','disabled'].some(tag => profileName.includes(tag));
                                         return (isPostpaid && (isDue || isNonPayProfile)) ? (
