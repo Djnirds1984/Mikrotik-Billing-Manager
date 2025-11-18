@@ -692,10 +692,10 @@ export interface DhcpClientActionParams {
     customerInfo: string;
     contactNumber?: string;
     email?: string;
-    // For plan-based activation/renewal
     plan?: DhcpBillingPlanWithId;
     downtimeDays?: number;
-    // For manual edits
-    expiresAt?: string; // ISO string for datetime-local
+    planType?: 'prepaid' | 'postpaid';
+    graceDays?: number;
+    expiresAt?: string;
     speedLimit?: string;
 }

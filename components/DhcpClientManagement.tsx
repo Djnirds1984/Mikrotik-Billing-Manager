@@ -6,6 +6,7 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
 import { getDhcpClients } from '../services/mikrotikService.ts';
 import { Loader } from './Loader.tsx';
+import { GracePeriodModal } from './GracePeriodModal.tsx';
 import { EditIcon, TrashIcon, ExclamationTriangleIcon } from '../constants.tsx';
 
 // The new unified modal for activation and payment
@@ -229,6 +230,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     
     const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
     const [isEditModalOpen, setEditModalOpen] = useState(false);
+    const [isGraceModalOpen, setGraceModalOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
 
     const isLegacyApi = selectedRouter.api_type === 'legacy';
@@ -346,6 +348,25 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
             setIsSubmitting(false);
         }
     };
+
+    const handleGraceSave = async ({ graceDays }: { graceDays: number }) => {
+        if (!selectedClient) return false;
+        setIsSubmitting(true);
+        try {
+            await updateDhcpClientDetails(selectedRouter, selectedClient, {
+                customerInfo: selectedClient.customerInfo || selectedClient.hostName,
+                graceDays,
+            });
+            setGraceModalOpen(false);
+            await fetchData();
+            return true;
+        } catch (err) {
+            alert(`Failed to grant grace: ${(err as Error).message}`);
+            return false;
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
     
     const handleDeactivateOrDelete = async (client: DhcpClient) => {
          if (window.confirm(`Are you sure you want to ${client.status === 'active' ? 'deactivate' : 'delete'} this client?`)) {
@@ -377,6 +398,12 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 client={selectedClient}
                 isSubmitting={isSubmitting}
                 dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
+            />
+            <GracePeriodModal
+                isOpen={isGraceModalOpen}
+                onClose={() => setGraceModalOpen(false)}
+                subject={selectedClient}
+                onSave={handleGraceSave}
             />
 
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
@@ -431,6 +458,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                                          ) : (
                                             <>
                                                 <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Pay/Renew"}>Pay/Renew</button>
+                                                <button onClick={() => { setSelectedClient(client); setGraceModalOpen(true); }} className="px-3 py-1 text-sm bg-purple-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Grant Grace Period"}>Grace</button>
                                                 <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500 disabled:opacity-50 disabled:cursor-not-allowed" title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Edit Client"} disabled={isLegacyApi}><EditIcon className="w-5 h-5"/></button>
                                                 <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed" disabled={isLegacyApi} title={isLegacyApi ? "Feature requires RouterOS v7+ (REST API)" : "Deactivate"}>Deactivate</button>
                                             </>

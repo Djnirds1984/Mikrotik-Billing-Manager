@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import type { PppSecret } from '../types.ts';
 
 interface GracePeriodModalProps {
   isOpen: boolean;
   onClose: () => void;
-  secret: PppSecret | null;
+  subject: { comment?: string } | null;
   onSave: (params: { graceDays: number }) => Promise<boolean> | boolean;
 }
 
-export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onClose, secret, onSave }) => {
+export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onClose, subject, onSave }) => {
   const [graceDays, setGraceDays] = useState<number>(0);
   const [dueDate, setDueDate] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -18,9 +17,9 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
     setError(null);
     setGraceDays(0);
     setDueDate('');
-    if (secret?.comment) {
+    if (subject?.comment) {
       try {
-        const parsed = JSON.parse(secret.comment);
+        const parsed = JSON.parse(subject.comment);
         if (parsed?.dueDate) {
           setDueDate(parsed.dueDate);
         }
@@ -32,10 +31,10 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!secret) return;
+    if (!subject) return;
     if (!Number.isFinite(graceDays) || graceDays <= 0) {
       setError('Please enter a valid number of days (> 0).');
       return;
