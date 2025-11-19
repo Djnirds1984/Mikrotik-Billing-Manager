@@ -1,23 +1,18 @@
 import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
-import { AuthProvider } from './contexts/AuthContext';
+import ReactDOM from 'react-dom/client';
+import App from './App.tsx';
+import { AuthProvider } from './contexts/AuthContext.tsx';
 
-const mount = () => {
-  const rootElement = document.getElementById('root');
-  if (!rootElement) return;
-  const root = createRoot(rootElement);
-  root.render(
-    <React.StrictMode>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </React.StrictMode>
-  );
-};
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', mount);
-} else {
-  mount();
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
 }
+
+const root = ReactDOM.createRoot(rootElement);
+root.render(
+  <React.StrictMode>
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  </React.StrictMode>
+);
