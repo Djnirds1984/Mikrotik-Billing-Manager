@@ -70,7 +70,8 @@ export const Chart: React.FC<ChartProps> = ({ trafficHistory }) => {
                 <Tooltip content={<CustomTooltip />} />
                 <Area 
                     isAnimationActive={true}
-                    animationDuration={300}
+                    animationDuration={600}
+                    animationEasing="easeInOut"
                     type="monotone" 
                     dataKey="rx" 
                     stroke="#10b981" 
@@ -80,7 +81,8 @@ export const Chart: React.FC<ChartProps> = ({ trafficHistory }) => {
                 />
                 <Area 
                     isAnimationActive={true}
-                    animationDuration={300}
+                    animationDuration={600}
+                    animationEasing="easeInOut"
                     type="monotone" 
                     dataKey="tx" 
                     stroke="#0ea5e9" 

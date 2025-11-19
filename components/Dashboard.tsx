@@ -44,7 +44,9 @@ const formatBps = (bps: number): string => {
     return `${(bps / (1000 * 1000 * 1000)).toFixed(2)} Gbps`;
 };
 
+// Polling interval for live interface updates (ms)
 const MAX_HISTORY_POINTS = 30;
+const POLL_INTERVAL_MS = 2000;
 
 export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
     // Router States
@@ -81,7 +83,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
 
     useEffect(() => {
         fetchHostData();
-        const interval = setInterval(fetchHostData, 5000); // Poll every 5 seconds
+        const interval = setInterval(fetchHostData, 5000);
         return () => clearInterval(interval);
     }, [fetchHostData]);
 
@@ -194,7 +196,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                 message: `Failed to fetch data from ${selectedRouter.name}. Check connection and credentials.`,
                 details: err,
             });
-            // FIX: Removed clearInterval here to ensure it keeps retrying
         } finally {
             if (isInitial) setIsLoading(false);
         }
@@ -203,7 +204,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     useEffect(() => {
         if (selectedRouter) {
             fetchRouterData(true);
-            intervalRef.current = window.setInterval(() => fetchRouterData(false), 2000);
+            intervalRef.current = window.setInterval(() => fetchRouterData(false), POLL_INTERVAL_MS);
         } else {
             setIsLoading(false);
             setSystemInfo(null);
