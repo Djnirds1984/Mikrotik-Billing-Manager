@@ -98,8 +98,8 @@ export class XenditService {
    */
   async getInvoice(invoiceId: string): Promise<XenditInvoiceResponse> {
     try {
-      // FIX: Use getInvoice method to retrieve an invoice by its ID.
-      const response = await this.client.Invoice.getInvoice({ invoiceID: invoiceId });
+      // FIX: Per the error, the method is likely getInvoices, which may be used to fetch a single invoice by its ID.
+      const response = await this.client.Invoice.getInvoices({ invoiceID: invoiceId });
       return response as unknown as XenditInvoiceResponse;
     } catch (error) {
       console.error('Xendit get invoice error:', error);

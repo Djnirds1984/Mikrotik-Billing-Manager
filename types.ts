@@ -406,6 +406,23 @@ export interface PanelHostStatus {
     };
 }
 
+export interface TelegramSettings {
+    enabled: boolean;
+    botToken: string;
+    chatId: string;
+    enableClientDueDate: boolean;
+    enableClientDisconnected: boolean;
+    enableInterfaceDisconnected: boolean;
+    enableUserPaid: boolean;
+}
+
+export interface XenditSettings {
+    enabled: boolean;
+    secretKey: string;
+    publicKey: string;
+    webhookToken: string;
+}
+
 export interface PanelSettings {
     language: 'en' | 'fil' | 'es' | 'pt';
     currency: 'USD' | 'PHP' | 'EUR' | 'BRL';
@@ -419,21 +436,8 @@ export interface PanelSettings {
         debounceMinutes: number;
         dhcpNearExpiryHours: number;
     };
-    telegramSettings?: {
-        enabled: boolean;
-        botToken: string;
-        chatId: string;
-        enableClientDueDate: boolean;
-        enableClientDisconnected: boolean;
-        enableInterfaceDisconnected: boolean;
-        enableUserPaid: boolean;
-    };
-    xenditSettings?: {
-        enabled: boolean;
-        secretKey: string;
-        publicKey: string;
-        webhookToken: string;
-    };
+    telegramSettings?: TelegramSettings;
+    xenditSettings?: XenditSettings;
 }
 
 export interface PanelNtpStatus {

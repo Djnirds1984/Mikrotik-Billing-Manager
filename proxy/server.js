@@ -1450,6 +1450,7 @@ updaterRouter.get('/update-status', (req, res) => {
 
 updaterRouter.get('/update-app', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
