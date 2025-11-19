@@ -325,15 +325,14 @@ app.get('/mt-api/:routerId/interface/stats', getRouterConfig, async (req, res) =
             await client.connect();
             try {
                 // 'detail' argument forces full stats in legacy API
-                const result = await writeLegacySafe(client, ['/interface/print', 'detail']);
+                // 'without-paging' prevents hanging on large interface lists
+                const result = await writeLegacySafe(client, ['/interface/print', 'detail', 'without-paging']);
                 return result.map(normalizeLegacyObject);
             } finally {
                 await client.close();
             }
         } else {
             // For REST API (v7+), sending { "detail": true } forces stats to be returned.
-            // Note: Older v7 versions might behave differently, but "detail": true is the standard 
-            // way to enable verbose/detailed output which includes dynamic byte counters.
             const response = await req.routerInstance.post('/interface/print', { 'detail': true });
             return response.data;
         }

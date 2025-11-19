@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, SystemInfo, InterfaceWithHistory, TrafficHistoryPoint, Interface, PanelHostStatus } from '../types.ts';
 import { getSystemInfo, getInterfaceStats, getPppActiveConnections } from '../services/mikrotikService.ts';
@@ -182,7 +180,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                 message: `Failed to fetch data from ${selectedRouter.name}. Check connection and credentials.`,
                 details: err,
             });
-            if (intervalRef.current) clearInterval(intervalRef.current);
+            // FIX: Removed clearInterval here to ensure it keeps retrying
         } finally {
             if (isInitial) setIsLoading(false);
         }
@@ -238,9 +236,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                      {hostError && <p className="text-yellow-600 dark:text-yellow-400 text-sm">{hostError}</p>}
                      {!hostStatus && !hostError && <div className="flex items-center justify-center h-24"><Loader /></div>}
                      {hostStatus && <>
-                        <StatItem label="CPU Usage" value={`${hostStatus.cpuUsage.toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage} colorClass="bg-green-500" /></StatItem>
-                        <StatItem label="RAM Usage" value={`${hostStatus.memory.percent.toFixed(1)}%`} subtext={`(${hostStatus.memory.used} / ${hostStatus.memory.total})`}><ProgressBar percent={hostStatus.memory.percent} colorClass="bg-sky-500" /></StatItem>
-                        <StatItem label="SD Card Usage" value={`${hostStatus.disk.percent}%`} subtext={`(${hostStatus.disk.used} / ${hostStatus.disk.total})`}><ProgressBar percent={hostStatus.disk.percent} colorClass="bg-amber-500" /></StatItem>
+                        <StatItem label="CPU Usage" value={`${(hostStatus.cpuUsage || 0).toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage || 0} colorClass="bg-green-500" /></StatItem>
+                        <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used || 0} / ${hostStatus.memory?.total || 0})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
+                        <StatItem label="SD Card Usage" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used || 0} / ${hostStatus.disk?.total || 0})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
                      </>}
                  </StatCard>
                  <div className="flex flex-col items-center justify-center h-full text-center py-16">
@@ -292,9 +290,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                          {hostError && <p className="text-yellow-600 dark:text-yellow-400 text-sm">{hostError}</p>}
                          {!hostStatus && !hostError && <div className="flex items-center justify-center h-24"><Loader /></div>}
                          {hostStatus && <>
-                            <StatItem label="CPU Usage" value={`${hostStatus.cpuUsage.toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage} colorClass="bg-green-500" /></StatItem>
-                            <StatItem label="RAM Usage" value={`${hostStatus.memory.percent.toFixed(1)}%`} subtext={`(${hostStatus.memory.used}/${hostStatus.memory.total})`}><ProgressBar percent={hostStatus.memory.percent} colorClass="bg-sky-500" /></StatItem>
-                            <StatItem label="SD Card" value={`${hostStatus.disk.percent}%`} subtext={`(${hostStatus.disk.used}/${hostStatus.disk.total})`}><ProgressBar percent={hostStatus.disk.percent} colorClass="bg-amber-500" /></StatItem>
+                            <StatItem label="CPU Usage" value={`${(hostStatus.cpuUsage || 0).toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage || 0} colorClass="bg-green-500" /></StatItem>
+                            <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used || 0}/${hostStatus.memory?.total || 0})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
+                            <StatItem label="SD Card" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used || 0}/${hostStatus.disk?.total || 0})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
                          </>}
                      </StatCard>
                      <StatCard title={`Router: ${selectedRouter.name}`}>
