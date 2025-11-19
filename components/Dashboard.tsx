@@ -161,9 +161,21 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         if (isNaN(txRate)) txRate = 0;
                     }
 
+                    if (rxRate === 0) {
+                        const i = iface as any;
+                        rxRate = Number(i['rx-bits-per-second'] ?? i['rx-rate'] ?? 0) || rxRate;
+                    }
+                    if (txRate === 0) {
+                        const i = iface as any;
+                        txRate = Number(i['tx-bits-per-second'] ?? i['tx-rate'] ?? 0) || txRate;
+                    }
+
                     const newHistoryPoint: TrafficHistoryPoint = { name: new Date().toLocaleTimeString(), rx: rxRate, tx: txRate };
                     
                     let newHistory = existingIface ? [...existingIface.trafficHistory, newHistoryPoint] : [newHistoryPoint];
+                    if (!existingIface && (rxRate > 0 || txRate > 0)) {
+                        newHistory = [newHistoryPoint, newHistoryPoint];
+                    }
                     if (newHistory.length > MAX_HISTORY_POINTS) {
                         newHistory = newHistory.slice(newHistory.length - MAX_HISTORY_POINTS);
                     }
