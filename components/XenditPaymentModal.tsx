@@ -1,5 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
-import type { PppSecret, BillingPlanWithId, CompanySettings } from '../types';
+// FIX: Changed CompanySettings to PanelSettings to match the required properties for Xendit configuration.
+import type { PppSecret, BillingPlanWithId, PanelSettings } from '../types';
 import { initializeXenditService, getXenditService, isXenditConfigured } from '../services/xenditService';
 import { Loader } from './Loader';
 
@@ -8,7 +10,7 @@ interface XenditPaymentModalProps {
   onClose: () => void;
   client: PppSecret;
   plan: BillingPlanWithId;
-  companySettings: CompanySettings;
+  companySettings: PanelSettings;
   onPaymentSuccess: (invoiceId: string) => void;
 }
 
@@ -37,6 +39,7 @@ export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
   }, [isOpen]);
 
   const createXenditInvoice = async () => {
+    // FIX: Passing the correct PanelSettings type to isXenditConfigured.
     if (!isXenditConfigured(companySettings)) {
       setError('Xendit payment gateway is not configured. Please contact support.');
       return;
@@ -47,15 +50,17 @@ export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
 
     try {
       // Initialize Xendit service
+      // FIX: Accessing nested xenditSettings properties instead of non-existent top-level properties.
       initializeXenditService({
-        secretKey: companySettings.xenditSecretKey!,
-        publicKey: companySettings.xenditPublicKey,
-        webhookToken: companySettings.xenditWebhookToken,
+        secretKey: companySettings.xenditSettings!.secretKey!,
+        publicKey: companySettings.xenditSettings!.publicKey,
+        webhookToken: companySettings.xenditSettings!.webhookToken,
       });
 
       const xenditService = getXenditService();
       
       // Create invoice
+      // FIX: Passing the correct PanelSettings type to createBillingInvoice.
       const invoice = await xenditService.createBillingInvoice(
         client,
         plan,

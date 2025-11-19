@@ -1,3 +1,4 @@
+
 {
     "app": {
         "loading_data": "Nilo-load ang data ng application..."
@@ -120,5 +121,9 @@
         "stop": "Itigil",
         "restart": "I-restart",
         "uninstall": "I-uninstall"
+    },
+    "system": {
+        "telegram_settings": "Mga Setting ng Telegram",
+        "xendit_settings": "Xendit Payment Gateway"
     }
 }

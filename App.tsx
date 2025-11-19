@@ -1,5 +1,4 @@
 
-
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
@@ -46,6 +45,7 @@ import { useAuth } from './contexts/AuthContext.tsx';
 import type { View, LicenseStatus } from './types.ts';
 import { getAuthHeader, getPanelSettings } from './services/databaseService.ts';
 import { initializeAiClient } from './services/geminiService.ts';
+import { initializeXenditService } from './services/xenditService.ts';
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -100,20 +100,32 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const { t, isLoading: isLoadingLocalization } = useLocalization();
 
   useEffect(() => {
-    // Initialize AI client on app load
-    const initAI = async () => {
+    // Initialize AI and other services on app load
+    const initServices = async () => {
         try {
             const settings = await getPanelSettings() as any;
-            // The key from DB takes precedence over the one in env.js
-            const key = settings?.geminiApiKey || process.env.API_KEY;
-            initializeAiClient(key);
+            
+            // AI init
+            const aiKey = settings?.geminiApiKey || process.env.API_KEY;
+            initializeAiClient(aiKey);
+
+            // Xendit init
+            if (settings?.xenditSettings?.enabled && settings.xenditSettings.secretKey) {
+                initializeXenditService({
+                    secretKey: settings.xenditSettings.secretKey,
+                    publicKey: settings.xenditSettings.publicKey,
+                    webhookToken: settings.xenditSettings.webhookToken,
+                });
+                console.log("Xendit Service Initialized.");
+            }
+
         } catch (error) {
-            console.error("Could not load API key for AI init:", error);
-            // Initialize with whatever is in env.js as a fallback
+            console.error("Could not load settings for service initialization:", error);
+            // Fallback initializations
             initializeAiClient(process.env.API_KEY);
         }
     };
-    initAI();
+    initServices();
   }, []); // Run only once on mount
 
   const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;

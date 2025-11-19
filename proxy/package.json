@@ -1,3 +1,4 @@
+
 {
   "name": "mikrotik-proxy-frontend",
   "version": "1.6.0",
@@ -11,6 +12,7 @@
   "dependencies": {
     "@vscode/sqlite3": "^5.1.1",
     "archiver": "^7.0.1",
+    "axios": "^1.7.2",
     "bcryptjs": "^2.4.3",
     "esbuild": "^0.25.12",
     "express": "^4.19.2",

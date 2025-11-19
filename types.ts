@@ -343,10 +343,6 @@ export interface CompanySettings {
     contactNumber?: string;
     email?: string;
     logoBase64?: string;
-    xenditEnabled?: boolean;
-    xenditSecretKey?: string;
-    xenditPublicKey?: string;
-    xenditWebhookToken?: string;
 }
 
 export interface ChatMessage {
@@ -431,6 +427,12 @@ export interface PanelSettings {
         enableClientDisconnected: boolean;
         enableInterfaceDisconnected: boolean;
         enableUserPaid: boolean;
+    };
+    xenditSettings?: {
+        enabled: boolean;
+        secretKey: string;
+        publicKey: string;
+        webhookToken: string;
     };
 }
 

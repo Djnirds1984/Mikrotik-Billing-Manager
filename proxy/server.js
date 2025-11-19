@@ -1,3 +1,4 @@
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -13,6 +14,7 @@ const jwt = require('jsonwebtoken');
 const os = require('os');
 const fsPromises = require('fs').promises;
 const crypto = require('crypto');
+const axios = require('axios');
 
 const app = express();
 const PORT = 3001;
@@ -1785,6 +1787,45 @@ app.get('/api/list-backups', protect, async (req, res) => { /* ... */ });
 app.post('/api/delete-backup', protect, async (req, res) => { /* ... */ });
 app.get('/download-backup/:filename', protect, (req, res) => { /* ... */ });
 app.get('/api/restore-backup', protect, (req, res) => { /* ... */ });
+
+class TelegramService {
+    constructor() { this.axios = axios; }
+    async sendTelegramNotification(message, settings) {
+        if (!settings?.enabled || !settings.botToken || !settings.chatId) {
+            return { success: false, error: 'Telegram not configured or disabled' };
+        }
+        try {
+            const telegramApiUrl = `https://api.telegram.org/bot${settings.botToken}/sendMessage`;
+            const response = await this.axios.post(telegramApiUrl, { chat_id: settings.chatId, text: message, parse_mode: 'HTML' });
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error('Failed to send Telegram notification:', error.response?.data || error.message);
+            return { success: false, error: error.response?.data || error.message };
+        }
+    }
+    async testTelegramConnection(settings) {
+        const testMessage = "🧪 <b>Test Message</b>\n\nThis is a test message from your MikroTik Billing Manager panel.\n\nIf you received this message, your Telegram integration is working correctly!";
+        return await this.sendTelegramNotification(testMessage, { ...settings, enabled: true });
+    }
+}
+const telegramService = new TelegramService();
+
+app.post('/api/telegram/test', protect, async (req, res) => {
+    try {
+        const { botToken, chatId } = req.body;
+        if (!botToken || !chatId) {
+            return res.status(400).json({ success: false, error: 'Missing botToken or chatId.' });
+        }
+        const result = await telegramService.testTelegramConnection({ botToken, chatId });
+        if (result.success) {
+            res.json({ success: true, message: 'Test message sent successfully!' });
+        } else {
+            res.status(400).json({ success: false, error: 'Telegram API returned an error: ' + (result.error?.description || 'Unknown error') });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to send message: ' + (error.response?.data?.description || error.message) });
+    }
+});
 
 app.use('/api/zt', ztRouter);
 app.use('/api/pitunnel', piTunnelRouter);

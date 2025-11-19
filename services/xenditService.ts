@@ -1,8 +1,6 @@
 
-
-
 import { Xendit } from 'xendit-node';
-import type { BillingPlanWithId, PppSecret, CompanySettings } from '../types';
+import type { BillingPlanWithId, PppSecret, PanelSettings } from '../types';
 
 // Xendit Invoice API Response Type
 export interface XenditInvoiceResponse {
@@ -86,7 +84,8 @@ export class XenditService {
 
       // FIX: Corrected casing for Xendit service. It should be PascalCase 'Invoice'.
       const response = await this.client.Invoice.createInvoice(invoiceData as any);
-      return response as XenditInvoiceResponse;
+      // FIX: Cast to unknown first to satisfy TypeScript's strict type checking when library types and local types diverge.
+      return response as unknown as XenditInvoiceResponse;
     } catch (error) {
       console.error('Xendit create invoice error:', error);
       throw new Error(`Failed to create Xendit invoice: ${(error as any).message}`);
@@ -98,9 +97,9 @@ export class XenditService {
    */
   async getInvoice(invoiceId: string): Promise<XenditInvoiceResponse> {
     try {
-      // FIX: Corrected casing for Xendit service. It should be PascalCase 'Invoice'.
-      const response = await this.client.Invoice.getInvoice({ invoiceID: invoiceId });
-      return response as XenditInvoiceResponse;
+      // FIX: Changed from getInvoice to get, which is the correct method in recent versions of the SDK for retrieving a single invoice by ID.
+      const response = await this.client.Invoice.get({ invoiceID: invoiceId });
+      return response as unknown as XenditInvoiceResponse;
     } catch (error) {
       console.error('Xendit get invoice error:', error);
       throw new Error(`Failed to get Xendit invoice: ${(error as any).message}`);
@@ -113,11 +112,11 @@ export class XenditService {
   async createBillingInvoice(
     client: PppSecret,
     plan: BillingPlanWithId,
-    companySettings: CompanySettings
+    settings: PanelSettings
   ): Promise<XenditInvoiceResponse> {
     const externalId = `billing-${client.name}-${Date.now()}`;
     const description = `${plan.name} - ${plan.description || 'Internet Service'}`;
-    const customerEmail = client.comment?.includes('@') ? client.comment : companySettings.email || 'customer@example.com';
+    const customerEmail = client.comment?.includes('@') ? client.comment : settings.telegramSettings?.chatId || 'customer@example.com';
     const customerName = client.name;
 
     return this.createInvoice({
@@ -158,6 +157,6 @@ export const getXenditService = (): XenditService => {
   return xenditService;
 };
 
-export const isXenditConfigured = (settings: CompanySettings): boolean => {
-  return !!(settings.xenditEnabled && settings.xenditSecretKey);
+export const isXenditConfigured = (settings: PanelSettings): boolean => {
+  return !!(settings.xenditSettings?.enabled && settings.xenditSettings.secretKey);
 };

@@ -1,3 +1,4 @@
+
 {
     "app": {
         "loading_data": "Cargando datos de la aplicación..."
@@ -144,5 +145,9 @@
         "stop": "Detener",
         "restart": "Reiniciar",
         "uninstall": "Desinstalar"
+    },
+    "system": {
+        "telegram_settings": "Configuración de Telegram",
+        "xendit_settings": "Pasarela de Pago Xendit"
     }
 }
