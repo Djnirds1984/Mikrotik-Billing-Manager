@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, SystemInfo, InterfaceWithHistory, TrafficHistoryPoint, Interface, PanelHostStatus } from '../types.ts';
-import { getSystemInfo, getInterfaces, getPppActiveConnections } from '../services/mikrotikService.ts';
+import { getSystemInfo, getInterfaceStats, getPppActiveConnections } from '../services/mikrotikService.ts';
 import { getPanelHostStatus } from '../services/panelService.ts';
 import { Loader } from './Loader.tsx';
 import { Chart } from './chart.tsx';
@@ -109,7 +110,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         try {
             const [info, currentInterfacesData, pppoeActive] = await Promise.all([
                 getSystemInfo(selectedRouter),
-                getInterfaces(selectedRouter),
+                getInterfaceStats(selectedRouter), // Use stats version to get byte counters
                 getPppActiveConnections(selectedRouter).catch(() => []), 
             ]);
             setSystemInfo(info);
@@ -135,11 +136,18 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                     let txRate = 0;
 
                     if (prevIfaceData && timeDiffSeconds > 0.1) {
-                        let rxByteDiff = (iface['rx-byte'] || 0) - (prevIfaceData['rx-byte'] || 0);
-                        let txByteDiff = (iface['tx-byte'] || 0) - (prevIfaceData['tx-byte'] || 0);
+                        // Standardize property access (some APIs return rx-byte, others rx-bytes or bytes-in)
+                        const currRx = Number(iface['rx-byte'] ?? 0);
+                        const prevRx = Number(prevIfaceData['rx-byte'] ?? 0);
+                        const currTx = Number(iface['tx-byte'] ?? 0);
+                        const prevTx = Number(prevIfaceData['tx-byte'] ?? 0);
 
-                        if (rxByteDiff < 0) rxByteDiff = iface['rx-byte'] || 0;
-                        if (txByteDiff < 0) txByteDiff = iface['tx-byte'] || 0;
+                        let rxByteDiff = currRx - prevRx;
+                        let txByteDiff = currTx - prevTx;
+
+                        // Handle counter reset/overflow or bad data
+                        if (rxByteDiff < 0) rxByteDiff = currRx;
+                        if (txByteDiff < 0) txByteDiff = currTx;
                         
                         rxRate = Math.round((rxByteDiff * 8) / timeDiffSeconds);
                         txRate = Math.round((txByteDiff * 8) / timeDiffSeconds);
@@ -188,7 +196,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     // --- Memos and Effects for UI ---
     
     const selectableInterfaces = useMemo(() => 
-        interfaces.filter(i => i.type.startsWith('ether') || i.type === 'bridge'), 
+        interfaces.filter(i => i.type.startsWith('ether') || i.type === 'bridge' || i.type === 'vlan' || i.type === 'wlan'), 
         [interfaces]
     );
     const chartData1 = useMemo(() => interfaces.find(i => i.name === selectedChartInterface1), [interfaces, selectedChartInterface1]);
@@ -196,11 +204,16 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
 
     useEffect(() => {
         if (selectableInterfaces.length > 0) {
-            if (!selectedChartInterface1) {
-                setSelectedChartInterface1(selectableInterfaces[0].name);
+            // Initialize selection only if null or if the previously selected interface no longer exists
+            if (!selectedChartInterface1 || !selectableInterfaces.some(i => i.name === selectedChartInterface1)) {
+                // Prefer WAN or Bridge if possible, otherwise first available
+                const default1 = selectableInterfaces.find(i => i.name.toLowerCase().includes('wan') || i.name === 'ether1') || selectableInterfaces[0];
+                setSelectedChartInterface1(default1.name);
             }
-            if (!selectedChartInterface2) {
-                setSelectedChartInterface2(selectableInterfaces[1]?.name || selectableInterfaces[0].name);
+            if (!selectedChartInterface2 || !selectableInterfaces.some(i => i.name === selectedChartInterface2)) {
+                // Prefer LAN or Bridge
+                const default2 = selectableInterfaces.find(i => i.name.toLowerCase().includes('lan') || i.name.toLowerCase().includes('bridge') && i.name !== selectedChartInterface1) || selectableInterfaces[1] || selectableInterfaces[0];
+                setSelectedChartInterface2(default2.name);
             }
         }
     }, [selectableInterfaces, selectedChartInterface1, selectedChartInterface2]);

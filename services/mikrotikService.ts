@@ -1,3 +1,4 @@
+
 import type {
     RouterConfig,
     RouterConfigWithId,
@@ -121,6 +122,11 @@ export const syncTimeToRouter = (router: RouterConfigWithId): Promise<{ message:
 // --- Interfaces & IPs ---
 export const getInterfaces = (router: RouterConfigWithId): Promise<Interface[]> => {
     return fetchMikrotikData<Interface[]>(router, '/interface');
+};
+
+// New function to get detailed stats
+export const getInterfaceStats = (router: RouterConfigWithId): Promise<Interface[]> => {
+    return fetchMikrotikData<Interface[]>(router, '/interface/stats');
 };
 
 export const getIpAddresses = (router: RouterConfigWithId): Promise<IpAddress[]> => {

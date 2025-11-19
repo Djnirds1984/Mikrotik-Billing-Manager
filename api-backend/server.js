@@ -1,6 +1,4 @@
 
-
-
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -316,6 +314,28 @@ app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) =
             memoryUsage: parseFloat(memoryUsage.toFixed(1)),
             totalMemory: formatBytes(totalMemoryBytes),
         };
+    });
+});
+
+// --- SPECIAL STATS ENDPOINT FOR DASHBOARD ---
+app.get('/mt-api/:routerId/interface/stats', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // 'detail' argument forces full stats in legacy API
+                const result = await writeLegacySafe(client, ['/interface/print', 'detail']);
+                return result.map(normalizeLegacyObject);
+            } finally {
+                await client.close();
+            }
+        } else {
+            // For REST API (v7+), POSTing to /print ensures we run the command to get dynamic stats
+            // rather than just getting the static configuration list.
+            const response = await req.routerInstance.post('/interface/print', { detail: true });
+            return response.data;
+        }
     });
 });
 
