@@ -136,23 +136,32 @@ const handleApiRequest = async (req, res, action) => {
             res.json(result);
         }
     } catch (error) {
+        const ts = new Date().toISOString();
+        const cid = (crypto.randomUUID && crypto.randomUUID()) || Math.random().toString(36).slice(2);
         if (error.isAxiosError) {
-            console.error("Axios Error:", `[${error.config?.method?.toUpperCase()}] ${error.config?.url} - ${error.message}`);
+            const method = error.config?.method?.toUpperCase();
+            const url = error.config?.url;
+            const reqHeaders = error.config?.headers || {};
+            const reqData = error.config?.data;
+            console.error("Axios Error:", { cid, ts, method, url, reqHeaders, reqData, message: error.message });
             if (error.response) {
                 const status = error.response.status || 500;
-                let message = `MikroTik REST API Error: ${error.response.data.message || 'Bad Request'}`;
-                if (error.response.data.detail) message += ` - ${error.response.data.detail}`;
-                res.status(status).json({ message });
+                const respHeaders = error.response.headers || {};
+                const respData = error.response.data || {};
+                const code = status === 400 ? 'BAD_REQUEST' : 'HTTP_ERROR';
+                const message = typeof respData === 'string' ? respData : (respData.message || error.message || 'Request failed');
+                const detail = typeof respData === 'object' && respData.detail ? respData.detail : undefined;
+                res.status(status).json({ code, message, detail, ts, cid, request: { method, url }, response: { status, headers: respHeaders } });
             } else {
-                res.status(500).json({ message: error.message });
+                res.status(500).json({ code: 'NETWORK_ERROR', message: error.message, ts, cid, request: { method, url } });
             }
         } else {
-            console.error("API Request Error:", error);
+            console.error("API Request Error:", { cid, ts, message: error.message });
             let message = error.message || 'An internal server error occurred.';
             if (message.includes('ECONNREFUSED')) message = 'Connection refused. Check the IP address, port, and ensure the API service is enabled on the router.';
             if (message.includes('authentication failed')) message = 'Authentication failed. Please check your username and password.';
             if (message.includes('timeout')) message = 'Connection timed out. The router is not responding.';
-            res.status(500).json({ message });
+            res.status(500).json({ code: 'SERVER_ERROR', message, ts, cid });
         }
     }
 };
@@ -1127,7 +1136,8 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
                 const pathParts = apiPath.split('/').filter(Boolean);
                 const hasId = pathParts.length > 1 && pathParts[pathParts.length-1].startsWith('*');
                 const command = `/${pathParts.join('/')}`;
-                const id = hasId ? pathParts[pathParts.length - 1] : null;
+                const idRaw = hasId ? pathParts[pathParts.length - 1] : null;
+                const id = idRaw ? decodeURIComponent(idRaw) : null;
                 const commandWithoutId = hasId ? `/${pathParts.slice(0, -1).join('/')}` : command;
 
                 let query = [];
@@ -1170,8 +1180,29 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
                 data: (req.method !== 'GET' && req.body) ? req.body : undefined,
                 params: req.query
             };
-            const response = await req.routerInstance(options);
-            return response.data;
+            const shouldRetry = (err) => {
+                const status = err?.response?.status;
+                const code = err?.code || '';
+                const transient = status === 429 || status === 502 || status === 503 || status === 504 || code === 'ECONNRESET' || code === 'ETIMEDOUT';
+                const safeMethod = options.method === 'GET' || options.method === 'HEAD';
+                return transient && safeMethod;
+            };
+            const delay = (ms) => new Promise(r => setTimeout(r, ms));
+            let attempt = 0;
+            const maxAttempts = 2;
+            while (true) {
+                try {
+                    const response = await req.routerInstance(options);
+                    return response.data;
+                } catch (err) {
+                    if (attempt < maxAttempts && shouldRetry(err)) {
+                        attempt += 1;
+                        await delay(300 * attempt);
+                        continue;
+                    }
+                    throw err;
+                }
+            }
         }
     });
 });
