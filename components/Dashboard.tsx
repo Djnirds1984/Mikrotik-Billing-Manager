@@ -137,12 +137,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                     let txRate = 0;
 
                     if (prevIfaceData && timeDiffSeconds > 0.1) {
-                        // Robust property access handling multiple possible API response formats
-                        // Cast to 'any' to access potential dynamic properties safely
                         const i = iface as any;
                         const p = prevIfaceData as any;
                         
-                        // Try different property names that RouterOS might return
                         const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['rx-bytes'] ?? 0);
                         const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['rx-bytes'] ?? 0);
                         const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['tx-bytes'] ?? 0);
@@ -161,6 +158,17 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         // Sanity check to prevent NaN
                         if (isNaN(rxRate)) rxRate = 0;
                         if (isNaN(txRate)) txRate = 0;
+                    }
+
+                    if (rxRate === 0) {
+                        const i = iface as any;
+                        const instRx = Number(i['rx-bits-per-second'] ?? i['rx-rate'] ?? 0);
+                        if (isFinite(instRx) && !isNaN(instRx)) rxRate = instRx;
+                    }
+                    if (txRate === 0) {
+                        const i = iface as any;
+                        const instTx = Number(i['tx-bits-per-second'] ?? i['tx-rate'] ?? 0);
+                        if (isFinite(instTx) && !isNaN(instTx)) txRate = instTx;
                     }
 
                     
