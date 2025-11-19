@@ -331,10 +331,10 @@ app.get('/mt-api/:routerId/interface/stats', getRouterConfig, async (req, res) =
                 await client.close();
             }
         } else {
-            // For REST API (v7+), use empty strings for flags like 'detail' or 'without-paging'.
-            // Sending 'true' (boolean) might sometimes be interpreted as a value filter rather than a flag.
-            // 'detail' forces stats to be returned.
-            const response = await req.routerInstance.post('/interface/print', { 'detail': '', 'without-paging': '' });
+            // For REST API (v7+), sending { "detail": true } forces stats to be returned.
+            // Note: Older v7 versions might behave differently, but "detail": true is the standard 
+            // way to enable verbose/detailed output which includes dynamic byte counters.
+            const response = await req.routerInstance.post('/interface/print', { 'detail': true });
             return response.data;
         }
     });

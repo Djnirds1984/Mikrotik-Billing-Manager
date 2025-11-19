@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, SystemInfo, InterfaceWithHistory, TrafficHistoryPoint, Interface, PanelHostStatus } from '../types.ts';
 import { getSystemInfo, getInterfaceStats, getPppActiveConnections } from '../services/mikrotikService.ts';
@@ -141,6 +142,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         const i = iface as any;
                         const p = prevIfaceData as any;
                         
+                        // Try different property names that RouterOS might return
                         const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['rx-bytes'] ?? 0);
                         const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['rx-bytes'] ?? 0);
                         const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['tx-bytes'] ?? 0);
