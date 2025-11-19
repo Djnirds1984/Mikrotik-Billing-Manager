@@ -245,8 +245,6 @@ export const addPppProfile = (router: RouterConfigWithId, profileData: PppProfil
 };
 
 export const updatePppProfile = (router: RouterConfigWithId, profileData: PppProfile): Promise<any> => {
-    // FIX: The `name` of a profile is often read-only after creation.
-    // Exclude it from the PATCH payload to prevent a 400 Bad Request error from the MikroTik API.
     const { id, name, ...dataToSend } = profileData as any;
     delete dataToSend['.id'];
     return fetchMikrotikData(router, `/ppp/profile/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(dataToSend) });
@@ -300,7 +298,7 @@ export const updatePppSecret = (router: RouterConfigWithId, secretData: PppSecre
     delete dataToUpdate['last-logged-out'];
     delete dataToUpdate['caller-id'];
     delete dataToUpdate['last-caller-id'];
-    delete dataToUpdate['last-disconnect-reason']; // FIX: Added this additional read-only property.
+    delete dataToUpdate['last-disconnect-reason'];
     
     // Delete properties added by the frontend UI for display purposes
     delete dataToUpdate.isActive;
@@ -455,7 +453,6 @@ export const runDhcpCaptivePortalUninstall = (router: RouterConfigWithId): Promi
     });
 };
 
-// FIX: Add functions for DHCP Captive Portal client management
 // --- DHCP Captive Portal Client Management ---
 
 export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpClient[]> => {

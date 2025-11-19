@@ -960,7 +960,7 @@ const getDeviceId = () => {
 
         // Sort to ensure a deterministic order and pick the first one
         macs.sort();
-        // FIX: Hash the MAC address to ensure a consistent ID format
+        // Hash the MAC address to ensure a consistent ID format
         return crypto.createHash('sha1').update(macs[0]).digest('hex').substring(0, 12);
 
     } catch (e) {
@@ -1205,6 +1205,10 @@ panelAdminRouter.put('/roles/:roleId/permissions', requireAdmin, async (req, res
 });
 
 
+// Correct API route order
+app.use('/api/auth', authRouter);
+app.use('/api/license', licenseRouter);
+app.use('/api/db', protect, dbRouter);
 app.use('/api', panelAdminRouter);
 
 
@@ -1454,9 +1458,6 @@ app.post('/api/db/panel-settings', protect, createSettingsSaver('panel_settings'
 app.get('/api/db/company-settings', protect, createSettingsHandler('company_settings'));
 app.post('/api/db/company-settings', protect, createSettingsSaver('company_settings'));
 
-app.use('/api/db', protect, dbRouter);
-
-
 // --- ZeroTier CLI ---
 const ztCli = (command) => new Promise((resolve, reject) => {
     exec(`sudo zerotier-cli -j ${command}`, (error, stdout, stderr) => {
@@ -1657,8 +1658,8 @@ piTunnelRouter.get('/uninstall', (req, res) => {
             await runCommandWithLogs('sudo systemctl stop pitunnel.service', 'Stopping pitunnel service...');
             await runCommandWithLogs('sudo systemctl disable pitunnel.service', 'Disabling pitunnel service from startup...');
             await runCommandWithLogs('sudo rm -f /etc/systemd/system/pitunnel.service', 'Removing service file...');
-            await runCommandWithLogs('sudo rm -f /usr/local/bin/pitunnel', 'Removing pitunnel executable...');
             await runCommandWithLogs('sudo systemctl daemon-reload', 'Reloading system services...');
+            await runCommandWithLogs('sudo rm -f /usr/local/bin/pitunnel', 'Removing pitunnel executable...');
             await runCommandWithLogs('sudo rm -rf /root/.pitunnel', 'Removing configuration files...');
             send({ status: 'success', log: 'Uninstallation process finished successfully.' });
         } catch (e) {

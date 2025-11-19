@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, Bridge, BridgePort, Interface, BridgeData, BridgePortData } from '../types.ts';
 import {
@@ -5,6 +6,7 @@ import {
     getBridgePorts, addBridgePort, deleteBridgePort
 } from '../services/mikrotikService.ts';
 import { Loader } from './Loader.tsx';
+// FIX: Import missing BridgeIcon component.
 import { EditIcon, TrashIcon, BridgeIcon } from '../constants.tsx';
 
 const ToggleSwitch: React.FC<{ checked: boolean; onChange: () => void; disabled?: boolean; }> = ({ checked, onChange, disabled }) => (

@@ -1,6 +1,8 @@
+
 import React, { useEffect, useState } from 'react';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { CircleStackIcon } from '../constants.tsx';
+// FIX: Import missing functions for MariaDB operations.
 import { getPanelSettings, savePanelSettings, initMariaDb, migrateSqliteToMariaDb } from '../services/databaseService.ts';
 import type { PanelSettings } from '../types.ts';
 

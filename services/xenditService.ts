@@ -1,3 +1,4 @@
+
 import { Xendit } from 'xendit-node';
 import type { BillingPlanWithId, PppSecret, CompanySettings } from '../types';
 
@@ -111,9 +112,10 @@ export class XenditService {
     }
   }
 
-  /**
+  // FIX: Removed server-side webhook verification from the frontend service.
+  /*
    * Verify webhook signature
-   */
+   
   verifyWebhookSignature(payload: any, signature: string): boolean {
     if (!this.config.webhookToken) {
       console.warn('Webhook token not configured');
@@ -133,6 +135,7 @@ export class XenditService {
       return false;
     }
   }
+  */
 
   /**
    * Create billing invoice for PPPoE client
