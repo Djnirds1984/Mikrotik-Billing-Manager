@@ -247,11 +247,25 @@ async function initDb() {
 const getDeviceId = () => {
     const networkInterfaces = os.networkInterfaces();
     let macs = [];
-    for (const iface of Object.values(networkInterfaces).flat()) {
-        if (iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal) {
-            macs.push(iface.mac);
+    
+    // Regular expression to ignore virtual interfaces that change (ZeroTier, Docker, Tunnels, etc.)
+    // zt = ZeroTier, docker = Docker, veth = Virtual Ethernet, tun/tap = Tunnels, br = Bridges
+    const ignoredInterfacePattern = /^(zt|docker|veth|br-|tun|tap|lo)/i;
+
+    for (const [name, interfaces] of Object.entries(networkInterfaces)) {
+        // Skip interfaces that match the ignored pattern
+        if (ignoredInterfacePattern.test(name)) {
+            continue;
+        }
+
+        for (const iface of interfaces) {
+            // Only use valid MAC addresses from non-internal IPv4/IPv6 interfaces
+            if (iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal) {
+                macs.push(iface.mac);
+            }
         }
     }
+    
     macs.sort();
     const uniqueId = macs.join('') || (os.hostname() + os.arch() + os.platform());
     return crypto.createHash('sha256').update(uniqueId).digest('hex');
