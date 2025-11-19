@@ -12,6 +12,7 @@ const os = require('os');
 const crypto = require('crypto');
 const axios = require('axios');
 const { Xendit } = require('xendit-node');
+const si = require('systeminformation');
 
 const PORT = 3001;
 const DB_PATH = path.join(__dirname, 'panel.db');
@@ -375,62 +376,122 @@ async function startServer() {
     dbRouter.use(protect);
 
     // Generic CRUD handler generator
-    const createCrud = (table) => {
-        dbRouter.get(`/${table}`, async (req, res) => {
-            const { routerId } = req.query;
-            let query = `SELECT * FROM ${table}`;
-            let params = [];
-            if (routerId) {
-                query += ` WHERE routerId = ?`;
-                params.push(routerId);
+    const createCrud = (route, table) => {
+        dbRouter.get(route, async (req, res) => {
+            try {
+                const { routerId } = req.query;
+                let query = `SELECT * FROM ${table}`;
+                let params = [];
+                if (routerId) {
+                    query += ` WHERE routerId = ?`;
+                    params.push(routerId);
+                }
+                const rows = await db.all(query, params);
+                res.json(rows);
+            } catch (e) {
+                res.status(500).json({ message: e.message });
             }
-            const rows = await db.all(query, params);
-            res.json(rows);
         });
-        dbRouter.post(`/${table}`, async (req, res) => {
-            const keys = Object.keys(req.body);
-            const values = Object.values(req.body);
-            const placeholders = keys.map(() => '?').join(',');
-            await db.run(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${placeholders})`, values);
-            res.json({ message: 'Created' });
+        dbRouter.post(route, async (req, res) => {
+            try {
+                const keys = Object.keys(req.body);
+                const values = Object.values(req.body);
+                const placeholders = keys.map(() => '?').join(',');
+                await db.run(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${placeholders})`, values);
+                res.json({ message: 'Created' });
+            } catch (e) {
+                res.status(500).json({ message: e.message });
+            }
         });
-        dbRouter.patch(`/${table}/:id`, async (req, res) => {
-            const { id } = req.params;
-            const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
-            const values = [...Object.values(req.body), id];
-            await db.run(`UPDATE ${table} SET ${updates} WHERE id = ?`, values);
-            res.json({ message: 'Updated' });
+        dbRouter.patch(`${route}/:id`, async (req, res) => {
+            try {
+                const { id } = req.params;
+                const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
+                const values = [...Object.values(req.body), id];
+                await db.run(`UPDATE ${table} SET ${updates} WHERE id = ?`, values);
+                res.json({ message: 'Updated' });
+            } catch (e) {
+                res.status(500).json({ message: e.message });
+            }
         });
-        dbRouter.delete(`/${table}/:id`, async (req, res) => {
-            await db.run(`DELETE FROM ${table} WHERE id = ?`, req.params.id);
-            res.json({ message: 'Deleted' });
+        dbRouter.delete(`${route}/:id`, async (req, res) => {
+            try {
+                await db.run(`DELETE FROM ${table} WHERE id = ?`, req.params.id);
+                res.json({ message: 'Deleted' });
+            } catch (e) {
+                res.status(500).json({ message: e.message });
+            }
         });
     };
 
-    ['billing_plans', 'sales_records', 'inventory', 'expenses', 'employees', 'employee_benefits', 'time_records', 'customers', 'dhcp_billing_plans', 'dhcp_clients'].forEach(t => createCrud(t));
+    // Map frontend routes to DB tables
+    createCrud('/billing-plans', 'billing_plans');
+    createCrud('/inventory', 'inventory');
+    createCrud('/expenses', 'expenses');
+    createCrud('/employees', 'employees');
+    createCrud('/customers', 'customers');
+    createCrud('/routers', 'routers');
+
+    // Mapped with aliases for dash-case vs underscore
+    createCrud('/employee-benefits', 'employee_benefits');
+    createCrud('/time-records', 'time_records');
+    createCrud('/dhcp-billing-plans', 'dhcp_billing_plans');
+    createCrud('/dhcp_clients', 'dhcp_clients'); // frontend sends underscore
     
+    // Sales alias
+    createCrud('/sales', 'sales_records'); // Frontend uses /sales, DB table is sales_records
+
     // Special handling for settings
     dbRouter.get('/panel-settings', async (req, res) => {
-        const s = await db.get('SELECT * FROM settings WHERE id = 1');
-        if(s) {
-            try { s.telegramSettings = JSON.parse(s.telegramSettings); } catch(e) {}
-            try { s.xenditSettings = JSON.parse(s.xenditSettings); } catch(e) {}
-            try { s.notificationSettings = JSON.parse(s.notificationSettings); } catch(e) {}
+        try {
+            const s = await db.get('SELECT * FROM settings WHERE id = 1');
+            if(s) {
+                try { s.telegramSettings = JSON.parse(s.telegramSettings); } catch(e) {}
+                try { s.xenditSettings = JSON.parse(s.xenditSettings); } catch(e) {}
+                try { s.notificationSettings = JSON.parse(s.notificationSettings); } catch(e) {}
+            }
+            res.json(s || {});
+        } catch (e) {
+            res.status(500).json({ message: e.message });
         }
-        res.json(s || {});
+    });
+
+    dbRouter.get('/company-settings', async (req, res) => {
+        try {
+            const s = await db.get('SELECT companyName, address, contactNumber, email, logoBase64 FROM settings WHERE id = 1');
+            res.json(s || {});
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.post('/company-settings', async (req, res) => {
+        try {
+            const keys = Object.keys(req.body);
+            const values = Object.values(req.body);
+            const setClause = keys.map(k => `${k} = ?`).join(',');
+            await db.run(`UPDATE settings SET ${setClause} WHERE id = 1`, values);
+            res.json({ message: 'Company settings saved' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
     });
 
     dbRouter.post('/panel-settings', async (req, res) => {
-        const data = { ...req.body };
-        if (data.telegramSettings) data.telegramSettings = JSON.stringify(data.telegramSettings);
-        if (data.xenditSettings) data.xenditSettings = JSON.stringify(data.xenditSettings);
-        if (data.notificationSettings) data.notificationSettings = JSON.stringify(data.notificationSettings);
-        
-        const keys = Object.keys(data);
-        const values = Object.values(data);
-        const setClause = keys.map(k => `${k} = ?`).join(',');
-        await db.run(`UPDATE settings SET ${setClause} WHERE id = 1`, values);
-        res.json({ message: 'Settings saved' });
+        try {
+            const data = { ...req.body };
+            if (data.telegramSettings) data.telegramSettings = JSON.stringify(data.telegramSettings);
+            if (data.xenditSettings) data.xenditSettings = JSON.stringify(data.xenditSettings);
+            if (data.notificationSettings) data.notificationSettings = JSON.stringify(data.notificationSettings);
+            
+            const keys = Object.keys(data);
+            const values = Object.values(data);
+            const setClause = keys.map(k => `${k} = ?`).join(',');
+            await db.run(`UPDATE settings SET ${setClause} WHERE id = 1`, values);
+            res.json({ message: 'Settings saved' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
     });
 
     // Notifications
@@ -453,7 +514,7 @@ async function startServer() {
         res.json({ message: 'Cleared' });
     });
     
-    // Special handling for sales
+    // Special handling for sales clearing
     dbRouter.post('/sales/clear-all', async (req, res) => {
         const { routerId } = req.body;
         if (routerId) {
@@ -463,9 +524,6 @@ async function startServer() {
         }
         res.json({ message: 'Sales cleared' });
     });
-    
-    // Routers (specific endpoint to handle potential encryption later)
-    createCrud('routers');
 
     app.use('/api/db', dbRouter);
 
@@ -560,7 +618,94 @@ async function startServer() {
     });
     app.use('/api/license', licenseRouter);
 
-    // --- System / Updater / Remote ---
+    // --- System / Host Status ---
+    app.get('/api/host-status', protect, async (req, res) => {
+        try {
+            const cpu = await si.currentLoad();
+            const mem = await si.mem();
+            const fsSize = await si.fsSize();
+            // Use root volume or first available
+            const disk = fsSize.find(d => d.mount === '/') || fsSize[0] || { size: 1, used: 0, use: 0 };
+            
+            res.json({
+                cpuUsage: cpu.currentLoad,
+                memory: {
+                    total: (mem.total / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+                    free: (mem.available / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+                    used: (mem.active / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+                    percent: (mem.active / mem.total) * 100
+                },
+                disk: {
+                    total: (disk.size / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+                    used: (disk.used / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+                    free: ((disk.size - disk.used) / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+                    percent: disk.use
+                }
+            });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.get('/api/host/logs', protect, async (req, res) => {
+        // Stub: In a real environment, you would read /var/log/syslog or pm2 logs
+        // This just returns a message for now to prevent 404
+        const type = req.query.type || 'panel-ui';
+        let logCommand = '';
+        
+        // Attempt to read logs via pm2 if available, otherwise mock
+        if (type.includes('nginx')) {
+            logCommand = type === 'nginx-access' ? 'tail -n 50 /var/log/nginx/access.log' : 'tail -n 50 /var/log/nginx/error.log';
+        } else {
+            const appName = type === 'panel-ui' ? 'mikrotik-manager' : 'mikrotik-api-backend';
+            logCommand = `pm2 logs ${appName} --lines 50 --nostream --raw`;
+        }
+
+        exec(logCommand, (error, stdout, stderr) => {
+            if (error) {
+               return res.send(`Error reading logs: ${error.message}\n${stderr}`);
+            }
+            res.send(stdout || 'No logs found.');
+        });
+    });
+
+    // --- Database Backups ---
+    app.get('/api/list-backups', protect, requireSuperadmin, async (req, res) => {
+        try {
+            const files = await fs.promises.readdir(BACKUP_DIR);
+            res.json(files.filter(f => f.endsWith('.db')));
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.get('/api/create-backup', protect, requireSuperadmin, async (req, res) => {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupName = `panel_backup_${timestamp}.db`;
+        const backupPath = path.join(BACKUP_DIR, backupName);
+        
+        try {
+            await fs.promises.copyFile(DB_PATH, backupPath);
+            res.json({ message: 'Backup created successfully' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+    
+    app.post('/api/delete-backup', protect, requireSuperadmin, async (req, res) => {
+        try {
+            const { backupFile } = req.body;
+            if (!backupFile) return res.status(400).json({ message: 'Filename required' });
+            const filePath = path.join(BACKUP_DIR, backupFile);
+            if (!filePath.startsWith(BACKUP_DIR)) return res.status(403).json({ message: 'Invalid path' });
+            
+            await fs.promises.unlink(filePath);
+            res.json({ message: 'Deleted' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     app.get('/api/update-status', protect, (req, res) => {
         // Placeholder for real git check
         res.json({ status: 'uptodate', message: 'System is up to date (mock).' });
@@ -586,13 +731,17 @@ async function startServer() {
         }
     });
 
-    // --- Super Admin & Backups ---
+    // --- Super Admin & Full Panel Backups ---
     const superRouter = express.Router();
     superRouter.use(protect, requireSuperadmin);
     
     superRouter.get('/list-full-backups', async (req, res) => {
-        const files = await fs.promises.readdir(BACKUP_DIR);
-        res.json(files.filter(f => f.endsWith('.mk')));
+        try {
+            const files = await fs.promises.readdir(BACKUP_DIR);
+            res.json(files.filter(f => f.endsWith('.mk')));
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
     });
     
     // ... (Implement create/delete/restore logic using child_process if needed) ...
