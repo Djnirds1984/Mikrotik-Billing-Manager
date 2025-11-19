@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { RouterConfigWithId, MikroTikFile } from '../types.ts';
 import { listFiles, getFileContent, saveFileContent, createFile } from '../services/mikrotikService.ts';
 import { Loader } from './Loader.tsx';
+// FIX: Import missing CodeBracketIcon.
 import { CodeBracketIcon, EyeIcon } from '../constants.tsx';
 
 const DEFAULT_PORTAL_HTML = `<!DOCTYPE html>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getDataplicityStatus, streamUninstallDataplicity, streamInstallDataplicity } from '../services/dataplicityService.ts';
 import type { DataplicityStatus } from '../types.ts';
 import { Loader } from './Loader.tsx';
+// FIX: Import missing DataplicityIcon.
 import { DataplicityIcon, CheckCircleIcon, TrashIcon } from '../constants.tsx';
 import { SudoInstructionBox } from './SudoInstructionBox.tsx';
 

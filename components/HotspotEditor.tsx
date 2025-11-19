@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { listFiles, getFileContent, saveFileContent, createFile } from '../services/mikrotikService.ts';
 import type { RouterConfigWithId, MikroTikFile } from '../types.ts';
 import { Loader } from './Loader.tsx';
+// FIX: Import missing FolderIcon and FileIcon.
 import { FolderIcon, FileIcon } from '../constants.tsx';
 
 type Status = 'browsing' | 'loading_list' | 'loading_content' | 'editing' | 'saving' | 'error';

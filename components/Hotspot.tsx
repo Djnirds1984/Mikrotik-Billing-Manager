@@ -24,6 +24,7 @@ import {
 import { generateHotspotSetupScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
+// FIX: Import missing CodeBracketIcon.
 import { RouterIcon, UsersIcon, ServerIcon, EditIcon, TrashIcon, ChipIcon, CodeBracketIcon, ExclamationTriangleIcon } from '../constants.tsx';
 import { NodeMcuManager } from './NodeMcuManager.tsx';
 import { HotspotEditor } from './HotspotEditor.tsx';

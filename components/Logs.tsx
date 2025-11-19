@@ -3,6 +3,7 @@ import type { RouterConfigWithId, MikroTikLogEntry } from '../types.ts';
 import { getRouterLogs } from '../services/mikrotikService.ts';
 import { getHostLog } from '../services/panelService.ts';
 import { Loader } from './Loader.tsx';
+// FIX: Import missing CodeBracketIcon.
 import { RouterIcon, CodeBracketIcon } from '../constants.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 

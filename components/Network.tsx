@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, VlanInterface, Interface, IpAddress, IpRoute, IpRouteData, WanRoute, FailoverStatus, DhcpServer, DhcpLease, IpPool, DhcpServerData, DhcpServerSetupParams } from '../types.ts';
 import { 
@@ -11,6 +12,7 @@ import {
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
+// FIX: Import missing BridgeIcon.
 import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon, ServerIcon, CircleStackIcon, BridgeIcon } from '../constants.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 import { Firewall } from './Firewall.tsx';

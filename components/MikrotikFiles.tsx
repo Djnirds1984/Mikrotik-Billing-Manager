@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, MikroTikFile } from '../types.ts';
 import { listFiles, getFileContent, saveFileContent } from '../services/mikrotikService.ts';
 import { Loader } from './Loader.tsx';
+// FIX: Import missing FolderIcon and FileIcon.
 import { RouterIcon, FolderIcon, FileIcon } from '../constants.tsx';
 
 type View = 'browser' | 'editor';

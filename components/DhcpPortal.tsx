@@ -5,6 +5,7 @@ import { DhcpCaptivePortalInstaller } from './DhcpCaptivePortalInstaller.tsx';
 import { DhcpPortalServerManager } from './DhcpPortalServerManager.tsx';
 import { DhcpPortalPageEditor } from './DhcpPortalPageEditor.tsx';
 import { DhcpBillingPlans } from './DhcpBillingPlans.tsx';
+// FIX: Import missing CodeBracketIcon.
 import { UsersIcon, ServerIcon, RouterIcon, CodeBracketIcon, SignalIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import type { InventoryItem, ExpenseRecord } from '../types.ts';
+// FIX: Import missing ReceiptPercentIcon.
 import { EditIcon, TrashIcon, SearchIcon, ArchiveBoxIcon, ReceiptPercentIcon, CurrencyDollarIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 

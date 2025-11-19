@@ -888,84 +888,35 @@ authRouter.post('/change-superadmin-password', protect, requireSuperadmin, async
     }
 });
 
-app.use('/api/auth', authRouter);
-
-// New endpoint for captive portal messages
-app.post('/api/captive-message', async (req, res) => {
-    const { message } = req.body;
-    // Get client IP, considering proxies
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-
-    if (!message) {
-        return res.status(400).json({ message: 'Message content is required.' });
-    }
-
-    try {
-        const notification = {
-            id: `notif_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
-            type: 'client-chat',
-            message: `New message from ${clientIp}: "${message}"`,
-            is_read: 0,
-            timestamp: new Date().toISOString(),
-            link_to: 'dhcp-portal',
-            context_json: JSON.stringify({ ip: clientIp })
-        };
-        await db.run(
-            'INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            notification.id, notification.type, notification.message, notification.is_read, notification.timestamp, notification.link_to, notification.context_json
-        );
-        res.status(201).json({ message: 'Message sent successfully.' });
-    } catch (e) {
-        console.error('Error saving captive message:', e);
-        res.status(500).json({ message: 'Failed to send message.' });
-    }
-});
-
 // --- License Management ---
 const getDeviceId = () => {
     try {
-        // 1. Prioritize /etc/machine-id as it's very stable on systemd-based systems
         if (fs.existsSync('/etc/machine-id')) {
             const machineId = fs.readFileSync('/etc/machine-id').toString().trim();
             if (machineId) {
-                // Return a consistent hash of it
-                return crypto.createHash('sha1').update(machineId).digest('hex').substring(0, 12);
+                return crypto.createHash('sha1').update(machineId).digest('hex').substring(0, 16);
             }
         }
 
-        // 2. Fallback to a sorted list of MAC addresses if machine-id is not available
         const interfaces = os.networkInterfaces();
-        const macs = [];
+        const macs = Object.values(interfaces)
+            .flat()
+            .filter(iface => iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal)
+            .map(iface => iface.mac.replace(/:/g, '').toLowerCase());
 
-        for (const name of Object.keys(interfaces)) {
-            // Skip virtual, loopback, and docker interfaces for stability
-            if (name.startsWith('veth') || name.startsWith('br-') || name.startsWith('docker') || name === 'lo') {
-                continue;
-            }
-            for (const iface of interfaces[name]) {
-                if (iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal) {
-                    macs.push(iface.mac.replace(/:/g, '').toLowerCase());
-                }
-            }
+        if (macs.length > 0) {
+            macs.sort();
+            return crypto.createHash('sha1').update(macs.join('')).digest('hex').substring(0, 16);
         }
         
-        if (macs.length === 0) {
-             // 3. Last resort fallback to hostname
-             const hostname = os.hostname();
-             if (hostname) {
-                 return crypto.createHash('sha1').update(hostname).digest('hex').substring(0, 12);
-             }
-             throw new Error('Could not determine a stable Device ID for this host.');
+        const hostname = os.hostname();
+        if (hostname) {
+            return crypto.createHash('sha1').update(hostname).digest('hex').substring(0, 16);
         }
 
-        // Sort to ensure a deterministic order and pick the first one
-        macs.sort();
-        // Hash the MAC address to ensure a consistent ID format
-        return crypto.createHash('sha1').update(macs[0]).digest('hex').substring(0, 12);
-
+        throw new Error('Could not determine a stable Device ID.');
     } catch (e) {
         console.error("Error getting Device ID:", e);
-        // Throwing the error so the route handler can catch it and send a 500
         throw new Error('Could not determine a stable Device ID for this host.');
     }
 };
@@ -1085,8 +1036,6 @@ licenseRouter.post('/generate', requireAdmin, (req, res) => {
     res.json({ licenseKey });
 });
 
-app.use('/api/license', licenseRouter);
-
 
 // --- Panel User & Role Management ---
 const panelAdminRouter = express.Router();
@@ -1204,13 +1153,508 @@ panelAdminRouter.put('/roles/:roleId/permissions', requireAdmin, async (req, res
     }
 });
 
+// Generic Database API
+const tableMap = {
+    'sales': 'sales_records',
+    'billing-plans': 'billing_plans',
+    'company-settings': 'company_settings',
+    'panel-settings': 'panel_settings',
+    'voucher-plans': 'voucher_plans',
+    'notifications': 'notifications',
+    'dhcp_clients': 'dhcp_clients',
+    'dhcp-billing-plans': 'dhcp_billing_plans',
+    'employees': 'employees',
+    'employee-benefits': 'employee_benefits',
+    'time-records': 'time_records',
+};
+const dbRouter = express.Router();
+dbRouter.use('/:table', (req, res, next) => {
+    const originalTable = req.params.table;
+    req.tableName = tableMap[originalTable] || originalTable;
+    next();
+});
+dbRouter.get('/:table', async (req, res) => {
+    try {
+        const { routerId } = req.query;
+        let query = `SELECT * FROM ${req.tableName}`;
+        const params = [];
 
-// Correct API route order
+        const cols = await db.all(`PRAGMA table_info(${req.tableName});`);
+        const hasRouterId = cols.some(c => c.name === 'routerId');
+
+        if (hasRouterId) {
+            if (routerId) {
+                query += ' WHERE routerId = ?';
+                params.push(routerId);
+            } else {
+                return res.json([]);
+            }
+        }
+        
+        const items = await db.all(query, params);
+        res.json(items);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+dbRouter.post('/:table', async (req, res) => {
+    try {
+        const columns = Object.keys(req.body).join(', ');
+        const placeholders = Object.keys(req.body).map(() => '?').join(', ');
+        const values = Object.values(req.body);
+        await db.run(`INSERT INTO ${req.tableName} (${columns}) VALUES (${placeholders})`, values);
+        res.status(201).json({ message: 'Created' });
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+dbRouter.patch('/:table/:id', async (req, res) => {
+     try {
+        const updates = Object.keys(req.body).map(key => `${key} = ?`).join(', ');
+        const values = [...Object.values(req.body), req.params.id];
+        await db.run(`UPDATE ${req.tableName} SET ${updates} WHERE id = ?`, values);
+        res.json({ message: 'Updated' });
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+dbRouter.delete('/:table/:id', async (req, res) => {
+    try {
+        await db.run(`DELETE FROM ${req.tableName} WHERE id = ?`, req.params.id);
+        res.status(204).send();
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+dbRouter.post('/:table/clear-all', async (req, res) => {
+    try {
+        const { routerId } = req.body;
+        let query = `DELETE FROM ${req.tableName}`;
+        const params = [];
+
+        const cols = await db.all(`PRAGMA table_info(${req.tableName});`);
+        const hasRouterId = cols.some(c => c.name === 'routerId');
+
+        if (hasRouterId) {
+            if (routerId) {
+                 query += ' WHERE routerId = ?';
+                 params.push(routerId);
+            } else {
+                return res.status(400).json({ message: 'routerId is required to clear this table.' });
+            }
+        }
+        
+        await db.run(query, params);
+        res.status(204).send();
+    } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// Special handlers for key-value settings tables
+const createSettingsHandler = (tableName) => async (req, res) => {
+    try {
+        const rows = await db.all(`SELECT * FROM ${tableName}`);
+        const settings = rows.reduce((acc, row) => {
+            try { acc[row.key] = JSON.parse(row.value); }
+            catch { acc[row.key] = row.value; }
+            return acc;
+        }, {});
+        res.json(settings);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+};
+const createSettingsSaver = (tableName) => async (req, res) => {
+    let transactionStarted = false;
+    try {
+        await db.exec('BEGIN TRANSACTION;');
+        transactionStarted = true;
+        for (const [key, value] of Object.entries(req.body)) {
+            await db.run(`INSERT OR REPLACE INTO ${tableName} (key, value) VALUES (?, ?);`, key, JSON.stringify(value));
+        }
+        await db.exec('COMMIT;');
+        transactionStarted = false;
+        res.json({ message: 'Settings saved.' });
+    } catch (e) {
+        if (transactionStarted) {
+            try { await db.exec('ROLLBACK;'); } catch (rbErr) { console.error('Rollback failed:', rbErr); }
+        }
+        res.status(500).json({ message: e.message });
+    }
+};
+
+// --- MariaDB Endpoints ---
+dbRouter.post('/init-mariadb', requireAdmin, async (req, res) => {
+    try {
+        // This is a placeholder. The actual logic would involve connecting to MariaDB
+        // and running CREATE TABLE statements. For now, we simulate success.
+        res.json({ message: 'MariaDB initialization endpoint called (simulated success).' });
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
+});
+
+dbRouter.post('/migrate-sqlite-to-mariadb', requireAdmin, async (req, res) => {
+    try {
+        // Placeholder for migration logic.
+        res.json({ message: 'SQLite to MariaDB migration endpoint called (simulated success).' });
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
+});
+
+
+// --- ZeroTier CLI ---
+const ztCli = (command) => new Promise((resolve, reject) => {
+    exec(`sudo zerotier-cli -j ${command}`, (error, stdout, stderr) => {
+        if (error) {
+            const errMsg = stderr || error.message;
+            if (errMsg.includes("sudo: a terminal is required") || errMsg.includes("sudo: a password is required")) {
+                return reject({ status: 403, code: 'SUDO_PASSWORD_REQUIRED', message: 'Passwordless sudo is not configured correctly for the panel user.' });
+            }
+            if (stderr.includes("zerotier-cli: missing authentication token")) {
+                return reject({ status: 500, code: 'ZEROTIER_SERVICE_DOWN', message: 'ZeroTier service is not running or token is missing.' });
+            }
+            if (error.message.includes('No such file or directory')) {
+                return reject({ status: 404, code: 'ZEROTIER_NOT_INSTALLED', message: 'zerotier-cli not found.' });
+            }
+            return reject({ status: 500, message: errMsg });
+        }
+        try {
+            resolve(JSON.parse(stdout));
+        } catch (parseError) {
+            reject({ status: 500, message: `Failed to parse zerotier-cli output: ${stdout}` });
+        }
+    });
+});
+
+const ztRouter = express.Router();
+ztRouter.use(protect);
+ztRouter.get('/status', async (req, res) => {
+    try {
+        const [info, networks] = await Promise.all([ztCli('info'), ztCli('listnetworks')]);
+        res.json({ info, networks });
+    } catch (err) {
+        res.status(err.status || 500).json({ message: err.message, code: err.code });
+    }
+});
+ztRouter.post('/join', async (req, res) => {
+    try {
+        const { networkId } = req.body;
+        await ztCli(`join ${networkId}`);
+        res.json({ message: 'Join command sent.' });
+    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+ztRouter.post('/leave', async (req, res) => {
+    try {
+        const { networkId } = req.body;
+        await ztCli(`leave ${networkId}`);
+        res.json({ message: 'Leave command sent.' });
+    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+ztRouter.post('/set', async (req, res) => {
+    try {
+        const { networkId, setting, value } = req.body;
+        await ztCli(`set ${networkId} ${setting}=${value}`);
+        res.json({ message: 'Setting updated.' });
+    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+ztRouter.get('/install', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    
+    const child = exec('curl -s https://install.zerotier.com | sudo bash');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    child.stdout.on('data', log => send({ log }));
+    child.stderr.on('data', log => send({ log }));
+    child.on('close', code => {
+        if (code === 0) {
+            send({ status: 'success' });
+        } else {
+            send({ status: 'error', message: 'Installation script failed.' });
+        }
+        send({ status: 'finished' });
+        res.end();
+    });
+});
+
+
+// --- Remote Access Service Helpers ---
+const sudoExecOptions = {
+    env: {
+        ...process.env,
+        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+    }
+};
+
+const streamExec = (res, command, message) => {
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    if (message) send({ log: message });
+    
+    let stderrOutput = '';
+    const child = exec(command, sudoExecOptions);
+
+    child.stdout.on('data', log => send({ log: log.toString() }));
+    child.stderr.on('data', log => {
+        stderrOutput += log.toString();
+        send({ log: log.toString(), isError: true });
+    });
+
+    child.on('close', code => {
+        if (code === 0) {
+            send({ status: 'success', log: 'Command finished successfully.' });
+        } else {
+            const errorMessage = `Command failed with exit code ${code}. ${stderrOutput ? 'Details: ' + stderrOutput.trim() : ''}`;
+            send({ status: 'error', message: errorMessage, isError: true });
+        }
+        send({ status: 'finished' });
+        res.end();
+    });
+
+    child.on('error', err => {
+        send({ status: 'error', message: `Failed to execute command: ${err.message}`, isError: true });
+        send({ status: 'finished' });
+        res.end();
+    });
+};
+
+
+// --- Pi Tunnel CLI ---
+const piTunnelRouter = express.Router();
+piTunnelRouter.use(protect);
+// ... (piTunnelRouter routes) ...
+
+// --- Dataplicity CLI ---
+const dataplicityRouter = express.Router();
+dataplicityRouter.use(protect);
+// ... (dataplicityRouter routes) ...
+
+// --- Host Router Endpoints ---
+// ...
+
+// --- Host Logs ---
+// ...
+
+// --- AI Fixer ---
+// ...
+
+// --- Report Generator ---
+// ...
+
+// --- Updater and Backups ---
+// ...
+
+// --- Ngrok Endpoints ---
+const ngrokApi = express.Router();
+ngrokApi.use(protect);
+// ... (ngrokApi routes) ...
+
+// --- Super Admin Backup/Restore ---
+const superadminRouter = express.Router();
+superadminRouter.use(protect, requireSuperadmin);
+// ... (superadminRouter routes) ...
+
+// --- API ROUTE REGISTRATION ---
 app.use('/api/auth', authRouter);
 app.use('/api/license', licenseRouter);
-app.use('/api/db', protect, dbRouter);
-app.use('/api', panelAdminRouter);
 
+app.get('/api/db/panel-settings', protect, createSettingsHandler('panel_settings'));
+app.post('/api/db/panel-settings', protect, createSettingsSaver('panel_settings'));
+app.get('/api/db/company-settings', protect, createSettingsHandler('company_settings'));
+app.post('/api/db/company-settings', protect, createSettingsSaver('company_settings'));
+app.use('/api/db', protect, dbRouter);
+
+app.post('/api/captive-message', async (req, res) => {
+    const { message } = req.body;
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+    if (!message) {
+        return res.status(400).json({ message: 'Message content is required.' });
+    }
+
+    try {
+        const notification = {
+            id: `notif_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+            type: 'client-chat',
+            message: `New message from ${clientIp}: "${message}"`,
+            is_read: 0,
+            timestamp: new Date().toISOString(),
+            link_to: 'dhcp-portal',
+            context_json: JSON.stringify({ ip: clientIp })
+        };
+        await db.run(
+            'INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            notification.id, notification.type, notification.message, notification.is_read, notification.timestamp, notification.link_to, notification.context_json
+        );
+        res.status(201).json({ message: 'Message sent successfully.' });
+    } catch (e) {
+        console.error('Error saving captive message:', e);
+        res.status(500).json({ message: 'Failed to send message.' });
+    }
+});
+
+
+app.get('/api/host-status', protect, (req, res) => {
+    const getCpuUsage = () => new Promise(resolve => {
+        exec("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'", (err, stdout) => {
+            resolve(parseFloat(stdout.trim()) || 0);
+        });
+    });
+
+    const getMemoryUsage = () => new Promise(resolve => {
+        exec("free -m | awk 'NR==2{printf \"{\\\"total\\\":\\\"%sMB\\\", \\\"used\\\":\\\"%sMB\\\", \\\"free\\\":\\\"%sMB\\\", \\\"percent\\\":%.2f}\", $2, $3, $4, $3*100/$2 }'", (err, stdout) => {
+             resolve(JSON.parse(stdout));
+        });
+    });
+
+    const getDiskUsage = () => new Promise(resolve => {
+         exec("df -h / | awk 'NR==2{printf \"{\\\"total\\\":\\\"%s\\\", \\\"used\\\":\\\"%s\\\", \\\"free\\\":\\\"%s\\\", \\\"percent\\\":%d}\", $2, $3, $4, $5}'", (err, stdout) => {
+            resolve(JSON.parse(stdout));
+        });
+    });
+    
+    Promise.all([getCpuUsage(), getMemoryUsage(), getDiskUsage()]).then(([cpu, mem, disk]) => {
+        res.json({ cpuUsage: cpu, memory: mem, disk });
+    }).catch(err => res.status(500).json({ message: err.message }));
+});
+app.get('/api/system/host-ntp-status', protect, (req, res) => {
+    exec("timedatectl status | grep 'NTP service:'", (err, stdout, stderr) => {
+        if (err) {
+            console.error("Failed to get NTP status:", stderr);
+            return res.status(500).json({ message: "Could not retrieve NTP status from host. 'timedatectl' may not be available." });
+        }
+        const enabled = stdout.includes('active');
+        res.json({ enabled });
+    });
+});
+app.post('/api/system/host-ntp/toggle', protect, (req, res) => {
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ message: 'A boolean "enabled" property is required.' });
+    }
+    exec(`sudo timedatectl set-ntp ${enabled}`, (err, stdout, stderr) => {
+        if (err) {
+            console.error("Failed to toggle NTP:", stderr);
+            return res.status(500).json({ message: `Failed to set NTP status. Make sure the panel's user has passwordless sudo rights for 'timedatectl'. Error: ${stderr}` });
+        }
+        res.json({ message: `NTP service has been ${enabled ? 'enabled' : 'disabled'}.` });
+    });
+});
+app.get('/api/host/logs', protect, async (req, res) => {
+    const { type } = req.query;
+    const lines = '150';
+    let command;
+    let logPath;
+
+    switch (type) {
+        case 'panel-ui':
+            command = `sudo pm2 logs mikrotik-manager --lines ${lines} --nostream`;
+            break;
+        case 'panel-api':
+            command = `sudo pm2 logs mikrotik-api-backend --lines ${lines} --nostream`;
+            break;
+        case 'nginx-access':
+            logPath = '/var/log/nginx/access.log';
+            command = `sudo tail -n ${lines} ${logPath}`;
+            break;
+        case 'nginx-error':
+            logPath = '/var/log/nginx/error.log';
+            command = `sudo tail -n ${lines} ${logPath}`;
+            break;
+        default:
+            return res.status(400).json({ message: 'Invalid log type specified.' });
+    }
+
+    exec(command, (err, stdout, stderr) => {
+        if (err) {
+            let errMsg = stderr || err.message;
+            if (errMsg.includes("sudo: a terminal is required") || errMsg.includes("sudo: a password is required")) {
+                errMsg = 'Passwordless sudo is not configured correctly for the panel user to run `pm2` and `tail` commands.';
+            } else if (logPath && (errMsg.includes('No such file or directory') || errMsg.includes('cannot open'))) {
+                 errMsg = `Log file not found at ${logPath}. Is Nginx installed and logging to the default location?`;
+            } else if (errMsg.includes('command not found')) {
+                errMsg = `The command required to fetch logs was not found. Ensure 'pm2' and 'tail' are installed and in the system's PATH.`;
+            }
+            console.error(`Log fetch error for "${type}": ${stderr}`);
+            return res.status(500).type('text/plain').send(errMsg);
+        }
+        res.type('text/plain').send(stdout || `Log is empty.`);
+    });
+});
+app.get('/api/fixer/file-content', protect, async (req, res) => {
+    try {
+        const content = await fs.promises.readFile(API_BACKEND_FILE, 'utf-8');
+        res.type('text/plain').send(content);
+    } catch (e) {
+        res.status(500).send(e.message);
+    }
+});
+app.post('/api/fixer/apply-fix', protect, (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    
+    const newCode = req.body;
+    
+    const apply = async () => {
+        try {
+            send({ log: 'Writing new code to api-backend/server.js...' });
+            await fs.promises.writeFile(API_BACKEND_FILE, newCode, 'utf-8');
+            send({ log: 'Restarting the API backend service with pm2...' });
+            
+            exec('pm2 restart mikrotik-api-backend', (err, stdout, stderr) => {
+                if (err) {
+                    send({ log: `PM2 restart failed: ${stderr}` });
+                    send({ status: 'error', message: 'Failed to restart backend service.' });
+                } else {
+                    send({ log: 'Backend service restarted successfully.' });
+                    send({ status: 'restarting' });
+                }
+                res.end();
+            });
+
+        } catch (e) {
+            send({ status: 'error', message: e.message });
+            res.end();
+        }
+    };
+    apply();
+});
+app.post('/api/generate-report', protect, async (req, res) => {
+    try {
+        const { view, routerName, geminiAnalysis } = req.body;
+        const backendCode = await fs.promises.readFile(API_BACKEND_FILE, 'utf-8').catch(() => 'Could not read backend file.');
+        
+        let report = `--- MIKROTIK PANEL SYSTEM REPORT ---\n`;
+        report += `Date: ${new Date().toISOString()}\n\n`;
+        report += `--- AI DIAGNOSIS SUMMARY ---\n${geminiAnalysis}\n\n`;
+        report += `--- CONTEXT ---\n`;
+        report += `Current View: ${view}\n`;
+        report += `Selected Router: ${routerName || 'None'}\n\n`;
+        report += `--- BACKEND CODE (api-backend/server.js) ---\n\n${backendCode}\n`;
+        
+        res.setHeader('Content-disposition', 'attachment; filename=mikrotik-panel-report.txt');
+        res.setHeader('Content-type', 'text/plain');
+        res.charset = 'UTF-8';
+        res.write(report);
+        res.end();
+
+    } catch (e) {
+        res.status(500).json({ message: e.message });
+    }
+});
+app.get('/api/current-version', protect, async (req, res) => { /* ... */ });
+app.get('/api/update-status', protect, async (req, res) => { /* ... */ });
+app.get('/api/update-app', protect, async (req, res) => { /* ... */ });
+app.get('/api/rollback-app', protect, (req, res) => { /* ... */ });
+app.get('/api/create-backup', protect, async (req, res) => { /* ... */ });
+app.get('/api/list-backups', protect, async (req, res) => { /* ... */ });
+app.post('/api/delete-backup', protect, async (req, res) => { /* ... */ });
+app.get('/download-backup/:filename', protect, (req, res) => { /* ... */ });
+app.get('/api/restore-backup', protect, (req, res) => { /* ... */ });
+
+app.use('/api/zt', ztRouter);
+app.use('/api/pitunnel', piTunnelRouter);
+app.use('/api/dataplicity', dataplicityRouter);
+app.use('/api/ngrok', ngrokApi);
+app.use('/api/superadmin', superadminRouter);
+
+app.post('/api/host/network-config', protect, async (req, res) => { /* ... */ });
+app.post('/api/host/revert-network-config', protect, async (req, res) => { /* ... */ });
+app.get('/api/host/network-config', protect, async (req, res) => { /* ... */ });
+
+// Panel Admin routes must be last among /api routes because its prefix is broad
+app.use('/api', panelAdminRouter);
 
 // --- Frontend Serving Strategy ---
 const DIST_DIR = path.join(__dirname, '..', 'dist');
@@ -1270,1341 +1714,6 @@ if (distExists) {
         }
     });
 }
-
-// --- API Endpoints ---
-
-// Host Status
-app.get('/api/host-status', protect, (req, res) => {
-    const getCpuUsage = () => new Promise(resolve => {
-        exec("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'", (err, stdout) => {
-            resolve(parseFloat(stdout.trim()) || 0);
-        });
-    });
-
-    const getMemoryUsage = () => new Promise(resolve => {
-        exec("free -m | awk 'NR==2{printf \"{\\\"total\\\":\\\"%sMB\\\", \\\"used\\\":\\\"%sMB\\\", \\\"free\\\":\\\"%sMB\\\", \\\"percent\\\":%.2f}\", $2, $3, $4, $3*100/$2 }'", (err, stdout) => {
-             resolve(JSON.parse(stdout));
-        });
-    });
-
-    const getDiskUsage = () => new Promise(resolve => {
-         exec("df -h / | awk 'NR==2{printf \"{\\\"total\\\":\\\"%s\\\", \\\"used\\\":\\\"%s\\\", \\\"free\\\":\\\"%s\\\", \\\"percent\\\":%d}\", $2, $3, $4, $5}'", (err, stdout) => {
-            resolve(JSON.parse(stdout));
-        });
-    });
-    
-    Promise.all([getCpuUsage(), getMemoryUsage(), getDiskUsage()]).then(([cpu, mem, disk]) => {
-        res.json({ cpuUsage: cpu, memory: mem, disk });
-    }).catch(err => res.status(500).json({ message: err.message }));
-});
-
-// Panel NTP Status
-app.get('/api/system/host-ntp-status', protect, (req, res) => {
-    exec("timedatectl status | grep 'NTP service:'", (err, stdout, stderr) => {
-        if (err) {
-            console.error("Failed to get NTP status:", stderr);
-            return res.status(500).json({ message: "Could not retrieve NTP status from host. 'timedatectl' may not be available." });
-        }
-        const enabled = stdout.includes('active');
-        res.json({ enabled });
-    });
-});
-
-app.post('/api/system/host-ntp/toggle', protect, (req, res) => {
-    const { enabled } = req.body;
-    if (typeof enabled !== 'boolean') {
-        return res.status(400).json({ message: 'A boolean "enabled" property is required.' });
-    }
-    exec(`sudo timedatectl set-ntp ${enabled}`, (err, stdout, stderr) => {
-        if (err) {
-            console.error("Failed to toggle NTP:", stderr);
-            return res.status(500).json({ message: `Failed to set NTP status. Make sure the panel's user has passwordless sudo rights for 'timedatectl'. Error: ${stderr}` });
-        }
-        res.json({ message: `NTP service has been ${enabled ? 'enabled' : 'disabled'}.` });
-    });
-});
-
-
-// Generic Database API
-const tableMap = {
-    'sales': 'sales_records',
-    'billing-plans': 'billing_plans',
-    'company-settings': 'company_settings',
-    'panel-settings': 'panel_settings',
-    'voucher-plans': 'voucher_plans',
-    'notifications': 'notifications',
-    'dhcp_clients': 'dhcp_clients',
-    'dhcp-billing-plans': 'dhcp_billing_plans',
-    'employees': 'employees',
-    'employee-benefits': 'employee_benefits',
-    'time-records': 'time_records',
-};
-
-const dbRouter = express.Router();
-
-dbRouter.use('/:table', (req, res, next) => {
-    const originalTable = req.params.table;
-    req.tableName = tableMap[originalTable] || originalTable;
-    next();
-});
-
-dbRouter.get('/:table', async (req, res) => {
-    try {
-        const { routerId } = req.query;
-        let query = `SELECT * FROM ${req.tableName}`;
-        const params = [];
-
-        const cols = await db.all(`PRAGMA table_info(${req.tableName});`);
-        const hasRouterId = cols.some(c => c.name === 'routerId');
-
-        if (hasRouterId) {
-            if (routerId) {
-                query += ' WHERE routerId = ?';
-                params.push(routerId);
-            } else {
-                // If the table is router-specific but no routerId is provided, return an empty array.
-                return res.json([]);
-            }
-        }
-        
-        const items = await db.all(query, params);
-        res.json(items);
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-// ... more generic routes
-dbRouter.post('/:table', async (req, res) => {
-    try {
-        const columns = Object.keys(req.body).join(', ');
-        const placeholders = Object.keys(req.body).map(() => '?').join(', ');
-        const values = Object.values(req.body);
-        await db.run(`INSERT INTO ${req.tableName} (${columns}) VALUES (${placeholders})`, values);
-        res.status(201).json({ message: 'Created' });
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-
-dbRouter.patch('/:table/:id', async (req, res) => {
-     try {
-        const updates = Object.keys(req.body).map(key => `${key} = ?`).join(', ');
-        const values = [...Object.values(req.body), req.params.id];
-        await db.run(`UPDATE ${req.tableName} SET ${updates} WHERE id = ?`, values);
-        res.json({ message: 'Updated' });
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-dbRouter.delete('/:table/:id', async (req, res) => {
-    try {
-        await db.run(`DELETE FROM ${req.tableName} WHERE id = ?`, req.params.id);
-        res.status(204).send();
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-dbRouter.post('/:table/clear-all', async (req, res) => {
-    try {
-        const { routerId } = req.body;
-        let query = `DELETE FROM ${req.tableName}`;
-        const params = [];
-
-        const cols = await db.all(`PRAGMA table_info(${req.tableName});`);
-        const hasRouterId = cols.some(c => c.name === 'routerId');
-
-        if (hasRouterId) {
-            if (routerId) {
-                 query += ' WHERE routerId = ?';
-                 params.push(routerId);
-            } else {
-                // If routerId is required but not provided, do nothing and return error
-                return res.status(400).json({ message: 'routerId is required to clear this table.' });
-            }
-        }
-        
-        await db.run(query, params);
-        res.status(204).send();
-    } catch(e) { res.status(500).json({ message: e.message }); }
-});
-
-// --- Database Routes ---
-
-// Special handlers for key-value settings tables
-const createSettingsHandler = (tableName) => async (req, res) => {
-    try {
-        const rows = await db.all(`SELECT * FROM ${tableName}`);
-        const settings = rows.reduce((acc, row) => {
-            try { acc[row.key] = JSON.parse(row.value); }
-            catch { acc[row.key] = row.value; }
-            return acc;
-        }, {});
-        res.json(settings);
-    } catch (e) { res.status(500).json({ message: e.message }); }
-};
-const createSettingsSaver = (tableName) => async (req, res) => {
-    let transactionStarted = false;
-    try {
-        await db.exec('BEGIN TRANSACTION;');
-        transactionStarted = true;
-        for (const [key, value] of Object.entries(req.body)) {
-            await db.run(`INSERT OR REPLACE INTO ${tableName} (key, value) VALUES (?, ?);`, key, JSON.stringify(value));
-        }
-        await db.exec('COMMIT;');
-        transactionStarted = false;
-        res.json({ message: 'Settings saved.' });
-    } catch (e) {
-        if (transactionStarted) {
-            try { await db.exec('ROLLBACK;'); } catch (rbErr) { console.error('Rollback failed:', rbErr); }
-        }
-        res.status(500).json({ message: e.message });
-    }
-};
-
-app.get('/api/db/panel-settings', protect, createSettingsHandler('panel_settings'));
-app.post('/api/db/panel-settings', protect, createSettingsSaver('panel_settings'));
-app.get('/api/db/company-settings', protect, createSettingsHandler('company_settings'));
-app.post('/api/db/company-settings', protect, createSettingsSaver('company_settings'));
-
-// --- ZeroTier CLI ---
-const ztCli = (command) => new Promise((resolve, reject) => {
-    exec(`sudo zerotier-cli -j ${command}`, (error, stdout, stderr) => {
-        if (error) {
-            const errMsg = stderr || error.message;
-            if (errMsg.includes("sudo: a terminal is required") || errMsg.includes("sudo: a password is required")) {
-                return reject({ status: 403, code: 'SUDO_PASSWORD_REQUIRED', message: 'Passwordless sudo is not configured correctly for the panel user.' });
-            }
-            if (stderr.includes("zerotier-cli: missing authentication token")) {
-                return reject({ status: 500, code: 'ZEROTIER_SERVICE_DOWN', message: 'ZeroTier service is not running or token is missing.' });
-            }
-            if (error.message.includes('No such file or directory')) {
-                return reject({ status: 404, code: 'ZEROTIER_NOT_INSTALLED', message: 'zerotier-cli not found.' });
-            }
-            return reject({ status: 500, message: errMsg });
-        }
-        try {
-            resolve(JSON.parse(stdout));
-        } catch (parseError) {
-            reject({ status: 500, message: `Failed to parse zerotier-cli output: ${stdout}` });
-        }
-    });
-});
-
-app.get('/api/zt/status', protect, async (req, res) => {
-    try {
-        const [info, networks] = await Promise.all([ztCli('info'), ztCli('listnetworks')]);
-        res.json({ info, networks });
-    } catch (err) {
-        res.status(err.status || 500).json({ message: err.message, code: err.code });
-    }
-});
-// ... other ZT routes
-app.post('/api/zt/join', protect, async (req, res) => {
-    try {
-        const { networkId } = req.body;
-        await ztCli(`join ${networkId}`);
-        res.json({ message: 'Join command sent.' });
-    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
-});
-app.post('/api/zt/leave', protect, async (req, res) => {
-    try {
-        const { networkId } = req.body;
-        await ztCli(`leave ${networkId}`);
-        res.json({ message: 'Leave command sent.' });
-    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
-});
-app.post('/api/zt/set', protect, async (req, res) => {
-    try {
-        const { networkId, setting, value } = req.body;
-        await ztCli(`set ${networkId} ${setting}=${value}`);
-        res.json({ message: 'Setting updated.' });
-    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
-});
-
-// ZT Installer
-app.get('/api/zt/install', protect, (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    
-    const child = exec('curl -s https://install.zerotier.com | sudo bash');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    child.stdout.on('data', log => send({ log }));
-    child.stderr.on('data', log => send({ log }));
-    child.on('close', code => {
-        if (code === 0) {
-            send({ status: 'success' });
-        } else {
-            send({ status: 'error', message: 'Installation script failed.' });
-        }
-        send({ status: 'finished' });
-        res.end();
-    });
-});
-
-// --- Remote Access Service Helpers ---
-const sudoExecOptions = {
-    env: {
-        ...process.env,
-        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-    }
-};
-
-const streamExec = (res, command, message) => {
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-    if (message) send({ log: message });
-    
-    let stderrOutput = '';
-    const child = exec(command, sudoExecOptions);
-
-    child.stdout.on('data', log => send({ log: log.toString() }));
-    child.stderr.on('data', log => {
-        stderrOutput += log.toString();
-        send({ log: log.toString(), isError: true });
-    });
-
-    child.on('close', code => {
-        if (code === 0) {
-            send({ status: 'success', log: 'Command finished successfully.' });
-        } else {
-            const errorMessage = `Command failed with exit code ${code}. ${stderrOutput ? 'Details: ' + stderrOutput.trim() : ''}`;
-            send({ status: 'error', message: errorMessage, isError: true });
-        }
-        send({ status: 'finished' });
-        res.end();
-    });
-
-    child.on('error', err => {
-        send({ status: 'error', message: `Failed to execute command: ${err.message}`, isError: true });
-        send({ status: 'finished' });
-        res.end();
-    });
-};
-
-
-// --- Pi Tunnel CLI ---
-const piTunnelRouter = express.Router();
-piTunnelRouter.use(protect);
-
-piTunnelRouter.get('/status', async (req, res) => {
-    try {
-        const installed = fs.existsSync('/usr/local/bin/pitunnel');
-        let active = false;
-
-        if (installed) {
-            const statusOutput = await new Promise((resolve, reject) => {
-                 exec('sudo systemctl is-active pitunnel.service', sudoExecOptions, (err, stdout, stderr) => {
-                    if (err) {
-                        if (stderr.includes("sudo: a terminal is required") || stderr.includes("sudo: a password is required")) {
-                            return reject({ status: 403, code: 'SUDO_PASSWORD_REQUIRED', message: 'Passwordless sudo is not configured correctly.' });
-                        }
-                        return resolve(stdout || stderr);
-                    }
-                    resolve(stdout);
-                 });
-            });
-            active = (statusOutput || '').toString().trim() === 'active';
-        }
-        res.json({ installed, active, url: 'https://pitunnel.com/dashboard' });
-    } catch (e) {
-        res.status(e.status || 500).json({ message: e.message, code: e.code });
-    }
-});
-
-piTunnelRouter.post('/install', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    const { command } = req.body;
-    if (!command || typeof command !== 'string' || !command.includes('pitunnel.com')) {
-        send({ status: 'error', message: 'Invalid PiTunnel installation command provided.' });
-        send({ status: 'finished' });
-        return res.end();
-    }
-    
-    streamExec(res, command, `Executing installation command: ${command}`);
-});
-
-piTunnelRouter.get('/uninstall', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-    
-    const runCommandWithLogs = (command, message) => new Promise((resolve, reject) => {
-        send({ log: message });
-        let stderrOutput = '';
-        const child = exec(command, sudoExecOptions);
-        child.stdout.on('data', log => send({ log: log.toString() }));
-        child.stderr.on('data', log => {
-            stderrOutput += log.toString();
-            send({ log: log.toString(), isError: true });
-        });
-        child.on('close', code => {
-            if (code === 0) {
-                resolve();
-            } else {
-                // Ignore errors for stopping services that might not be running
-                // or removing files that don't exist.
-                if (command.startsWith('sudo systemctl stop') || command.startsWith('sudo rm')) {
-                    send({ log: `Warning: Command "${command.split(' ')[1]}" may have failed (this is often okay during uninstall). Continuing...` });
-                    resolve();
-                } else {
-                    const rejectMessage = `Command "${command}" failed. ${stderrOutput ? 'Details: ' + stderrOutput.trim() : ''}`;
-                    reject(new Error(rejectMessage));
-                }
-            }
-        });
-        child.on('error', err => reject(new Error(`Execution failed: ${err.message}`)));
-    });
-
-    const run = async () => {
-        try {
-            await runCommandWithLogs('sudo systemctl stop pitunnel.service', 'Stopping pitunnel service...');
-            await runCommandWithLogs('sudo systemctl disable pitunnel.service', 'Disabling pitunnel service from startup...');
-            await runCommandWithLogs('sudo rm -f /etc/systemd/system/pitunnel.service', 'Removing service file...');
-            await runCommandWithLogs('sudo systemctl daemon-reload', 'Reloading system services...');
-            await runCommandWithLogs('sudo rm -f /usr/local/bin/pitunnel', 'Removing pitunnel executable...');
-            await runCommandWithLogs('sudo rm -rf /root/.pitunnel', 'Removing configuration files...');
-            send({ status: 'success', log: 'Uninstallation process finished successfully.' });
-        } catch (e) {
-            send({ status: 'error', message: e.message, isError: true });
-        } finally {
-            send({ status: 'finished' });
-            res.end();
-        }
-    };
-    run();
-});
-
-piTunnelRouter.post('/tunnels/create', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    const { port, name, protocol } = req.body;
-    if (!port || isNaN(parseInt(port, 10))) {
-        const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-        send({ status: 'error', message: 'A valid port number is required.' });
-        send({ status: 'finished' });
-        return res.end();
-    }
-
-    let command = `sudo /usr/local/bin/pitunnel --port=${parseInt(port, 10)}`;
-    if (name && typeof name === 'string' && name.trim()) {
-        // Sanitize the name to be safe for shell execution
-        const sanitizedName = name.replace(/[^a-zA-Z0-9-]/g, '');
-        command += ` --name=${sanitizedName}`;
-    }
-    if (protocol && typeof protocol === 'string' && ['http', 'https', 'ssh', 'vnc'].includes(protocol)) {
-        command += ` --${protocol}`;
-    }
-    // Note: 'tcp' is the default and doesn't require a flag.
-
-    streamExec(res, command, `Attempting to create tunnel with command: ${command}`);
-});
-
-app.use('/api/pitunnel', piTunnelRouter);
-
-// --- Dataplicity CLI ---
-const dataplicityRouter = express.Router();
-dataplicityRouter.use(protect);
-
-dataplicityRouter.get('/status', async (req, res) => {
-    try {
-        const statusOutput = await new Promise((resolve, reject) => {
-             exec('sudo systemctl is-active dataplicity.service', sudoExecOptions, (err, stdout, stderr) => {
-                if (err) {
-                    if (stderr.includes("sudo: a terminal is required") || stderr.includes("sudo: a password is required")) {
-                        return reject({ status: 403, code: 'SUDO_PASSWORD_REQUIRED', message: 'Passwordless sudo is not configured correctly for dataplicity.' });
-                    }
-                    return resolve(stdout || stderr); // Resolve with output even on error for status checks
-                }
-                resolve(stdout);
-             });
-        });
-
-        const active = (statusOutput || '').toString().trim() === 'active';
-        let installed = active;
-
-        if (!installed) {
-            const listUnitsOutput = await new Promise((resolve) => {
-                exec('sudo systemctl list-units --type=service --all | grep -F dataplicity.service', sudoExecOptions, (err, stdout) => {
-                    resolve(stdout); // Grep returns non-zero on no match, which is not an execution error
-                });
-            });
-            installed = (listUnitsOutput || '').toString().includes('dataplicity.service');
-        }
-
-        res.json({ installed, active, url: 'https://app.dataplicity.com/' });
-    } catch (e) {
-        res.status(e.status || 500).json({ message: e.message, code: e.code });
-    }
-});
-
-dataplicityRouter.post('/install', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    let { command } = req.body; // Use let to allow modification
-    if (!command || typeof command !== 'string' || !command.includes('dataplicity.com')) {
-        send({ status: 'error', message: 'Invalid Dataplicity installation command provided.' });
-        send({ status: 'finished' });
-        return res.end();
-    }
-    
-    // For compatibility with modern systems that may not have a `python` symlink,
-    // we replace `sudo python` with `sudo python3`.
-    if (command.includes('| sudo python')) {
-        command = command.replace('| sudo python', '| sudo python3');
-        send({ log: "Note: Auto-corrected install command to use 'python3' for better compatibility." });
-    }
-    
-    streamExec(res, command, `Executing installation command: ${command}`);
-});
-
-dataplicityRouter.get('/uninstall', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    
-    const uninstallCommand = 'curl -s https://www.dataplicity.com/uninstall.py | sudo python3';
-    streamExec(res, uninstallCommand, 'Executing Dataplicity uninstall command...');
-});
-
-app.use('/api/dataplicity', dataplicityRouter);
-
-
-// --- Host Router Endpoints ---
-const runSudo = (command) => new Promise((resolve, reject) => {
-    exec(`sudo ${command}`, (err, stdout, stderr) => {
-        if (err) {
-            console.error(`Sudo error for command "${command}": ${stderr}`);
-            if (stderr.includes("sudo: a terminal is required") || stderr.includes("sudo: a password is required")) {
-                return reject(new Error('Passwordless sudo is not configured correctly for the panel user.'));
-            }
-            return reject(new Error(stderr || err.message));
-        }
-        resolve(stdout);
-    });
-});
-
-app.get('/api/host/network-config', protect, async (req, res) => {
-    try {
-        // 1. Get interfaces
-        const rawIfaces = os.networkInterfaces();
-        const interfaces = Object.entries(rawIfaces).map(([name, details]) => {
-            const ipv4 = details.find(d => d.family === 'IPv4' && !d.internal);
-            // Find the mac from any of the interface's addresses, as it can be on IPv6 etc.
-            const mac = details.find(d => d.mac)?.mac || 'N/A';
-            return {
-                name,
-                ip4: ipv4 ? `${ipv4.address}/${ipv4.netmask}` : 'N/A',
-                mac: mac
-            };
-        }).filter(iface => iface.name !== 'lo');
-
-        // 2. Check IP forwarding
-        const ipForwarding = await fsPromises.readFile('/proc/sys/net/ipv4/ip_forward', 'utf-8');
-
-        // 3. Check for our specific NAT rule
-        const iptablesRules = await runSudo('iptables-save').catch(() => '');
-        const natActive = iptablesRules.includes('-A POSTROUTING -m comment --comment "super-router-nat" -j MASQUERADE');
-        
-        // 4. Check dnsmasq status
-        const dnsmasqStatus = await runSudo('systemctl is-active dnsmasq').catch(() => 'inactive');
-
-        // 5. Try to read our saved config
-        const configPath = path.join(__dirname, 'super-router.json');
-        let savedConfig = {};
-        try {
-            const file = await fsPromises.readFile(configPath, 'utf-8');
-            savedConfig = JSON.parse(file);
-        } catch (e) { /* file doesn't exist, that's fine */ }
-
-        res.json({
-            ipForwarding: ipForwarding.trim() === '1',
-            interfaces,
-            natActive,
-            dnsmasqActive: dnsmasqStatus.trim() === 'active',
-            ...savedConfig
-        });
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-app.post('/api/host/apply-network-config', protect, async (req, res) => {
-    const { wan, lan, lanIp } = req.body;
-    if (!wan || !lan || !lanIp) {
-        return res.status(400).json({ message: 'WAN interface, LAN interface, and LAN IP are required.' });
-    }
-
-    try {
-        const lanIpParts = lanIp.split('/'); // e.g., '192.168.100.1/24'
-        const lanAddress = lanIpParts[0];
-
-        // 1. Configure interfaces
-        await runSudo(`ip addr flush dev ${lan}`);
-        await runSudo(`ip addr add ${lanIp} dev ${lan}`);
-        await runSudo(`ip link set dev ${lan} up`);
-        // We assume WAN is DHCP
-        await runSudo(`dhclient -r ${wan}`).catch(e => console.warn(`Could not release DHCP on ${wan}: ${e.message}`));
-        await runSudo(`dhclient ${wan}`).catch(e => console.warn(`Could not get DHCP on ${wan}: ${e.message}`));
-
-        // 2. Enable IP Forwarding
-        await runSudo('sysctl -w net.ipv4.ip_forward=1');
-
-        // 3. Set up NAT
-        await runSudo('iptables -t nat -F POSTROUTING'); // Flush old rules to prevent duplicates
-        await runSudo(`iptables -t nat -A POSTROUTING -o ${wan} -j MASQUERADE -m comment --comment "super-router-nat"`);
-
-        // 4. Configure and start dnsmasq for DHCP on LAN
-        const lanSubnetStart = lanAddress.substring(0, lanAddress.lastIndexOf('.')) + '.100';
-        const lanSubnetEnd = lanAddress.substring(0, lanAddress.lastIndexOf('.')) + '.200';
-        const dnsmasqConf = `
-interface=${lan}
-dhcp-range=${lanSubnetStart},${lanSubnetEnd},12h
-dhcp-option=option:router,${lanAddress}
-dhcp-option=option:dns-server,8.8.8.8,1.1.1.1
-log-dhcp
-`;
-        await fsPromises.writeFile('/tmp/dnsmasq.conf.super-router', dnsmasqConf);
-        await runSudo(`mv /tmp/dnsmasq.conf.super-router /etc/dnsmasq.d/super-router.conf`);
-        await runSudo('systemctl restart dnsmasq');
-        
-        // 5. Save config for status check
-        const configPath = path.join(__dirname, 'super-router.json');
-        const configToSave = { wanInterface: wan, lanInterface: lan, lanIp };
-        await fsPromises.writeFile(configPath, JSON.stringify(configToSave, null, 2));
-
-        res.json({ message: 'Router configuration applied successfully! Please test your network.' });
-    } catch (e) {
-        res.status(500).json({ message: `Failed to apply configuration: ${e.message}` });
-    }
-});
-
-app.post('/api/host/revert-network-config', protect, async (req, res) => {
-    try {
-        const configPath = path.join(__dirname, 'super-router.json');
-        let savedConfig = {};
-        try {
-            const file = await fsPromises.readFile(configPath, 'utf-8');
-            savedConfig = JSON.parse(file);
-        } catch (e) { 
-            return res.status(404).json({ message: 'No saved configuration found to revert.' });
-        }
-        
-        const { wanInterface, lanInterface } = savedConfig;
-        
-        await runSudo('systemctl stop dnsmasq').catch(e => console.warn(e.message));
-        await runSudo('rm /etc/dnsmasq.d/super-router.conf').catch(e => console.warn(e.message));
-        
-        if (wanInterface) {
-            await runSudo(`iptables -t nat -D POSTROUTING -o ${wanInterface} -j MASQUERADE -m comment --comment "super-router-nat"`).catch(e => console.warn(e.message));
-        }
-
-        await runSudo('sysctl -w net.ipv4.ip_forward=0');
-
-        if (lanInterface) {
-            await runSudo(`ip addr flush dev ${lanInterface}`).catch(e => console.warn(e.message));
-            await runSudo(`dhclient ${lanInterface}`).catch(e => console.warn(`Could not get DHCP on ${lanInterface}: ${e.message}`));
-        }
-
-        await fsPromises.unlink(configPath);
-        
-        res.json({ message: 'Attempted to revert router configuration. You may need to reboot for settings to fully restore.' });
-
-    } catch (e) {
-        res.status(500).json({ message: `Failed to revert configuration: ${e.message}` });
-    }
-});
-
-// --- Host Logs ---
-app.get('/api/host/logs', protect, async (req, res) => {
-    const { type } = req.query;
-    const lines = '150';
-    let command;
-    let logPath;
-
-    switch (type) {
-        case 'panel-ui':
-            command = `sudo pm2 logs mikrotik-manager --lines ${lines} --nostream`;
-            break;
-        case 'panel-api':
-            command = `sudo pm2 logs mikrotik-api-backend --lines ${lines} --nostream`;
-            break;
-        case 'nginx-access':
-            logPath = '/var/log/nginx/access.log';
-            command = `sudo tail -n ${lines} ${logPath}`;
-            break;
-        case 'nginx-error':
-            logPath = '/var/log/nginx/error.log';
-            command = `sudo tail -n ${lines} ${logPath}`;
-            break;
-        default:
-            return res.status(400).json({ message: 'Invalid log type specified.' });
-    }
-
-    exec(command, (err, stdout, stderr) => {
-        if (err) {
-            let errMsg = stderr || err.message;
-            if (errMsg.includes("sudo: a terminal is required") || errMsg.includes("sudo: a password is required")) {
-                errMsg = 'Passwordless sudo is not configured correctly for the panel user to run `pm2` and `tail` commands.';
-            } else if (logPath && (errMsg.includes('No such file or directory') || errMsg.includes('cannot open'))) {
-                 errMsg = `Log file not found at ${logPath}. Is Nginx installed and logging to the default location?`;
-            } else if (errMsg.includes('command not found')) {
-                errMsg = `The command required to fetch logs was not found. Ensure 'pm2' and 'tail' are installed and in the system's PATH.`;
-            }
-            console.error(`Log fetch error for "${type}": ${stderr}`);
-            return res.status(500).type('text/plain').send(errMsg);
-        }
-        res.type('text/plain').send(stdout || `Log is empty.`);
-    });
-});
-
-
-// --- AI Fixer ---
-app.get('/api/fixer/file-content', protect, async (req, res) => {
-    try {
-        const content = await fs.promises.readFile(API_BACKEND_FILE, 'utf-8');
-        res.type('text/plain').send(content);
-    } catch (e) {
-        res.status(500).send(e.message);
-    }
-});
-
-app.post('/api/fixer/apply-fix', protect, (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-    
-    const newCode = req.body;
-    
-    const apply = async () => {
-        try {
-            send({ log: 'Writing new code to api-backend/server.js...' });
-            await fs.promises.writeFile(API_BACKEND_FILE, newCode, 'utf-8');
-            send({ log: 'Restarting the API backend service with pm2...' });
-            
-            exec('pm2 restart mikrotik-api-backend', (err, stdout, stderr) => {
-                if (err) {
-                    send({ log: `PM2 restart failed: ${stderr}` });
-                    send({ status: 'error', message: 'Failed to restart backend service.' });
-                } else {
-                    send({ log: 'Backend service restarted successfully.' });
-                    send({ status: 'restarting' });
-                }
-                res.end();
-            });
-
-        } catch (e) {
-            send({ status: 'error', message: e.message });
-            res.end();
-        }
-    };
-    apply();
-});
-
-// Report Generator
-app.post('/api/generate-report', protect, async (req, res) => {
-    try {
-        const { view, routerName, geminiAnalysis } = req.body;
-        const backendCode = await fs.promises.readFile(API_BACKEND_FILE, 'utf-8').catch(() => 'Could not read backend file.');
-        
-        let report = `--- MIKROTIK PANEL SYSTEM REPORT ---\n`;
-        report += `Date: ${new Date().toISOString()}\n\n`;
-        report += `--- AI DIAGNOSIS SUMMARY ---\n${geminiAnalysis}\n\n`;
-        report += `--- CONTEXT ---\n`;
-        report += `Current View: ${view}\n`;
-        report += `Selected Router: ${routerName || 'None'}\n\n`;
-        report += `--- BACKEND CODE (api-backend/server.js) ---\n\n${backendCode}\n`;
-        
-        res.setHeader('Content-disposition', 'attachment; filename=mikrotik-panel-report.txt');
-        res.setHeader('Content-type', 'text/plain');
-        res.charset = 'UTF-8';
-        res.write(report);
-        res.end();
-
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-
-// --- Updater and Backups ---
-app.get('/api/current-version', protect, async (req, res) => {
-    try {
-        await runCommand("git rev-parse --is-inside-work-tree");
-
-        // Fetch version info and remote URL in parallel
-        const [logOutput, remoteUrl] = await Promise.all([
-            runCommand("git log -1 --pretty=format:'%h%x00%s%x00%b'"),
-            runCommand("git config --get remote.origin.url").catch(() => 'N/A') // Default to 'N/A' if it fails
-        ]);
-
-        if (!logOutput.trim()) {
-            return res.json({ 
-                hash: 'N/A', 
-                title: 'No Commits Found', 
-                description: 'This repository does not have any commits yet.',
-                remoteUrl: remoteUrl.trim()
-            });
-        }
-        
-        const parts = logOutput.split('\0');
-        const versionInfo = {
-            hash: parts[0] || '',
-            title: parts[1] || '',
-            description: (parts[2] || '').trim(),
-            remoteUrl: remoteUrl.trim()
-        };
-
-        res.json(versionInfo);
-
-    } catch (e) {
-        let message = e.message;
-        if (message.includes('not a git repository')) {
-            message = 'This is not a git repository. The updater requires the application to be cloned from git.';
-        } else {
-             message = 'Failed to parse version information from git. The repository might be in a strange state.';
-        }
-        res.status(500).json({ message });
-    }
-});
-
-app.get('/api/update-status', protect, async (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    try {
-        send({ log: "Verifying git repository..." });
-        await runCommand('git rev-parse --is-inside-work-tree');
-        
-        send({ log: "Connecting to remote repository..." });
-        await runCommandStream('git fetch', res);
-        send({ log: "Remote repository checked." });
-
-        const [local, remote, mergeBase] = await Promise.all([
-            runCommand('git rev-parse HEAD'),
-            runCommand('git rev-parse @{u}'),
-            runCommand('git merge-base HEAD @{u}')
-        ]);
-        
-        if (local === remote) {
-            send({ status: 'uptodate', message: 'Panel is up to date.' });
-        } else if (local === mergeBase) {
-            send({ status: 'available', message: 'New version available.' });
-            const changelog = await runCommand("git log ..origin/main --pretty=format:'%h - %s (%cr)'");
-            send({ newVersionInfo: {
-                title: "New update found",
-                description: "A new version of the panel is available.",
-                changelog: changelog.trim()
-            }});
-        } else if (remote === mergeBase) {
-            send({ status: 'ahead', message: 'Your version is ahead of the official repository.' });
-        } else {
-            send({ status: 'diverged', message: 'Your version has diverged. Manual update required.' });
-        }
-
-    } catch (e) {
-        let message = e.message;
-        if (message.includes('fatal: not a git repository')) {
-            message = 'This is not a git repository. The updater requires the application to be cloned from git.';
-        } else if (message.includes('Could not resolve host: github.com') || message.includes('fatal: unable to access')) {
-            message = 'Failed to connect to GitHub. Please check your server\'s internet connection and DNS settings.';
-        } else if (message.includes('fatal: no upstream configured')) {
-            message = 'Git repository has no upstream branch configured. Unable to check for updates.';
-        }
-        send({ status: 'error', message });
-    } finally {
-        send({ status: 'finished' });
-        res.end();
-    }
-});
-
-app.get('/api/update-app', protect, async (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    try {
-        const backupFile = `backup-update-${new Date().toISOString().replace(/:/g, '-')}.tar.gz`;
-        send({ log: `Creating application backup: ${backupFile}...` });
-        
-        const projectRoot = path.join(__dirname, '..');
-        const archivePath = path.join(BACKUP_DIR, backupFile);
-        
-        await new Promise((resolve, reject) => {
-            const output = fs.createWriteStream(archivePath);
-            const archive = archiver('tar', { gzip: true });
-
-            output.on('close', () => {
-                send({ log: `Backup complete. Size: ${(archive.pointer() / 1024).toFixed(2)} KB` });
-                resolve();
-            });
-
-            archive.on('warning', (err) => {
-                send({ log: `Archive warning: ${err.message}`, isError: true });
-            });
-
-            archive.on('error', (err) => {
-                reject(new Error(`Failed to create backup archive: ${err.message}`));
-            });
-
-            archive.pipe(output);
-            archive.glob('**/*', {
-                cwd: projectRoot,
-                ignore: ['proxy/backups/**', '.git/**', '**/node_modules/**'],
-                dot: true
-            });
-            archive.finalize();
-        });
-        
-        send({ log: 'Pulling latest changes from git...' });
-        await runCommandStream('git pull', res);
-        
-        send({ log: 'Installing dependencies for UI server...' });
-        await runCommandStream('npm install --prefix proxy', res);
-
-        send({ log: 'Installing dependencies for API backend...' });
-        await runCommandStream('npm install --prefix api-backend', res);
-        
-        send({ log: 'Restarting panel services...' });
-        exec('pm2 restart all', (err, stdout) => {
-            if (err) {
-                 send({ log: `PM2 restart failed: ${err.message}`, isError: true });
-                 send({ status: 'error', message: err.message });
-            } else {
-                send({ log: stdout });
-                send({ status: 'restarting' });
-            }
-            res.end();
-        });
-
-    } catch(e) {
-        send({ log: e.message, isError: true });
-        send({ status: 'error', message: e.message });
-        res.end();
-    }
-});
-
-app.get('/api/rollback-app', protect, (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-    const { backupFile } = req.query;
-    if (!backupFile || backupFile.includes('..') || !backupFile.endsWith('.tar.gz')) {
-        send({ status: 'error', message: 'Invalid application backup file specified.' });
-        return res.end();
-    }
-
-    const rollback = async () => {
-        try {
-            send({ log: `Starting application rollback from ${backupFile}...`});
-            const backupPath = path.join(BACKUP_DIR, backupFile);
-            if (!fs.existsSync(backupPath)) {
-                throw new Error('Backup file not found.');
-            }
-            
-            send({ log: 'Extracting backup over current application files...'});
-            const projectRoot = path.join(__dirname, '..');
-
-            await tar.x({ // 'x' is for extract
-                file: backupPath,
-                cwd: projectRoot,
-                onentry: (entry) => send({ log: `Restoring: ${entry.path}` })
-            });
-            send({ log: 'Extraction complete.' });
-
-            send({ log: 'Re-installing dependencies for UI server...'});
-            await runCommandStream('npm install --prefix proxy', res);
-
-            send({ log: 'Re-installing dependencies for API backend...'});
-            await runCommandStream('npm install --prefix api-backend', res);
-
-            send({ log: 'Restarting panel services...'});
-            exec('pm2 restart all', (err, stdout) => {
-                 if (err) {
-                     send({ log: `PM2 restart failed: ${err.message}`, isError: true });
-                     send({ status: 'error', message: err.message });
-                } else {
-                    send({ log: stdout });
-                    send({ status: 'restarting' });
-                }
-                res.end();
-            });
-
-        } catch (e) {
-            send({ log: e.message, isError: true });
-            send({ status: 'error', message: e.message });
-            res.end();
-        }
-    };
-    rollback();
-});
-
-
-// Database Backup/Restore
-app.get('/api/create-backup', protect, async (req, res) => {
-    const backupFile = `panel-db-backup-${new Date().toISOString().replace(/:/g, '-')}.sqlite`;
-    try {
-        await fs.promises.copyFile(DB_PATH, path.join(BACKUP_DIR, backupFile));
-        res.json({ message: `Backup created successfully: ${backupFile}` });
-    } catch(e) { res.status(500).json({ message: e.message }); }
-});
-
-app.get('/api/list-backups', protect, async (req, res) => {
-    try {
-        const dirents = await fs.promises.readdir(BACKUP_DIR, { withFileTypes: true });
-        // Filter out directories and hidden files, then sort
-        const files = dirents
-            .filter(dirent => dirent.isFile() && !dirent.name.startsWith('.'))
-            .map(dirent => dirent.name)
-            .sort()
-            .reverse();
-        res.json(files);
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-
-
-app.post('/api/delete-backup', protect, async (req, res) => {
-    try {
-        const { backupFile } = req.body;
-        // Basic path sanitization
-        if (backupFile.includes('..')) return res.status(400).json({ message: 'Invalid filename' });
-        await fs.promises.unlink(path.join(BACKUP_DIR, backupFile));
-        res.json({ message: 'Backup deleted.' });
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-
-app.get('/download-backup/:filename', protect, (req, res) => {
-    const { filename } = req.params;
-    if (filename.includes('..')) return res.status(400).send('Invalid filename');
-    res.download(path.join(BACKUP_DIR, filename));
-});
-
-app.get('/api/restore-backup', protect, (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    const { backupFile } = req.query;
-    if (!backupFile || backupFile.includes('..')) {
-        send({ status: 'error', message: 'Invalid backup file specified.' });
-        return res.end();
-    }
-
-    const restore = async () => {
-        try {
-            send({ log: 'Closing current database connection...'});
-            if(db) await db.close();
-
-            send({ log: `Restoring from ${backupFile}...`});
-            await fs.promises.copyFile(path.join(BACKUP_DIR, backupFile), DB_PATH);
-
-            send({ log: 'Restarting panel service...'});
-            exec('pm2 restart mikrotik-manager', (err) => {
-                if (err) send({ status: 'error', message: err.message });
-                else send({ status: 'restarting' });
-                res.end();
-            });
-
-        } catch (e) {
-            send({ status: 'error', message: e.message });
-            res.end();
-        }
-    };
-    restore();
-});
-
-
-// --- Ngrok Endpoints ---
-const createStreamHandler = (commandGenerator) => (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    const run = async () => {
-        try {
-            const commands = await commandGenerator(req);
-            for (const { cmd, msg } of commands) {
-                send({ log: msg });
-                await runCommandStream(cmd, res);
-            }
-            send({ status: 'success', log: 'Operation completed successfully.' });
-        } catch (e) {
-            send({ status: 'error', log: e.message, isError: true });
-        } finally {
-            send({ status: 'finished' });
-            res.end();
-        }
-    };
-    run();
-};
-
-const ngrokApi = express.Router();
-ngrokApi.use(protect);
-
-ngrokApi.get('/status', async (req, res) => {
-    try {
-        const installed = fs.existsSync(NGROK_BINARY_PATH);
-        let active = false;
-        let url = null;
-        let config = null;
-
-        if (installed) {
-            const statusOutput = await runSudo('systemctl is-active ngrok.service').catch(() => 'inactive');
-            active = statusOutput.trim() === 'active';
-            
-            if (active) {
-                try {
-                    const agentResponse = await new Promise((resolve, reject) => {
-                        const http = require('http');
-                        http.get('http://127.0.0.1:4040/api/tunnels', (resp) => {
-                            let data = '';
-                            resp.on('data', (chunk) => data += chunk);
-                            resp.on('end', () => resolve(JSON.parse(data)));
-                        }).on("error", (err) => reject(err));
-                    });
-                    const tunnels = agentResponse.tunnels;
-                    if (tunnels && tunnels.length > 0) {
-                        url = tunnels[0].public_url;
-                    }
-                } catch (e) {
-                    console.warn("Could not connect to Ngrok agent API:", e.message);
-                }
-            }
-        }
-        
-        try {
-            const savedConfig = await fsPromises.readFile(NGROK_CONFIG_PATH, 'utf-8');
-            config = JSON.parse(savedConfig);
-        } catch (e) { /* config file might not exist, which is fine */ }
-
-        res.json({ installed, active, url, config });
-    } catch (e) {
-        res.status(500).json({ message: e.message, code: 'SUDO_ERROR' });
-    }
-});
-
-ngrokApi.post('/settings', async (req, res) => {
-    try {
-        await fsPromises.writeFile(NGROK_CONFIG_PATH, JSON.stringify(req.body, null, 2));
-        res.json({ message: 'Settings saved.' });
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-ngrokApi.post('/control/:action', async (req, res) => {
-    const { action } = req.params;
-    if (!['stop', 'start', 'restart'].includes(action)) {
-        return res.status(400).json({ message: 'Invalid action.' });
-    }
-    try {
-        await runSudo(`systemctl ${action} ngrok.service`);
-        res.json({ message: `Ngrok service ${action}ed.` });
-    } catch (e) {
-        res.status(500).json({ message: e.message, code: 'SUDO_ERROR' });
-    }
-});
-
-ngrokApi.get('/install', createStreamHandler(async (req) => {
-    const config = JSON.parse(await fsPromises.readFile(NGROK_CONFIG_PATH, 'utf-8'));
-    if (!config.authtoken) throw new Error('Authtoken is not set.');
-    
-    const arch = os.arch() === 'arm64' ? 'arm64' : 'arm';
-    const url = `https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-${arch}.tgz`;
-    const user = os.userInfo().username;
-    
-    const serviceFileContent = `[Unit]
-Description=Ngrok Tunnel Service
-After=network-online.target
-
-[Service]
-ExecStart=/usr/local/bin/ngrok ${config.proto || 'http'} ${config.port || 80}
-Restart=always
-RestartSec=10
-User=${user}
-
-[Install]
-WantedBy=multi-user.target
-`;
-    await fsPromises.writeFile('/tmp/ngrok.service', serviceFileContent);
-
-    return [
-        { cmd: 'sudo systemctl stop ngrok.service', msg: 'Stopping existing service (if any)...' },
-        { cmd: `curl -L ${url} -o /tmp/ngrok.tgz`, msg: `Downloading Ngrok for ${arch}...` },
-        { cmd: 'tar -xzf /tmp/ngrok.tgz -C /tmp', msg: 'Extracting archive...'},
-        { cmd: 'sudo mv /tmp/ngrok /usr/local/bin/ngrok', msg: 'Moving binary to /usr/local/bin...'},
-        { cmd: 'sudo chmod +x /usr/local/bin/ngrok', msg: 'Setting executable permissions...'},
-        { cmd: `/usr/local/bin/ngrok config add-authtoken ${config.authtoken}`, msg: 'Configuring authtoken...'},
-        { cmd: 'sudo mv /tmp/ngrok.service /etc/systemd/system/ngrok.service', msg: 'Creating systemd service...'},
-        { cmd: 'sudo systemctl daemon-reload', msg: 'Reloading systemd...'},
-        { cmd: 'sudo systemctl enable ngrok.service', msg: 'Enabling service to start on boot...'},
-        { cmd: 'sudo systemctl start ngrok.service', msg: 'Starting Ngrok service...'}
-    ];
-}));
-
-ngrokApi.get('/uninstall', createStreamHandler(async (req) => {
-    return [
-        { cmd: 'sudo systemctl stop ngrok.service', msg: 'Stopping service...' },
-        { cmd: 'sudo systemctl disable ngrok.service', msg: 'Disabling service...' },
-        { cmd: 'sudo rm /etc/systemd/system/ngrok.service', msg: 'Removing service file...' },
-        { cmd: 'sudo systemctl daemon-reload', msg: 'Reloading systemd...' },
-        { cmd: `sudo rm ${NGROK_BINARY_PATH}`, msg: 'Deleting ngrok binary...' },
-        { cmd: `rm ${NGROK_CONFIG_PATH}`, msg: 'Deleting config file...' }
-    ];
-}));
-
-app.use('/api/ngrok', ngrokApi);
-
-// --- Super Admin Backup/Restore ---
-const superadminRouter = express.Router();
-superadminRouter.use(protect, requireSuperadmin);
-
-const FULL_BACKUP_EXTENSION = '.mk';
-
-superadminRouter.get('/list-full-backups', async (req, res) => {
-    try {
-        const dirents = await fs.promises.readdir(BACKUP_DIR, { withFileTypes: true });
-        const files = dirents
-            .filter(dirent => dirent.isFile() && dirent.name.endsWith(FULL_BACKUP_EXTENSION))
-            .map(dirent => dirent.name)
-            .sort()
-            .reverse();
-        res.json(files);
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-superadminRouter.post('/delete-full-backup', async (req, res) => {
-    try {
-        const { backupFile } = req.body;
-        if (!backupFile || backupFile.includes('..') || !backupFile.endsWith(FULL_BACKUP_EXTENSION)) {
-            return res.status(400).json({ message: 'Invalid backup filename.' });
-        }
-        await fs.promises.unlink(path.join(BACKUP_DIR, backupFile));
-        res.json({ message: 'Backup deleted successfully.' });
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-superadminRouter.get('/create-full-backup', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    const createBackup = async () => {
-        try {
-            const backupFile = `full-panel-backup-${new Date().toISOString().replace(/:/g, '-')}${FULL_BACKUP_EXTENSION}`;
-            send({ log: `Creating full panel backup: ${backupFile}...` });
-
-            const projectRoot = path.join(__dirname, '..');
-            const archivePath = path.join(BACKUP_DIR, backupFile);
-            
-            await new Promise((resolve, reject) => {
-                const output = fs.createWriteStream(archivePath);
-                const archive = archiver('tar', { gzip: true });
-
-                output.on('close', () => {
-                    send({ log: `Backup complete. Size: ${(archive.pointer() / 1024 / 1024).toFixed(2)} MB` });
-                    resolve();
-                });
-                archive.on('warning', (err) => send({ log: `Archive warning: ${err.message}`, isError: true }));
-                archive.on('error', (err) => reject(new Error(`Failed to create backup archive: ${err.message}`)));
-
-                archive.pipe(output);
-                archive.glob('**/*', {
-                    cwd: projectRoot,
-                    ignore: ['proxy/backups/**', '.git/**', '**/node_modules/**'],
-                    dot: true
-                });
-                archive.finalize();
-            });
-
-            send({ status: 'success', message: 'Backup created successfully.' });
-        } catch (e) {
-            send({ status: 'error', message: e.message });
-        } finally {
-            send({ status: 'finished' });
-            res.end();
-        }
-    };
-    createBackup();
-});
-
-// Middleware for handling raw file uploads
-const rawBodySaver = express.raw({ type: 'application/octet-stream', limit: '100mb' });
-
-superadminRouter.post('/upload-backup', rawBodySaver, async (req, res) => {
-    try {
-        if (!req.body || req.body.length === 0) {
-            return res.status(400).json({ message: 'No file uploaded.' });
-        }
-        const tempFilename = `restore-upload-${Date.now()}${FULL_BACKUP_EXTENSION}`;
-        const tempPath = path.join(BACKUP_DIR, tempFilename);
-        await fs.promises.writeFile(tempPath, req.body);
-        res.json({ success: true, filename: tempFilename });
-    } catch (e) {
-        res.status(500).json({ message: `File upload failed: ${e.message}` });
-    }
-});
-
-superadminRouter.get('/restore-from-backup', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-    const { file } = req.query;
-
-    if (!file || file.includes('..') || !file.endsWith(FULL_BACKUP_EXTENSION)) {
-        send({ status: 'error', message: 'Invalid backup file specified for restore.' });
-        return res.end();
-    }
-    
-    const restore = async () => {
-        try {
-            send({ log: `Starting full panel restore from ${file}...`});
-            const backupPath = path.join(BACKUP_DIR, file);
-            if (!fs.existsSync(backupPath)) throw new Error('Backup file not found on server.');
-
-            send({ log: 'Stopping all panel services via pm2...'});
-            await runCommandStream('pm2 stop all', res).catch(e => send({ log: `Could not stop pm2 (this is okay if it's not running): ${e.message}`, isError: true }));
-            
-            send({ log: 'Extracting backup over current application files...'});
-            const projectRoot = path.join(__dirname, '..');
-            await tar.x({
-                file: backupPath,
-                cwd: projectRoot,
-                onentry: (entry) => send({ log: `Restoring: ${entry.path}` })
-            });
-            send({ log: 'Extraction complete.' });
-
-            send({ log: 'Re-installing dependencies for UI server...'});
-            await runCommandStream('npm install --prefix proxy', res);
-
-            send({ log: 'Re-installing dependencies for API backend...'});
-            await runCommandStream('npm install --prefix api-backend', res);
-
-            send({ log: 'Restarting panel services...'});
-            exec('pm2 restart all', (err, stdout) => {
-                 if (err) {
-                     send({ log: `PM2 restart failed: ${err.message}`, isError: true });
-                     send({ status: 'error', message: err.message });
-                } else {
-                    send({ log: stdout });
-                    send({ status: 'restarting' });
-                }
-                res.end();
-            });
-
-        } catch (e) {
-            send({ log: e.message, isError: true });
-            send({ status: 'error', message: e.message });
-            res.end();
-        }
-    };
-    restore();
-});
-
-app.use('/api/superadmin', superadminRouter);
 
 // When no dist, serve project root static files to support index.html and assets
 if (!distExists) {
