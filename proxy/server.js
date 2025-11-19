@@ -1443,11 +1443,154 @@ ngrokApi.use(protect);
 // --- Super Admin Backup/Restore ---
 const superadminRouter = express.Router();
 superadminRouter.use(protect, requireSuperadmin);
-// ... (superadminRouter routes) ...
+
+superadminRouter.get('/list-full-backups', async (req, res) => {
+    try {
+        const files = await fsPromises.readdir(BACKUP_DIR);
+        const mkFiles = files.filter(file => file.endsWith('.mk')).sort().reverse();
+        res.json(mkFiles);
+    } catch (err) {
+        if (err.code === 'ENOENT') {
+            return res.json([]);
+        }
+        res.status(500).json({ message: err.message });
+    }
+});
+
+superadminRouter.get('/create-full-backup', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupFilename = `panel-backup-${timestamp}.mk`;
+    const backupFilePath = path.join(BACKUP_DIR, backupFilename);
+    const projectRoot = path.join(__dirname, '..');
+
+    send({ log: `Starting backup... Output: ${backupFilename}` });
+
+    const tarProcess = tar.c(
+        {
+            gzip: true,
+            file: backupFilePath,
+            cwd: projectRoot,
+            filter: (p) => !p.includes('node_modules') && !p.includes('.git') && !p.includes('backups'),
+        },
+        ['.']
+    );
+
+    tarProcess.then(() => {
+        send({ log: 'Backup created successfully.' });
+        send({ status: 'success' });
+        res.end();
+    }).catch(err => {
+        send({ log: `Error creating backup: ${err.message}`, isError: true });
+        send({ status: 'error', message: err.message });
+        res.end();
+    });
+});
+
+superadminRouter.post('/delete-full-backup', async (req, res) => {
+    const { backupFile } = req.body;
+    if (!backupFile || typeof backupFile !== 'string' || !backupFile.endsWith('.mk')) {
+        return res.status(400).json({ message: 'Invalid filename.' });
+    }
+    try {
+        const filePath = path.join(BACKUP_DIR, backupFile);
+        if (path.dirname(filePath) !== path.resolve(BACKUP_DIR)) {
+            return res.status(400).json({ message: 'Invalid path.' });
+        }
+        await fsPromises.unlink(filePath);
+        res.json({ message: `Backup "${backupFile}" deleted.` });
+    } catch (err) {
+        res.status(err.code === 'ENOENT' ? 404 : 500).json({ message: err.message });
+    }
+});
+
+superadminRouter.post('/upload-backup', express.raw({
+    type: 'application/octet-stream',
+    limit: '50mb'
+}), async (req, res) => {
+    const tempFilename = `restore-upload-${Date.now()}.mk`;
+    const tempFilePath = path.join(BACKUP_DIR, tempFilename);
+    try {
+        await fsPromises.writeFile(tempFilePath, req.body);
+        res.json({ message: 'Upload successful', filename: tempFilename });
+    } catch (err) {
+        res.status(500).json({ message: `Failed to save file: ${err.message}` });
+    }
+});
+
+superadminRouter.get('/restore-from-backup', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    const { file } = req.query;
+    if (!file || !file.endsWith('.mk')) {
+        send({ status: 'error', message: 'Invalid backup file.' });
+        return res.end();
+    }
+    const backupFilePath = path.join(BACKUP_DIR, file);
+    if (!fs.existsSync(backupFilePath)) {
+        send({ status: 'error', message: 'Backup file not found.' });
+        return res.end();
+    }
+    
+    const projectRoot = path.join(__dirname, '..');
+    const restore = async () => {
+        try {
+            send({ log: 'Stopping services...' });
+            await runCommandStream('pm2 stop all', res);
+            send({ log: 'Clearing project directory...' });
+            const items = await fsPromises.readdir(projectRoot);
+            for (const item of items) {
+                if (item !== 'backups' && item !== 'proxy' && item.startsWith('proxy')) continue; // Keep proxy dir with backups
+                if (item !== 'backups') await fsExtra.remove(path.join(projectRoot, item));
+            }
+            send({ log: 'Extracting backup...' });
+            await tar.x({ file: backupFilePath, cwd: projectRoot });
+            send({ log: 'Installing dependencies...' });
+            await runCommandStream('npm install --prefix proxy', res);
+            await runCommandStream('npm install --prefix api-backend', res);
+            if (file.startsWith('restore-upload-')) {
+                await fsPromises.unlink(backupFilePath);
+            }
+            send({ log: 'Restarting services...' });
+            await runCommandStream('pm2 restart all', res);
+            send({ status: 'restarting' });
+        } catch (err) {
+            send({ log: `ERROR: ${err.message}`, isError: true });
+            send({ status: 'error', message: 'Restore failed. Manual intervention may be needed.' });
+        } finally {
+            res.end();
+        }
+    };
+    restore();
+});
+
 
 // --- API ROUTE REGISTRATION ---
 app.use('/api/auth', authRouter);
 app.use('/api/license', licenseRouter);
+
+app.get('/download-backup/:filename', protect, requireSuperadmin, (req, res) => {
+    const { filename } = req.params;
+    if (!filename || !filename.endsWith('.mk')) {
+        return res.status(400).send('Invalid filename.');
+    }
+    const filePath = path.join(BACKUP_DIR, filename);
+    if (path.dirname(filePath) !== path.resolve(BACKUP_DIR)) {
+        return res.status(400).send('Invalid path.');
+    }
+    res.download(filePath, (err) => {
+        if (err) {
+            res.status(err.code === 'ENOENT' ? 404 : 500).send('Could not download file.');
+        }
+    });
+});
 
 app.get('/api/db/panel-settings', protect, createSettingsHandler('panel_settings'));
 app.post('/api/db/panel-settings', protect, createSettingsSaver('panel_settings'));
