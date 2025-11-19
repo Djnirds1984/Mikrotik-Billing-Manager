@@ -44,6 +44,29 @@ const formatBps = (bps: number): string => {
     return `${(bps / (1000 * 1000 * 1000)).toFixed(2)} Gbps`;
 };
 
+// CHANGE: Defensive numeric parser for RouterOS fields that might be numbers or strings with units
+const parseNum = (v: any): number => {
+    if (v == null) return 0;
+    if (typeof v === 'number') return isFinite(v) ? v : 0;
+    if (typeof v === 'string') {
+        const trimmed = v.trim().toLowerCase();
+        const direct = Number(trimmed);
+        if (!isNaN(direct)) return direct;
+        const match = trimmed.match(/([0-9]*\.?[0-9]+)\s*([kmgt]?)(b|bps|byte|bytes)?/);
+        if (match) {
+            const value = Number(match[1]);
+            const scale = match[2];
+            let multiplier = 1;
+            if (scale === 'k') multiplier = 1000;
+            else if (scale === 'm') multiplier = 1000 * 1000;
+            else if (scale === 'g') multiplier = 1000 * 1000 * 1000;
+            return isNaN(value) ? 0 : value * multiplier;
+        }
+        return 0;
+    }
+    return 0;
+};
+
 // Polling interval for live interface updates (ms)
 const MAX_HISTORY_POINTS = 30;
 const POLL_INTERVAL_MS = 2000;
@@ -137,13 +160,13 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                     let txRate = 0;
 
                     if (prevIfaceData && timeDiffSeconds > 0.1) {
+                        // CHANGE: Use parseNum to safely read counters (supports numeric and unit-suffixed strings)
                         const i = iface as any;
                         const p = prevIfaceData as any;
-                        
-                        const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['rx-bytes'] ?? 0);
-                        const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['rx-bytes'] ?? 0);
-                        const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['tx-bytes'] ?? 0);
-                        const prevTx = Number(p['tx-byte'] ?? p['bytes-out'] ?? p['tx-bytes'] ?? 0);
+                        const currRx = parseNum(i['rx-byte'] ?? i['bytes-in'] ?? i['rx-bytes']);
+                        const prevRx = parseNum(p['rx-byte'] ?? p['bytes-in'] ?? p['rx-bytes']);
+                        const currTx = parseNum(i['tx-byte'] ?? i['bytes-out'] ?? i['tx-bytes']);
+                        const prevTx = parseNum(p['tx-byte'] ?? p['bytes-out'] ?? p['tx-bytes']);
 
                         let rxByteDiff = currRx - prevRx;
                         let txByteDiff = currTx - prevTx;
@@ -160,14 +183,15 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         if (isNaN(txRate)) txRate = 0;
                     }
 
+                    // CHANGE: Fallback to instantaneous rate fields when counters are missing or unchanged
                     if (rxRate === 0) {
                         const i = iface as any;
-                        const instRx = Number(i['rx-bits-per-second'] ?? i['rx-rate'] ?? 0);
+                        const instRx = parseNum(i['rx-bits-per-second'] ?? i['rx-bps'] ?? i['rx-rate']);
                         if (isFinite(instRx) && !isNaN(instRx)) rxRate = instRx;
                     }
                     if (txRate === 0) {
                         const i = iface as any;
-                        const instTx = Number(i['tx-bits-per-second'] ?? i['tx-rate'] ?? 0);
+                        const instTx = parseNum(i['tx-bits-per-second'] ?? i['tx-bps'] ?? i['tx-rate']);
                         if (isFinite(instTx) && !isNaN(instTx)) txRate = instTx;
                     }
 
