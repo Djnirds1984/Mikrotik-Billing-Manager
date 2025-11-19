@@ -1,6 +1,4 @@
 
-
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, VlanInterface, Interface, IpAddress, IpRoute, IpRouteData, WanRoute, FailoverStatus, DhcpServer, DhcpLease, IpPool, DhcpServerData, DhcpServerSetupParams } from '../types.ts';
 import { 
@@ -13,7 +11,6 @@ import {
 } from '../services/mikrotikService.ts';
 import { generateMultiWanScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
-// FIX: Import missing BridgeIcon.
 import { RouterIcon, TrashIcon, VlanIcon, ShareIcon, EditIcon, ShieldCheckIcon, ServerIcon, CircleStackIcon, BridgeIcon } from '../constants.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 import { Firewall } from './Firewall.tsx';
@@ -56,7 +53,6 @@ const DhcpServerFormModal: React.FC<{
                 interface: interfaces.length > 0 ? interfaces[0].name : '',
                 'address-pool': pools.length > 0 ? pools[0].name : 'none',
                 'lease-time': '00:10:00',
-                // FIX: Use 'as const' to ensure the type of 'disabled' is inferred as the literal 'false', not 'string'.
                 disabled: 'false' as const
             };
             setServer(initialData ? { ...initialData } : defaults);
@@ -995,4 +991,128 @@ export const Network: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                                                 <td className="px-6 py-4 text-slate-500 italic">{route.comment}</td>
                                                 <td className="px-6 py-4 text-right">
                                                     <button onClick={() => { setEditingRoute(route); setIsRouteModalOpen(true); }} disabled={route.dynamic === 'true' || route.connected === 'true'} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 rounded-md disabled:opacity-50"><EditIcon className="h-5 w-5" /></button>
-                                                    <button onClick={() => handleDeleteRoute(route)} disabled={isSubmitting || route.dynamic === 'true' || route.connected === 'true'} className="p-2 text-slate-500 dark:text-slate-400 hover:
+                                                    <button onClick={() => handleDeleteRoute(route)} disabled={isSubmitting || route.dynamic === 'true' || route.connected === 'true'} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md disabled:opacity-50"><TrashIcon className="h-5 w-5" /></button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                 );
+            case 'firewall':
+                return <Firewall selectedRouter={selectedRouter} interfaces={interfaces} />;
+            case 'aiwan':
+                 return (
+                     <div className="space-y-6">
+                         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-6">
+                             <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">AI Multi-WAN Script Generator</h3>
+                             <div className="space-y-4">
+                                 <div>
+                                     <label className="block text-sm font-medium">WAN Interfaces (comma separated)</label>
+                                     <input type="text" value={wanInterfaces} onChange={e => setWanInterfaces(e.target.value)} className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="ether1, ether2" />
+                                 </div>
+                                 <div>
+                                     <label className="block text-sm font-medium">LAN Interface</label>
+                                     <input type="text" value={lanInterface} onChange={e => setLanInterface(e.target.value)} className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="bridge-local" />
+                                 </div>
+                                 <div>
+                                     <label className="block text-sm font-medium">Configuration Type</label>
+                                     <select value={wanType} onChange={e => setWanType(e.target.value as any)} className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                         <option value="pcc">Load Balancing (PCC)</option>
+                                         <option value="pbr">Failover (PBR)</option>
+                                     </select>
+                                 </div>
+                                 <button onClick={handleGenerateWanScript} disabled={isGenerating} className="bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-bold py-2 px-4 rounded-lg">
+                                     {isGenerating ? 'Generating...' : 'Generate Script'}
+                                 </button>
+                             </div>
+                             {wanScript && (
+                                 <div className="mt-6">
+                                     <h4 className="font-semibold mb-2">Generated Script</h4>
+                                     <div className="h-64 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700">
+                                        <CodeBlock script={wanScript} />
+                                     </div>
+                                 </div>
+                             )}
+                         </div>
+                     </div>
+                 );
+            case 'dhcp':
+                return <DhcpManager selectedRouter={selectedRouter} />;
+            case 'pools':
+                return <IpPoolManager selectedRouter={selectedRouter} />;
+            case 'bridge':
+                return <BridgeManager selectedRouter={selectedRouter} interfaces={interfaces} onDataChange={fetchData} />;
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <div className="max-w-7xl mx-auto space-y-6">
+             <VlanFormModal isOpen={isVlanModalOpen} onClose={() => setIsVlanModalOpen(false)} onSave={handleAddVlan} interfaces={interfaces} isLoading={isSubmitting} />
+             <RouteFormModal isOpen={isRouteModalOpen} onClose={() => { setIsRouteModalOpen(false); setEditingRoute(null); }} onSave={handleSaveRoute} initialData={editingRoute} isLoading={isSubmitting} />
+             
+             <div className="border-b border-slate-200 dark:border-slate-700 overflow-x-auto">
+                <nav className="flex space-x-2 -mb-px">
+                    <TabButton label="WAN & Failover" icon={<ShieldCheckIcon className="w-5 h-5" />} isActive={activeTab === 'wan'} onClick={() => setActiveTab('wan')} />
+                    <TabButton label="Routes" icon={<ShareIcon className="w-5 h-5" />} isActive={activeTab === 'routes'} onClick={() => setActiveTab('routes')} />
+                    <TabButton label="Firewall" icon={<ShieldCheckIcon className="w-5 h-5" />} isActive={activeTab === 'firewall'} onClick={() => setActiveTab('firewall')} />
+                    <TabButton label="DHCP" icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'dhcp'} onClick={() => setActiveTab('dhcp')} />
+                    <TabButton label="IP Pools" icon={<CircleStackIcon className="w-5 h-5" />} isActive={activeTab === 'pools'} onClick={() => setActiveTab('pools')} />
+                    <TabButton label="Bridge & Ports" icon={<BridgeIcon className="w-5 h-5" />} isActive={activeTab === 'bridge'} onClick={() => setActiveTab('bridge')} />
+                    <TabButton label="VLANs" icon={<VlanIcon className="w-5 h-5" />} isActive={activeTab === 'aiwan'} onClick={() => { /* Reuse AI WAN tab for VLANs temporarily or create separate */ setIsVlanModalOpen(true); }} />
+                    <TabButton label="Multi-WAN Gen" icon={<RouterIcon className="w-5 h-5" />} isActive={activeTab === 'aiwan'} onClick={() => setActiveTab('aiwan')} />
+                </nav>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <h4 className="text-sm font-semibold text-slate-500 dark:text-slate-400">LAN Interface (Detected)</h4>
+                    <p className="text-lg font-bold text-slate-900 dark:text-white">{lanInterface || 'None'}</p>
+                    <p className="text-xs text-slate-500">{lanIp ? lanIp : 'No IP assigned'}</p>
+                 </div>
+                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <h4 className="text-sm font-semibold text-slate-500 dark:text-slate-400">WAN IPs (Detected)</h4>
+                    <p className="text-lg font-bold text-slate-900 dark:text-white truncate">{wanIps || 'None'}</p>
+                 </div>
+            </div>
+
+            {renderActiveTab()}
+
+             {activeTab === 'aiwan' && vlans.length > 0 && (
+                 <div className="mt-8 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
+                     <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+                        <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Configured VLANs</h3>
+                     </div>
+                     <table className="w-full text-sm text-left">
+                         <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-900/50">
+                             <tr>
+                                 <th className="px-6 py-3">Name</th>
+                                 <th className="px-6 py-3">VLAN ID</th>
+                                 <th className="px-6 py-3">Interface</th>
+                                 <th className="px-6 py-3 text-right">Actions</th>
+                             </tr>
+                         </thead>
+                         <tbody>
+                             {vlans.map(vlan => (
+                                 <tr key={vlan.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0">
+                                     <td className="px-6 py-4 font-medium">{vlan.name}</td>
+                                     <td className="px-6 py-4 font-mono">{vlan['vlan-id']}</td>
+                                     <td className="px-6 py-4 font-mono">{vlan.interface}</td>
+                                     <td className="px-6 py-4 text-right">
+                                         <button onClick={() => handleDeleteVlan(vlan.id)} disabled={isSubmitting} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50">
+                                             <TrashIcon className="h-5 w-5" />
+                                         </button>
+                                     </td>
+                                 </tr>
+                             ))}
+                         </tbody>
+                     </table>
+                 </div>
+             )}
+        </div>
+    );
+};
