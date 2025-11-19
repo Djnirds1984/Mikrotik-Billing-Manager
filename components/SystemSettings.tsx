@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
-import type { RouterConfigWithId, PanelSettings, PanelNtpStatus, LicenseStatus } from '../types.ts';
+import type { RouterConfigWithId, PanelSettings, PanelNtpStatus, LicenseStatus, TelegramSettings, XenditSettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { initializeAiClient } from '../services/geminiService.ts';
@@ -15,47 +16,94 @@ import { SudoInstructionBox } from './SudoInstructionBox.tsx';
 const SunIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>;
 const MoonIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /></svg>;
 const ComputerDesktopIcon: React.FC<{ className?: string }> = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>;
+const MessageIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.76 9.76 0 01-2.53-.405m-3.038-5.858a2.25 2.25 0 00-3.75-3.75C3.302 4.03 7.056 2.25 12 2.25c4.97 0 9 3.694 9 8.25z" />
+    </svg>
+);
+const XenditIcon: React.FC<{ className?: string }> = ({ className }) => (
+     <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12.35 12.63l-2.48 2.48a.5.5 0 01-.71 0l-2.48-2.48a.5.5 0 010-.71l2.48-2.48a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71z" />
+        <path fillRule="evenodd" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 5.36a.5.5 0 00-.71 0l-2.48 2.48a.5.5 0 000 .71l2.48 2.48a.5.5 0 00.71 0l2.48-2.48a.5.5 0 000-.71L16.64 5.36zm-1.07 7.06a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71l-2.48 2.48a.5.5 0 01-.71 0l-2.48-2.48a.5.5 0 010-.71l2.48-2.48zM5.36 7.36a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71l-2.48 2.48a.5.5 0 01-.71 0L2.88 10.55a.5.5 0 010-.71l2.48-2.48z" clipRule="evenodd" />
+    </svg>
+);
 
 
-// A generic settings card component
-const SettingsCard: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode; }> = ({ title, icon, children }) => (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
-        <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
-            {icon}
-            <h3 className="text-lg font-semibold text-[--color-primary-500] dark:text-[--color-primary-400]">{title}</h3>
-        </div>
-        <div className="p-6">
-            {children}
-        </div>
+// Tab button component
+const TabButton: React.FC<{
+    label: string;
+    icon: React.ReactNode;
+    isActive: boolean;
+    onClick: () => void;
+}> = ({ label, icon, isActive, onClick }) => (
+    <button
+        onClick={onClick}
+        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors duration-200 focus:outline-none ${
+            isActive
+                ? 'border-[--color-primary-500] text-[--color-primary-500] dark:text-[--color-primary-400]'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+        }`}
+    >
+        {icon}
+        <span className="hidden sm:inline">{label}</span>
+    </button>
+);
+
+// Generic form field components
+const TextInput: React.FC<{ label: string; name: string; value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; type?: string; placeholder?: string; info?: string }> = ({ label, name, value, onChange, type = "text", placeholder, info }) => (
+    <div>
+        <label htmlFor={name} className="block text-sm font-medium text-slate-700 dark:text-slate-300">{label}</label>
+        <input type={type} name={name} id={name} value={value || ''} onChange={onChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" placeholder={placeholder} />
+        {info && <p className="mt-1 text-xs text-slate-500">{info}</p>}
     </div>
 );
 
-// --- Sub-components for System Settings ---
-const ThemeSwitcher = () => {
+const Toggle: React.FC<{ label: string; checked: boolean; onChange: (checked: boolean) => void; info?: string }> = ({ label, checked, onChange, info }) => (
+    <div>
+        <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{label}</span>
+            <div className="relative inline-flex items-center">
+                <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="sr-only peer" />
+                <div className="w-11 h-6 bg-slate-200 dark:bg-slate-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-[--color-primary-500] peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[--color-primary-600]"></div>
+            </div>
+        </label>
+        {info && <p className="mt-1 text-xs text-slate-500">{info}</p>}
+    </div>
+);
+
+const SettingsSection: React.FC<{ title: string; children: React.ReactNode; }> = ({ title, children }) => (
+    <div className="space-y-6">
+        <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">{title}</h3>
+        {children}
+    </div>
+);
+
+// FIX: Define the missing ThemeSwitcher component.
+const ThemeSwitcher: React.FC = () => {
     const { theme, setTheme } = useTheme();
 
-    const themes = [
-        { name: 'light', label: 'Light', icon: <SunIcon className="w-5 h-5" /> },
-        { name: 'dark', label: 'Dark', icon: <MoonIcon className="w-5 h-5" /> },
-        { name: 'system', label: 'System', icon: <ComputerDesktopIcon className="w-5 h-5" /> },
+    const options = [
+        { value: 'light', label: 'Light', icon: <SunIcon className="w-5 h-5" /> },
+        { value: 'dark', label: 'Dark', icon: <MoonIcon className="w-5 h-5" /> },
+        { value: 'system', label: 'System', icon: <ComputerDesktopIcon className="w-5 h-5" /> },
     ];
 
     return (
         <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Theme</label>
-            <div className="flex items-center gap-2 rounded-lg bg-slate-100 dark:bg-slate-700 p-1">
-                {themes.map(t => (
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Theme</label>
+            <div className="mt-1 grid grid-cols-3 gap-2 rounded-lg bg-slate-100 dark:bg-slate-700 p-1">
+                {options.map(option => (
                     <button
-                        key={t.name}
-                        onClick={() => setTheme(t.name as 'light' | 'dark' | 'system')}
-                        className={`w-full flex items-center justify-center gap-2 rounded-md py-2 px-3 text-sm font-medium transition-colors ${
-                            theme === t.name
-                                ? 'bg-white dark:bg-slate-900 text-[--color-primary-600] dark:text-[--color-primary-400] shadow-sm'
-                                : 'text-slate-600 dark:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-900/20'
+                        key={option.value}
+                        onClick={() => setTheme(option.value as any)}
+                        className={`flex items-center justify-center gap-2 w-full rounded-md py-2 px-3 text-sm font-medium transition-colors ${
+                            theme === option.value
+                                ? 'bg-white dark:bg-slate-900 text-[--color-primary-600] shadow-sm'
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-900/50'
                         }`}
                     >
-                        {t.icon}
-                        {t.label}
+                        {option.icon}
+                        {option.label}
                     </button>
                 ))}
             </div>
@@ -63,473 +111,212 @@ const ThemeSwitcher = () => {
     );
 };
 
-const TimeSyncManager: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
-    // State for Panel NTP
-    const [panelNtpStatus, setPanelNtpStatus] = useState<PanelNtpStatus | null>(null);
-    const [isNtpLoading, setIsNtpLoading] = useState(true);
-    const [isNtpSaving, setIsNtpSaving] = useState(false);
-    const [ntpError, setNtpError] = useState<string | null>(null);
-    
-    // State for Router Sync
-    const [isSyncing, setIsSyncing] = useState(false);
-    
-    // Fetch Panel NTP logic
-    const fetchNtpData = useCallback(() => {
-        setIsNtpLoading(true);
-        setNtpError(null);
-        getPanelNtpStatus()
-            .then(setPanelNtpStatus)
-            .catch(err => setNtpError(`Could not fetch panel NTP status: ${(err as Error).message}`))
-            .finally(() => setIsNtpLoading(false));
-    }, []);
-    
-    useEffect(() => { fetchNtpData() }, [fetchNtpData]);
+// --- Sub-components for each tab ---
 
-    // handle toggle Panel NTP
-    const handleTogglePanelNtp = async () => {
-        if (panelNtpStatus === null) return;
-        setIsNtpSaving(true);
-        try {
-            const result = await togglePanelNtp(!panelNtpStatus.enabled);
-            alert(result.message);
-            await fetchNtpData();
-        } catch (err) {
-            alert(`Failed to toggle panel NTP: ${(err as Error).message}`);
-        } finally {
-            setIsNtpSaving(false);
-        }
-    };
-
-    // handle sync to router
-    const handleSyncTimeToRouter = async () => {
-        if (!selectedRouter) return;
-        if (window.confirm(`Are you sure you want to set the time on "${selectedRouter.name}" to the panel's current time? This will set the router's system clock.`)) {
-            setIsSyncing(true);
-            try {
-                const res = await syncTimeToRouter(selectedRouter);
-                alert(res.message);
-            } catch (err) {
-                alert(`Failed to sync time: ${(err as Error).message}`);
-            } finally {
-                setIsSyncing(false);
-            }
-        }
-    };
+const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
+    const { language, currency, setLanguage, setCurrency } = useLocalization();
 
     return (
-        <div className="space-y-6">
-            {/* Panel Section */}
-            <div>
-                <h4 className="font-semibold text-lg text-slate-800 dark:text-slate-200 mb-2">Panel Host NTP</h4>
-                {isNtpLoading ? <div className="flex justify-center"><Loader /></div> : ntpError ? <p className="text-red-500 text-sm mb-2">{ntpError}</p> :
-                    <>
-                        <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                            <div>
-                                <p className="font-medium text-slate-700 dark:text-slate-300">Automatic Time Sync (timedatectl)</p>
-                                <p className="text-xs text-slate-500">Keep the panel server's time accurate.</p>
-                            </div>
-                            <button onClick={handleTogglePanelNtp} disabled={isNtpSaving || panelNtpStatus === null} className={`px-4 py-2 text-sm font-semibold rounded-lg w-28 text-white ${panelNtpStatus?.enabled ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} disabled:opacity-50`}>
-                                {isNtpSaving ? <Loader /> : panelNtpStatus?.enabled ? 'Disable' : 'Enable'}
-                            </button>
-                        </div>
-                         <div className="mt-4">
-                            <SudoInstructionBox />
-                        </div>
-                    </>
-                }
-            </div>
-            
-            {/* Router Section */}
-            {selectedRouter && (
-                <div className="pt-6 border-t border-slate-200 dark:border-slate-700">
-                    <h4 className="font-semibold text-lg text-slate-800 dark:text-slate-200 mb-2">Router Time Sync</h4>
-                    <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                        <div>
-                            <p className="font-medium text-slate-700 dark:text-slate-300">Sync Time to {selectedRouter.name}</p>
-                            <p className="text-sm text-slate-500">Set the router's clock to match this panel's server time.</p>
-                        </div>
-                        <button onClick={handleSyncTimeToRouter} disabled={isSyncing} className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg flex items-center gap-2 disabled:opacity-50">
-                            {isSyncing ? <Loader /> : <ClockIcon className="w-5 h-5" />}
-                            {isSyncing ? 'Syncing...' : 'Sync Now'}
-                        </button>
-                    </div>
+        <SettingsSection title="Panel Appearance">
+            <ThemeSwitcher />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label htmlFor="language" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Language</label>
+                    <select id="language" value={settings.language} onChange={e => setSettings(s => ({...s, language: e.target.value as PanelSettings['language']}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
+                        <option value="en">English</option>
+                        <option value="fil">Filipino</option>
+                        <option value="es">Español (Spanish)</option>
+                        <option value="pt">Português (Portuguese)</option>
+                    </select>
                 </div>
-            )}
-        </div>
+                <div>
+                    <label htmlFor="currency" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Currency</label>
+                    <select id="currency" value={settings.currency} onChange={e => setSettings(s => ({...s, currency: e.target.value as PanelSettings['currency']}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
+                        <option value="USD">USD ($)</option>
+                        <option value="PHP">PHP (₱)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="BRL">BRL (R$)</option>
+                    </select>
+                </div>
+            </div>
+        </SettingsSection>
     );
 };
 
+const AiTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => (
+    <SettingsSection title="AI Settings">
+        <TextInput 
+            label="Google Gemini API Key" 
+            name="geminiApiKey" 
+            type="password"
+            value={(settings as any).geminiApiKey || ''}
+            onChange={e => setSettings(s => ({ ...s, geminiApiKey: e.target.value }))}
+            info="Your key is stored securely in the panel's database."
+        />
+    </SettingsSection>
+);
 
-const DatabaseManager: React.FC = () => {
-    const [backups, setBackups] = useState<string[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [isActioning, setIsActioning] = useState<string | null>(null); // 'create', 'delete-filename', 'restore-filename'
-    const [restoreLogs, setRestoreLogs] = useState<string[]>([]);
+const TelegramTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>>, onTest: (token: string, id: string) => void, isTesting: boolean }> = ({ settings, setSettings, onTest, isTesting }) => {
+    const telegram = settings.telegramSettings || {} as TelegramSettings;
 
-    const fetchBackups = useCallback(async () => {
-        setIsLoading(true);
-        try {
-            const data = await listDatabaseBackups();
-            setBackups(data.filter(f => f.endsWith('.sqlite')));
-        } catch (error) {
-            console.error("Failed to list backups:", error);
-            alert(`Error: ${(error as Error).message}`);
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchBackups();
-    }, [fetchBackups]);
-
-    const handleCreateBackup = async () => {
-        setIsActioning('create');
-        try {
-            const result = await createDatabaseBackup();
-            alert(result.message);
-            await fetchBackups();
-        } catch (error) {
-            alert(`Failed to create backup: ${(error as Error).message}`);
-        } finally {
-            setIsActioning(null);
-        }
-    };
-
-    const handleDeleteBackup = async (filename: string) => {
-        if (!window.confirm(`Are you sure you want to permanently delete backup "${filename}"?`)) return;
-        setIsActioning(`delete-${filename}`);
-        try {
-            await deleteDatabaseBackup(filename);
-            await fetchBackups();
-        } catch (error) {
-            alert(`Failed to delete backup: ${(error as Error).message}`);
-        } finally {
-            setIsActioning(null);
-        }
-    };
-
-    const handleRestore = (filename: string) => {
-        if (!window.confirm(`Are you sure you want to restore from "${filename}"? This will overwrite all current panel data.`)) return;
-        
-        setIsActioning(`restore-${filename}`);
-        setRestoreLogs([]);
-
-        const eventSource = new EventSource(`/api/restore-backup?backupFile=${encodeURIComponent(filename)}`);
-
-        eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.log) setRestoreLogs(prev => [...prev, data.log]);
-            if (data.status === 'restarting') {
-                alert('Restore successful! The panel is restarting. The page will reload in a few seconds.');
-                setTimeout(() => window.location.reload(), 8000);
-                eventSource.close();
-            }
-            if (data.status === 'error') {
-                alert(`Restore failed: ${data.message}`);
-                setIsActioning(null);
-                eventSource.close();
-            }
-        };
-
-        eventSource.onerror = () => {
-            alert('Connection lost during restore process.');
-            setIsActioning(null);
-            eventSource.close();
-        };
-    };
-
-    const handleDownload = async (filename: string) => {
-        setIsActioning(`download-${filename}`);
-        try {
-            const res = await fetch(`/download-backup/${filename}`, {
-                headers: getAuthHeader(),
-            });
-
-            if (!res.ok) {
-                let errorMsg = `Download failed: ${res.statusText}`;
-                try {
-                    const data = await res.json();
-                    errorMsg = data.message || errorMsg;
-                } catch (e) {
-                    // response is not json
-                }
-                throw new Error(errorMsg);
-            }
-
-            const blob = await res.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            a.remove();
-        } catch (error) {
-            alert(`Failed to download backup: ${(error as Error).message}`);
-        } finally {
-            setIsActioning(null);
-        }
+    const update = (field: keyof TelegramSettings, value: any) => {
+        setSettings(s => ({ ...s, telegramSettings: { ...s.telegramSettings, [field]: value } as TelegramSettings }));
     };
 
     return (
-        <div className="space-y-4">
-            <button onClick={handleCreateBackup} disabled={!!isActioning} className="w-full px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2">
-                {isActioning === 'create' ? <Loader /> : <CircleStackIcon className="w-5 h-5" />}
-                {isActioning === 'create' ? 'Backing up...' : 'Create New Backup'}
-            </button>
-            <div className="pt-4">
-                <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Available Backups</h4>
-                {isLoading ? <div className="flex justify-center"><Loader/></div> :
-                 backups.length > 0 ? (
-                    <ul className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                        {backups.map(backup => (
-                            <li key={backup} className="bg-slate-100 dark:bg-slate-700/50 p-3 rounded-md flex justify-between items-center">
-                                <span className="font-mono text-sm text-slate-800 dark:text-slate-300 truncate mr-4">{backup}</span>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                    <button onClick={() => handleRestore(backup)} disabled={!!isActioning} className="p-2 text-slate-500 hover:text-sky-500 disabled:opacity-50" title="Restore"><ArrowPathIcon className="h-5 w-5"/></button>
-                                    <button onClick={() => handleDownload(backup)} disabled={!!isActioning} className="p-2 text-slate-500 hover:text-green-500 disabled:opacity-50" title="Download">
-                                        {isActioning === `download-${backup}` ? <Loader/> : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>}
-                                    </button>
-                                    <button onClick={() => handleDeleteBackup(backup)} disabled={!!isActioning} className="p-2 text-slate-500 hover:text-red-500 disabled:opacity-50" title="Delete">
-                                        {isActioning === `delete-${backup}` ? <Loader/> : <TrashIcon className="h-5 w-5"/>}
-                                    </button>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                 ) : (
-                    <p className="text-slate-500 dark:text-slate-400 text-center py-4">No database backups found.</p>
-                 )
-                }
-            </div>
-            {isActioning?.startsWith('restore-') && (
-                <div className="mt-4">
-                    <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Restoring...</h4>
-                    <div className="bg-slate-900 text-slate-300 font-mono text-xs p-4 rounded-md h-48 overflow-y-auto">
-                        {restoreLogs.map((log, i) => <pre key={i} className="whitespace-pre-wrap">{log}</pre>)}
-                    </div>
+        <SettingsSection title="Telegram Notifications">
+            <Toggle label="Enable Telegram Notifications" checked={telegram.enabled || false} onChange={c => update('enabled', c)} />
+            <div className={`space-y-4 ${!telegram.enabled ? 'opacity-50' : ''}`}>
+                <TextInput label="Bot Token" name="botToken" value={telegram.botToken || ''} onChange={e => update('botToken', e.target.value)} type="password" />
+                <TextInput label="Chat ID" name="chatId" value={telegram.chatId || ''} onChange={e => update('chatId', e.target.value)} />
+                <button onClick={() => onTest(telegram.botToken, telegram.chatId)} disabled={isTesting || !telegram.botToken || !telegram.chatId} className="px-4 py-2 bg-sky-600 text-white rounded-md disabled:opacity-50">
+                    {isTesting ? 'Sending...' : 'Send Test Message'}
+                </button>
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                    <h4 className="font-semibold">Event Triggers</h4>
+                    <Toggle label="Client Due Date" checked={telegram.enableClientDueDate || false} onChange={c => update('enableClientDueDate', c)} info="Notify when a client's subscription is about to expire or has expired." />
+                    <Toggle label="Client Disconnected" checked={telegram.enableClientDisconnected || false} onChange={c => update('enableClientDisconnected', c)} info="Notify when a PPPoE user is disabled or disconnected due to expiry." />
+                    <Toggle label="Interface Disconnected" checked={telegram.enableInterfaceDisconnected || false} onChange={c => update('enableInterfaceDisconnected', c)} info="Notify when a monitored WAN interface goes down." />
+                    <Toggle label="User Paid" checked={telegram.enableUserPaid || false} onChange={c => update('enableUserPaid', c)} info="Notify when a payment is processed through the panel." />
                 </div>
-            )}
-        </div>
+            </div>
+        </SettingsSection>
     );
 };
 
+const XenditTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
+    const xendit = settings.xenditSettings || {} as XenditSettings;
+    const update = (field: keyof XenditSettings, value: any) => {
+        setSettings(s => ({ ...s, xenditSettings: { ...s.xenditSettings, [field]: value } as XenditSettings }));
+    };
+
+    return (
+        <SettingsSection title="Xendit Payment Gateway">
+            <Toggle label="Enable Xendit Payments" checked={xendit.enabled || false} onChange={c => update('enabled', c)} />
+            <div className={`space-y-4 ${!xendit.enabled ? 'opacity-50' : ''}`}>
+                <TextInput label="Secret Key" name="secretKey" value={xendit.secretKey || ''} onChange={e => update('secretKey', e.target.value)} type="password" />
+                <TextInput label="Public Key" name="publicKey" value={xendit.publicKey || ''} onChange={e => update('publicKey', e.target.value)} type="password" />
+                <TextInput label="Webhook Token" name="webhookToken" value={xendit.webhookToken || ''} onChange={e => update('webhookToken', e.target.value)} type="password" />
+            </div>
+        </SettingsSection>
+    );
+};
 
 interface SystemSettingsProps {
     selectedRouter: RouterConfigWithId | null;
     licenseStatus: LicenseStatus | null;
 }
 
+type Tab = 'panel' | 'ai' | 'telegram' | 'xendit' | 'database' | 'time' | 'power';
+
 // --- Main Component ---
 export const SystemSettings: React.FC<SystemSettingsProps> = ({ selectedRouter, licenseStatus }) => {
-    const { language, currency, setLanguage, setCurrency } = useLocalization();
-    const { logout } = useAuth();
-    const [localSettings, setLocalSettings] = useState({ language, currency });
-    const [isPanelSettingsSaving, setIsPanelSettingsSaving] = useState(false);
-    
-    const [apiKey, setApiKey] = useState('');
-    const [isKeySaving, setIsKeySaving] = useState(false);
-    const [isResetting, setIsResetting] = useState(false);
-    
-    useEffect(() => {
-        setLocalSettings({ language, currency });
-    }, [language, currency]);
+    const [activeTab, setActiveTab] = useState<Tab>('panel');
+    const [settings, setSettings] = useState<PanelSettings>({} as PanelSettings);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isTesting, setIsTesting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        const loadSettings = async () => {
+        const load = async () => {
+            setIsLoading(true);
             try {
-                const settings = await getPanelSettings() as any;
-                if (settings?.geminiApiKey) {
-                    setApiKey(settings.geminiApiKey);
-                }
-            } catch (error) {
-                console.error("Could not load API key:", error);
+                const data = await getPanelSettings();
+                setSettings(data);
+            } catch (err) {
+                setError((err as Error).message);
+            } finally {
+                setIsLoading(false);
             }
         };
-        loadSettings();
+        load();
     }, []);
-
-    const handleSavePanelSettings = async () => {
-        setIsPanelSettingsSaving(true);
+    
+    const handleSave = async () => {
+        setIsSaving(true);
+        setError(null);
         try {
-            // Fetch current settings to avoid overwriting other values (like API key)
-            const currentSettings = await getPanelSettings();
-            const newSettings = { ...(currentSettings && typeof currentSettings === 'object' ? currentSettings : {}), ...localSettings };
-
-            // 1. Save the merged settings object in a single API call
-            await savePanelSettings(newSettings);
-
-            // 2. On success, update the context state
-            if (localSettings.language !== language) {
-                await setLanguage(localSettings.language);
-            }
-            if (localSettings.currency !== currency) {
-                setCurrency(localSettings.currency);
-            }
-            
-            alert('Panel settings saved!');
+            await savePanelSettings(settings);
+            // Re-initialize AI client if key changed
+            initializeAiClient((settings as any).geminiApiKey);
+            alert('Settings saved successfully!');
         } catch (err) {
-            console.error("Failed to save panel settings:", err);
-            alert(`Failed to save panel settings: ${(err as Error).message}`);
+            setError((err as Error).message);
         } finally {
-            setIsPanelSettingsSaving(false);
+            setIsSaving(false);
         }
     };
-
-    const handleSaveApiKey = async () => {
-        setIsKeySaving(true);
+    
+    const handleTestTelegram = async (botToken: string, chatId: string) => {
+        setIsTesting(true);
         try {
-            const currentSettings = await getPanelSettings();
-            const newSettings = { ...(currentSettings && typeof currentSettings === 'object' ? currentSettings : {}), geminiApiKey: apiKey };
-            await savePanelSettings(newSettings);
-            initializeAiClient(apiKey);
-            alert('Gemini API Key saved successfully!');
-        } catch (error) {
-            alert(`Failed to save API Key: ${(error as Error).message}`);
+            const res = await fetch('/api/telegram/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+                body: JSON.stringify({ botToken, chatId })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            alert(data.message);
+        } catch (err) {
+            alert(`Test failed: ${(err as Error).message}`);
         } finally {
-            setIsKeySaving(false);
+            setIsTesting(false);
         }
     };
+    
+    const tabs = [
+        { id: 'panel', label: 'Panel', icon: <CogIcon className="w-5 h-5" /> },
+        { id: 'ai', label: 'AI', icon: <KeyIcon className="w-5 h-5" /> },
+        { id: 'telegram', label: 'Telegram', icon: <MessageIcon className="w-5 h-5" /> },
+        { id: 'xendit', label: 'Xendit', icon: <XenditIcon className="w-5 h-5" /> },
+        { id: 'database', label: 'Database', icon: <CircleStackIcon className="w-5 h-5" /> },
+        { id: 'time', label: 'Time Sync', icon: <ClockIcon className="w-5 h-5" /> },
+        { id: 'power', label: 'Power', icon: <PowerIcon className="w-5 h-5" /> },
+    ];
+    
+    const renderContent = () => {
+        if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
+        if (error) return <p className="text-red-500">{error}</p>;
 
-    const handleReboot = async () => {
-        if (!selectedRouter) return;
-        if (window.confirm(`Are you sure you want to reboot the router "${selectedRouter.name}"?`)) {
-            try {
-                const res = await rebootRouter(selectedRouter);
-                alert(res.message);
-            } catch (err) {
-                alert(`Failed to send reboot command: ${(err as Error).message}`);
-            }
-        }
-    };
-
-    const handleResetCredentials = async () => {
-        const confirmation = "Are you sure you want to reset all admin credentials? This will delete all user accounts and security questions from the panel's database. The panel will return to its initial setup state, prompting for a new administrator account to be created. This action cannot be undone.";
-        if (window.confirm(confirmation)) {
-            setIsResetting(true);
-            try {
-                const response = await fetch('/api/auth/reset-all', {
-                    method: 'POST',
-                    headers: getAuthHeader(),
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.message || 'Failed to reset credentials.');
-                }
-                alert('All user credentials have been reset. You will now be logged out.');
-                logout(); // This will clear local storage and reload the page
-            } catch (err) {
-                alert(`Error: ${(err as Error).message}`);
-            } finally {
-                setIsResetting(false);
-            }
+        switch (activeTab) {
+            case 'panel': return <PanelTab settings={settings} setSettings={setSettings} />;
+            case 'ai': return <AiTab settings={settings} setSettings={setSettings} />;
+            case 'telegram': return <TelegramTab settings={settings} setSettings={setSettings} onTest={handleTestTelegram} isTesting={isTesting} />;
+            case 'xendit': return <XenditTab settings={settings} setSettings={setSettings} />;
+            // Add other tabs here...
+            default: return null;
         }
     };
 
     return (
         <div className="max-w-4xl mx-auto space-y-8">
-             {!licenseStatus?.licensed && (
-                <div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700/50 text-yellow-900 dark:text-yellow-200 flex items-center gap-3">
-                    <KeyIcon className="w-6 h-6 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
-                    <div>
-                        <h4 className="font-bold">Panel Unlicensed</h4>
-                        <p className="text-sm">Please activate your panel on the License page to ensure all features work correctly.</p>
-                    </div>
-                </div>
-            )}
-            <SettingsCard title="Panel Settings" icon={<CogIcon className="w-6 h-6" />}>
-                <div className="space-y-6">
-                    <ThemeSwitcher />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label htmlFor="language" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Language</label>
-                            <select id="language" value={localSettings.language} onChange={e => setLocalSettings(s => ({...s, language: e.target.value as PanelSettings['language']}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
-                                <option value="en">English</option>
-                                <option value="fil">Filipino</option>
-                                <option value="es">Español (Spanish)</option>
-                                <option value="pt">Português (Portuguese)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label htmlFor="currency" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Currency</label>
-                            <select id="currency" value={localSettings.currency} onChange={e => setLocalSettings(s => ({...s, currency: e.target.value as PanelSettings['currency']}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
-                                <option value="USD">USD ($)</option>
-                                <option value="PHP">PHP (₱)</option>
-                                <option value="EUR">EUR (€)</option>
-                                <option value="BRL">BRL (R$)</option>
-                            </select>
-                        </div>
-                    </div>
-                     <div className="flex justify-end pt-4 border-t border-slate-200 dark:border-slate-700">
-                        <button onClick={handleSavePanelSettings} disabled={isPanelSettingsSaving} className="px-4 py-2 bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-semibold rounded-lg disabled:opacity-50">
-                            {isPanelSettingsSaving ? 'Saving...' : 'Save Panel Settings'}
-                        </button>
-                    </div>
-                </div>
-            </SettingsCard>
+            <div className="border-b border-slate-200 dark:border-slate-700">
+                <nav className="flex space-x-2 -mb-px overflow-x-auto" aria-label="Tabs">
+                    {tabs.map(tab => (
+                        <TabButton 
+                            key={tab.id}
+                            label={tab.label}
+                            icon={tab.icon}
+                            isActive={activeTab === tab.id}
+                            onClick={() => setActiveTab(tab.id as Tab)}
+                        />
+                    ))}
+                </nav>
+            </div>
             
-            <SettingsCard title="Database Management" icon={<CircleStackIcon className="w-6 h-6" />}>
-                <DatabaseManager />
-            </SettingsCard>
-            
-            <SettingsCard title="AI Settings" icon={<KeyIcon className="w-6 h-6" />}>
-                <div className="space-y-2">
-                    <label htmlFor="apiKey" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Google Gemini API Key</label>
-                    <input type="password" name="apiKey" id="apiKey" value={apiKey} onChange={e => setApiKey(e.target.value)} className="block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
-                    <p className="text-xs text-slate-500">Your key is stored locally in the panel's database.</p>
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
+                <div className="p-6">
+                    {renderContent()}
                 </div>
-                <div className="flex justify-end mt-4">
-                    <button onClick={handleSaveApiKey} disabled={isKeySaving} className="px-4 py-2 bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-semibold rounded-lg disabled:opacity-50">
-                        {isKeySaving ? 'Saving...' : 'Save API Key'}
+                <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-4 flex justify-end rounded-b-lg">
+                    <button onClick={handleSave} disabled={isSaving} className="px-6 py-2 font-semibold bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white rounded-lg disabled:opacity-50 flex items-center gap-2">
+                        {isSaving && <Loader />}
+                        {isSaving ? 'Saving...' : 'Save All Settings'}
                     </button>
                 </div>
-            </SettingsCard>
-
-            <SettingsCard title="Time Synchronization" icon={<ClockIcon className="w-6 h-6" />}>
-                <TimeSyncManager selectedRouter={selectedRouter} />
-            </SettingsCard>
-
-            <SettingsCard title="Account Reset" icon={<UsersIcon className="w-6 h-6" />}>
-                <div className="space-y-4">
-                    <p className="text-sm text-slate-600 dark:text-slate-400">
-                        This will delete all user accounts and security questions from the panel's database.
-                        The panel will return to its initial setup state, prompting for a new administrator account to be created.
-                        This is useful if you are selling or transferring ownership of this panel.
-                    </p>
-                    <div className="flex items-center justify-between p-4 bg-red-50 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-700">
-                        <div>
-                            <p className="font-semibold text-red-800 dark:text-red-300">Reset All Credentials</p>
-                            <p className="text-sm text-red-600 dark:text-red-400">This action cannot be undone.</p>
-                        </div>
-                        <button onClick={handleResetCredentials} disabled={isResetting} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg flex items-center gap-2 disabled:opacity-50">
-                            {isResetting && <Loader />}
-                            {isResetting ? 'Resetting...' : 'Reset Now'}
-                        </button>
-                    </div>
-                </div>
-            </SettingsCard>
-
-            {selectedRouter && (
-                 <SettingsCard title={`Router Management (${selectedRouter.name})`} icon={<RouterIcon className="w-6 h-6" />}>
-                    <div className="space-y-6">
-                         <div className="pt-6 border-t border-slate-200 dark:border-slate-700">
-                             <h4 className="font-semibold text-lg text-slate-800 dark:text-slate-200 mb-2">Power Actions</h4>
-                            <div className="flex items-center justify-between p-4 bg-red-50 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-700">
-                                <div>
-                                    <p className="font-semibold text-red-800 dark:text-red-300">Reboot Router</p>
-                                    <p className="text-sm text-red-600 dark:text-red-400">This will immediately restart the selected router.</p>
-                                </div>
-                                <button onClick={handleReboot} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg flex items-center gap-2">
-                                    <PowerIcon className="w-5 h-5" />
-                                    Reboot
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                 </SettingsCard>
-            )}
+            </div>
         </div>
     );
 };

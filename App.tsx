@@ -1,5 +1,3 @@
-
-
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
@@ -107,7 +105,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
             const settings = await getPanelSettings() as any;
             
             // AI init
-            const aiKey = settings?.geminiApiKey || process.env.API_KEY;
+            const aiKey = settings?.geminiApiKey || (window as any).process?.env?.API_KEY;
             initializeAiClient(aiKey);
 
             // Xendit init
@@ -123,7 +121,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
         } catch (error) {
             console.error("Could not load settings for service initialization:", error);
             // Fallback initializations
-            initializeAiClient(process.env.API_KEY);
+            initializeAiClient((window as any).process?.env?.API_KEY);
         }
     };
     initServices();
