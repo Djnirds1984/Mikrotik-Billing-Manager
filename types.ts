@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 export type View =
@@ -41,7 +42,6 @@ export interface LicenseStatus {
   expires?: string;
   deviceId?: string;
   licenseKey?: string;
-  // FIX: Add optional error property to match potential API responses.
   error?: string;
 }
 
@@ -178,7 +178,6 @@ export interface IpRoute {
     'dst-address': string;
     gateway?: string;
     distance: string;
-    // FIX: Changed boolean types to string to match MikroTik API response format.
     active: string;
     disabled: string;
     comment?: string;
@@ -207,7 +206,7 @@ export interface BillingPlan {
 }
 
 export interface BillingPlanWithId extends BillingPlan {
-    id: string;
+  id: string;
 }
 
 export interface VoucherPlan {
@@ -223,7 +222,6 @@ export interface VoucherPlanWithId extends VoucherPlan {
     id: string;
 }
 
-// FIX: Add DHCP Billing Plan types
 export interface DhcpBillingPlan {
     routerId: string;
     name: string;
@@ -312,7 +310,6 @@ export interface SaleRecord {
     routerName: string;
     currency: string;
     routerId?: string;
-    // New fields for receipt
     clientAddress?: string;
     clientContact?: string;
     clientEmail?: string;
@@ -425,6 +422,7 @@ export interface XenditSettings {
 export interface PanelSettings {
     language: 'en' | 'fil' | 'es' | 'pt';
     currency: 'USD' | 'PHP' | 'EUR' | 'BRL';
+    geminiApiKey?: string;
     databaseEngine?: 'sqlite' | 'mariadb';
     dbHost?: string;
     dbPort?: number;
@@ -458,7 +456,6 @@ export interface WanRoute {
     gateway: string;
     distance: string;
     checkGateway: string;
-    // FIX: Changed boolean types to string to match MikroTik API response format.
     active: string;
     disabled: string;
     comment?: string;
@@ -468,7 +465,6 @@ export interface FailoverStatus {
     enabled: boolean;
 }
 
-// --- Payroll Types ---
 export interface Employee {
   id: string;
   fullName: string;
@@ -495,14 +491,13 @@ export interface TimeRecord {
 }
 
 
-// --- Firewall Types ---
 export interface FirewallRuleBase {
-    '.id': string; // MikroTik API uses .id
-    id: string; // We map .id to id for easier use
+    '.id': string;
+    id: string;
     chain: string;
     action: string;
     comment?: string;
-    disabled: string; // 'true' or 'false'
+    disabled: string;
     invalid: string;
     dynamic: string;
     bytes: number;
@@ -536,19 +531,17 @@ export interface FirewallMangleRule extends FirewallRuleBase {
     'src-address'?: string;
     'dst-address'?: string;
     'new-routing-mark'?: string;
-    passthrough: string; // 'true' or 'false'
+    passthrough: string;
     protocol?: string;
 }
 
 export type FirewallRule = FirewallFilterRule | FirewallNatRule | FirewallMangleRule;
 
-// Data types for POST/PATCH requests
 export type FirewallFilterRuleData = Partial<Omit<FirewallFilterRule, 'id' | '.id' | 'invalid' | 'dynamic' | 'bytes' | 'packets'>>;
 export type FirewallNatRuleData = Partial<Omit<FirewallNatRule, 'id' | '.id' | 'invalid' | 'dynamic' | 'bytes' | 'packets'>>;
 export type FirewallMangleRuleData = Partial<Omit<FirewallMangleRule, 'id' | '.id' | 'invalid' | 'dynamic' | 'bytes' | 'packets'>>;
 export type FirewallRuleData = FirewallFilterRuleData | FirewallNatRuleData | FirewallMangleRuleData;
 
-// FIX: Add SimpleQueue and SimpleQueueData types
 export interface SimpleQueue {
     id: string;
     name: string;
@@ -562,7 +555,6 @@ export interface SimpleQueue {
 
 export type SimpleQueueData = Partial<Omit<SimpleQueue, 'id' | 'bytes' | 'packets'>>;
 
-// --- Hotspot Setup Types ---
 export interface SslCertificate {
     id: string;
     name: string;
@@ -575,7 +567,7 @@ export interface HotspotSetupParams {
     hotspotInterface: string;
     localAddress: string;
     addressPool: string;
-    sslCertificate: string; // 'none' or certificate name
+    sslCertificate: string; 
     dnsServers: string;
     dnsName: string;
     hotspotUser: string;
@@ -594,7 +586,6 @@ export interface NewVersionInfo {
     description: string;
     changelog: string;
 }
-// FIX: Added missing DataplicityStatus interface.
 export interface DataplicityStatus {
     installed: boolean;
     url?: string;
@@ -687,23 +678,20 @@ export interface DhcpCaptivePortalSetupParams {
 }
 
 export interface DhcpClient {
-    id: string; // This will be the address list entry ID
+    id: string; 
     status: 'pending' | 'active';
     address: string;
     macAddress: string;
     hostName: string;
-    // Parsed from comment or local DB
     customerInfo?: string;
     contactNumber?: string;
     email?: string;
     speedLimit?: string;
-    // Raw data
-    timeout?: string; // e.g. 29d23h59m58s
+    timeout?: string; 
     creationTime?: string;
     comment?: string;
 }
 
-// FIX: Added DB record type for DHCP clients.
 export interface DhcpClientDbRecord {
     id: string;
     routerId: string;
@@ -716,7 +704,6 @@ export interface DhcpClientDbRecord {
 }
 
 
-// FIX: Updated DhcpClientActionParams to support both plan-based and manual updates.
 export interface DhcpClientActionParams {
     customerInfo: string;
     contactNumber?: string;

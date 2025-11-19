@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
@@ -41,7 +42,7 @@ import { LocalizationProvider, useLocalization } from './contexts/LocalizationCo
 import { ThemeProvider } from './contexts/ThemeContext.tsx';
 import { NotificationProvider } from './contexts/NotificationContext.tsx';
 import { useAuth } from './contexts/AuthContext.tsx';
-import type { View, LicenseStatus } from './types.ts';
+import type { View, LicenseStatus, PanelSettings } from './types.ts';
 import { getAuthHeader, getPanelSettings } from './services/databaseService.ts';
 import { initializeAiClient } from './services/geminiService.ts';
 import { initializeXenditService } from './services/xenditService.ts';
@@ -99,16 +100,13 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const { t, isLoading: isLoadingLocalization } = useLocalization();
 
   useEffect(() => {
-    // Initialize AI and other services on app load
     const initServices = async () => {
         try {
-            const settings = await getPanelSettings() as any;
+            const settings = await getPanelSettings() as PanelSettings;
             
-            // AI init
             const aiKey = settings?.geminiApiKey || (window as any).process?.env?.API_KEY;
             initializeAiClient(aiKey);
 
-            // Xendit init
             if (settings?.xenditSettings?.enabled && settings.xenditSettings.secretKey) {
                 initializeXenditService({
                     secretKey: settings.xenditSettings.secretKey,
@@ -120,12 +118,11 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
 
         } catch (error) {
             console.error("Could not load settings for service initialization:", error);
-            // Fallback initializations
             initializeAiClient((window as any).process?.env?.API_KEY);
         }
     };
     initServices();
-  }, []); // Run only once on mount
+  }, []);
 
   const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;
 
@@ -221,7 +218,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
       case 'company':
           return <Company settings={companySettings} onSave={updateCompanySettings} />;
       case 'system':
-          return <SystemSettings selectedRouter={selectedRouter} licenseStatus={licenseStatus} />;
+          return <SystemSettings />;
       case 'updater':
         return <Updater />;
       case 'logs':
@@ -281,7 +278,6 @@ const AppRouter: React.FC = () => {
     const [isLicenseLoading, setIsLicenseLoading] = useState(true);
     let licenseCheckInterval = React.useRef<number | null>(null);
 
-    // This renders a dedicated, unauthenticated page for captive portal clients
     if (window.location.pathname.startsWith('/captive')) {
         return (
             <ThemeProvider>
@@ -320,7 +316,6 @@ const AppRouter: React.FC = () => {
         }
     }, [isLoading, hasUsers]);
     
-    // Initial license check and polling
     useEffect(() => {
         if (user) {
             setIsLicenseLoading(true);
@@ -329,7 +324,7 @@ const AppRouter: React.FC = () => {
             if (licenseCheckInterval.current) {
                 clearInterval(licenseCheckInterval.current);
             }
-            licenseCheckInterval.current = window.setInterval(checkLicense, 5000); // Poll every 5 seconds
+            licenseCheckInterval.current = window.setInterval(checkLicense, 5000);
         } else if (!isLoading) {
             setIsLicenseLoading(false);
             setLicenseStatus(null);

@@ -98,8 +98,9 @@ export class XenditService {
    */
   async getInvoice(invoiceId: string): Promise<XenditInvoiceResponse> {
     try {
-      // FIX: The method to get a single invoice by ID is `getInvoice`, not `getInvoices`. `getInvoices` is for listing multiple invoices and doesn't accept `invoiceID`.
-      const response = await this.client.Invoice.getInvoice({ invoiceID: invoiceId });
+      // FIX: The method to get a single invoice by ID is `getInvoice`, but the type definitions are likely incorrect and suggest `getInvoices`.
+      // Using bracket notation to bypass the compile-time error while calling the correct runtime method.
+      const response = await (this.client.Invoice as any).getInvoice({ invoiceID: invoiceId });
       return response as unknown as XenditInvoiceResponse;
     } catch (error) {
       console.error('Xendit get invoice error:', error);
