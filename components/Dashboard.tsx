@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, SystemInfo, InterfaceWithHistory, TrafficHistoryPoint, Interface, PanelHostStatus } from '../types.ts';
-import { getSystemInfo, getInterfaceStats, getInterfaces, getPppActiveConnections } from '../services/mikrotikService.ts';
+import { getSystemInfo, getInterfaceStats, getPppActiveConnections } from '../services/mikrotikService.ts';
 import { getPanelHostStatus } from '../services/panelService.ts';
 import { Loader } from './Loader.tsx';
 import { Chart } from './chart.tsx';
@@ -109,13 +109,11 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         }
 
         try {
-            const [info, statsData, pppoeActive] = await Promise.all([
+            const [info, currentInterfacesData, pppoeActive] = await Promise.all([
                 getSystemInfo(selectedRouter),
-                getInterfaceStats(selectedRouter).catch(() => []),
+                getInterfaceStats(selectedRouter),
                 getPppActiveConnections(selectedRouter).catch(() => []), 
             ]);
-            const hasCounters = Array.isArray(statsData) && statsData.some((i: any) => i['rx-byte'] || i['bytes-in'] || i['rx-bytes'] || i['tx-byte'] || i['bytes-out'] || i['tx-bytes'] || i['rx-bits-per-second'] || i['tx-bits-per-second'] || i['rx-rate'] || i['tx-rate']);
-            const currentInterfacesData: Interface[] = hasCounters ? (statsData as Interface[]) : await getInterfaces(selectedRouter);
             setSystemInfo(info);
             setPppoeCount(Array.isArray(pppoeActive) ? pppoeActive.length : 0);
             
@@ -165,21 +163,11 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         if (isNaN(txRate)) txRate = 0;
                     }
 
-                    if (rxRate === 0) {
-                        const i = iface as any;
-                        rxRate = Number(i['rx-bits-per-second'] ?? i['rx-rate'] ?? 0) || rxRate;
-                    }
-                    if (txRate === 0) {
-                        const i = iface as any;
-                        txRate = Number(i['tx-bits-per-second'] ?? i['tx-rate'] ?? 0) || txRate;
-                    }
+                    
 
                     const newHistoryPoint: TrafficHistoryPoint = { name: new Date().toLocaleTimeString(), rx: rxRate, tx: txRate };
                     
                     let newHistory = existingIface ? [...existingIface.trafficHistory, newHistoryPoint] : [newHistoryPoint];
-                    if (!existingIface && (rxRate > 0 || txRate > 0)) {
-                        newHistory = [newHistoryPoint, newHistoryPoint];
-                    }
                     if (newHistory.length > MAX_HISTORY_POINTS) {
                         newHistory = newHistory.slice(newHistory.length - MAX_HISTORY_POINTS);
                     }
