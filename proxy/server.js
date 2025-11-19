@@ -2,7 +2,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const util = require('util');
 const sqlite3 = require('@vscode/sqlite3');
 const { open } = require('sqlite');
@@ -655,10 +655,10 @@ async function startServer() {
         
         // Attempt to read logs via pm2 if available, otherwise mock
         if (type.includes('nginx')) {
-            logCommand = type === 'nginx-access' ? 'tail -n 50 /var/log/nginx/access.log' : 'tail -n 50 /var/log/nginx/error.log';
+            logCommand = type === 'nginx-access' ? 'sudo tail -n 50 /var/log/nginx/access.log' : 'sudo tail -n 50 /var/log/nginx/error.log';
         } else {
             const appName = type === 'panel-ui' ? 'mikrotik-manager' : 'mikrotik-api-backend';
-            logCommand = `pm2 logs ${appName} --lines 50 --nostream --raw`;
+            logCommand = `sudo pm2 logs ${appName} --lines 50 --nostream --raw`;
         }
 
         exec(logCommand, (error, stdout, stderr) => {
@@ -711,11 +711,134 @@ async function startServer() {
         res.json({ status: 'uptodate', message: 'System is up to date (mock).' });
     });
     
-    // Remote Access Endpoints (Placeholder implementation)
-    app.get('/api/zt/status', protect, (req, res) => res.json({ info: { online: false, version: '0.0.0', address: 'unknown' }, networks: [] }));
-    app.get('/api/pitunnel/status', protect, (req, res) => res.json({ installed: false }));
-    app.get('/api/ngrok/status', protect, (req, res) => res.json({ installed: false }));
-    app.get('/api/dataplicity/status', protect, (req, res) => res.json({ installed: false }));
+    // --- REMOTE ACCESS ENDPOINTS (ZeroTier, PiTunnel, Ngrok, Dataplicity) ---
+    // Helper function to execute shell commands
+    const runCommand = (cmd) => new Promise((resolve, reject) => {
+        exec(cmd, (error, stdout, stderr) => {
+            if (error) reject({ error, stderr, stdout });
+            else resolve(stdout.trim());
+        });
+    });
+
+    // ZeroTier
+    app.get('/api/zt/status', protect, async (req, res) => {
+        try {
+            // Check if installed
+            try {
+                await runCommand('which zerotier-cli');
+            } catch (e) {
+                throw { code: 'ZEROTIER_NOT_INSTALLED', message: 'ZeroTier is not installed' };
+            }
+
+            // Run info and listnetworks with sudo
+            const infoRaw = await runCommand('sudo zerotier-cli info -j').catch(e => {
+                if (e.stderr.includes('sudo')) throw { code: 'SUDO_PASSWORD_REQUIRED' };
+                throw e;
+            });
+            const networksRaw = await runCommand('sudo zerotier-cli listnetworks -j');
+
+            const info = JSON.parse(infoRaw);
+            const networks = JSON.parse(networksRaw);
+
+            res.json({ info, networks });
+        } catch (error) {
+            if (error.code === 'ZEROTIER_NOT_INSTALLED') {
+                // Return a valid structure with offline status so frontend doesn't crash
+                res.json({ info: { online: false, version: '0.0.0', address: 'not_installed' }, networks: [], error: 'NOT_INSTALLED' });
+            } else if (error.code === 'SUDO_PASSWORD_REQUIRED') {
+                 res.status(500).json({ code: 'SUDO_PASSWORD_REQUIRED', message: 'Sudo access required' });
+            } else {
+                 // Fallback structure to prevent frontend crash
+                 console.error("ZeroTier Error:", error);
+                 res.json({ info: { online: false, version: '0.0.0', address: 'error' }, networks: [], error: error.message || 'Unknown error' });
+            }
+        }
+    });
+
+    app.post('/api/zt/join', protect, async (req, res) => {
+        const { networkId } = req.body;
+        try {
+            const output = await runCommand(`sudo zerotier-cli join ${networkId}`);
+            res.json({ message: output });
+        } catch (e) {
+            res.status(500).json({ message: e.stderr || e.message });
+        }
+    });
+
+    app.post('/api/zt/leave', protect, async (req, res) => {
+        const { networkId } = req.body;
+        try {
+            const output = await runCommand(`sudo zerotier-cli leave ${networkId}`);
+            res.json({ message: output });
+        } catch (e) {
+            res.status(500).json({ message: e.stderr || e.message });
+        }
+    });
+
+    // PiTunnel
+    app.get('/api/pitunnel/status', protect, async (req, res) => {
+        try {
+            const isActive = await runCommand('systemctl is-active pitunnel').then(o => o === 'active').catch(() => false);
+            const isInstalled = await runCommand('which pitunnel').then(() => true).catch(() => false);
+            
+            // Attempt to find monitor URL from a config file if it exists (mock logic as location varies)
+            // Real logic would depend on where PiTunnel stores its state.
+            res.json({ installed: isInstalled, active: isActive, url: isInstalled ? 'https://pitunnel.com/dashboard' : undefined });
+        } catch (e) {
+             res.json({ installed: false, active: false });
+        }
+    });
+
+    // Ngrok
+    app.get('/api/ngrok/status', protect, async (req, res) => {
+        try {
+             // Check if running
+            const isRunning = await runCommand('pgrep ngrok').then(() => true).catch(() => false);
+            const isInstalled = await runCommand('which ngrok').then(() => true).catch(() => false);
+            
+            // Attempt to get tunnel URL from local API if running
+            let url = null;
+            if (isRunning) {
+                try {
+                    const tunnels = await axios.get('http://127.0.0.1:4040/api/tunnels');
+                    url = tunnels.data.tunnels?.[0]?.public_url;
+                } catch (e) { /* ignore */ }
+            }
+            
+            // Load saved config if exists
+            const configPath = path.join(__dirname, 'ngrok-config.json');
+            let config = {};
+            if (fs.existsSync(configPath)) {
+                 config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            }
+
+            res.json({ installed: isInstalled, active: isRunning, url, config });
+        } catch (e) {
+            res.json({ installed: false, active: false });
+        }
+    });
+    
+    app.post('/api/ngrok/settings', protect, async (req, res) => {
+        try {
+            const configPath = path.join(__dirname, 'ngrok-config.json');
+            fs.writeFileSync(configPath, JSON.stringify(req.body, null, 2));
+            res.json({ message: 'Settings saved' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Dataplicity
+    app.get('/api/dataplicity/status', protect, async (req, res) => {
+        try {
+             // Check for dataplicity agent process
+            const isRunning = await runCommand('pgrep -f dataplicity').then(() => true).catch(() => false);
+            const isInstalled = fs.existsSync('/opt/dataplicity');
+            res.json({ installed: isInstalled, active: isRunning });
+        } catch (e) {
+             res.json({ installed: false });
+        }
+    });
     
     // Telegram Test
     app.post('/api/telegram/test', protect, async (req, res) => {

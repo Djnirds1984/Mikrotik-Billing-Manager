@@ -346,7 +346,7 @@ export const ZeroTier: React.FC = () => {
                     <div className="font-mono"><span className="text-slate-500 dark:text-slate-400">Node ID:</span> <span className="text-[--color-primary-600] dark:text-[--color-primary-300]">{data.info.address}</span></div>
                     <div><span className="text-slate-500 dark:text-slate-400">Version:</span> <span className="text-slate-800 dark:text-slate-200">{data.info.version}</span></div>
                     <div><span className="text-slate-500 dark:text-slate-400">Online:</span> <span className={data.info.online ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>{data.info.online ? 'Yes' : 'No'}</span></div>
-                    <div><span className="text-slate-500 dark:text-slate-400">Port Mapping:</span> <span className="text-slate-800 dark:text-slate-200">{data.info.config.settings.portMappingEnabled ? 'Enabled' : 'Disabled'}</span></div>
+                    <div><span className="text-slate-500 dark:text-slate-400">Port Mapping:</span> <span className="text-slate-800 dark:text-slate-200">{data.info.config?.settings?.portMappingEnabled ? 'Enabled' : 'Disabled'}</span></div>
                 </div>
 
                 <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
