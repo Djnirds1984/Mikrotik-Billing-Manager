@@ -1,4 +1,5 @@
 
+
 import type { PanelSettings } from '../types.ts';
 
 const apiBaseUrl = '/api/db';
@@ -57,7 +58,6 @@ export const savePanelSettings = (settings: Partial<PanelSettings>): Promise<{ m
     return dbApi.post<{ message: string }>('/panel-settings', settings);
 };
 
-// FIX: Add functions to call backend endpoints for MariaDB operations.
 export const initMariaDb = (): Promise<{ message: string }> => {
     return dbApi.post<{ message: string }>('/init-mariadb', {});
 };

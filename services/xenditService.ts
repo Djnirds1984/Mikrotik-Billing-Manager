@@ -1,4 +1,6 @@
 
+
+
 import { Xendit } from 'xendit-node';
 import type { BillingPlanWithId, PppSecret, CompanySettings } from '../types';
 
@@ -58,9 +60,6 @@ export class XenditService {
     this.config = config;
     this.client = new Xendit({
       secretKey: config.secretKey,
-      xenditLibOpts: {
-        userAgent: 'Mikrotik-Billing-Manager/1.0.0',
-      },
     });
   }
 
@@ -69,9 +68,6 @@ export class XenditService {
    */
   async createInvoice(params: CreateInvoiceParams): Promise<XenditInvoiceResponse> {
     try {
-      const { Invoice } = this.client;
-      const invoice = new Invoice({});
-
       const invoiceData = {
         externalID: params.externalId,
         amount: params.amount,
@@ -88,11 +84,12 @@ export class XenditService {
         payment_methods: params.paymentMethods || ['BANK_TRANSFER', 'EWALLET', 'RETAIL_OUTLET'],
       };
 
-      const response = await invoice.createInvoice(invoiceData);
+      // FIX: Corrected casing for Xendit service. It should be PascalCase 'Invoice'.
+      const response = await this.client.Invoice.createInvoice(invoiceData as any);
       return response as XenditInvoiceResponse;
     } catch (error) {
       console.error('Xendit create invoice error:', error);
-      throw new Error(`Failed to create Xendit invoice: ${error.message}`);
+      throw new Error(`Failed to create Xendit invoice: ${(error as any).message}`);
     }
   }
 
@@ -101,41 +98,14 @@ export class XenditService {
    */
   async getInvoice(invoiceId: string): Promise<XenditInvoiceResponse> {
     try {
-      const { Invoice } = this.client;
-      const invoice = new Invoice({});
-      
-      const response = await invoice.getInvoice({ invoiceID: invoiceId });
+      // FIX: Corrected casing for Xendit service. It should be PascalCase 'Invoice'.
+      const response = await this.client.Invoice.getInvoice({ invoiceID: invoiceId });
       return response as XenditInvoiceResponse;
     } catch (error) {
       console.error('Xendit get invoice error:', error);
-      throw new Error(`Failed to get Xendit invoice: ${error.message}`);
+      throw new Error(`Failed to get Xendit invoice: ${(error as any).message}`);
     }
   }
-
-  // FIX: Removed server-side webhook verification from the frontend service.
-  /*
-   * Verify webhook signature
-   
-  verifyWebhookSignature(payload: any, signature: string): boolean {
-    if (!this.config.webhookToken) {
-      console.warn('Webhook token not configured');
-      return false;
-    }
-
-    try {
-      const crypto = require('crypto');
-      const expectedSignature = crypto
-        .createHmac('sha256', this.config.webhookToken)
-        .update(JSON.stringify(payload))
-        .digest('hex');
-      
-      return signature === expectedSignature;
-    } catch (error) {
-      console.error('Webhook signature verification error:', error);
-      return false;
-    }
-  }
-  */
 
   /**
    * Create billing invoice for PPPoE client

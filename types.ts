@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 export type View =
@@ -342,6 +343,10 @@ export interface CompanySettings {
     contactNumber?: string;
     email?: string;
     logoBase64?: string;
+    xenditEnabled?: boolean;
+    xenditSecretKey?: string;
+    xenditPublicKey?: string;
+    xenditWebhookToken?: string;
 }
 
 export interface ChatMessage {
@@ -408,6 +413,25 @@ export interface PanelHostStatus {
 export interface PanelSettings {
     language: 'en' | 'fil' | 'es' | 'pt';
     currency: 'USD' | 'PHP' | 'EUR' | 'BRL';
+    databaseEngine?: 'sqlite' | 'mariadb';
+    dbHost?: string;
+    dbPort?: number;
+    dbUser?: string;
+    dbPassword?: string;
+    dbName?: string;
+    notificationSettings?: {
+        debounceMinutes: number;
+        dhcpNearExpiryHours: number;
+    };
+    telegramSettings?: {
+        enabled: boolean;
+        botToken: string;
+        chatId: string;
+        enableClientDueDate: boolean;
+        enableClientDisconnected: boolean;
+        enableInterfaceDisconnected: boolean;
+        enableUserPaid: boolean;
+    };
 }
 
 export interface PanelNtpStatus {
@@ -696,6 +720,7 @@ export interface DhcpClientActionParams {
     downtimeDays?: number;
     planType?: 'prepaid' | 'postpaid';
     graceDays?: number;
+    graceTime?: string;
     expiresAt?: string;
     speedLimit?: string;
 }

@@ -1,4 +1,5 @@
 
+
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { Notification } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
@@ -74,7 +75,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     
     const clearNotifications = async () => {
         if (notifications.length === 0 || !window.confirm("Are you sure you want to clear all notifications? This cannot be undone.")) return;
-        // FIX: Moved `originalNotifications` declaration outside of the try block so it is accessible in the catch block for reverting the state on error.
         const originalNotifications = [...notifications];
         try {
             setNotifications([]); // Optimistic UI update

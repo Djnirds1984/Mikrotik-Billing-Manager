@@ -1,3 +1,5 @@
+
+
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
@@ -42,7 +44,8 @@ import { ThemeProvider } from './contexts/ThemeContext.tsx';
 import { NotificationProvider } from './contexts/NotificationContext.tsx';
 import { useAuth } from './contexts/AuthContext.tsx';
 import type { View, LicenseStatus } from './types.ts';
-import { getAuthHeader } from './services/databaseService.ts';
+import { getAuthHeader, getPanelSettings } from './services/databaseService.ts';
+import { initializeAiClient } from './services/geminiService.ts';
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -96,6 +99,22 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
 
+  useEffect(() => {
+    // Initialize AI client on app load
+    const initAI = async () => {
+        try {
+            const settings = await getPanelSettings() as any;
+            // The key from DB takes precedence over the one in env.js
+            const key = settings?.geminiApiKey || process.env.API_KEY;
+            initializeAiClient(key);
+        } catch (error) {
+            console.error("Could not load API key for AI init:", error);
+            // Initialize with whatever is in env.js as a fallback
+            initializeAiClient(process.env.API_KEY);
+        }
+    };
+    initAI();
+  }, []); // Run only once on mount
 
   const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;
 
@@ -325,40 +344,46 @@ const AppRouter: React.FC = () => {
     }
 
     if (!user) {
-        if (isLoading) {
-             return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
-        }
-        if (!hasUsers) {
-             return <AuthLayout><Register /></AuthLayout>;
-        }
-        if (authView === 'login') {
-            return <AuthLayout><Login onSwitchToForgotPassword={() => setAuthView('forgot')} /></AuthLayout>;
-        }
-        if (authView === 'forgot') {
-            return <AuthLayout><ForgotPassword onSwitchToLogin={() => setAuthView('login')} /></AuthLayout>;
-        }
+        return (
+            <ThemeProvider>
+                 <LocalizationProvider>
+                    <AuthLayout>
+                        {!hasUsers ? (
+                            <Register />
+                        ) : authView === 'login' ? (
+                            <Login onSwitchToForgotPassword={() => setAuthView('forgot')} />
+                        ) : (
+                            <ForgotPassword onSwitchToLogin={() => setAuthView('login')} />
+                        )}
+                    </AuthLayout>
+                 </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+    
+    if (isLicenseLoading) {
+        return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
     }
 
-    if (user) {
-        if (isLicenseLoading) {
-            return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
-        }
-        return <AppContent licenseStatus={licenseStatus} onLicenseChange={handleLicenseChange} />;
+    if (!licenseStatus?.licensed && user.role.name.toLowerCase() !== 'superadmin') {
+         return (
+             <ThemeProvider>
+                <LocalizationProvider>
+                    <License onLicenseChange={handleLicenseChange} licenseStatus={licenseStatus} />
+                </LocalizationProvider>
+            </ThemeProvider>
+         );
     }
-
-    return <AuthLayout><Login onSwitchToForgotPassword={() => setAuthView('forgot')} /></AuthLayout>;
+    
+    return (
+        <ThemeProvider>
+            <LocalizationProvider>
+                <NotificationProvider>
+                    <AppContent licenseStatus={licenseStatus} onLicenseChange={handleLicenseChange} />
+                </NotificationProvider>
+            </LocalizationProvider>
+        </ThemeProvider>
+    );
 };
 
-const App: React.FC = () => {
-  return (
-    <ThemeProvider>
-      <LocalizationProvider>
-          <NotificationProvider>
-            <AppRouter />
-          </NotificationProvider>
-      </LocalizationProvider>
-    </ThemeProvider>
-  );
-};
-
-export default App;
+export default AppRouter;

@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
     getCurrentVersion, listBackups, deleteBackup, 
@@ -6,7 +7,6 @@ import {
 } from '../services/updaterService.ts';
 import { UpdateIcon, CloudArrowUpIcon, CheckCircleIcon, ExclamationTriangleIcon, TrashIcon } from '../constants.tsx';
 import { Loader } from './Loader.tsx';
-// FIX: Import shared types from types.ts to resolve type errors.
 import type { VersionInfo, NewVersionInfo } from '../types.ts';
 
 type UpdateStatus = 'idle' | 'checking' | 'uptodate' | 'available' | 'diverged' | 'ahead' | 'error' | 'updating' | 'restarting' | 'rollingback';
@@ -14,7 +14,6 @@ type StatusInfo = {
     status: UpdateStatus;
     message: string;
 };
-// FIX: Removed local type definitions, now imported from types.ts.
 type LogEntry = {
     text: string;
     isError?: boolean;

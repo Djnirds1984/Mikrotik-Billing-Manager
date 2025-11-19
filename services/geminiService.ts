@@ -1,31 +1,26 @@
 
 
-
 import { GoogleGenAI, Type } from "@google/genai";
 import type { AIFixResponse, ChatMessage, HotspotSetupParams } from '../types.ts';
 
 let ai: GoogleGenAI | null = null;
 
 export const initializeAiClient = (apiKey?: string) => {
-    if (apiKey && apiKey !== "YOUR_GEMINI_API_KEY_HERE") {
+    const keyToUse = apiKey || (window as any).process?.env?.API_KEY;
+
+    if (keyToUse && keyToUse !== "YOUR_GEMINI_API_KEY_HERE") {
         try {
-            // FIX: Cast window to 'any' to access the 'process' property injected by env.js.
-            if ((window as any).process?.env) {
-                (window as any).process.env.API_KEY = apiKey;
-            }
-            ai = new GoogleGenAI({ apiKey });
+            ai = new GoogleGenAI({ apiKey: keyToUse });
+            console.log("Gemini AI Client initialized.");
         } catch (e) {
             console.error("Failed to initialize GoogleGenAI client:", e);
             ai = null;
         }
     } else {
+        console.warn("Gemini API Key not found or is default. AI features will be disabled.");
         ai = null;
     }
 };
-
-// Initial call on page load using the key from env.js
-initializeAiClient(process.env.API_KEY);
-
 
 const SCRIPT_SYSTEM_INSTRUCTION = `You are an expert MikroTik network engineer specializing in RouterOS.
 Your sole purpose is to generate RouterOS terminal command scripts based on user requests.

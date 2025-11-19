@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, DhcpClient, DhcpClientActionParams, SaleRecord, DhcpClientDbRecord, DhcpBillingPlanWithId } from '../types.ts';
 import { updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
@@ -349,13 +350,14 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
         }
     };
 
-    const handleGraceSave = async ({ graceDays }: { graceDays: number }) => {
+    const handleGraceSave = async ({ graceDays, graceTime }: { graceDays: number; graceTime: string; }) => {
         if (!selectedClient) return false;
         setIsSubmitting(true);
         try {
             await updateDhcpClientDetails(selectedRouter, selectedClient, {
                 customerInfo: selectedClient.customerInfo || selectedClient.hostName,
                 graceDays,
+                graceTime,
             });
             setGraceModalOpen(false);
             await fetchData();
@@ -403,7 +405,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 isOpen={isGraceModalOpen}
                 onClose={() => setGraceModalOpen(false)}
                 subject={selectedClient}
-                onSave={handleGraceSave}
+                onSave={handleGraceSave as any}
             />
 
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
