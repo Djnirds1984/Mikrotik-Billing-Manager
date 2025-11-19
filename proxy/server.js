@@ -11,6 +11,7 @@ const jwt = require('jsonwebtoken');
 const os = require('os');
 const crypto = require('crypto');
 const axios = require('axios');
+const { Xendit } = require('xendit-node');
 
 const PORT = 3001;
 const DB_PATH = path.join(__dirname, 'panel.db');
@@ -468,6 +469,54 @@ async function startServer() {
 
     app.use('/api/db', dbRouter);
 
+    // --- Xendit API ---
+    const xenditRouter = express.Router();
+    xenditRouter.use(protect);
+
+    xenditRouter.post('/invoice', async (req, res) => {
+        try {
+            const settings = await db.get('SELECT xenditSettings FROM settings WHERE id = 1');
+            if (!settings || !settings.xenditSettings) {
+                return res.status(400).json({ message: 'Xendit settings not configured in database.' });
+            }
+            
+            const xSettings = JSON.parse(settings.xenditSettings);
+            if (!xSettings.secretKey) {
+                return res.status(400).json({ message: 'Xendit Secret Key is missing.' });
+            }
+
+            const x = new Xendit({ secretKey: xSettings.secretKey });
+            const { Invoice } = x;
+
+            const resp = await Invoice.createInvoice({
+                data: req.body
+            });
+            res.json(resp);
+        } catch (err) {
+            console.error('Xendit Error:', err);
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    xenditRouter.get('/invoice/:id', async (req, res) => {
+        try {
+            const settings = await db.get('SELECT xenditSettings FROM settings WHERE id = 1');
+            const xSettings = JSON.parse(settings?.xenditSettings || '{}');
+            if (!xSettings.secretKey) return res.status(400).json({ message: 'Xendit unconfigured' });
+
+            const x = new Xendit({ secretKey: xSettings.secretKey });
+            const { Invoice } = x;
+            
+            const resp = await Invoice.getInvoice({ invoiceID: req.params.id });
+            res.json(resp);
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    app.use('/api/xendit', xenditRouter);
+
+
     // --- License ---
     const licenseRouter = express.Router();
     licenseRouter.use(protect);
@@ -542,7 +591,7 @@ async function startServer() {
     superRouter.use(protect, requireSuperadmin);
     
     superRouter.get('/list-full-backups', async (req, res) => {
-        const files = await fsPromises.readdir(BACKUP_DIR);
+        const files = await fs.promises.readdir(BACKUP_DIR);
         res.json(files.filter(f => f.endsWith('.mk')));
     });
     
