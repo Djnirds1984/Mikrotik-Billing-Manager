@@ -331,9 +331,10 @@ app.get('/mt-api/:routerId/interface/stats', getRouterConfig, async (req, res) =
                 await client.close();
             }
         } else {
-            // For REST API (v7+), POSTing to /print ensures we run the command to get dynamic stats
-            // rather than just getting the static configuration list.
-            const response = await req.routerInstance.post('/interface/print', { detail: true });
+            // For REST API (v7+), use empty strings for flags like 'detail' or 'without-paging'.
+            // Sending 'true' (boolean) might sometimes be interpreted as a value filter rather than a flag.
+            // 'detail' forces stats to be returned.
+            const response = await req.routerInstance.post('/interface/print', { 'detail': '', 'without-paging': '' });
             return response.data;
         }
     });

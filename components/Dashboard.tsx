@@ -38,7 +38,7 @@ const ProgressBar: React.FC<{ percent: number; colorClass: string }> = ({ percen
 
 
 const formatBps = (bps: number): string => {
-    if (typeof bps !== 'number' || !isFinite(bps)) return '0 bps';
+    if (typeof bps !== 'number' || !isFinite(bps) || isNaN(bps)) return '0 bps';
     if (bps < 1000) return `${bps.toFixed(0)} bps`;
     if (bps < 1000 * 1000) return `${(bps / 1000).toFixed(2)} Kbps`;
     if (bps < 1000 * 1000 * 1000) return `${(bps / (1000 * 1000)).toFixed(2)} Mbps`;
@@ -136,11 +136,15 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                     let txRate = 0;
 
                     if (prevIfaceData && timeDiffSeconds > 0.1) {
-                        // Standardize property access (some APIs return rx-byte, others rx-bytes or bytes-in)
-                        const currRx = Number(iface['rx-byte'] ?? 0);
-                        const prevRx = Number(prevIfaceData['rx-byte'] ?? 0);
-                        const currTx = Number(iface['tx-byte'] ?? 0);
-                        const prevTx = Number(prevIfaceData['tx-byte'] ?? 0);
+                        // Robust property access handling multiple possible API response formats
+                        // Cast to 'any' to access potential dynamic properties safely
+                        const i = iface as any;
+                        const p = prevIfaceData as any;
+                        
+                        const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['rx-bytes'] ?? 0);
+                        const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['rx-bytes'] ?? 0);
+                        const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['tx-bytes'] ?? 0);
+                        const prevTx = Number(p['tx-byte'] ?? p['bytes-out'] ?? p['tx-bytes'] ?? 0);
 
                         let rxByteDiff = currRx - prevRx;
                         let txByteDiff = currTx - prevTx;
@@ -151,6 +155,10 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         
                         rxRate = Math.round((rxByteDiff * 8) / timeDiffSeconds);
                         txRate = Math.round((txByteDiff * 8) / timeDiffSeconds);
+                        
+                        // Sanity check to prevent NaN
+                        if (isNaN(rxRate)) rxRate = 0;
+                        if (isNaN(txRate)) txRate = 0;
                     }
 
                     const newHistoryPoint: TrafficHistoryPoint = { name: new Date().toLocaleTimeString(), rx: rxRate, tx: txRate };
