@@ -6,16 +6,15 @@ import { useTheme } from '../contexts/ThemeContext.tsx';
 import { initializeAiClient } from '../services/geminiService.ts';
 import { getPanelSettings, savePanelSettings, getAuthHeader } from '../services/databaseService.ts';
 import { Loader } from './Loader.tsx';
-import { KeyIcon, CogIcon, ClockIcon } from '../constants.tsx';
+import { KeyIcon, CogIcon } from '../constants.tsx';
 
-// --- Icon Components (kept local to this file to avoid dependency issues) ---
+// --- Icon Components (kept local to this file) ---
 const SunIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>;
 const MoonIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /></svg>;
 const ComputerDesktopIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>;
 const MessageIcon: React.FC<{ className?: string }> = ({ className }) => ( <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.76 9.76 0 01-2.53-.405m-3.038-5.858a2.25 2.25 0 00-3.75-3.75C3.302 4.03 7.056 2.25 12 2.25c4.97 0 9 3.694 9 8.25z" /></svg>);
 const XenditIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12.35 12.63l-2.48 2.48a.5.5 0 01-.71 0l-2.48-2.48a.5.5 0 010-.71l2.48-2.48a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71z" /><path fillRule="evenodd" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 5.36a.5.5 0 00-.71 0l-2.48 2.48a.5.5 0 000 .71l2.48 2.48a.5.5 0 00.71 0l2.48-2.48a.5.5 0 000-.71L16.64 5.36zm-1.07 7.06a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71l-2.48 2.48a.5.5 0 01-.71 0l-2.48-2.48a.5.5 0 010-.71l2.48-2.48zM5.36 7.36a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71l-2.48 2.48a.5.5 0 01-.71 0L2.88 10.55a.5.5 0 010-.71l2.48-2.48z" clipRule="evenodd" /></svg>);
 
-// Tab button component
 const TabButton: React.FC<{
     label: string;
     icon: React.ReactNode;
@@ -37,13 +36,11 @@ const TabButton: React.FC<{
 
 const ThemeSwitcher: React.FC = () => {
     const { theme, setTheme } = useTheme();
-
     const options = [
         { value: 'light', label: 'Light', icon: <SunIcon className="w-5 h-5" /> },
         { value: 'dark', label: 'Dark', icon: <MoonIcon className="w-5 h-5" /> },
         { value: 'system', label: 'System', icon: <ComputerDesktopIcon className="w-5 h-5" /> },
     ];
-
     return (
         <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Theme</label>
@@ -127,7 +124,7 @@ const AiTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<Rea
             label="Google Gemini API Key" 
             name="geminiApiKey" 
             type="password"
-            value={(settings as any).geminiApiKey || ''}
+            value={settings.geminiApiKey || ''}
             onChange={e => setSettings(s => ({ ...s, geminiApiKey: e.target.value }))}
             info="Your key is stored securely in the panel's database."
         />
@@ -136,7 +133,6 @@ const AiTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<Rea
 
 const TelegramTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>>, onTest: (token: string, id: string) => void, isTesting: boolean }> = ({ settings, setSettings, onTest, isTesting }) => {
     const telegram = settings.telegramSettings || {} as TelegramSettings;
-
     const update = (field: keyof TelegramSettings, value: any) => {
         setSettings(s => ({ ...s, telegramSettings: { ...s.telegramSettings, [field]: value } as TelegramSettings }));
     };
@@ -212,10 +208,9 @@ export const SystemSettings: React.FC = () => {
         setError(null);
         try {
             await savePanelSettings(settings);
-            // Update context after saving
             if (settings.language) await setLanguage(settings.language);
             if (settings.currency) setCurrency(settings.currency);
-            initializeAiClient((settings as any).geminiApiKey);
+            initializeAiClient(settings.geminiApiKey);
             alert('Settings saved successfully!');
         } catch (err) {
             setError((err as Error).message);

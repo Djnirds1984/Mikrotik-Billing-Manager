@@ -162,6 +162,90 @@ const requireAdmin = (req, res, next) => {
 };
 
 
+// --- License Key Logic ---
+const getDeviceId = () => {
+    const networkInterfaces = os.networkInterfaces();
+    const macs = [];
+    for (const interfaceName in networkInterfaces) {
+        const networkInterface = networkInterfaces[interfaceName];
+        for (const interfaceInfo of networkInterface) {
+            if (interfaceInfo.mac && interfaceInfo.mac !== '00:00:00:00:00:00' && !interfaceInfo.internal) {
+                macs.push(interfaceInfo.mac);
+            }
+        }
+    }
+    macs.sort();
+    if (macs.length === 0) {
+        return crypto.createHash('sha256').update(os.hostname() + os.arch() + os.platform()).digest('hex');
+    }
+    return crypto.createHash('sha256').update(macs.join('')).digest('hex');
+};
+
+const licenseRouter = express.Router();
+licenseRouter.use(protect);
+
+licenseRouter.get('/status', async (req, res) => {
+    try {
+        const deviceId = getDeviceId();
+        const settings = await db.get('SELECT licenseKey FROM settings');
+        const licenseKey = settings?.licenseKey;
+
+        if (!licenseKey) {
+            return res.json({ licensed: false, deviceId });
+        }
+
+        jwt.verify(licenseKey, LICENSE_SECRET_KEY, (err, decoded) => {
+            if (err) {
+                return res.json({ licensed: false, deviceId, error: `Invalid license key: ${err.message}` });
+            }
+            if (decoded.deviceId !== deviceId) {
+                return res.json({ licensed: false, deviceId, error: 'License key is for a different device.' });
+            }
+            res.json({
+                licensed: true,
+                expires: new Date(decoded.exp * 1000).toISOString(),
+                deviceId,
+                licenseKey
+            });
+        });
+    } catch (err) {
+        res.status(500).json({ licensed: false, error: err.message, deviceId: getDeviceId() });
+    }
+});
+
+licenseRouter.post('/activate', async (req, res) => {
+    const { licenseKey } = req.body;
+    const deviceId = getDeviceId();
+    jwt.verify(licenseKey, LICENSE_SECRET_KEY, async (err, decoded) => {
+        if (err) return res.status(400).json({ message: `Invalid license key: ${err.message}` });
+        if (decoded.deviceId !== deviceId) return res.status(400).json({ message: 'License key does not match this device.' });
+        try {
+            await db.run('UPDATE settings SET licenseKey = ?', licenseKey);
+            res.json({ message: 'License activated successfully.' });
+        } catch (dbErr) {
+            res.status(500).json({ message: `Database error: ${dbErr.message}` });
+        }
+    });
+});
+
+licenseRouter.post('/revoke', async (req, res) => {
+    try {
+        await db.run('UPDATE settings SET licenseKey = NULL');
+        res.json({ message: 'License revoked.' });
+    } catch (dbErr) {
+        res.status(500).json({ message: `Database error: ${dbErr.message}` });
+    }
+});
+
+licenseRouter.post('/generate', requireSuperadmin, (req, res) => {
+    const { deviceId, days } = req.body;
+    if (!deviceId || !days) return res.status(400).json({ message: 'deviceId and days are required.' });
+    const expiresIn = `${days}d`;
+    const licenseKey = jwt.sign({ deviceId }, LICENSE_SECRET_KEY, { expiresIn });
+    res.json({ licenseKey });
+});
+
+
 // --- ZeroTier CLI ---
 const ztCli = (command) => new Promise((resolve, reject) => {
     exec(`sudo zerotier-cli -j ${command}`, (error, stdout, stderr) => {
@@ -200,34 +284,204 @@ ztRouter.get('/status', async (req, res) => {
         res.status(err.status || 500).json(err.data || { message: err.message });
     }
 });
+
 ztRouter.post('/join', async (req, res) => {
     try {
-        await ztCli(`join ${req.body.networkId}`);
-        res.json({ message: 'Join command sent successfully. It may take a moment to connect.' });
+        const result = await ztCli(`join ${req.body.networkId}`);
+        res.json(result);
     } catch (err) {
         res.status(err.status || 500).json({ message: err.message });
     }
 });
-// ... other ztRouter endpoints ...
+
+ztRouter.post('/leave', async (req, res) => {
+    try {
+        const result = await ztCli(`leave ${req.body.networkId}`);
+        res.json(result);
+    } catch (err) {
+        res.status(err.status || 500).json({ message: err.message });
+    }
+});
+
+ztRouter.post('/set', async (req, res) => {
+    const { networkId, setting, value } = req.body;
+    try {
+        const result = await ztCli(`set ${networkId} ${setting}=${value}`);
+        res.json(result);
+    } catch (err) {
+        res.status(err.status || 500).json({ message: err.message });
+    }
+});
+
+ztRouter.get('/install', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders();
+    
+    const command = 'curl -s https://install.zerotier.com | sudo bash';
+    runCommandStream(command, res)
+        .then(() => {
+            res.write(`data: ${JSON.stringify({ status: 'success', log: 'Installation script finished.' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ status: 'finished' })}\n\n`);
+            res.end();
+        })
+        .catch(err => {
+            res.write(`data: ${JSON.stringify({ status: 'error', message: err.message })}\n\n`);
+            res.end();
+        });
+});
 
 // --- Remote Access Service Helpers ---
 const sudoExecOptions = { env: { ...process.env, PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' } };
 const streamExec = (res, command, message) => {
-    // ... (streamExec implementation) ...
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders();
+    res.write(`data: ${JSON.stringify({ log: message })}\n\n`);
+    
+    runCommandStream(command, res, sudoExecOptions)
+    .then(() => res.write(`data: ${JSON.stringify({ status: 'finished' })}\n\n`))
+    .catch(err => res.write(`data: ${JSON.stringify({ status: 'error', message: err.message })}\n\n`))
+    .finally(() => res.end());
 };
 
 // --- Pi Tunnel, Dataplicity, Ngrok Routers ---
 const piTunnelRouter = express.Router();
 piTunnelRouter.use(protect);
-// ... (All PiTunnel routes implemented here) ...
+
+piTunnelRouter.get('/status', async (req, res) => {
+    try {
+        const installed = fs.existsSync('/usr/local/bin/pitunnel');
+        let active = false;
+        if (installed) {
+            const { stdout } = await execPromise('sudo systemctl is-active pitunnel.service').catch(() => ({ stdout: 'inactive' }));
+            active = stdout.trim() === 'active';
+        }
+        res.json({ installed, active, url: 'https://pitunnel.com/dashboard' });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+piTunnelRouter.post('/install', (req, res) => streamExec(res, req.body.command, 'Starting PiTunnel installation...'));
+piTunnelRouter.get('/uninstall', (req, res) => streamExec(res, 'sudo pitunnel --remove', 'Starting PiTunnel uninstallation...'));
+piTunnelRouter.post('/tunnels/create', (req, res) => {
+    const { port, name, protocol } = req.body;
+    const cmd = `sudo pitunnel --port=${port} ${name ? `--name=${name}` : ''} ${protocol !== 'tcp' ? `--${protocol}` : ''}`.trim();
+    streamExec(res, cmd, `Creating tunnel with command: ${cmd}`);
+});
+
 
 const dataplicityRouter = express.Router();
 dataplicityRouter.use(protect);
-// ... (All Dataplicity routes implemented here) ...
+dataplicityRouter.get('/status', async (req, res) => {
+    try {
+        const installed = fs.existsSync('/usr/local/bin/dataplicity');
+        res.json({ installed, url: 'https://app.dataplicity.com/' });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+dataplicityRouter.post('/install', (req, res) => streamExec(res, req.body.command, 'Starting Dataplicity installation...'));
+dataplicityRouter.get('/uninstall', (req, res) => streamExec(res, 'sudo supervisorctl stop dataplicity && sudo rm -f /etc/supervisor/conf.d/dataplicity.conf && sudo supervisorctl reread && sudo supervisorctl update', 'Starting Dataplicity uninstallation...'));
+
 
 const ngrokApi = express.Router();
 ngrokApi.use(protect);
-// ... (All Ngrok routes implemented here) ...
+
+ngrokApi.get('/status', async (req, res) => {
+    try {
+        const installed = fs.existsSync(NGROK_BINARY_PATH);
+        let active = false;
+        if (installed) {
+            const { stdout } = await execPromise('sudo systemctl is-active ngrok.service').catch(() => ({ stdout: 'inactive' }));
+            active = stdout.trim() === 'active';
+        }
+        const config = fs.existsSync(NGROK_CONFIG_PATH) ? JSON.parse(fs.readFileSync(NGROK_CONFIG_PATH)) : {};
+        let url = null;
+        if (active) {
+             try {
+                const response = await axios.get('http://127.0.0.1:4040/api/tunnels');
+                url = response.data.tunnels?.[0]?.public_url;
+            } catch (e) { console.warn("Could not fetch ngrok URL from local API"); }
+        }
+        res.json({ installed, active, config, url });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+ngrokApi.post('/settings', async (req, res) => {
+    try {
+        fs.writeFileSync(NGROK_CONFIG_PATH, JSON.stringify(req.body, null, 2));
+        res.json({ message: 'Settings saved. Please re-install/re-configure for changes to take effect.' });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+ngrokApi.post('/control/:action', async (req, res) => {
+    const { action } = req.params;
+    if (!['start', 'stop', 'restart'].includes(action)) return res.status(400).json({ message: 'Invalid action.'});
+    try {
+        await execPromise(`sudo systemctl ${action} ngrok.service`);
+        res.json({ message: `Ngrok service ${action}ed.` });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+ngrokApi.get('/install', (req, res) => {
+    const config = fs.existsSync(NGROK_CONFIG_PATH) ? JSON.parse(fs.readFileSync(NGROK_CONFIG_PATH)) : {};
+    const installScript = `
+        set -e
+        echo "--- Downloading Ngrok ---"
+        curl -s https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-linux-arm.zip -o ngrok.zip
+        unzip -o ngrok.zip
+        echo "--- Moving binary ---"
+        sudo mv ngrok ${NGROK_BINARY_PATH}
+        sudo chmod +x ${NGROK_BINARY_PATH}
+        echo "--- Configuring auth token ---"
+        ${NGROK_BINARY_PATH} authtoken ${config.authtoken} --config /root/.ngrok2/ngrok.yml
+        echo "--- Creating systemd service file ---"
+        sudo bash -c 'cat > /etc/systemd/system/ngrok.service <<EOL
+[Unit]
+Description=Ngrok Tunnel
+After=network.target
+
+[Service]
+ExecStart=${NGROK_BINARY_PATH} ${config.proto} ${config.port}
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOL'
+        echo "--- Reloading systemd and starting service ---"
+        sudo systemctl daemon-reload
+        sudo systemctl enable ngrok.service
+        sudo systemctl start ngrok.service
+        echo "--- Cleaning up ---"
+        rm ngrok.zip
+        echo "--- Installation complete! ---"
+    `.trim();
+    streamExec(res, installScript, 'Starting Ngrok installation...');
+});
+
+ngrokApi.get('/uninstall', (req, res) => {
+    const uninstallScript = `
+        set -e
+        echo "--- Stopping and disabling Ngrok service ---"
+        sudo systemctl stop ngrok.service
+        sudo systemctl disable ngrok.service
+        echo "--- Removing files ---"
+        sudo rm -f /etc/systemd/system/ngrok.service ${NGROK_BINARY_PATH}
+        echo "--- Reloading systemd ---"
+        sudo systemctl daemon-reload
+        echo "--- Uninstallation complete! ---"
+    `.trim();
+    streamExec(res, uninstallScript, 'Starting Ngrok uninstallation...');
+});
 
 
 // --- Super Admin Backup/Restore ---
@@ -239,7 +493,7 @@ superadminRouter.use(protect, requireSuperadmin);
 // --- API ROUTE REGISTRATION ---
 app.use('/api/auth', authRouter);
 app.use('/api/license', licenseRouter);
-app.use('/api', updaterRouter); 
+
 
 // ... (All other API routes remain the same) ...
 
@@ -267,9 +521,6 @@ app.post('/api/telegram/test', protect, async (req, res) => {
     }
 });
 
-
-// Panel Admin routes
-app.use('/api', panelAdminRouter);
 
 // --- Frontend Serving Strategy ---
 // ... (rest of the file remains the same) ...
