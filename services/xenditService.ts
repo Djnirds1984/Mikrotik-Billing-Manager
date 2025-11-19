@@ -1,4 +1,5 @@
 
+
 import { Xendit } from 'xendit-node';
 import type { BillingPlanWithId, PppSecret, PanelSettings } from '../types';
 
@@ -97,8 +98,8 @@ export class XenditService {
    */
   async getInvoice(invoiceId: string): Promise<XenditInvoiceResponse> {
     try {
-      // FIX: Changed from getInvoice to get, which is the correct method in recent versions of the SDK for retrieving a single invoice by ID.
-      const response = await this.client.Invoice.get({ invoiceID: invoiceId });
+      // FIX: Use getInvoice method to retrieve an invoice by its ID.
+      const response = await this.client.Invoice.getInvoice({ invoiceID: invoiceId });
       return response as unknown as XenditInvoiceResponse;
     } catch (error) {
       console.error('Xendit get invoice error:', error);

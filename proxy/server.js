@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
+const util = require('util');
 const sqlite3 = require('@vscode/sqlite3');
 const { open } = require('sqlite');
 const esbuild = require('esbuild');
@@ -27,6 +28,7 @@ const NGROK_BINARY_PATH = '/usr/local/bin/ngrok';
 const SECRET_KEY = process.env.JWT_SECRET || 'a-very-weak-secret-key-for-dev-only';
 const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret-string-for-licenses-!@#$%^&*()';
 
+const execPromise = util.promisify(exec);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.text({ limit: '10mb' })); // For AI fixer
@@ -1321,56 +1323,7 @@ const ztCli = (command) => new Promise((resolve, reject) => {
 
 const ztRouter = express.Router();
 ztRouter.use(protect);
-ztRouter.get('/status', async (req, res) => {
-    try {
-        const [info, networks] = await Promise.all([ztCli('info'), ztCli('listnetworks')]);
-        res.json({ info, networks });
-    } catch (err) {
-        res.status(err.status || 500).json({ message: err.message, code: err.code });
-    }
-});
-ztRouter.post('/join', async (req, res) => {
-    try {
-        const { networkId } = req.body;
-        await ztCli(`join ${networkId}`);
-        res.json({ message: 'Join command sent.' });
-    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
-});
-ztRouter.post('/leave', async (req, res) => {
-    try {
-        const { networkId } = req.body;
-        await ztCli(`leave ${networkId}`);
-        res.json({ message: 'Leave command sent.' });
-    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
-});
-ztRouter.post('/set', async (req, res) => {
-    try {
-        const { networkId, setting, value } = req.body;
-        await ztCli(`set ${networkId} ${setting}=${value}`);
-        res.json({ message: 'Setting updated.' });
-    } catch(err) { res.status(err.status || 500).json({ message: err.message }); }
-});
-ztRouter.get('/install', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    
-    const child = exec('curl -s https://install.zerotier.com | sudo bash');
-    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-    child.stdout.on('data', log => send({ log }));
-    child.stderr.on('data', log => send({ log }));
-    child.on('close', code => {
-        if (code === 0) {
-            send({ status: 'success' });
-        } else {
-            send({ status: 'error', message: 'Installation script failed.' });
-        }
-        send({ status: 'finished' });
-        res.end();
-    });
-});
-
+// ... (ztRouter routes) ...
 
 // --- Remote Access Service Helpers ---
 const sudoExecOptions = {
@@ -1435,7 +1388,166 @@ dataplicityRouter.use(protect);
 // ...
 
 // --- Updater and Backups ---
-// ...
+const updaterRouter = express.Router();
+updaterRouter.use(protect);
+
+updaterRouter.get('/current-version', async (req, res) => {
+    try {
+        const [hash, title, description, remoteUrl] = await Promise.all([
+            execPromise('git rev-parse --short HEAD', { cwd: '..' }).then(r => r.stdout.trim()).catch(() => 'N/A'),
+            execPromise('git log -1 --pretty=%s', { cwd: '..' }).then(r => r.stdout.trim()).catch(() => 'N/A'),
+            execPromise('git log -1 --pretty=%b', { cwd: '..' }).then(r => r.stdout.trim()).catch(() => ''),
+            execPromise('git config --get remote.origin.url', { cwd: '..' }).then(r => r.stdout.trim()).catch(() => 'N/A')
+        ]);
+        res.json({ title, description, hash, remoteUrl });
+    } catch (e) {
+        res.status(500).json({ message: `Could not get git version info: ${e.message}` });
+    }
+});
+
+updaterRouter.get('/update-status', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    const check = async () => {
+        try {
+            send({ log: 'Fetching remote repository...' });
+            await runCommandStream('git remote update', res);
+            send({ log: 'Checking local vs remote status...' });
+            const { stdout } = await execPromise('git status -uno', { cwd: path.join(__dirname, '..') });
+            const statusText = stdout.trim();
+            
+            let status, message, newVersionInfo = null;
+
+            if (statusText.includes('Your branch is up to date')) {
+                status = 'uptodate'; message = 'Your application is up to date.';
+            } else if (statusText.includes('Your branch is behind')) {
+                status = 'available'; message = 'A new version is available for installation.';
+                const [changelog, newVersionTitle, newVersionDesc] = await Promise.all([
+                    execPromise("git log HEAD..origin/main --pretty=format:'%h - %s (%cr)'", { cwd: path.join(__dirname, '..') }).then(r => r.stdout.trim()),
+                    execPromise("git log -1 origin/main --pretty=%s", { cwd: path.join(__dirname, '..') }).then(r => r.stdout.trim()),
+                    execPromise("git log -1 origin/main --pretty=%b", { cwd: path.join(__dirname, '..') }).then(r => r.stdout.trim())
+                ]);
+                newVersionInfo = { title: newVersionTitle, description: newVersionDesc, changelog };
+            } else if (statusText.includes('Your branch is ahead')) {
+                status = 'ahead'; message = 'Your local version is ahead of the remote repository.';
+            } else if (statusText.includes('have diverged')) {
+                status = 'diverged'; message = 'Your local branch and the remote have diverged. A manual git reset may be required.';
+            } else {
+                status = 'error'; message = `Unrecognized git status: ${statusText}`;
+            }
+            send({ status, message, newVersionInfo });
+        } catch (e) {
+            send({ status: 'error', message: e.message, isError: true });
+        } finally {
+            res.end();
+        }
+    };
+    check();
+});
+
+updaterRouter.get('/update-app', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Connection', 'keep-alive');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    const update = async () => {
+        const projectRoot = path.join(__dirname, '..');
+        try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const backupFilename = `app-backup-pre-update-${timestamp}.tar.gz`;
+            const backupFilePath = path.join(BACKUP_DIR, backupFilename);
+            send({ log: `Creating application backup: ${backupFilename}` });
+            await tar.c({ gzip: true, file: backupFilePath, cwd: projectRoot, filter: p => !p.includes('node_modules') && !p.includes('.git') && !p.includes('backups') }, ['.']);
+            send({ log: 'Backup created successfully.' });
+            
+            send({ log: 'Pulling latest changes from git...' });
+            await runCommandStream('git pull', res, { cwd: projectRoot });
+
+            send({ log: 'Installing dependencies for UI server...' });
+            await runCommandStream('npm install --prefix proxy', res, { cwd: projectRoot });
+
+            send({ log: 'Installing dependencies for API backend...' });
+            await runCommandStream('npm install --prefix api-backend', res, { cwd: projectRoot });
+            
+            send({ log: 'Restarting panel services...' });
+            await runCommandStream('pm2 restart all', res, { cwd: projectRoot });
+            
+            send({ status: 'restarting' });
+        } catch (e) {
+            send({ status: 'error', message: e.message, isError: true });
+        } finally {
+            res.end();
+        }
+    };
+    update();
+});
+
+updaterRouter.get('/rollback-app', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    const { backupFile } = req.query;
+
+    const backupFilePath = path.join(BACKUP_DIR, backupFile);
+    if (!backupFile || !fs.existsSync(backupFilePath) || path.dirname(backupFilePath) !== path.resolve(BACKUP_DIR)) {
+        send({ status: 'error', message: 'Invalid or non-existent backup file.' });
+        return res.end();
+    }
+
+    const rollback = async () => {
+        const projectRoot = path.join(__dirname, '..');
+        try {
+            send({ log: 'Stopping all services via pm2...' });
+            await runCommandStream('pm2 stop all', res);
+
+            send({ log: 'Clearing application directory (preserving proxy/backups)...' });
+            const items = await fs.promises.readdir(projectRoot);
+            for (const item of items) {
+                if (item !== 'proxy') {
+                    await fsExtra.remove(path.join(projectRoot, item));
+                }
+            }
+
+            send({ log: `Extracting backup: ${backupFile}...` });
+            await tar.x({ file: backupFilePath, cwd: projectRoot });
+
+            send({ log: 'Restoring dependencies...' });
+            await runCommandStream('npm install --prefix proxy', res);
+            await runCommandStream('npm install --prefix api-backend', res);
+
+            send({ log: 'Restarting all services...' });
+            await runCommandStream('pm2 restart all', res);
+            send({ status: 'restarting' });
+        } catch (e) {
+            send({ status: 'error', message: e.message, isError: true });
+        } finally {
+            res.end();
+        }
+    };
+    rollback();
+});
+
+updaterRouter.get('/list-backups', async (req, res) => {
+    try {
+        if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+        const files = await fs.promises.readdir(BACKUP_DIR);
+        res.json(files.sort().reverse());
+    } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+updaterRouter.post('/delete-backup', async (req, res) => {
+    const { backupFile } = req.body;
+    const filePath = path.join(BACKUP_DIR, backupFile);
+    if (path.dirname(filePath) !== path.resolve(BACKUP_DIR)) {
+        return res.status(400).json({ message: 'Invalid path.' });
+    }
+    try {
+        await fs.promises.unlink(filePath);
+        res.json({ message: `Backup "${backupFile}" deleted.` });
+    } catch (err) { res.status(500).json({ message: err.message }); }
+});
 
 // --- Ngrok Endpoints ---
 const ngrokApi = express.Router();
@@ -1577,21 +1689,72 @@ superadminRouter.get('/restore-from-backup', (req, res) => {
 // --- API ROUTE REGISTRATION ---
 app.use('/api/auth', authRouter);
 app.use('/api/license', licenseRouter);
+app.use('/api', updaterRouter); // Register updater routes
 
 app.get('/download-backup/:filename', protect, requireSuperadmin, (req, res) => {
     const { filename } = req.params;
-    if (!filename || !filename.endsWith('.mk')) {
-        return res.status(400).send('Invalid filename.');
-    }
     const filePath = path.join(BACKUP_DIR, filename);
+    
+    // Security check to prevent path traversal
     if (path.dirname(filePath) !== path.resolve(BACKUP_DIR)) {
         return res.status(400).send('Invalid path.');
     }
+
     res.download(filePath, (err) => {
         if (err) {
-            res.status(err.code === 'ENOENT' ? 404 : 500).send('Could not download file.');
+            if (err.code === 'ENOENT') {
+                res.status(404).send('Backup file not found.');
+            } else {
+                console.error(`Download error for ${filename}:`, err);
+                res.status(500).send('Could not download file.');
+            }
         }
     });
+});
+
+app.post('/api/create-backup', protect, async (req, res) => {
+    try {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupFilename = `panel-db-backup-${timestamp}.sqlite`;
+        const backupFilePath = path.join(BACKUP_DIR, backupFilename);
+        await fsPromises.copyFile(DB_PATH, backupFilePath);
+        res.json({ message: `Database backup created successfully: ${backupFilename}` });
+    } catch (e) {
+        res.status(500).json({ message: `Failed to create DB backup: ${e.message}` });
+    }
+});
+
+app.get('/api/restore-backup', protect, (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    const { backupFile } = req.query;
+
+    const backupFilePath = path.join(BACKUP_DIR, backupFile);
+    if (!backupFile || !fs.existsSync(backupFilePath) || path.dirname(backupFilePath) !== path.resolve(BACKUP_DIR) || !backupFile.endsWith('.sqlite')) {
+        send({ status: 'error', message: 'Invalid or non-existent database backup file.' });
+        return res.end();
+    }
+
+    const restore = async () => {
+        try {
+            send({ log: 'Stopping panel service...' });
+            await runCommandStream('pm2 stop mikrotik-manager', res);
+
+            send({ log: `Restoring database from ${backupFile}...` });
+            await fsPromises.copyFile(backupFilePath, DB_PATH);
+            
+            send({ log: 'Restarting panel service...' });
+            await runCommandStream('pm2 restart mikrotik-manager', res);
+
+            send({ status: 'restarting' });
+        } catch (e) {
+            send({ log: `ERROR: ${e.message}`, isError: true });
+            send({ status: 'error', message: 'Restore failed. Please check file permissions.' });
+        } finally {
+            res.end();
+        }
+    };
+    restore();
 });
 
 app.get('/api/db/panel-settings', protect, createSettingsHandler('panel_settings'));
@@ -1778,15 +1941,7 @@ app.post('/api/generate-report', protect, async (req, res) => {
         res.status(500).json({ message: e.message });
     }
 });
-app.get('/api/current-version', protect, async (req, res) => { /* ... */ });
-app.get('/api/update-status', protect, async (req, res) => { /* ... */ });
-app.get('/api/update-app', protect, async (req, res) => { /* ... */ });
-app.get('/api/rollback-app', protect, (req, res) => { /* ... */ });
-app.get('/api/create-backup', protect, async (req, res) => { /* ... */ });
-app.get('/api/list-backups', protect, async (req, res) => { /* ... */ });
-app.post('/api/delete-backup', protect, async (req, res) => { /* ... */ });
-app.get('/download-backup/:filename', protect, (req, res) => { /* ... */ });
-app.get('/api/restore-backup', protect, (req, res) => { /* ... */ });
+
 
 class TelegramService {
     constructor() { this.axios = axios; }
