@@ -347,21 +347,18 @@ const routerConfigCache = new Map();
 const getRouterConfig = async (req, res, next) => {
     const routerId = req.params.routerId || req.body.id;
 
-    if (routerConfigCache.has(routerId)) {
-        req.routerConfig = routerConfigCache.get(routerId);
-        req.routerInstance = createRouterInstance(req.routerConfig);
-        return next();
-    }
     try {
-        // PERFORMANCE FIX: Query DB directly instead of using axios loopback to avoid deadlocks/timeouts
-        const rows = await db.all('SELECT * FROM routers');
-        const config = rows.find(r => r.id === routerId);
+        // Always check database first to ensure we have the latest config
+        const rows = await db.all('SELECT * FROM routers WHERE id = ?', [routerId]);
+        const config = rows[0];
         
         if (!config) {
+            // Clear cache if router no longer exists
             routerConfigCache.delete(routerId);
             return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
         }
 
+        // Update cache with latest config
         routerConfigCache.set(routerId, config);
         req.routerConfig = config;
         req.routerInstance = createRouterInstance(req.routerConfig);
@@ -508,6 +505,10 @@ async function startServer() {
         dbRouter.delete(`${route}/:id`, async (req, res) => {
             try {
                 await db.run(`DELETE FROM ${table} WHERE id = ?`, req.params.id);
+                // Clear router config cache when router is deleted
+                if (table === 'routers') {
+                    routerConfigCache.delete(req.params.id);
+                }
                 res.json({ message: 'Deleted' });
             } catch (e) {
                 res.status(500).json({ message: e.message });
