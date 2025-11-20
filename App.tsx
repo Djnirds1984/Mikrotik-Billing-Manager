@@ -83,9 +83,10 @@ const useMediaQuery = (query: string): boolean => {
 interface AppContentProps {
     licenseStatus: LicenseStatus | null;
     onLicenseChange: () => void;
+    user?: any;
 }
 
-const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange }) => {
+const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange, user }) => {
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
   const [isSidebarOpen, setIsSidebarOpen] = useState(isLargeScreen);
@@ -168,13 +169,17 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
         );
     }
 
+    // Check license status for non-superadmin users after authentication
     const licensedViews: View[] = [
         'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
         'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal'
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
-        return <UnlicensedComponent setCurrentView={setCurrentView} />;
+        // Check if user is not superadmin to show unlicensed component
+        if (user?.role?.name?.toLowerCase() !== 'superadmin') {
+            return <UnlicensedComponent setCurrentView={setCurrentView} />;
+        }
     }
 
     switch (currentView) {
@@ -373,21 +378,13 @@ const AppRouter: React.FC = () => {
         return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
     }
 
-    if (!licenseStatus?.licensed && user.role.name.toLowerCase() !== 'superadmin') {
-         return (
-             <ThemeProvider>
-                <LocalizationProvider>
-                    <License onLicenseChange={handleLicenseChange} licenseStatus={licenseStatus} />
-                </LocalizationProvider>
-            </ThemeProvider>
-         );
-    }
+    // License verification moved to post-authentication in AppContent
     
     return (
         <ThemeProvider>
             <LocalizationProvider>
                 <NotificationProvider>
-                    <AppContent licenseStatus={licenseStatus} onLicenseChange={handleLicenseChange} />
+                    <AppContent licenseStatus={licenseStatus} onLicenseChange={handleLicenseChange} user={user} />
                 </NotificationProvider>
             </LocalizationProvider>
         </ThemeProvider>
