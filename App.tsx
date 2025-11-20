@@ -92,9 +92,9 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
   
   const { routers, addRouter, updateRouter, deleteRouter, isLoading: isLoadingRouters } = useRouters();
-  const { sales, addSale, deleteSale, clearSales, isLoading: isLoadingSales } = useSalesData(selectedRouterId);
-  const { items, addItem, updateItem, deleteItem, isLoading: isLoadingInventory } = useInventoryData();
-  const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData();
+  const { sales, addSale, deleteSale, clearSales } = useSalesData(selectedRouterId);
+  const { items, addItem, updateItem, deleteItem } = useInventoryData();
+  const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData();
   const payrollData = usePayrollData();
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
@@ -124,7 +124,9 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     initServices();
   }, []);
 
-  const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;
+  // OPTIMIZATION: Only block UI loading for critical data. 
+  // Sales, Inventory, Expenses, and Payroll can load in the background without blocking the dashboard.
+  const appIsLoading = isLoadingRouters || isLoadingCompany || isLoadingLocalization;
 
   useEffect(() => {
     setIsSidebarOpen(isLargeScreen);

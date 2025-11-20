@@ -290,6 +290,87 @@ const requireSuperadmin = (req, res, next) => {
     next();
 };
 
+// Router Instance Factory
+const createRouterInstance = (config) => {
+    if (!config || !config.host || !config.user) {
+        throw new Error('Invalid router configuration: host and user are required.');
+    }
+    
+    if (config.api_type === 'legacy') {
+        const isTls = config.port === 8729;
+        return new RouterOSAPI({
+            host: config.host,
+            user: config.user,
+            password: config.password || '',
+            port: config.port || 8728,
+            timeout: 15,
+            tls: isTls,
+            tlsOptions: isTls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2' } : undefined,
+        });
+    }
+
+    const protocol = config.port === 443 ? 'https' : 'http';
+    const baseURL = `${protocol}://${config.host}:${config.port}/rest`;
+    const auth = { username: config.user, password: config.password || '' };
+
+    const instance = axios.create({ 
+        baseURL, 
+        auth,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1.2' }),
+        timeout: 15000
+    });
+
+    instance.interceptors.response.use(response => {
+        const mapId = (item) => {
+            if (item && typeof item === 'object' && '.id' in item) {
+                return { ...item, id: item['.id'] };
+            }
+            return item;
+        };
+
+        if (response.data && typeof response.data === 'object') {
+            if (Array.isArray(response.data)) {
+                response.data = response.data.map(mapId);
+            } else {
+                response.data = mapId(response.data);
+            }
+        }
+        return response;
+    }, error => Promise.reject(error));
+
+    return instance;
+};
+
+// Helper middleware for router config
+const routerConfigCache = new Map();
+const getRouterConfig = async (req, res, next) => {
+    const routerId = req.params.routerId || req.body.id;
+
+    if (routerConfigCache.has(routerId)) {
+        req.routerConfig = routerConfigCache.get(routerId);
+        req.routerInstance = createRouterInstance(req.routerConfig);
+        return next();
+    }
+    try {
+        // PERFORMANCE FIX: Query DB directly instead of using axios loopback to avoid deadlocks/timeouts
+        const rows = await db.all('SELECT * FROM routers');
+        const config = rows.find(r => r.id === routerId);
+        
+        if (!config) {
+            routerConfigCache.delete(routerId);
+            return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
+        }
+
+        routerConfigCache.set(routerId, config);
+        req.routerConfig = config;
+        req.routerInstance = createRouterInstance(req.routerConfig);
+        next();
+    } catch (error) {
+        console.error("Error fetching router config:", error);
+        res.status(500).json({ message: `Failed to fetch router config: ${error.message}` });
+    }
+};
+
 // --- Main Application Logic ---
 async function startServer() {
     await Promise.all([initDb(), initSuperadminDb()]);
@@ -899,86 +980,6 @@ async function startServer() {
     });
 }
 
-// Helper middleware for router config
-const routerConfigCache = new Map();
-const getRouterConfig = async (req, res, next) => {
-    const routerId = req.params.routerId || req.body.id;
-    const authHeader = req.headers.authorization;
-
-    if (routerConfigCache.has(routerId)) {
-        req.routerConfig = routerConfigCache.get(routerId);
-        req.routerInstance = createRouterInstance(req.routerConfig);
-        return next();
-    }
-    try {
-        const rows = await db.all('SELECT * FROM routers');
-        const config = rows.find(r => r.id === routerId);
-        
-        if (!config) {
-            routerConfigCache.delete(routerId);
-            return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
-        }
-
-        routerConfigCache.set(routerId, config);
-        req.routerConfig = config;
-        req.routerInstance = createRouterInstance(req.routerConfig);
-        next();
-    } catch (error) {
-        res.status(500).json({ message: `Failed to fetch router config: ${error.message}` });
-    }
-};
-
-// Router Instance Factory
-const createRouterInstance = (config) => {
-    if (!config || !config.host || !config.user) {
-        throw new Error('Invalid router configuration: host and user are required.');
-    }
-    
-    if (config.api_type === 'legacy') {
-        const isTls = config.port === 8729;
-        return new RouterOSAPI({
-            host: config.host,
-            user: config.user,
-            password: config.password || '',
-            port: config.port || 8728,
-            timeout: 15,
-            tls: isTls,
-            tlsOptions: isTls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2' } : undefined,
-        });
-    }
-
-    const protocol = config.port === 443 ? 'https' : 'http';
-    const baseURL = `${protocol}://${config.host}:${config.port}/rest`;
-    const auth = { username: config.user, password: config.password || '' };
-
-    const instance = axios.create({ 
-        baseURL, 
-        auth,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1.2' }),
-        timeout: 15000
-    });
-
-    instance.interceptors.response.use(response => {
-        const mapId = (item) => {
-            if (item && typeof item === 'object' && '.id' in item) {
-                return { ...item, id: item['.id'] };
-            }
-            return item;
-        };
-
-        if (response.data && typeof response.data === 'object') {
-            if (Array.isArray(response.data)) {
-                response.data = response.data.map(mapId);
-            } else {
-                response.data = mapId(response.data);
-            }
-        }
-        return response;
-    }, error => Promise.reject(error));
-
-    return instance;
-};
-
 const handleApiRequest = async (req, res, action) => {
     try {
         const result = await action();
@@ -1017,3 +1018,4 @@ const normalizeLegacyObject = (obj) => {
 }
 
 startServer();
+
