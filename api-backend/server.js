@@ -22,6 +22,8 @@ app.use(express.json());
 
 const routerConfigCache = new Map();
 const trafficStatsCache = new Map();
+// NEW: Streaming registry to support SSE clients per-router
+const interfaceStreams = new Map();
 
 // --- Data Normalization for Legacy API ---
 const toKebabCase = (str) => str.replace(/_/g, '-');
@@ -344,6 +346,71 @@ app.get('/mt-api/:routerId/interface/stats', getRouterConfig, async (req, res) =
             // For REST API (v7+), sending { "detail": true } forces stats to be returned.
             const response = await req.routerInstance.post('/interface/print', { 'detail': true });
             return response.data;
+        }
+    });
+});
+
+// NEW: Server-Sent Events endpoint for live interface updates
+app.get('/mt-api/:routerId/interface/stream', getRouterConfig, async (req, res) => {
+    // Setup SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const routerId = req.params.routerId;
+    if (!interfaceStreams.has(routerId)) {
+        interfaceStreams.set(routerId, { clients: new Set(), interval: null });
+    }
+    const bucket = interfaceStreams.get(routerId);
+    bucket.clients.add(res);
+
+    // Helper to broadcast to all clients
+    const broadcast = (event, payload) => {
+        const data = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        for (const client of bucket.clients) {
+            try {
+                client.write(`event: ${event}\n`);
+                client.write(`data: ${data}\n\n`);
+            } catch (e) {}
+        }
+    };
+
+    // Start polling once per-router (shared across clients)
+    if (!bucket.interval) {
+        bucket.interval = setInterval(async () => {
+            try {
+                let result;
+                if (req.routerConfig.api_type === 'legacy') {
+                    const client = createRouterInstance(req.routerConfig);
+                    await client.connect();
+                    try {
+                        result = await writeLegacySafe(client, ['/interface/print', 'detail', 'without-paging']);
+                        result = result.map(normalizeLegacyObject);
+                    } finally {
+                        await client.close();
+                    }
+                } else {
+                    const response = await req.routerInstance.post('/interface/print', { detail: true });
+                    result = response.data;
+                }
+                broadcast('data', { timestamp: Date.now(), interfaces: result });
+            } catch (err) {
+                broadcast('error', { message: err.message || 'poll-error', timestamp: Date.now() });
+            }
+        }, 2000);
+    }
+
+    // Initial hello
+    res.write(`event: hello\n`);
+    res.write(`data: {"timestamp": ${Date.now()}}\n\n`);
+
+    req.on('close', () => {
+        bucket.clients.delete(res);
+        try { res.end(); } catch (e) {}
+        if (bucket.clients.size === 0 && bucket.interval) {
+            clearInterval(bucket.interval);
+            bucket.interval = null;
         }
     });
 });

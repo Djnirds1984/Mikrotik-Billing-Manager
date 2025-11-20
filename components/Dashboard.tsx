@@ -88,6 +88,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<{ message: string; details?: any } | null>(null);
     const [showFixer, setShowFixer] = useState(false);
+    // CHANGE: Stream connection state and last update timestamp for live UI indicators
+    const [streamConnected, setStreamConnected] = useState<boolean>(false);
+    const [lastUpdateTs, setLastUpdateTs] = useState<number | null>(null);
 
     const intervalRef = useRef<number | null>(null);
     const previousInterfacesRef = useRef<{ timestamp: number; interfaces: Interface[] } | null>(null);
@@ -220,6 +223,57 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
             if (isInitial) setIsLoading(false);
         }
     }, [selectedRouter, error]);
+
+    // CHANGE: Handle streaming updates from backend SSE and feed into same rate computation
+    useEffect(() => {
+        if (!selectedRouter) return;
+        const url = `/mt-api/${selectedRouter.id}/interface/stream`;
+        let es: EventSource | null = null;
+        try {
+            es = new EventSource(url, { withCredentials: true } as any);
+            es.onopen = () => setStreamConnected(true);
+            es.onerror = () => setStreamConnected(false);
+            es.addEventListener('data', (evt: MessageEvent) => {
+                try {
+                    const payload = JSON.parse(evt.data);
+                    const currentInterfacesData = Array.isArray(payload?.interfaces) ? (payload.interfaces as Interface[]) : [];
+                    const now = payload?.timestamp || Date.now();
+                    setLastUpdateTs(now);
+                    setInterfaces(prevInterfaces => {
+                        const previousState = previousInterfacesRef.current;
+                        previousInterfacesRef.current = { timestamp: now, interfaces: currentInterfacesData };
+                        if (!Array.isArray(currentInterfacesData)) return prevInterfaces;
+                        const timeDiffSeconds = previousState ? (now - previousState.timestamp) / 1000 : 0;
+                        const newInterfaces = currentInterfacesData.map((iface: Interface) => {
+                            const existingIface = prevInterfaces.find(p => p.name === iface.name);
+                            const prevIfaceData = previousState?.interfaces.find(p => p.name === iface.name);
+                            let rxRate = 0; let txRate = 0;
+                            if (prevIfaceData && timeDiffSeconds > 0.1) {
+                                const i = iface as any; const p = prevIfaceData as any;
+                                const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['rx-bytes'] ?? 0);
+                                const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['rx-bytes'] ?? 0);
+                                const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['tx-bytes'] ?? 0);
+                                const prevTx = Number(p['tx-byte'] ?? p['bytes-out'] ?? p['tx-bytes'] ?? 0);
+                                let rxByteDiff = currRx - prevRx; let txByteDiff = currTx - prevTx;
+                                if (rxByteDiff < 0) rxByteDiff = currRx; if (txByteDiff < 0) txByteDiff = currTx;
+                                rxRate = Math.round((rxByteDiff * 8) / timeDiffSeconds);
+                                txRate = Math.round((txByteDiff * 8) / timeDiffSeconds);
+                                if (isNaN(rxRate)) rxRate = 0; if (isNaN(txRate)) txRate = 0;
+                            }
+                            if (rxRate === 0) { const i = iface as any; const instRx = Number(i['rx-bits-per-second'] ?? i['rx-rate'] ?? 0); if (isFinite(instRx) && !isNaN(instRx)) rxRate = instRx; }
+                            if (txRate === 0) { const i = iface as any; const instTx = Number(i['tx-bits-per-second'] ?? i['tx-rate'] ?? 0); if (isFinite(instTx) && !isNaN(instTx)) txRate = instTx; }
+                            const newHistoryPoint: TrafficHistoryPoint = { name: new Date().toLocaleTimeString(), rx: rxRate, tx: txRate };
+                            let newHistory = existingIface ? [...existingIface.trafficHistory, newHistoryPoint] : [newHistoryPoint];
+                            if (newHistory.length > MAX_HISTORY_POINTS) newHistory = newHistory.slice(newHistory.length - MAX_HISTORY_POINTS);
+                            return { ...iface, rxRate, txRate, trafficHistory: newHistory };
+                        });
+                        return newInterfaces;
+                    });
+                } catch (e) {}
+            });
+        } catch (e) { setStreamConnected(false); }
+        return () => { try { es?.close(); } catch (e) {} };
+    }, [selectedRouter]);
 
     useEffect(() => {
         if (selectedRouter) {
@@ -364,6 +418,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                                     <p>RX: <span className="font-semibold text-green-600 dark:text-green-400">{formatBps(chartData1.rxRate)}</span></p>
                                     <p>TX: <span className="font-semibold text-sky-600 dark:text-sky-400">{formatBps(chartData1.txRate)}</span></p>
                                 </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">{streamConnected ? 'Live' : 'Polling'} • Last update: {lastUpdateTs ? new Date(lastUpdateTs).toLocaleTimeString() : '—'}</div>
                                 <div className="h-64">
                                 <Chart trafficHistory={chartData1.trafficHistory} />
                                 </div>
@@ -390,6 +445,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                                     <p>RX: <span className="font-semibold text-green-600 dark:text-green-400">{formatBps(chartData2.rxRate)}</span></p>
                                     <p>TX: <span className="font-semibold text-sky-600 dark:text-sky-400">{formatBps(chartData2.txRate)}</span></p>
                                 </div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">{streamConnected ? 'Live' : 'Polling'} • Last update: {lastUpdateTs ? new Date(lastUpdateTs).toLocaleTimeString() : '—'}</div>
                                 <div className="h-64">
                                 <Chart trafficHistory={chartData2.trafficHistory} />
                                 </div>
