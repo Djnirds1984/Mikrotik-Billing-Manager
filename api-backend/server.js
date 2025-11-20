@@ -398,7 +398,7 @@ app.get('/mt-api/:routerId/interface/stream', getRouterConfig, async (req, res) 
             } catch (err) {
                 broadcast('error', { message: err.message || 'poll-error', timestamp: Date.now() });
             }
-        }, 2000);
+        }, 1000);
     }
 
     // Initial hello

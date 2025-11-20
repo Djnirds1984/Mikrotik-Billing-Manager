@@ -4,7 +4,7 @@ import { getInterfaceStats } from '../services/mikrotikService.ts';
 import { Chart } from './chart.tsx';
 
 const MAX_HISTORY_POINTS = 30;
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 1000;
 
 const formatBps = (bps: number): string => {
   if (typeof bps !== 'number' || !isFinite(bps) || isNaN(bps)) return '0 bps';
@@ -152,4 +152,3 @@ export const LiveTrafficCard: React.FC<Props> = ({ selectedRouter, title = 'Live
     </div>
   );
 };
-

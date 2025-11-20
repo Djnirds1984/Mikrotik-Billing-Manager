@@ -69,7 +69,7 @@ const parseNum = (v: any): number => {
 
 // Polling interval for live interface updates (ms)
 const MAX_HISTORY_POINTS = 30;
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 1000;
 
 export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
     // Router States
