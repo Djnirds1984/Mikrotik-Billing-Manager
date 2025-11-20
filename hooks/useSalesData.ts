@@ -4,13 +4,13 @@ import { useState, useEffect, useCallback } from 'react';
 import type { SaleRecord } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
 
-export const useSalesData = (routerId: string | null) => {
+export const useSalesData = (routerId: string | null, enabled: boolean = true) => {
     const [sales, setSales] = useState<SaleRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const fetchSales = useCallback(async () => {
-        if (!routerId) {
+        if (!routerId || !enabled) {
             setSales([]);
             setIsLoading(false);
             return;
@@ -28,7 +28,7 @@ export const useSalesData = (routerId: string | null) => {
         } finally {
             setIsLoading(false);
         }
-    }, [routerId]);
+    }, [routerId, enabled]);
 
     useEffect(() => {
         fetchSales();

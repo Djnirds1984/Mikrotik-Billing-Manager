@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Employee, EmployeeBenefit, TimeRecord } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
 
-export const usePayrollData = () => {
+export const usePayrollData = (enabled: boolean = true) => {
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [benefits, setBenefits] = useState<EmployeeBenefit[]>([]);
     const [timeRecords, setTimeRecords] = useState<TimeRecord[]>([]);
@@ -10,6 +10,7 @@ export const usePayrollData = () => {
     const [error, setError] = useState<string | null>(null);
 
     const fetchData = useCallback(async () => {
+        if (!enabled) { setIsLoading(false); return; }
         setIsLoading(true);
         setError(null);
         try {
@@ -27,7 +28,7 @@ export const usePayrollData = () => {
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [enabled]);
 
     useEffect(() => {
         fetchData();

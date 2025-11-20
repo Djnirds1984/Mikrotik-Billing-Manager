@@ -50,8 +50,23 @@ export const dbApi = {
     delete: <T>(path: string): Promise<T> => fetchData<T>(path, { method: 'DELETE' }),
 };
 
-export const getPanelSettings = (): Promise<PanelSettings> => {
-    return dbApi.get<PanelSettings>('/panel-settings');
+export const getPanelSettings = async (): Promise<PanelSettings> => {
+    try {
+        const raw = localStorage.getItem('panelSettingsCache');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            const ttlMs = 10 * 60 * 1000;
+            if (parsed && parsed.data && Date.now() - parsed.timestamp < ttlMs) {
+                dbApi.get<PanelSettings>('/panel-settings').then((data) => {
+                    try { localStorage.setItem('panelSettingsCache', JSON.stringify({ timestamp: Date.now(), data })); } catch {}
+                }).catch(() => {});
+                return parsed.data as PanelSettings;
+            }
+        }
+    } catch {}
+    const data = await dbApi.get<PanelSettings>('/panel-settings');
+    try { localStorage.setItem('panelSettingsCache', JSON.stringify({ timestamp: Date.now(), data })); } catch {}
+    return data;
 };
 
 export const savePanelSettings = (settings: Partial<PanelSettings>): Promise<{ message: string }> => {
