@@ -22,8 +22,6 @@ app.use(express.json());
 
 const routerConfigCache = new Map();
 const trafficStatsCache = new Map();
-// NEW: Streaming registry to support SSE clients per-router
-const interfaceStreams = new Map();
 
 // --- Data Normalization for Legacy API ---
 const toKebabCase = (str) => str.replace(/_/g, '-');
@@ -138,32 +136,23 @@ const handleApiRequest = async (req, res, action) => {
             res.json(result);
         }
     } catch (error) {
-        const ts = new Date().toISOString();
-        const cid = (crypto.randomUUID && crypto.randomUUID()) || Math.random().toString(36).slice(2);
         if (error.isAxiosError) {
-            const method = error.config?.method?.toUpperCase();
-            const url = error.config?.url;
-            const reqHeaders = error.config?.headers || {};
-            const reqData = error.config?.data;
-            console.error("Axios Error:", { cid, ts, method, url, reqHeaders, reqData, message: error.message });
+            console.error("Axios Error:", `[${error.config?.method?.toUpperCase()}] ${error.config?.url} - ${error.message}`);
             if (error.response) {
                 const status = error.response.status || 500;
-                const respHeaders = error.response.headers || {};
-                const respData = error.response.data || {};
-                const code = status === 400 ? 'BAD_REQUEST' : 'HTTP_ERROR';
-                const message = typeof respData === 'string' ? respData : (respData.message || error.message || 'Request failed');
-                const detail = typeof respData === 'object' && respData.detail ? respData.detail : undefined;
-                res.status(status).json({ code, message, detail, ts, cid, request: { method, url }, response: { status, headers: respHeaders } });
+                let message = `MikroTik REST API Error: ${error.response.data.message || 'Bad Request'}`;
+                if (error.response.data.detail) message += ` - ${error.response.data.detail}`;
+                res.status(status).json({ message });
             } else {
-                res.status(500).json({ code: 'NETWORK_ERROR', message: error.message, ts, cid, request: { method, url } });
+                res.status(500).json({ message: error.message });
             }
         } else {
-            console.error("API Request Error:", { cid, ts, message: error.message });
+            console.error("API Request Error:", error);
             let message = error.message || 'An internal server error occurred.';
             if (message.includes('ECONNREFUSED')) message = 'Connection refused. Check the IP address, port, and ensure the API service is enabled on the router.';
             if (message.includes('authentication failed')) message = 'Authentication failed. Please check your username and password.';
             if (message.includes('timeout')) message = 'Connection timed out. The router is not responding.';
-            res.status(500).json({ code: 'SERVER_ERROR', message, ts, cid });
+            res.status(500).json({ message });
         }
     }
 };
@@ -346,71 +335,6 @@ app.get('/mt-api/:routerId/interface/stats', getRouterConfig, async (req, res) =
             // For REST API (v7+), sending { "detail": true } forces stats to be returned.
             const response = await req.routerInstance.post('/interface/print', { 'detail': true });
             return response.data;
-        }
-    });
-});
-
-// NEW: Server-Sent Events endpoint for live interface updates
-app.get('/mt-api/:routerId/interface/stream', getRouterConfig, async (req, res) => {
-    // Setup SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
-
-    const routerId = req.params.routerId;
-    if (!interfaceStreams.has(routerId)) {
-        interfaceStreams.set(routerId, { clients: new Set(), interval: null });
-    }
-    const bucket = interfaceStreams.get(routerId);
-    bucket.clients.add(res);
-
-    // Helper to broadcast to all clients
-    const broadcast = (event, payload) => {
-        const data = typeof payload === 'string' ? payload : JSON.stringify(payload);
-        for (const client of bucket.clients) {
-            try {
-                client.write(`event: ${event}\n`);
-                client.write(`data: ${data}\n\n`);
-            } catch (e) {}
-        }
-    };
-
-    // Start polling once per-router (shared across clients)
-    if (!bucket.interval) {
-        bucket.interval = setInterval(async () => {
-            try {
-                let result;
-                if (req.routerConfig.api_type === 'legacy') {
-                    const client = createRouterInstance(req.routerConfig);
-                    await client.connect();
-                    try {
-                        result = await writeLegacySafe(client, ['/interface/print', 'detail', 'without-paging']);
-                        result = result.map(normalizeLegacyObject);
-                    } finally {
-                        await client.close();
-                    }
-                } else {
-                    const response = await req.routerInstance.post('/interface/print', { detail: true });
-                    result = response.data;
-                }
-                broadcast('data', { timestamp: Date.now(), interfaces: result });
-            } catch (err) {
-                broadcast('error', { message: err.message || 'poll-error', timestamp: Date.now() });
-            }
-        }, 1000);
-    }
-
-    // Initial hello
-    res.write(`event: hello\n`);
-    res.write(`data: {"timestamp": ${Date.now()}}\n\n`);
-
-    req.on('close', () => {
-        bucket.clients.delete(res);
-        try { res.end(); } catch (e) {}
-        if (bucket.clients.size === 0 && bucket.interval) {
-            clearInterval(bucket.interval);
-            bucket.interval = null;
         }
     });
 });
@@ -1203,8 +1127,7 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
                 const pathParts = apiPath.split('/').filter(Boolean);
                 const hasId = pathParts.length > 1 && pathParts[pathParts.length-1].startsWith('*');
                 const command = `/${pathParts.join('/')}`;
-                const idRaw = hasId ? pathParts[pathParts.length - 1] : null;
-                const id = idRaw ? decodeURIComponent(idRaw) : null;
+                const id = hasId ? pathParts[pathParts.length - 1] : null;
                 const commandWithoutId = hasId ? `/${pathParts.slice(0, -1).join('/')}` : command;
 
                 let query = [];
@@ -1247,29 +1170,8 @@ app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
                 data: (req.method !== 'GET' && req.body) ? req.body : undefined,
                 params: req.query
             };
-            const shouldRetry = (err) => {
-                const status = err?.response?.status;
-                const code = err?.code || '';
-                const transient = status === 429 || status === 502 || status === 503 || status === 504 || code === 'ECONNRESET' || code === 'ETIMEDOUT';
-                const safeMethod = options.method === 'GET' || options.method === 'HEAD';
-                return transient && safeMethod;
-            };
-            const delay = (ms) => new Promise(r => setTimeout(r, ms));
-            let attempt = 0;
-            const maxAttempts = 2;
-            while (true) {
-                try {
-                    const response = await req.routerInstance(options);
-                    return response.data;
-                } catch (err) {
-                    if (attempt < maxAttempts && shouldRetry(err)) {
-                        attempt += 1;
-                        await delay(300 * attempt);
-                        continue;
-                    }
-                    throw err;
-                }
-            }
+            const response = await req.routerInstance(options);
+            return response.data;
         }
     });
 });

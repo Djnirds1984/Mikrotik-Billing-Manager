@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, SystemInfo, InterfaceWithHistory, TrafficHistoryPoint, Interface, PanelHostStatus } from '../types.ts';
 import { getSystemInfo, getInterfaceStats, getPppActiveConnections } from '../services/mikrotikService.ts';
@@ -44,32 +45,7 @@ const formatBps = (bps: number): string => {
     return `${(bps / (1000 * 1000 * 1000)).toFixed(2)} Gbps`;
 };
 
-// CHANGE: Defensive numeric parser for RouterOS fields that might be numbers or strings with units
-const parseNum = (v: any): number => {
-    if (v == null) return 0;
-    if (typeof v === 'number') return isFinite(v) ? v : 0;
-    if (typeof v === 'string') {
-        const trimmed = v.trim().toLowerCase();
-        const direct = Number(trimmed);
-        if (!isNaN(direct)) return direct;
-        const match = trimmed.match(/([0-9]*\.?[0-9]+)\s*([kmgt]?)(b|bps|byte|bytes)?/);
-        if (match) {
-            const value = Number(match[1]);
-            const scale = match[2];
-            let multiplier = 1;
-            if (scale === 'k') multiplier = 1000;
-            else if (scale === 'm') multiplier = 1000 * 1000;
-            else if (scale === 'g') multiplier = 1000 * 1000 * 1000;
-            return isNaN(value) ? 0 : value * multiplier;
-        }
-        return 0;
-    }
-    return 0;
-};
-
-// Polling interval for live interface updates (ms)
 const MAX_HISTORY_POINTS = 30;
-const POLL_INTERVAL_MS = 1000;
 
 export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
     // Router States
@@ -88,9 +64,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<{ message: string; details?: any } | null>(null);
     const [showFixer, setShowFixer] = useState(false);
-    // CHANGE: Stream connection state and last update timestamp for live UI indicators
-    const [streamConnected, setStreamConnected] = useState<boolean>(false);
-    const [lastUpdateTs, setLastUpdateTs] = useState<number | null>(null);
 
     const intervalRef = useRef<number | null>(null);
     const previousInterfacesRef = useRef<{ timestamp: number; interfaces: Interface[] } | null>(null);
@@ -109,7 +82,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
 
     useEffect(() => {
         fetchHostData();
-        const interval = setInterval(fetchHostData, 5000);
+        const interval = setInterval(fetchHostData, 5000); // Poll every 5 seconds
         return () => clearInterval(interval);
     }, [fetchHostData]);
 
@@ -137,7 +110,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         try {
             const [info, currentInterfacesData, pppoeActive] = await Promise.all([
                 getSystemInfo(selectedRouter),
-                getInterfaceStats(selectedRouter),
+                getInterfaceStats(selectedRouter), // Use stats version to get byte counters
                 getPppActiveConnections(selectedRouter).catch(() => []), 
             ]);
             setSystemInfo(info);
@@ -163,13 +136,16 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                     let txRate = 0;
 
                     if (prevIfaceData && timeDiffSeconds > 0.1) {
-                        // CHANGE: Use parseNum to safely read counters (supports numeric and unit-suffixed strings)
+                        // Robust property access handling multiple possible API response formats
                         const i = iface as any;
                         const p = prevIfaceData as any;
-                        const currRx = parseNum(i['rx-byte'] ?? i['bytes-in'] ?? i['rx-bytes']);
-                        const prevRx = parseNum(p['rx-byte'] ?? p['bytes-in'] ?? p['rx-bytes']);
-                        const currTx = parseNum(i['tx-byte'] ?? i['bytes-out'] ?? i['tx-bytes']);
-                        const prevTx = parseNum(p['tx-byte'] ?? p['bytes-out'] ?? p['tx-bytes']);
+                        
+                        // Try different property names that RouterOS might return.
+                        // Specifically checking fp-rx-byte for Fast Path counters if standard ones fail.
+                        const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['fp-rx-byte'] ?? 0);
+                        const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['fp-rx-byte'] ?? 0);
+                        const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['fp-tx-byte'] ?? 0);
+                        const prevTx = Number(p['tx-byte'] ?? p['bytes-out'] ?? p['fp-tx-byte'] ?? 0);
 
                         let rxByteDiff = currRx - prevRx;
                         let txByteDiff = currTx - prevTx;
@@ -185,20 +161,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         if (isNaN(rxRate)) rxRate = 0;
                         if (isNaN(txRate)) txRate = 0;
                     }
-
-                    // CHANGE: Fallback to instantaneous rate fields when counters are missing or unchanged
-                    if (rxRate === 0) {
-                        const i = iface as any;
-                        const instRx = parseNum(i['rx-bits-per-second'] ?? i['rx-bps'] ?? i['rx-rate']);
-                        if (isFinite(instRx) && !isNaN(instRx)) rxRate = instRx;
-                    }
-                    if (txRate === 0) {
-                        const i = iface as any;
-                        const instTx = parseNum(i['tx-bits-per-second'] ?? i['tx-bps'] ?? i['tx-rate']);
-                        if (isFinite(instTx) && !isNaN(instTx)) txRate = instTx;
-                    }
-
-                    
 
                     const newHistoryPoint: TrafficHistoryPoint = { name: new Date().toLocaleTimeString(), rx: rxRate, tx: txRate };
                     
@@ -219,66 +181,16 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                 message: `Failed to fetch data from ${selectedRouter.name}. Check connection and credentials.`,
                 details: err,
             });
+            // FIX: Removed clearInterval here to ensure it keeps retrying
         } finally {
             if (isInitial) setIsLoading(false);
         }
     }, [selectedRouter, error]);
 
-    // CHANGE: Handle streaming updates from backend SSE and feed into same rate computation
-    useEffect(() => {
-        if (!selectedRouter) return;
-        const url = `/mt-api/${selectedRouter.id}/interface/stream`;
-        let es: EventSource | null = null;
-        try {
-            es = new EventSource(url, { withCredentials: true } as any);
-            es.onopen = () => setStreamConnected(true);
-            es.onerror = () => setStreamConnected(false);
-            es.addEventListener('data', (evt: MessageEvent) => {
-                try {
-                    const payload = JSON.parse(evt.data);
-                    const currentInterfacesData = Array.isArray(payload?.interfaces) ? (payload.interfaces as Interface[]) : [];
-                    const now = payload?.timestamp || Date.now();
-                    setLastUpdateTs(now);
-                    setInterfaces(prevInterfaces => {
-                        const previousState = previousInterfacesRef.current;
-                        previousInterfacesRef.current = { timestamp: now, interfaces: currentInterfacesData };
-                        if (!Array.isArray(currentInterfacesData)) return prevInterfaces;
-                        const timeDiffSeconds = previousState ? (now - previousState.timestamp) / 1000 : 0;
-                        const newInterfaces = currentInterfacesData.map((iface: Interface) => {
-                            const existingIface = prevInterfaces.find(p => p.name === iface.name);
-                            const prevIfaceData = previousState?.interfaces.find(p => p.name === iface.name);
-                            let rxRate = 0; let txRate = 0;
-                            if (prevIfaceData && timeDiffSeconds > 0.1) {
-                                const i = iface as any; const p = prevIfaceData as any;
-                                const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['rx-bytes'] ?? 0);
-                                const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['rx-bytes'] ?? 0);
-                                const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['tx-bytes'] ?? 0);
-                                const prevTx = Number(p['tx-byte'] ?? p['bytes-out'] ?? p['tx-bytes'] ?? 0);
-                                let rxByteDiff = currRx - prevRx; let txByteDiff = currTx - prevTx;
-                                if (rxByteDiff < 0) rxByteDiff = currRx; if (txByteDiff < 0) txByteDiff = currTx;
-                                rxRate = Math.round((rxByteDiff * 8) / timeDiffSeconds);
-                                txRate = Math.round((txByteDiff * 8) / timeDiffSeconds);
-                                if (isNaN(rxRate)) rxRate = 0; if (isNaN(txRate)) txRate = 0;
-                            }
-                            if (rxRate === 0) { const i = iface as any; const instRx = Number(i['rx-bits-per-second'] ?? i['rx-rate'] ?? 0); if (isFinite(instRx) && !isNaN(instRx)) rxRate = instRx; }
-                            if (txRate === 0) { const i = iface as any; const instTx = Number(i['tx-bits-per-second'] ?? i['tx-rate'] ?? 0); if (isFinite(instTx) && !isNaN(instTx)) txRate = instTx; }
-                            const newHistoryPoint: TrafficHistoryPoint = { name: new Date().toLocaleTimeString(), rx: rxRate, tx: txRate };
-                            let newHistory = existingIface ? [...existingIface.trafficHistory, newHistoryPoint] : [newHistoryPoint];
-                            if (newHistory.length > MAX_HISTORY_POINTS) newHistory = newHistory.slice(newHistory.length - MAX_HISTORY_POINTS);
-                            return { ...iface, rxRate, txRate, trafficHistory: newHistory };
-                        });
-                        return newInterfaces;
-                    });
-                } catch (e) {}
-            });
-        } catch (e) { setStreamConnected(false); }
-        return () => { try { es?.close(); } catch (e) {} };
-    }, [selectedRouter]);
-
     useEffect(() => {
         if (selectedRouter) {
             fetchRouterData(true);
-            intervalRef.current = window.setInterval(() => fetchRouterData(false), POLL_INTERVAL_MS);
+            intervalRef.current = window.setInterval(() => fetchRouterData(false), 2000);
         } else {
             setIsLoading(false);
             setSystemInfo(null);
@@ -326,8 +238,8 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                      {!hostStatus && !hostError && <div className="flex items-center justify-center h-24"><Loader /></div>}
                      {hostStatus && <>
                         <StatItem label="CPU Usage" value={`${(hostStatus.cpuUsage || 0).toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage || 0} colorClass="bg-green-500" /></StatItem>
-                        <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used || 0} / ${hostStatus.memory?.total || 0})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
-                        <StatItem label="SD Card Usage" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used || 0} / ${hostStatus.disk?.total || 0})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
+                        <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used || 0}/${hostStatus.memory?.total || 0})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
+                        <StatItem label="SD Card" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used || 0}/${hostStatus.disk?.total || 0})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
                      </>}
                  </StatCard>
                  <div className="flex flex-col items-center justify-center h-full text-center py-16">
@@ -418,7 +330,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                                     <p>RX: <span className="font-semibold text-green-600 dark:text-green-400">{formatBps(chartData1.rxRate)}</span></p>
                                     <p>TX: <span className="font-semibold text-sky-600 dark:text-sky-400">{formatBps(chartData1.txRate)}</span></p>
                                 </div>
-                                <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">{streamConnected ? 'Live' : 'Polling'} • Last update: {lastUpdateTs ? new Date(lastUpdateTs).toLocaleTimeString() : '—'}</div>
                                 <div className="h-64">
                                 <Chart trafficHistory={chartData1.trafficHistory} />
                                 </div>
@@ -445,7 +356,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                                     <p>RX: <span className="font-semibold text-green-600 dark:text-green-400">{formatBps(chartData2.rxRate)}</span></p>
                                     <p>TX: <span className="font-semibold text-sky-600 dark:text-sky-400">{formatBps(chartData2.txRate)}</span></p>
                                 </div>
-                                <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">{streamConnected ? 'Live' : 'Polling'} • Last update: {lastUpdateTs ? new Date(lastUpdateTs).toLocaleTimeString() : '—'}</div>
                                 <div className="h-64">
                                 <Chart trafficHistory={chartData2.trafficHistory} />
                                 </div>

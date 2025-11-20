@@ -27,11 +27,18 @@ const CustomTooltip: React.FC<any> = ({ active, payload }) => {
 };
 
 export const Chart: React.FC<ChartProps> = ({ trafficHistory }) => {
-    const data = trafficHistory.length > 0 ? trafficHistory : [{ name: '', rx: 0, tx: 0 }];
+    if (trafficHistory.length < 2) {
+        return (
+            <div className="flex items-center justify-center h-full text-slate-400 dark:text-slate-500 text-sm">
+                Collecting traffic data...
+            </div>
+        );
+    }
+    
     return (
         <ResponsiveContainer width="100%" height="100%">
             <AreaChart
-                data={data}
+                data={trafficHistory}
                 margin={{
                     top: 5,
                     right: 0,
@@ -63,8 +70,7 @@ export const Chart: React.FC<ChartProps> = ({ trafficHistory }) => {
                 <Tooltip content={<CustomTooltip />} />
                 <Area 
                     isAnimationActive={true}
-                    animationDuration={600}
-                    animationEasing="ease-in-out"
+                    animationDuration={300}
                     type="monotone" 
                     dataKey="rx" 
                     stroke="#10b981" 
@@ -74,8 +80,7 @@ export const Chart: React.FC<ChartProps> = ({ trafficHistory }) => {
                 />
                 <Area 
                     isAnimationActive={true}
-                    animationDuration={600}
-                    animationEasing="ease-in-out"
+                    animationDuration={300}
                     type="monotone" 
                     dataKey="tx" 
                     stroke="#0ea5e9" 

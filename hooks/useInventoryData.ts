@@ -2,13 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import type { InventoryItem } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
 
-export const useInventoryData = (enabled: boolean = true) => {
+export const useInventoryData = () => {
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const fetchItems = useCallback(async () => {
-        if (!enabled) { setIsLoading(false); return; }
         setIsLoading(true);
         setError(null);
         try {
@@ -20,7 +19,7 @@ export const useInventoryData = (enabled: boolean = true) => {
         } finally {
             setIsLoading(false);
         }
-    }, [enabled]);
+    }, []);
 
     useEffect(() => {
         fetchItems();

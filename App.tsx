@@ -3,36 +3,35 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
 import { Dashboard } from './components/Dashboard.tsx';
+import { Scripting } from './components/Scripting.tsx';
+import { Routers } from './components/Routers.tsx';
+import { Updater } from './components/Updater.tsx';
+import { Pppoe } from './components/Pppoe.tsx';
+import { Billing } from './components/Billing.tsx';
+import { Remote } from './components/Remote.tsx';
+import { Hotspot } from './components/Hotspot.tsx';
 import { Help } from './components/Help.tsx';
+import { SystemSettings } from './components/SystemSettings.tsx';
+import { SalesReport } from './components/SalesReport.tsx';
+import { Network } from './components/Network.tsx';
+import { Inventory } from './components/Inventory.tsx';
+import { Company } from './components/Company.tsx';
+import { Terminal } from './components/Terminal.tsx';
 import { Loader } from './components/Loader.tsx';
+import { Login } from './components/Login.tsx';
+import { Register } from './components/Register.tsx';
+import { ForgotPassword } from './components/ForgotPassword.tsx';
+import { AuthLayout } from './components/AuthLayout.tsx';
+import { Logs } from './components/Logs.tsx';
+import { PanelRoles } from './components/PanelRoles.tsx';
+import { MikrotikFiles } from './components/MikrotikFiles.tsx';
+import { License } from './components/License.tsx';
+import { SuperAdmin } from './components/SuperAdmin.tsx';
 import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
+import { DhcpPortal } from './components/DhcpPortal.tsx';
 import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
-
-const Scripting = React.lazy(() => import('./components/Scripting.tsx').then(m => ({ default: m.Scripting })));
-const Routers = React.lazy(() => import('./components/Routers.tsx').then(m => ({ default: m.Routers })));
-const Updater = React.lazy(() => import('./components/Updater.tsx').then(m => ({ default: m.Updater })));
-const Pppoe = React.lazy(() => import('./components/Pppoe.tsx').then(m => ({ default: m.Pppoe })));
-const Billing = React.lazy(() => import('./components/Billing.tsx').then(m => ({ default: m.Billing })));
-const Remote = React.lazy(() => import('./components/Remote.tsx').then(m => ({ default: m.Remote })));
-const Hotspot = React.lazy(() => import('./components/Hotspot.tsx').then(m => ({ default: m.Hotspot })));
-const SystemSettings = React.lazy(() => import('./components/SystemSettings.tsx').then(m => ({ default: m.SystemSettings })));
-const SalesReport = React.lazy(() => import('./components/SalesReport.tsx').then(m => ({ default: m.SalesReport })));
-const Network = React.lazy(() => import('./components/Network.tsx').then(m => ({ default: m.Network })));
-const Inventory = React.lazy(() => import('./components/Inventory.tsx').then(m => ({ default: m.Inventory })));
-const Company = React.lazy(() => import('./components/Company.tsx').then(m => ({ default: m.Company })));
-const Terminal = React.lazy(() => import('./components/Terminal.tsx').then(m => ({ default: m.Terminal })));
-const Login = React.lazy(() => import('./components/Login.tsx').then(m => ({ default: m.Login })));
-const Register = React.lazy(() => import('./components/Register.tsx').then(m => ({ default: m.Register })));
-const ForgotPassword = React.lazy(() => import('./components/ForgotPassword.tsx').then(m => ({ default: m.ForgotPassword })));
-const AuthLayout = React.lazy(() => import('./components/AuthLayout.tsx').then(m => ({ default: m.AuthLayout })));
-const Logs = React.lazy(() => import('./components/Logs.tsx').then(m => ({ default: m.Logs })));
-const PanelRoles = React.lazy(() => import('./components/PanelRoles.tsx').then(m => ({ default: m.PanelRoles })));
-const MikrotikFiles = React.lazy(() => import('./components/MikrotikFiles.tsx').then(m => ({ default: m.MikrotikFiles })));
-const License = React.lazy(() => import('./components/License.tsx').then(m => ({ default: m.License })));
-const SuperAdmin = React.lazy(() => import('./components/SuperAdmin.tsx').then(m => ({ default: m.SuperAdmin })));
-const DhcpPortal = React.lazy(() => import('./components/DhcpPortal.tsx').then(m => ({ default: m.DhcpPortal })));
-const NotificationsPage = React.lazy(() => import('./components/NotificationsPage.tsx').then(m => ({ default: m.NotificationsPage })));
-const Payroll = React.lazy(() => import('./components/Payroll.tsx').then(m => ({ default: m.Payroll })));
+import { NotificationsPage } from './components/NotificationsPage.tsx';
+import { Payroll } from './components/Payroll.tsx';
 import { useRouters } from './hooks/useRouters.ts';
 import { useSalesData } from './hooks/useSalesData.ts';
 import { useInventoryData } from './hooks/useInventoryData.ts';
@@ -93,10 +92,10 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
   
   const { routers, addRouter, updateRouter, deleteRouter, isLoading: isLoadingRouters } = useRouters();
-  const { sales, addSale, deleteSale, clearSales, isLoading: isLoadingSales } = useSalesData(selectedRouterId, currentView === 'sales');
-  const { items, addItem, updateItem, deleteItem, isLoading: isLoadingInventory } = useInventoryData(currentView === 'inventory');
-  const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData(currentView === 'inventory');
-  const payrollData = usePayrollData(currentView === 'payroll');
+  const { sales, addSale, deleteSale, clearSales, isLoading: isLoadingSales } = useSalesData(selectedRouterId);
+  const { items, addItem, updateItem, deleteItem, isLoading: isLoadingInventory } = useInventoryData();
+  const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData();
+  const payrollData = usePayrollData();
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
 
@@ -126,8 +125,6 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   }, []);
 
   const appIsLoading = isLoadingRouters || isLoadingSales || isLoadingInventory || isLoadingCompany || isLoadingLocalization || isLoadingExpenses || payrollData.isLoading;
-  useEffect(() => { performance.mark('panel-init-start'); }, []);
-  useEffect(() => { if (!appIsLoading) { performance.mark('panel-init-end'); try { performance.measure('panel-init', 'panel-init-start', 'panel-init-end'); const m = performance.getEntriesByName('panel-init'); const last = m[m.length - 1]; if (last) { localStorage.setItem('panelLoadTimeMs', String(Math.round(last.duration))); } } catch {} } }, [appIsLoading]);
 
   useEffect(() => {
     setIsSidebarOpen(isLargeScreen);
@@ -265,7 +262,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
         />
         <div className="p-4 sm:p-8 overflow-auto h-full flex flex-col">
           <div className="flex-grow">
-             <React.Suspense fallback={<Loader />}>{renderView()}</React.Suspense>
+             {renderView()}
           </div>
         </div>
       </main>
@@ -356,17 +353,15 @@ const AppRouter: React.FC = () => {
         return (
             <ThemeProvider>
                  <LocalizationProvider>
-            <React.Suspense fallback={<Loader />}>
-                <AuthLayout>
-                    {!hasUsers ? (
-                        <Register />
-                    ) : authView === 'login' ? (
-                        <Login onSwitchToForgotPassword={() => setAuthView('forgot')} />
-                    ) : (
-                        <ForgotPassword onSwitchToLogin={() => setAuthView('login')} />
-                    )}
-                </AuthLayout>
-            </React.Suspense>
+                    <AuthLayout>
+                        {!hasUsers ? (
+                            <Register />
+                        ) : authView === 'login' ? (
+                            <Login onSwitchToForgotPassword={() => setAuthView('forgot')} />
+                        ) : (
+                            <ForgotPassword onSwitchToLogin={() => setAuthView('login')} />
+                        )}
+                    </AuthLayout>
                  </LocalizationProvider>
             </ThemeProvider>
         );
@@ -380,9 +375,7 @@ const AppRouter: React.FC = () => {
          return (
              <ThemeProvider>
                 <LocalizationProvider>
-                    <React.Suspense fallback={<Loader />}>
-                        <License onLicenseChange={handleLicenseChange} licenseStatus={licenseStatus} />
-                    </React.Suspense>
+                    <License onLicenseChange={handleLicenseChange} licenseStatus={licenseStatus} />
                 </LocalizationProvider>
             </ThemeProvider>
          );

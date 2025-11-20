@@ -8,15 +8,11 @@ export const useRouters = () => {
     const [error, setError] = useState<string | null>(null);
 
     const fetchRouters = useCallback(async () => {
-        setIsLoading(routers.length === 0);
+        setIsLoading(true);
         setError(null);
         try {
             const data = await dbApi.get<RouterConfigWithId[]>('/routers');
             setRouters(data);
-            try {
-                const cache = { timestamp: Date.now(), data };
-                localStorage.setItem('routersCache', JSON.stringify(cache));
-            } catch {}
         } catch (err) {
             setError((err as Error).message);
             console.error("Failed to fetch routers from DB", err);
@@ -26,17 +22,6 @@ export const useRouters = () => {
     }, []);
 
     useEffect(() => {
-        try {
-            const raw = localStorage.getItem('routersCache');
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                const ttlMs = 5 * 60 * 1000;
-                if (parsed && Array.isArray(parsed.data) && Date.now() - parsed.timestamp < ttlMs) {
-                    setRouters(parsed.data);
-                    setIsLoading(false);
-                }
-            }
-        } catch {}
         fetchRouters();
     }, [fetchRouters]);
 

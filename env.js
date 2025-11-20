@@ -8,6 +8,6 @@ window.process = {
     //
     // Obtain your key from Google AI Studio: https://aistudio.google.com/app/apikey
     //
-    API_KEY: "YOAIzaSyB6lj0dUc5acYmrhAWv09AEorYru3BnbxI"
+    API_KEY: "YOUR_GEMINI_API_KEY_HERE",
   }
 };
