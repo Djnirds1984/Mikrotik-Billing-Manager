@@ -41,10 +41,10 @@ async function initSuperadminDb() {
         await superadminDb.exec('CREATE TABLE IF NOT EXISTS superadmin (username TEXT PRIMARY KEY, password TEXT NOT NULL);');
         const superadminUser = await superadminDb.get("SELECT COUNT(*) as count FROM superadmin");
         if (superadminUser.count === 0) {
-            const defaultPassword = 'superadmin';
+            const defaultPassword = 'Akoangnagwagi84%';
             const hashedPassword = await bcrypt.hash(defaultPassword, 10);
             await superadminDb.run('INSERT INTO superadmin (username, password) VALUES (?, ?)', 'superadmin', hashedPassword);
-            console.log('Superadmin user created (password: superadmin)');
+            console.log('Superadmin user created (password: Akoangnagwagi84%)');
         }
     } catch (err) {
         console.error('Failed to initialize superadmin database:', err);
@@ -1018,4 +1018,3 @@ const normalizeLegacyObject = (obj) => {
 }
 
 startServer();
-
