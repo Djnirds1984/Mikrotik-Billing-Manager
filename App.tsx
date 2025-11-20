@@ -28,6 +28,7 @@ import { MikrotikFiles } from './components/MikrotikFiles.tsx';
 import { License } from './components/License.tsx';
 import { SuperAdmin } from './components/SuperAdmin.tsx';
 import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
+import { clearRouterCache, validateRouterSelection } from './utils/routerCache.ts';
 import { DhcpPortal } from './components/DhcpPortal.tsx';
 import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
 import { NotificationsPage } from './components/NotificationsPage.tsx';
@@ -90,7 +91,21 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange,
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
   const [isSidebarOpen, setIsSidebarOpen] = useState(isLargeScreen);
-  const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
+  const [selectedRouterId, setSelectedRouterId] = useState<string | null>(() => {
+    // Clear any cached router ID on app startup to prevent stale data
+    // Also clear any potential session storage
+    if (typeof window !== 'undefined') {
+      clearRouterCache();
+    }
+    return null;
+  });
+
+  // Function to manually reset router selection
+  const resetRouterSelection = useCallback(() => {
+    console.log('DEBUG: Manually resetting router selection');
+    clearRouterCache();
+    setSelectedRouterId(null);
+  }, []);
   
   const { routers, addRouter, updateRouter, deleteRouter, isLoading: isLoadingRouters } = useRouters();
   const { sales, addSale, deleteSale, clearSales } = useSalesData(selectedRouterId);
@@ -150,20 +165,24 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange,
     console.log('DEBUG: Router selection check - selectedRouterId:', selectedRouterId);
     console.log('DEBUG: Available routers:', routers.map(r => r.id));
     
-    if (!selectedRouterId && routers.length > 0) {
-      console.log('DEBUG: No selected router, setting to first:', routers[0].id);
-      setSelectedRouterId(routers[0].id);
-    }
+    // Force reset to null if selected router doesn't exist in current routers list
     if (selectedRouterId && !routers.find(r => r.id === selectedRouterId)) {
-        console.log('DEBUG: Selected router not found, resetting to first or null');
-        setSelectedRouterId(routers.length > 0 ? routers[0].id : null);
+        console.log('DEBUG: Selected router not found, resetting to null');
+        setSelectedRouterId(null);
+    }
+    
+    // Select first available router if none is selected
+    if (!selectedRouterId && routers.length > 0) {
+        console.log('DEBUG: No selected router, setting to first:', routers[0].id);
+        setSelectedRouterId(routers[0].id);
     }
   }, [routers, selectedRouterId]);
 
   const selectedRouter = useMemo(
     () => {
-      const found = routers.find(r => r.id === selectedRouterId) || null;
-      console.log('DEBUG: selectedRouter useMemo - selectedRouterId:', selectedRouterId, 'found:', found);
+      const validRouterId = validateRouterSelection(selectedRouterId, routers);
+      const found = validRouterId ? routers.find(r => r.id === validRouterId) || null : null;
+      console.log('DEBUG: selectedRouter useMemo - selectedRouterId:', selectedRouterId, 'validRouterId:', validRouterId, 'found:', found);
       return found;
     },
     [routers, selectedRouterId]
@@ -278,6 +297,20 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange,
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         />
         <div className="p-4 sm:p-8 overflow-auto h-full flex flex-col">
+          {/* Debug button to reset router selection */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mb-4 p-2 bg-yellow-100 dark:bg-yellow-900 rounded-lg">
+              <button 
+                onClick={resetRouterSelection}
+                className="text-xs bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
+              >
+                Reset Router Selection (Debug)
+              </button>
+              <span className="ml-2 text-xs text-yellow-800 dark:text-yellow-200">
+                Current: {selectedRouter?.id || 'none'}
+              </span>
+            </div>
+          )}
           <div className="flex-grow">
              {renderView()}
           </div>

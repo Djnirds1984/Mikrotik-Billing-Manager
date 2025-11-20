@@ -47,8 +47,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const checkHasUsers = useCallback(async () => {
         try {
+            console.log('DEBUG: Checking for existing users...');
             const res = await fetch('/api/auth/has-users');
+            console.log('DEBUG: has-users response status:', res.status);
+            if (!res.ok) {
+                console.log('DEBUG: has-users request failed with status:', res.status);
+                return;
+            }
             const data = await res.json();
+            console.log('DEBUG: has-users data:', data);
             setHasUsers(data.hasUsers);
         } catch (e) {
             console.error("Could not check for existing users", e);
@@ -59,20 +66,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const verifyToken = useCallback(async (tokenToVerify: string) => {
         try {
+            console.log('DEBUG: Verifying token...');
             const response = await fetch('/api/auth/status', {
                 headers: { 'Authorization': `Bearer ${tokenToVerify}` },
             });
+            console.log('DEBUG: Token verification response status:', response.status);
             if (response.ok) {
                 const userData = await response.json();
+                console.log('DEBUG: Token verification successful');
                 setUser(userData);
             } else {
+                console.log('DEBUG: Token verification failed with status:', response.status);
                 // Token is invalid, clear it
                 setUser(null);
                 setToken(null);
                 localStorage.removeItem('authToken');
             }
         } catch (e) {
-            console.error('Token verification failed', e);
+            console.error("Token verification failed", e);
+            // On error, also clear the token
             setUser(null);
             setToken(null);
             localStorage.removeItem('authToken');
