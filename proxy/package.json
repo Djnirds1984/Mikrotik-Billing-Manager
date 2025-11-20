@@ -17,6 +17,7 @@
     "express": "^4.19.2",
     "fs-extra": "^11.2.0",
     "jsonwebtoken": "^9.0.2",
+    "node-routeros-v2": "1.6.12",
     "sqlite": "^5.1.1",
     "systeminformation": "^5.21.22",
     "tar": "^7.1.0",

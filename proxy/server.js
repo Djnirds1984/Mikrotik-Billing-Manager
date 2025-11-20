@@ -11,8 +11,10 @@ const jwt = require('jsonwebtoken');
 const os = require('os');
 const crypto = require('crypto');
 const axios = require('axios');
+const https = require('https');
 const { Xendit } = require('xendit-node');
 const si = require('systeminformation');
+const { RouterOSAPI } = require('node-routeros-v2');
 
 const PORT = 3001;
 const DB_PATH = path.join(__dirname, 'panel.db');
@@ -248,18 +250,14 @@ const getDeviceId = () => {
     const networkInterfaces = os.networkInterfaces();
     let macs = [];
     
-    // Regular expression to ignore virtual interfaces that change (ZeroTier, Docker, Tunnels, etc.)
-    // zt = ZeroTier, docker = Docker, veth = Virtual Ethernet, tun/tap = Tunnels, br = Bridges
     const ignoredInterfacePattern = /^(zt|docker|veth|br-|tun|tap|lo)/i;
 
     for (const [name, interfaces] of Object.entries(networkInterfaces)) {
-        // Skip interfaces that match the ignored pattern
         if (ignoredInterfacePattern.test(name)) {
             continue;
         }
 
         for (const iface of interfaces) {
-            // Only use valid MAC addresses from non-internal IPv4/IPv6 interfaces
             if (iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal) {
                 macs.push(iface.mac);
             }
@@ -297,8 +295,6 @@ async function startServer() {
     await Promise.all([initDb(), initSuperadminDb()]);
     const app = express();
 
-    // Use Vite middleware for serving the frontend in development mode
-    // This compiles .tsx files on the fly, preventing "application/octet-stream" errors.
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
         server: { middlewareMode: true },
@@ -365,7 +361,6 @@ async function startServer() {
             const adminRole = await db.get("SELECT id FROM roles WHERE name = 'Administrator'");
             
             await db.run('INSERT INTO users (id, username, password, role_id) VALUES (?, ?, ?, ?)', [userId, username, hashedPassword, adminRole.id]);
-            // Note: Security questions table needs to be implemented if using this feature fully
 
             const token = jwt.sign({ id: userId, username, role: { name: 'Administrator' }, permissions: ['*:*'] }, SECRET_KEY);
             res.json({ token, user: { id: userId, username, role: { name: 'Administrator' }, permissions: ['*:*'] } });
@@ -438,22 +433,17 @@ async function startServer() {
         });
     };
 
-    // Map frontend routes to DB tables
     createCrud('/billing-plans', 'billing_plans');
     createCrud('/inventory', 'inventory');
     createCrud('/expenses', 'expenses');
     createCrud('/employees', 'employees');
     createCrud('/customers', 'customers');
     createCrud('/routers', 'routers');
-
-    // Mapped with aliases for dash-case vs underscore
     createCrud('/employee-benefits', 'employee_benefits');
     createCrud('/time-records', 'time_records');
     createCrud('/dhcp-billing-plans', 'dhcp_billing_plans');
-    createCrud('/dhcp_clients', 'dhcp_clients'); // frontend sends underscore
-    
-    // Sales alias
-    createCrud('/sales', 'sales_records'); // Frontend uses /sales, DB table is sales_records
+    createCrud('/dhcp_clients', 'dhcp_clients');
+    createCrud('/sales', 'sales_records');
 
     // Special handling for settings
     dbRouter.get('/panel-settings', async (req, res) => {
@@ -528,7 +518,6 @@ async function startServer() {
         res.json({ message: 'Cleared' });
     });
     
-    // Special handling for sales clearing
     dbRouter.post('/sales/clear-all', async (req, res) => {
         const { routerId } = req.body;
         if (routerId) {
@@ -663,7 +652,6 @@ async function startServer() {
 
     app.get('/api/host/logs', protect, async (req, res) => {
         // Stub: In a real environment, you would read /var/log/syslog or pm2 logs
-        // This just returns a message for now to prevent 404
         const type = req.query.type || 'panel-ui';
         let logCommand = '';
         
@@ -721,7 +709,6 @@ async function startServer() {
     });
 
     app.get('/api/update-status', protect, (req, res) => {
-        // Placeholder for real git check
         res.json({ status: 'uptodate', message: 'System is up to date (mock).' });
     });
     
@@ -737,7 +724,6 @@ async function startServer() {
     // ZeroTier
     app.get('/api/zt/status', protect, async (req, res) => {
         try {
-            // Check if installed
             try {
                 await runCommand('which zerotier-cli');
             } catch (e) {
@@ -757,12 +743,10 @@ async function startServer() {
             res.json({ info, networks });
         } catch (error) {
             if (error.code === 'ZEROTIER_NOT_INSTALLED') {
-                // Return a valid structure with offline status so frontend doesn't crash
                 res.json({ info: { online: false, version: '0.0.0', address: 'not_installed' }, networks: [], error: 'NOT_INSTALLED' });
             } else if (error.code === 'SUDO_PASSWORD_REQUIRED') {
                  res.status(500).json({ code: 'SUDO_PASSWORD_REQUIRED', message: 'Sudo access required' });
             } else {
-                 // Fallback structure to prevent frontend crash
                  console.error("ZeroTier Error:", error);
                  res.json({ info: { online: false, version: '0.0.0', address: 'error' }, networks: [], error: error.message || 'Unknown error' });
             }
@@ -795,8 +779,6 @@ async function startServer() {
             const isActive = await runCommand('systemctl is-active pitunnel').then(o => o === 'active').catch(() => false);
             const isInstalled = await runCommand('which pitunnel').then(() => true).catch(() => false);
             
-            // Attempt to find monitor URL from a config file if it exists (mock logic as location varies)
-            // Real logic would depend on where PiTunnel stores its state.
             res.json({ installed: isInstalled, active: isActive, url: isInstalled ? 'https://pitunnel.com/dashboard' : undefined });
         } catch (e) {
              res.json({ installed: false, active: false });
@@ -881,7 +863,6 @@ async function startServer() {
         }
     });
     
-    // ... (Implement create/delete/restore logic using child_process if needed) ...
     app.use('/api/superadmin', superRouter);
 
     // --- SPECIAL STATS ENDPOINT FOR DASHBOARD ---
@@ -922,7 +903,6 @@ const routerConfigCache = new Map();
 const getRouterConfig = async (req, res, next) => {
     const routerId = req.params.routerId || req.body.id;
     const authHeader = req.headers.authorization;
-    const internalRequestHeaders = authHeader ? { 'Authorization': authHeader } : {};
 
     if (routerConfigCache.has(routerId)) {
         req.routerConfig = routerConfigCache.get(routerId);
@@ -930,7 +910,6 @@ const getRouterConfig = async (req, res, next) => {
         return next();
     }
     try {
-        // In a real deployment, this would call the local DB function directly instead of via HTTP loopback
         const rows = await db.all('SELECT * FROM routers');
         const config = rows.find(r => r.id === routerId);
         
@@ -948,10 +927,7 @@ const getRouterConfig = async (req, res, next) => {
     }
 };
 
-// Router Instance Factory (duplicated from api-backend for standalone dev mode)
-const { RouterOSAPI } = require('node-routeros-v2');
-const https = require('https');
-
+// Router Instance Factory
 const createRouterInstance = (config) => {
     if (!config || !config.host || !config.user) {
         throw new Error('Invalid router configuration: host and user are required.');
@@ -1008,7 +984,6 @@ const handleApiRequest = async (req, res, action) => {
         if (result === '') res.status(204).send();
         else res.json(result);
     } catch (error) {
-        // Error handling logic similar to api-backend
         if (error.isAxiosError && error.response) {
              res.status(error.response.status).json({ message: error.response.data.message || error.message });
         } else {
