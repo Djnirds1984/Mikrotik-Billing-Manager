@@ -346,15 +346,21 @@ const createRouterInstance = (config) => {
 const routerConfigCache = new Map();
 const getRouterConfig = async (req, res, next) => {
     const routerId = req.params.routerId || req.body.id;
+    console.log('DEBUG: getRouterConfig called with routerId:', routerId);
+    console.log('DEBUG: Request params:', req.params);
+    console.log('DEBUG: Request body:', req.body);
 
     try {
         // Always check database first to ensure we have the latest config
         const rows = await db.all('SELECT * FROM routers WHERE id = ?', [routerId]);
         const config = rows[0];
         
+        console.log('DEBUG: Database query result:', rows.length, 'rows found');
+        
         if (!config) {
             // Clear cache if router no longer exists
             routerConfigCache.delete(routerId);
+            console.log('DEBUG: Router not found, returning 404');
             return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
         }
 
@@ -362,6 +368,7 @@ const getRouterConfig = async (req, res, next) => {
         routerConfigCache.set(routerId, config);
         req.routerConfig = config;
         req.routerInstance = createRouterInstance(req.routerConfig);
+        console.log('DEBUG: Router config found and cached, proceeding');
         next();
     } catch (error) {
         console.error("Error fetching router config:", error);
@@ -383,6 +390,12 @@ async function startServer() {
 
     app.use(express.json({ limit: '10mb' }));
     app.use(express.text({ limit: '10mb' }));
+
+    // Request logging middleware
+    app.use((req, res, next) => {
+        console.log(`DEBUG: ${req.method} ${req.url} - ${new Date().toISOString()}`);
+        next();
+    });
 
     // --- API ROUTES ---
     

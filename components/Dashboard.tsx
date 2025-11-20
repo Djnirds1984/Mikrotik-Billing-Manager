@@ -113,6 +113,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
     const [pppoeCount, setPppoeCount] = useState<number>(0);
     
+    // DEBUG: Log selected router
+    console.log('DEBUG: Dashboard received selectedRouter:', selectedRouter);
+    
     // Interface Names List
     const [availableInterfaces, setAvailableInterfaces] = useState<string[]>([]);
     

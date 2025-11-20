@@ -141,21 +141,31 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange,
 
   useEffect(() => {
     if (!appIsLoading && routers.length > 0 && !selectedRouterId) {
+        console.log('DEBUG: Auto-selecting first router:', routers[0].id);
         setSelectedRouterId(routers[0].id);
     }
   }, [appIsLoading, routers, selectedRouterId]);
 
   useEffect(() => {
+    console.log('DEBUG: Router selection check - selectedRouterId:', selectedRouterId);
+    console.log('DEBUG: Available routers:', routers.map(r => r.id));
+    
     if (!selectedRouterId && routers.length > 0) {
+      console.log('DEBUG: No selected router, setting to first:', routers[0].id);
       setSelectedRouterId(routers[0].id);
     }
     if (selectedRouterId && !routers.find(r => r.id === selectedRouterId)) {
+        console.log('DEBUG: Selected router not found, resetting to first or null');
         setSelectedRouterId(routers.length > 0 ? routers[0].id : null);
     }
   }, [routers, selectedRouterId]);
 
   const selectedRouter = useMemo(
-    () => routers.find(r => r.id === selectedRouterId) || null,
+    () => {
+      const found = routers.find(r => r.id === selectedRouterId) || null;
+      console.log('DEBUG: selectedRouter useMemo - selectedRouterId:', selectedRouterId, 'found:', found);
+      return found;
+    },
     [routers, selectedRouterId]
   );
 

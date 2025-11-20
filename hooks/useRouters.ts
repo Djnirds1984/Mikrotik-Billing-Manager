@@ -12,6 +12,8 @@ export const useRouters = () => {
         setError(null);
         try {
             const data = await dbApi.get<RouterConfigWithId[]>('/routers');
+            console.log('DEBUG: useRouters fetched:', data.length, 'routers');
+            console.log('DEBUG: Router IDs:', data.map(r => r.id));
             setRouters(data);
         } catch (err) {
             setError((err as Error).message);

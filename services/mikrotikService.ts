@@ -7,6 +7,7 @@ const BASE_URL = '/mt-api';
 // Helper for API Calls
 const apiCall = async <T>(router: RouterConfigWithId, endpoint: string, method: string = 'GET', body?: any): Promise<T> => {
     const url = `${BASE_URL}/${router.id}/${endpoint.replace(/^\//, '')}`;
+    console.log('DEBUG: mikrotikService API call to:', url, 'for router:', router.id);
     const response = await fetch(url, {
         method,
         headers: {
