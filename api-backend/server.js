@@ -215,14 +215,56 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
             });
             await client.connect();
             
-            const cmd = '/' + endpoint; 
+            // Handle special endpoints that need specific RouterOS command formatting
+            let cmd;
+            if (endpoint === 'interface/stats') {
+                // Special handling for interface statistics
+                cmd = ['/interface/print', 'stats', 'detail', 'without-paging'];
+            } else if (endpoint === 'interface/monitor-traffic') {
+                // Handle monitor-traffic requests
+                cmd = ['/interface/monitor-traffic', 'once'];
+                if (body && body.interface) {
+                    cmd.push('=interface=' + body.interface);
+                }
+            } else if (endpoint === 'file/get-content') {
+                // Handle file content retrieval
+                cmd = ['/file/print'];
+                if (body && body['.id']) {
+                    cmd.push('?.id=' + body['.id']);
+                }
+            } else if (endpoint === 'system/script/wan-failover-status' || endpoint === 'system/script/configure-wan-failover') {
+                // Handle script endpoints that might not exist on all RouterOS versions
+                cmd = ['/system/script/print'];
+                console.warn(`Script endpoint "${endpoint}" may not be supported on all RouterOS versions`);
+            } else {
+                // Default command construction
+                cmd = '/' + endpoint;
+                // For print commands, ensure proper formatting
+                if (endpoint.endsWith('/print') && method === 'GET') {
+                    cmd = '/' + endpoint.replace('/print', '') + '/print';
+                }
+            }
             
-            if (method === 'POST' && body) {
+            if (method === 'POST' && body && endpoint !== 'interface/monitor-traffic') {
                  await client.write(cmd, body);
                  res.json({ message: 'Command executed' });
             } else {
-                 const data = await client.write(cmd);
-                 res.json(data);
+                 try {
+                     const data = await client.write(cmd);
+                     res.json(data);
+                 } catch (error) {
+                     // Handle RouterOS command errors more gracefully
+                     if (error.message && error.message.includes('no such command')) {
+                         console.error(`RouterOS command error: ${error.message} for command:`, cmd);
+                         res.status(400).json({ 
+                             message: `Invalid RouterOS command: ${error.message}`, 
+                             command: cmd,
+                             suggestion: 'Check if the command exists in your RouterOS version or if the endpoint is properly configured'
+                         });
+                     } else {
+                         throw error;
+                     }
+                 }
             }
             await client.close();
         } else {
