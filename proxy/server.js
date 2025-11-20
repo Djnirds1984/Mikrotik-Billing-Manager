@@ -884,6 +884,28 @@ async function startServer() {
     // ... (Implement create/delete/restore logic using child_process if needed) ...
     app.use('/api/superadmin', superRouter);
 
+    // --- SPECIAL STATS ENDPOINT FOR DASHBOARD ---
+    app.get('/mt-api/:routerId/interface/stats', getRouterConfig, async (req, res) => {
+        await handleApiRequest(req, res, async () => {
+            if (req.routerConfig.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    // 'detail' argument forces full stats in legacy API
+                    // 'without-paging' prevents hanging on large interface lists
+                    const result = await writeLegacySafe(client, ['/interface/print', 'detail', 'without-paging']);
+                    return result.map(normalizeLegacyObject);
+                } finally {
+                    await client.close();
+                }
+            } else {
+                // For REST API (v7+), passing the 'stats' key (even with empty value) triggers stats output.
+                // 'detail' key is also needed for some versions to show extended configuration info.
+                const response = await req.routerInstance.post('/interface/print', { 'stats': '' });
+                return response.data;
+            }
+        });
+    });
 
     // --- VITE MIDDLEWARE (The Critical Fix) ---
     // Ensure this comes AFTER API routes but BEFORE the catch-all handler.
@@ -893,6 +915,129 @@ async function startServer() {
         console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
         console.log(`   Mode: Development (Vite Middleware Active)`);
     });
+}
+
+// Helper middleware for router config
+const routerConfigCache = new Map();
+const getRouterConfig = async (req, res, next) => {
+    const routerId = req.params.routerId || req.body.id;
+    const authHeader = req.headers.authorization;
+    const internalRequestHeaders = authHeader ? { 'Authorization': authHeader } : {};
+
+    if (routerConfigCache.has(routerId)) {
+        req.routerConfig = routerConfigCache.get(routerId);
+        req.routerInstance = createRouterInstance(req.routerConfig);
+        return next();
+    }
+    try {
+        // In a real deployment, this would call the local DB function directly instead of via HTTP loopback
+        const rows = await db.all('SELECT * FROM routers');
+        const config = rows.find(r => r.id === routerId);
+        
+        if (!config) {
+            routerConfigCache.delete(routerId);
+            return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
+        }
+
+        routerConfigCache.set(routerId, config);
+        req.routerConfig = config;
+        req.routerInstance = createRouterInstance(req.routerConfig);
+        next();
+    } catch (error) {
+        res.status(500).json({ message: `Failed to fetch router config: ${error.message}` });
+    }
+};
+
+// Router Instance Factory (duplicated from api-backend for standalone dev mode)
+const { RouterOSAPI } = require('node-routeros-v2');
+const https = require('https');
+
+const createRouterInstance = (config) => {
+    if (!config || !config.host || !config.user) {
+        throw new Error('Invalid router configuration: host and user are required.');
+    }
+    
+    if (config.api_type === 'legacy') {
+        const isTls = config.port === 8729;
+        return new RouterOSAPI({
+            host: config.host,
+            user: config.user,
+            password: config.password || '',
+            port: config.port || 8728,
+            timeout: 15,
+            tls: isTls,
+            tlsOptions: isTls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2' } : undefined,
+        });
+    }
+
+    const protocol = config.port === 443 ? 'https' : 'http';
+    const baseURL = `${protocol}://${config.host}:${config.port}/rest`;
+    const auth = { username: config.user, password: config.password || '' };
+
+    const instance = axios.create({ 
+        baseURL, 
+        auth,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1.2' }),
+        timeout: 15000
+    });
+
+    instance.interceptors.response.use(response => {
+        const mapId = (item) => {
+            if (item && typeof item === 'object' && '.id' in item) {
+                return { ...item, id: item['.id'] };
+            }
+            return item;
+        };
+
+        if (response.data && typeof response.data === 'object') {
+            if (Array.isArray(response.data)) {
+                response.data = response.data.map(mapId);
+            } else {
+                response.data = mapId(response.data);
+            }
+        }
+        return response;
+    }, error => Promise.reject(error));
+
+    return instance;
+};
+
+const handleApiRequest = async (req, res, action) => {
+    try {
+        const result = await action();
+        if (result === '') res.status(204).send();
+        else res.json(result);
+    } catch (error) {
+        // Error handling logic similar to api-backend
+        if (error.isAxiosError && error.response) {
+             res.status(error.response.status).json({ message: error.response.data.message || error.message });
+        } else {
+             res.status(500).json({ message: error.message });
+        }
+    }
+};
+
+const writeLegacySafe = async (client, query) => {
+    try {
+        return await client.write(query);
+    } catch (error) {
+        if (error.errno === 'UNKNOWNREPLY' && error.message.includes('!empty')) {
+            return [];
+        }
+        throw error;
+    }
+};
+
+const normalizeLegacyObject = (obj) => {
+     if (!obj || typeof obj !== 'object') return obj;
+    const newObj = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            newObj[key.replace(/_/g, '-')] = obj[key];
+        }
+    }
+    if (newObj['.id']) newObj.id = newObj['.id'];
+    return newObj;
 }
 
 startServer();

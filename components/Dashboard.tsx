@@ -113,6 +113,10 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                 getInterfaceStats(selectedRouter), // Use stats version to get byte counters
                 getPppActiveConnections(selectedRouter).catch(() => []), 
             ]);
+            
+            // Debugging log to see what the router sends back
+            console.log("Raw Interface Data:", currentInterfacesData);
+
             setSystemInfo(info);
             setPppoeCount(Array.isArray(pppoeActive) ? pppoeActive.length : 0);
             
@@ -140,8 +144,8 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         const i = iface as any;
                         const p = prevIfaceData as any;
                         
-                        // Try different property names that RouterOS might return.
-                        // Specifically checking fp-rx-byte for Fast Path counters if standard ones fail.
+                        // Try different property names that RouterOS might return
+                        // Note: Numbers might come as strings
                         const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['fp-rx-byte'] ?? 0);
                         const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['fp-rx-byte'] ?? 0);
                         const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['fp-tx-byte'] ?? 0);
