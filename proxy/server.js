@@ -44,7 +44,7 @@ async function initSuperadminDb() {
             const defaultPassword = 'Akoangnagwagi84%';
             const hashedPassword = await bcrypt.hash(defaultPassword, 10);
             await superadminDb.run('INSERT INTO superadmin (username, password) VALUES (?, ?)', 'superadmin', hashedPassword);
-            console.log('Superadmin user created (password: Akoangnagwagi84%)');
+            console.log('Superadmin user created with default secured password.');
         }
     } catch (err) {
         console.error('Failed to initialize superadmin database:', err);
