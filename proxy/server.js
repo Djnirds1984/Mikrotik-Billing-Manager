@@ -872,17 +872,18 @@ async function startServer() {
                 const client = req.routerInstance;
                 await client.connect();
                 try {
-                    // 'detail' argument forces full stats in legacy API
-                    // 'without-paging' prevents hanging on large interface lists
-                    const result = await writeLegacySafe(client, ['/interface/print', 'detail', 'without-paging']);
+                    // For Legacy API, 'detail' is for configuration, 'stats' is for counters.
+                    // Often stats-detail combines them or print simply with both arguments works.
+                    // We use ['/interface/print', 'stats', 'detail'] to be safe and comprehensive.
+                    // 'without-paging' prevents large lists from getting stuck.
+                    const result = await writeLegacySafe(client, ['/interface/print', 'stats', 'detail', 'without-paging']);
                     return result.map(normalizeLegacyObject);
                 } finally {
                     await client.close();
                 }
             } else {
-                // For REST API (v7+), passing the 'stats' key (even with empty value) triggers stats output.
-                // 'detail' key is also needed for some versions to show extended configuration info.
-                const response = await req.routerInstance.post('/interface/print', { 'stats': '' });
+                // For REST API (v7+), sending boolean flags 'stats' and 'detail' ensures we get full data.
+                const response = await req.routerInstance.post('/interface/print', { 'stats': true, 'detail': true });
                 return response.data;
             }
         });

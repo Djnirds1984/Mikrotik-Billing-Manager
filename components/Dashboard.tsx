@@ -32,7 +32,7 @@ const StatItem: React.FC<{ label: string; value: string | number; subtext?: stri
 
 const ProgressBar: React.FC<{ percent: number; colorClass: string }> = ({ percent, colorClass }) => (
     <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
-        <div className={`${colorClass} h-2 rounded-full`} style={{ width: `${percent}%` }}></div>
+        <div className={`${colorClass} h-2 rounded-full`} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}></div>
     </div>
 );
 
@@ -55,7 +55,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     const [selectedChartInterface1, setSelectedChartInterface1] = useState<string | null>(null);
     const [selectedChartInterface2, setSelectedChartInterface2] = useState<string | null>(null);
 
-
     // Host States
     const [hostStatus, setHostStatus] = useState<PanelHostStatus | null>(null);
     const [hostError, setHostError] = useState<string | null>(null);
@@ -65,8 +64,10 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     const [error, setError] = useState<{ message: string; details?: any } | null>(null);
     const [showFixer, setShowFixer] = useState(false);
 
+    // Refs for traffic calculation
     const intervalRef = useRef<number | null>(null);
-    const previousInterfacesRef = useRef<{ timestamp: number; interfaces: Interface[] } | null>(null);
+    // Map to store the last byte count and timestamp for each interface
+    const lastTrafficRef = useRef<Record<string, { rx: number; tx: number; time: number }>>({});
 
     // --- Data Fetching ---
 
@@ -76,13 +77,14 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
             setHostStatus(data);
             if (hostError) setHostError(null);
         } catch (err) {
-            setHostError('Could not load panel host status.');
+            // Silent fail for host stats to not block router stats
+            console.warn('Could not load panel host status');
         }
-    }, [hostError]);
+    }, []);
 
     useEffect(() => {
         fetchHostData();
-        const interval = setInterval(fetchHostData, 5000); // Poll every 5 seconds
+        const interval = setInterval(fetchHostData, 5000); 
         return () => clearInterval(interval);
     }, [fetchHostData]);
 
@@ -101,79 +103,73 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
             setError(null);
             setShowFixer(false);
             setInterfaces([]);
-            setSelectedChartInterface1(null);
-            setSelectedChartInterface2(null);
-            setPppoeCount(0);
-            previousInterfacesRef.current = null;
+            // Don't reset charts selection if router didn't change
         }
 
         try {
             const [info, currentInterfacesData, pppoeActive] = await Promise.all([
                 getSystemInfo(selectedRouter),
-                getInterfaceStats(selectedRouter), // Use stats version to get byte counters
+                getInterfaceStats(selectedRouter),
                 getPppActiveConnections(selectedRouter).catch(() => []), 
             ]);
             
-            // Debugging log to see what the router sends back
-            console.log("Raw Interface Data:", currentInterfacesData);
-
             setSystemInfo(info);
             setPppoeCount(Array.isArray(pppoeActive) ? pppoeActive.length : 0);
             
             const now = Date.now();
+            
+            if (!Array.isArray(currentInterfacesData)) {
+                throw new Error("Invalid data received from router interface stats.");
+            }
+
             setInterfaces(prevInterfaces => {
-                const previousState = previousInterfacesRef.current;
-                previousInterfacesRef.current = { timestamp: now, interfaces: currentInterfacesData };
+                const newInterfaces = currentInterfacesData.map((iface: any) => {
+                    const name = iface.name;
+                    // Find existing history for this interface
+                    const existingIface = prevInterfaces.find(p => p.name === name);
+                    const prevTraffic = lastTrafficRef.current[name];
 
-                if (!Array.isArray(currentInterfacesData)) {
-                    console.error("Received non-array data for interfaces:", currentInterfacesData);
-                    return prevInterfaces;
-                }
-
-                const timeDiffSeconds = previousState ? (now - previousState.timestamp) / 1000 : 0;
-
-                const newInterfaces = currentInterfacesData.map((iface: Interface) => {
-                    const existingIface = prevInterfaces.find(p => p.name === iface.name);
-                    const prevIfaceData = previousState?.interfaces.find(p => p.name === iface.name);
+                    // Try to parse bytes from various possible fields
+                    const currRx = Number(iface['rx-byte'] ?? iface['bytes-in'] ?? iface['rx-bytes'] ?? 0);
+                    const currTx = Number(iface['tx-byte'] ?? iface['bytes-out'] ?? iface['tx-bytes'] ?? 0);
 
                     let rxRate = 0;
                     let txRate = 0;
 
-                    if (prevIfaceData && timeDiffSeconds > 0.1) {
-                        // Robust property access handling multiple possible API response formats
-                        const i = iface as any;
-                        const p = prevIfaceData as any;
+                    if (prevTraffic) {
+                        const timeDiffSeconds = (now - prevTraffic.time) / 1000;
                         
-                        // Try different property names that RouterOS might return
-                        // Note: Numbers might come as strings
-                        const currRx = Number(i['rx-byte'] ?? i['bytes-in'] ?? i['fp-rx-byte'] ?? 0);
-                        const prevRx = Number(p['rx-byte'] ?? p['bytes-in'] ?? p['fp-rx-byte'] ?? 0);
-                        const currTx = Number(i['tx-byte'] ?? i['bytes-out'] ?? i['fp-tx-byte'] ?? 0);
-                        const prevTx = Number(p['tx-byte'] ?? p['bytes-out'] ?? p['fp-tx-byte'] ?? 0);
+                        // Only calculate if time has passed to avoid divide by zero
+                        if (timeDiffSeconds > 0.1) {
+                            let rxByteDiff = currRx - prevTraffic.rx;
+                            let txByteDiff = currTx - prevTraffic.tx;
 
-                        let rxByteDiff = currRx - prevRx;
-                        let txByteDiff = currTx - prevTx;
+                            // Handle counter reset/overflow (if current is less than previous, assume reset)
+                            if (rxByteDiff < 0) rxByteDiff = currRx;
+                            if (txByteDiff < 0) txByteDiff = currTx;
 
-                        // Handle counter reset/overflow or bad data
-                        if (rxByteDiff < 0) rxByteDiff = currRx;
-                        if (txByteDiff < 0) txByteDiff = currTx;
-                        
-                        rxRate = Math.round((rxByteDiff * 8) / timeDiffSeconds);
-                        txRate = Math.round((txByteDiff * 8) / timeDiffSeconds);
-                        
-                        // Sanity check to prevent NaN
-                        if (isNaN(rxRate)) rxRate = 0;
-                        if (isNaN(txRate)) txRate = 0;
+                            rxRate = Math.round((rxByteDiff * 8) / timeDiffSeconds);
+                            txRate = Math.round((txByteDiff * 8) / timeDiffSeconds);
+                        }
                     }
+
+                    // Update Ref for next calculation
+                    lastTrafficRef.current[name] = { rx: currRx, tx: currTx, time: now };
 
                     const newHistoryPoint: TrafficHistoryPoint = { name: new Date().toLocaleTimeString(), rx: rxRate, tx: txRate };
                     
                     let newHistory = existingIface ? [...existingIface.trafficHistory, newHistoryPoint] : [newHistoryPoint];
+                    // Keep last 30 points
                     if (newHistory.length > MAX_HISTORY_POINTS) {
                         newHistory = newHistory.slice(newHistory.length - MAX_HISTORY_POINTS);
                     }
 
-                    return { ...iface, rxRate, txRate, trafficHistory: newHistory };
+                    return { 
+                        ...iface, 
+                        rxRate: isNaN(rxRate) ? 0 : rxRate, 
+                        txRate: isNaN(txRate) ? 0 : txRate, 
+                        trafficHistory: newHistory 
+                    } as InterfaceWithHistory;
                 });
                 return newInterfaces;
             });
@@ -182,18 +178,21 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         } catch (err) {
             console.error("Dashboard fetch error:", err);
             setError({
-                message: `Failed to fetch data from ${selectedRouter.name}. Check connection and credentials.`,
+                message: `Failed to fetch data from ${selectedRouter.name}.`,
                 details: err,
             });
-            // FIX: Removed clearInterval here to ensure it keeps retrying
         } finally {
             if (isInitial) setIsLoading(false);
         }
     }, [selectedRouter, error]);
 
     useEffect(() => {
+        // Reset traffic cache when router changes
+        lastTrafficRef.current = {};
+        
         if (selectedRouter) {
             fetchRouterData(true);
+            // Use window.setInterval to ensure it runs in browser context
             intervalRef.current = window.setInterval(() => fetchRouterData(false), 2000);
         } else {
             setIsLoading(false);
@@ -204,47 +203,46 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
         };
-    }, [selectedRouter, fetchRouterData]);
+    }, [selectedRouter]); // Only re-run if selectedRouter changes (ignore fetchRouterData dependency to avoid loop)
+
     
-    // --- Memos and Effects for UI ---
-    
+    // --- UI Helpers ---
     const selectableInterfaces = useMemo(() => 
-        interfaces.filter(i => i.type.startsWith('ether') || i.type === 'bridge' || i.type === 'vlan' || i.type === 'wlan'), 
+        interfaces.filter(i => i.type.startsWith('ether') || i.type === 'bridge' || i.type === 'vlan' || i.type === 'wlan' || i.type === 'lte'), 
         [interfaces]
     );
+
     const chartData1 = useMemo(() => interfaces.find(i => i.name === selectedChartInterface1), [interfaces, selectedChartInterface1]);
     const chartData2 = useMemo(() => interfaces.find(i => i.name === selectedChartInterface2), [interfaces, selectedChartInterface2]);
 
+    // Set default selections once interfaces load
     useEffect(() => {
         if (selectableInterfaces.length > 0) {
-            // Initialize selection only if null or if the previously selected interface no longer exists
             if (!selectedChartInterface1 || !selectableInterfaces.some(i => i.name === selectedChartInterface1)) {
-                // Prefer WAN or Bridge if possible, otherwise first available
                 const default1 = selectableInterfaces.find(i => i.name.toLowerCase().includes('wan') || i.name === 'ether1') || selectableInterfaces[0];
                 setSelectedChartInterface1(default1.name);
             }
             if (!selectedChartInterface2 || !selectableInterfaces.some(i => i.name === selectedChartInterface2)) {
-                // Prefer LAN or Bridge
                 const default2 = selectableInterfaces.find(i => i.name.toLowerCase().includes('lan') || i.name.toLowerCase().includes('bridge') && i.name !== selectedChartInterface1) || selectableInterfaces[1] || selectableInterfaces[0];
-                setSelectedChartInterface2(default2.name);
+                setSelectedChartInterface2(default2?.name || null);
             }
         }
-    }, [selectableInterfaces, selectedChartInterface1, selectedChartInterface2]);
+    }, [selectableInterfaces]);
 
 
-    // --- Render Logic ---
+    // --- Render ---
 
     if (!selectedRouter) {
         return (
             <div className="space-y-8">
                  <StatCard title="Host Panel Status">
-                     {hostError && <p className="text-yellow-600 dark:text-yellow-400 text-sm">{hostError}</p>}
-                     {!hostStatus && !hostError && <div className="flex items-center justify-center h-24"><Loader /></div>}
-                     {hostStatus && <>
+                     {!hostStatus ? <div className="flex items-center justify-center h-24"><Loader /></div> : (
+                     <>
                         <StatItem label="CPU Usage" value={`${(hostStatus.cpuUsage || 0).toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage || 0} colorClass="bg-green-500" /></StatItem>
-                        <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used || 0}/${hostStatus.memory?.total || 0})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
-                        <StatItem label="SD Card" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used || 0}/${hostStatus.disk?.total || 0})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
-                     </>}
+                        <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used}/${hostStatus.memory?.total})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
+                        <StatItem label="Disk Usage" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used}/${hostStatus.disk?.total})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
+                     </>
+                     )}
                  </StatCard>
                  <div className="flex flex-col items-center justify-center h-full text-center py-16">
                     <RouterIcon className="w-24 h-24 text-slate-300 dark:text-slate-700 mb-4" />
@@ -292,13 +290,13 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                  <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-4">System Overview</h2>
                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                      <StatCard title="Host Panel Status">
-                         {hostError && <p className="text-yellow-600 dark:text-yellow-400 text-sm">{hostError}</p>}
-                         {!hostStatus && !hostError && <div className="flex items-center justify-center h-24"><Loader /></div>}
-                         {hostStatus && <>
+                         {!hostStatus ? <div className="flex items-center justify-center h-24"><Loader /></div> : (
+                         <>
                             <StatItem label="CPU Usage" value={`${(hostStatus.cpuUsage || 0).toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage || 0} colorClass="bg-green-500" /></StatItem>
-                            <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used || 0}/${hostStatus.memory?.total || 0})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
-                            <StatItem label="SD Card" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used || 0}/${hostStatus.disk?.total || 0})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
-                         </>}
+                            <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used}/${hostStatus.memory?.total})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
+                            <StatItem label="Disk" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used}/${hostStatus.disk?.total})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
+                         </>
+                         )}
                      </StatCard>
                      <StatCard title={`Router: ${selectedRouter.name}`}>
                          {systemInfo ? <>
@@ -322,7 +320,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                                     value={selectedChartInterface1 || ''}
                                     onChange={(e) => setSelectedChartInterface1(e.target.value)}
                                     className="mt-2 sm:mt-0 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
-                                    aria-label="Select interface 1 to view traffic"
                                 >
                                     {selectableInterfaces.map(iface => (
                                         <option key={iface.name} value={iface.name}>{iface.name}</option>
@@ -348,7 +345,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                                     value={selectedChartInterface2 || ''}
                                     onChange={(e) => setSelectedChartInterface2(e.target.value)}
                                     className="mt-2 sm:mt-0 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
-                                    aria-label="Select interface 2 to view traffic"
                                 >
                                     {selectableInterfaces.map(iface => (
                                         <option key={iface.name} value={iface.name}>{iface.name}</option>
