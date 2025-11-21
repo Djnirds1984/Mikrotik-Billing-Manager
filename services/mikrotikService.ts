@@ -1,8 +1,9 @@
 import { getAuthHeader } from './databaseService.ts';
 import type { RouterConfigWithId, SystemInfo, Interface, DhcpClient, PppSecret, PppProfile, PppActiveConnection, HotspotActiveUser, HotspotHost, HotspotProfile, HotspotUserProfile, IpPool, DhcpServer, DhcpLease, Bridge, BridgePort, VlanInterface, IpAddress, IpRoute, WanRoute, FailoverStatus, FirewallRule, SslCertificate, MikroTikFile, MikroTikLogEntry, DhcpClientActionParams, HotspotSetupParams, DhcpServerSetupParams, DhcpCaptivePortalSetupParams, PppSecretData, PppServerData, PppProfileData, HotspotProfileData, HotspotUserProfileData, BridgeData, BridgePortData, IpRouteData, DhcpServerData, FirewallRuleData, PppServer } from '../types.ts';
 
-// Base API URL - Use relative path to go through proxy server
-const BASE_URL = '/mt-api';
+const BASE_URL = (typeof window !== 'undefined' && window.location.port !== '3000')
+    ? `http://${window.location.hostname}:3001/mt-api`
+    : '/mt-api';
 
 // Helper for API Calls
 const apiCall = async <T>(router: RouterConfigWithId, endpoint: string, method: string = 'GET', body?: any): Promise<T> => {

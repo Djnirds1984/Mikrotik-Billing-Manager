@@ -2,7 +2,9 @@
 
 import type { PanelSettings } from '../types.ts';
 
-const apiBaseUrl = '/api/db';
+const apiBaseUrl = (typeof window !== 'undefined' && window.location.port !== '3000')
+    ? `http://${window.location.hostname}:3001/api/db`
+    : '/api/db';
 
 // --- Auth Helper ---
 // This can be used by other services as well

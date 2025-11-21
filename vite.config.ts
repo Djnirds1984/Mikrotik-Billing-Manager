@@ -15,6 +15,11 @@ export default defineConfig(({ mode }) => {
             changeOrigin: true,
             secure: false,
           },
+          '/api/db': {
+            target: 'http://localhost:3001',
+            changeOrigin: true,
+            secure: false,
+          },
           '/api': {
             target: 'http://localhost:3002',
             changeOrigin: true,
