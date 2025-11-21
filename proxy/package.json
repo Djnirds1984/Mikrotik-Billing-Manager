@@ -16,6 +16,7 @@
     "esbuild": "^0.25.12",
     "express": "^4.19.2",
     "fs-extra": "^11.2.0",
+    "http-proxy-middleware": "^3.0.0",
     "jsonwebtoken": "^9.0.2",
     "node-routeros-v2": "1.6.12",
     "sqlite": "^5.1.1",
