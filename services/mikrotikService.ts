@@ -1,14 +1,12 @@
 import { getAuthHeader } from './databaseService.ts';
 import type { RouterConfigWithId, SystemInfo, Interface, DhcpClient, PppSecret, PppProfile, PppActiveConnection, HotspotActiveUser, HotspotHost, HotspotProfile, HotspotUserProfile, IpPool, DhcpServer, DhcpLease, Bridge, BridgePort, VlanInterface, IpAddress, IpRoute, WanRoute, FailoverStatus, FirewallRule, SslCertificate, MikroTikFile, MikroTikLogEntry, DhcpClientActionParams, HotspotSetupParams, DhcpServerSetupParams, DhcpCaptivePortalSetupParams, PppSecretData, PppServerData, PppProfileData, HotspotProfileData, HotspotUserProfileData, BridgeData, BridgePortData, IpRouteData, DhcpServerData, FirewallRuleData, PppServer } from '../types.ts';
 
-const BASE_URL = (typeof window !== 'undefined' && window.location.port !== '3000')
-    ? `http://${window.location.hostname}:3001/mt-api`
-    : '/mt-api';
+// Base API URL - Assuming the backend proxies requests to /mt-api/:routerId/...
+const BASE_URL = '/mt-api';
 
 // Helper for API Calls
 const apiCall = async <T>(router: RouterConfigWithId, endpoint: string, method: string = 'GET', body?: any): Promise<T> => {
     const url = `${BASE_URL}/${router.id}/${endpoint.replace(/^\//, '')}`;
-    console.log('DEBUG: mikrotikService API call to:', url, 'for router:', router.id);
     const response = await fetch(url, {
         method,
         headers: {

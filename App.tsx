@@ -28,7 +28,6 @@ import { MikrotikFiles } from './components/MikrotikFiles.tsx';
 import { License } from './components/License.tsx';
 import { SuperAdmin } from './components/SuperAdmin.tsx';
 import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
-import { clearRouterCache, validateRouterSelection } from './utils/routerCache.ts';
 import { DhcpPortal } from './components/DhcpPortal.tsx';
 import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
 import { NotificationsPage } from './components/NotificationsPage.tsx';
@@ -84,28 +83,13 @@ const useMediaQuery = (query: string): boolean => {
 interface AppContentProps {
     licenseStatus: LicenseStatus | null;
     onLicenseChange: () => void;
-    user?: any;
 }
 
-const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange, user }) => {
+const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange }) => {
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
   const [isSidebarOpen, setIsSidebarOpen] = useState(isLargeScreen);
-  const [selectedRouterId, setSelectedRouterId] = useState<string | null>(() => {
-    // Clear any cached router ID on app startup to prevent stale data
-    // Also clear any potential session storage
-    if (typeof window !== 'undefined') {
-      clearRouterCache();
-    }
-    return null;
-  });
-
-  // Function to manually reset router selection
-  const resetRouterSelection = useCallback(() => {
-    console.log('DEBUG: Manually resetting router selection');
-    clearRouterCache();
-    setSelectedRouterId(null);
-  }, []);
+  const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
   
   const { routers, addRouter, updateRouter, deleteRouter, isLoading: isLoadingRouters } = useRouters();
   const { sales, addSale, deleteSale, clearSales } = useSalesData(selectedRouterId);
@@ -156,35 +140,21 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange,
 
   useEffect(() => {
     if (!appIsLoading && routers.length > 0 && !selectedRouterId) {
-        console.log('DEBUG: Auto-selecting first router:', routers[0].id);
         setSelectedRouterId(routers[0].id);
     }
   }, [appIsLoading, routers, selectedRouterId]);
 
   useEffect(() => {
-    console.log('DEBUG: Router selection check - selectedRouterId:', selectedRouterId);
-    console.log('DEBUG: Available routers:', routers.map(r => r.id));
-    
-    // Force reset to null if selected router doesn't exist in current routers list
-    if (selectedRouterId && !routers.find(r => r.id === selectedRouterId)) {
-        console.log('DEBUG: Selected router not found, resetting to null');
-        setSelectedRouterId(null);
-    }
-    
-    // Select first available router if none is selected
     if (!selectedRouterId && routers.length > 0) {
-        console.log('DEBUG: No selected router, setting to first:', routers[0].id);
-        setSelectedRouterId(routers[0].id);
+      setSelectedRouterId(routers[0].id);
+    }
+    if (selectedRouterId && !routers.find(r => r.id === selectedRouterId)) {
+        setSelectedRouterId(routers.length > 0 ? routers[0].id : null);
     }
   }, [routers, selectedRouterId]);
 
   const selectedRouter = useMemo(
-    () => {
-      const validRouterId = validateRouterSelection(selectedRouterId, routers);
-      const found = validRouterId ? routers.find(r => r.id === validRouterId) || null : null;
-      console.log('DEBUG: selectedRouter useMemo - selectedRouterId:', selectedRouterId, 'validRouterId:', validRouterId, 'found:', found);
-      return found;
-    },
+    () => routers.find(r => r.id === selectedRouterId) || null,
     [routers, selectedRouterId]
   );
 
@@ -198,17 +168,13 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange,
         );
     }
 
-    // Check license status for non-superadmin users after authentication
     const licensedViews: View[] = [
         'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
         'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal'
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
-        // Check if user is not superadmin to show unlicensed component
-        if (user?.role?.name?.toLowerCase() !== 'superadmin') {
-            return <UnlicensedComponent setCurrentView={setCurrentView} />;
-        }
+        return <UnlicensedComponent setCurrentView={setCurrentView} />;
     }
 
     switch (currentView) {
@@ -297,20 +263,6 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange,
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         />
         <div className="p-4 sm:p-8 overflow-auto h-full flex flex-col">
-          {/* Debug button to reset router selection */}
-          {process.env.NODE_ENV === 'development' && (
-            <div className="mb-4 p-2 bg-yellow-100 dark:bg-yellow-900 rounded-lg">
-              <button 
-                onClick={resetRouterSelection}
-                className="text-xs bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
-              >
-                Reset Router Selection (Debug)
-              </button>
-              <span className="ml-2 text-xs text-yellow-800 dark:text-yellow-200">
-                Current: {selectedRouter?.id || 'none'}
-              </span>
-            </div>
-          )}
           <div className="flex-grow">
              {renderView()}
           </div>
@@ -421,13 +373,21 @@ const AppRouter: React.FC = () => {
         return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
     }
 
-    // License verification moved to post-authentication in AppContent
+    if (!licenseStatus?.licensed && user.role.name.toLowerCase() !== 'superadmin') {
+         return (
+             <ThemeProvider>
+                <LocalizationProvider>
+                    <License onLicenseChange={handleLicenseChange} licenseStatus={licenseStatus} />
+                </LocalizationProvider>
+            </ThemeProvider>
+         );
+    }
     
     return (
         <ThemeProvider>
             <LocalizationProvider>
                 <NotificationProvider>
-                    <AppContent licenseStatus={licenseStatus} onLicenseChange={handleLicenseChange} user={user} />
+                    <AppContent licenseStatus={licenseStatus} onLicenseChange={handleLicenseChange} />
                 </NotificationProvider>
             </LocalizationProvider>
         </ThemeProvider>

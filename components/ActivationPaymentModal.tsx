@@ -22,9 +22,8 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
     isSubmitting,
     dbClient
 }) => {
-    const { t, formatCurrency } = useLocalization();
+    const { formatCurrency } = useLocalization();
     
-    // State
     const [selectedPlanId, setSelectedPlanId] = useState<string>('');
     const [customerInfo, setCustomerInfo] = useState('');
     const [contactNumber, setContactNumber] = useState('');
@@ -32,7 +31,6 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
     const [downtimeDays, setDowntimeDays] = useState<number>(0);
     const [manualExpiresAt, setManualExpiresAt] = useState('');
 
-    // Effect to initialize data when modal opens or client/dbClient changes
     useEffect(() => {
         if (isOpen && client) {
             setCustomerInfo(dbClient?.customerInfo || client.customerInfo || client.hostName || '');
@@ -41,14 +39,12 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             setDowntimeDays(0);
             setManualExpiresAt('');
             
-            // Select first plan by default if none selected
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
             }
         }
     }, [isOpen, client, dbClient, plans]);
 
-    // Computed values
     const selectedPlan = useMemo(() => plans.find(p => p.id === selectedPlanId), [plans, selectedPlanId]);
     
     const calculation = useMemo(() => {
@@ -75,7 +71,7 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             email,
             plan: selectedPlan,
             downtimeDays,
-            expiresAt: manualExpiresAt || undefined, // If empty string, undefined to let backend calculate based on plan
+            expiresAt: manualExpiresAt || undefined,
             speedLimit: selectedPlan.speedLimit
         });
     };
@@ -91,7 +87,6 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
                 
                 <div className="p-6 overflow-y-auto">
                     <form id="activation-form" onSubmit={handleSubmit} className="space-y-4">
-                        {/* Customer Details */}
                         <div>
                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Customer Name / Identifier</label>
                             <input 
@@ -126,7 +121,6 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
 
                         <hr className="border-slate-200 dark:border-slate-700" />
 
-                        {/* Plan Details */}
                         <div>
                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Select Billing Plan</label>
                             <select 
@@ -165,7 +159,6 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
                              <p className="text-xs text-slate-500 mt-1">Override the plan's default duration.</p>
                         </div>
 
-                        {/* Summary */}
                         <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-md space-y-2">
                             <div className="flex justify-between text-sm text-slate-600 dark:text-slate-400">
                                 <span>Plan Price:</span>

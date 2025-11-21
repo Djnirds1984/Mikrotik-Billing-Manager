@@ -38,7 +38,6 @@ async function initSuperadminDb() {
             filename: SUPERADMIN_DB_PATH,
             driver: sqlite3.Database
         });
-
         await superadminDb.exec('CREATE TABLE IF NOT EXISTS superadmin (username TEXT PRIMARY KEY, password TEXT NOT NULL);');
         const superadminUser = await superadminDb.get("SELECT COUNT(*) as count FROM superadmin");
         if (superadminUser.count === 0) {
@@ -136,6 +135,15 @@ async function initDb() {
 
         // Business Data Tables
         await db.exec(`
+            CREATE TABLE IF NOT EXISTS routers (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                host TEXT,
+                user TEXT,
+                password TEXT,
+                port INTEGER,
+                api_type TEXT
+            );
             CREATE TABLE IF NOT EXISTS billing_plans (
                 id TEXT PRIMARY KEY,
                 routerId TEXT,
@@ -346,29 +354,25 @@ const createRouterInstance = (config) => {
 const routerConfigCache = new Map();
 const getRouterConfig = async (req, res, next) => {
     const routerId = req.params.routerId || req.body.id;
-    console.log('DEBUG: getRouterConfig called with routerId:', routerId);
-    console.log('DEBUG: Request params:', req.params);
-    console.log('DEBUG: Request body:', req.body);
 
+    if (routerConfigCache.has(routerId)) {
+        req.routerConfig = routerConfigCache.get(routerId);
+        req.routerInstance = createRouterInstance(req.routerConfig);
+        return next();
+    }
     try {
-        // Always check database first to ensure we have the latest config
-        const rows = await db.all('SELECT * FROM routers WHERE id = ?', [routerId]);
-        const config = rows[0];
-        
-        console.log('DEBUG: Database query result:', rows.length, 'rows found');
+        // PERFORMANCE FIX: Query DB directly instead of using axios loopback to avoid deadlocks/timeouts
+        const rows = await db.all('SELECT * FROM routers');
+        const config = rows.find(r => r.id === routerId);
         
         if (!config) {
-            // Clear cache if router no longer exists
             routerConfigCache.delete(routerId);
-            console.log('DEBUG: Router not found, returning 404');
             return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
         }
 
-        // Update cache with latest config
         routerConfigCache.set(routerId, config);
         req.routerConfig = config;
         req.routerInstance = createRouterInstance(req.routerConfig);
-        console.log('DEBUG: Router config found and cached, proceeding');
         next();
     } catch (error) {
         console.error("Error fetching router config:", error);
@@ -390,12 +394,6 @@ async function startServer() {
 
     app.use(express.json({ limit: '10mb' }));
     app.use(express.text({ limit: '10mb' }));
-
-    // Request logging middleware
-    app.use((req, res, next) => {
-        console.log(`DEBUG: ${req.method} ${req.url} - ${new Date().toISOString()}`);
-        next();
-    });
 
     // --- API ROUTES ---
     
@@ -518,10 +516,6 @@ async function startServer() {
         dbRouter.delete(`${route}/:id`, async (req, res) => {
             try {
                 await db.run(`DELETE FROM ${table} WHERE id = ?`, req.params.id);
-                // Clear router config cache when router is deleted
-                if (table === 'routers') {
-                    routerConfigCache.delete(req.params.id);
-                }
                 res.json({ message: 'Deleted' });
             } catch (e) {
                 res.status(500).json({ message: e.message });
@@ -981,370 +975,6 @@ async function startServer() {
                 // For REST API (v7+), sending boolean flags 'stats' and 'detail' ensures we get full data.
                 const response = await req.routerInstance.post('/interface/print', { 'stats': true, 'detail': true });
                 return response.data;
-            }
-        });
-    });
-
-    // --- ROUTER API ENDPOINTS ---
-    app.get('/mt-api/:routerId/system/resource/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/system/resource/print']);
-                    return normalizeLegacyObject(result[0]);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/system/resource/print');
-                return response.data[0];
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/interface/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/interface/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/interface/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/ppp/active/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ppp/active/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ppp/active/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.post('/mt-api/:routerId/test-connection', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            try {
-                if (req.routerConfig.api_type === 'legacy') {
-                    const client = req.routerInstance;
-                    await client.connect();
-                    await client.close();
-                } else {
-                    // Test REST API connectivity
-                    await req.routerInstance.get('/system/resource/print');
-                }
-                return { success: true, message: 'Connection successful' };
-            } catch (error) {
-                return { success: false, message: error.message };
-            }
-        });
-    });
-
-    // Additional router endpoints that might be missing
-    app.get('/mt-api/:routerId/system/identity/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/system/identity/print']);
-                    return normalizeLegacyObject(result[0]);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/system/identity/print');
-                return response.data[0];
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/interface/ethernet/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/interface/ethernet/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/interface/ethernet/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/ip/address/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ip/address/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ip/address/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/ip/route/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ip/route/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ip/route/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/ip/dns/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ip/dns/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ip/dns/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/ip/firewall/filter/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ip/firewall/filter/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ip/firewall/filter/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/ip/firewall/nat/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ip/firewall/nat/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ip/firewall/nat/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/system/package/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/system/package/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/system/package/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/system/routerboard/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/system/routerboard/print']);
-                    return normalizeLegacyObject(result[0]);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/system/routerboard/print');
-                return response.data[0];
-            }
-        });
-    });
-
-    // DHCP and Additional Router API ENDPOINTS
-    app.get('/mt-api/:routerId/ip/dhcp-server/lease/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ip/dhcp-server/lease/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ip/dhcp-server/lease/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/ip/firewall/address-list/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ip/firewall/address-list/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ip/firewall/address-list/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/queue/simple/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/queue/simple/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/queue/simple/print');
-                return response.data;
-            }
-        });
-    });
-
-    // --- ROUTER API ENDPOINTS ---
-    app.get('/mt-api/:routerId/system/resource/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/system/resource/print']);
-                    return normalizeLegacyObject(result[0]);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/system/resource/print');
-                return response.data[0];
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/interface/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/interface/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/interface/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.get('/mt-api/:routerId/ppp/active/print', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const result = await writeLegacySafe(client, ['/ppp/active/print']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const response = await req.routerInstance.get('/ppp/active/print');
-                return response.data;
-            }
-        });
-    });
-
-    app.post('/mt-api/:routerId/test-connection', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            try {
-                if (req.routerConfig.api_type === 'legacy') {
-                    const client = req.routerInstance;
-                    await client.connect();
-                    await client.close();
-                } else {
-                    // Test REST API connectivity
-                    await req.routerInstance.get('/system/resource/print');
-                }
-                return { success: true, message: 'Connection successful' };
-            } catch (error) {
-                return { success: false, message: error.message };
             }
         });
     });

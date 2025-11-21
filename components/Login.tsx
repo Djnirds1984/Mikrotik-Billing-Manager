@@ -9,35 +9,10 @@ interface LoginProps {
 export const Login: React.FC<LoginProps> = ({ onSwitchToForgotPassword }) => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [validationErrors, setValidationErrors] = useState<{username?: string; password?: string}>({});
     const { login, error, isLoading } = useAuth();
-
-    const validateForm = () => {
-        const errors: {username?: string; password?: string} = {};
-        
-        if (!username.trim()) {
-            errors.username = 'Username is required';
-        } else if (username.length < 3) {
-            errors.username = 'Username must be at least 3 characters';
-        }
-        
-        if (!password) {
-            errors.password = 'Password is required';
-        } else if (password.length < 6) {
-            errors.password = 'Password must be at least 6 characters';
-        }
-        
-        setValidationErrors(errors);
-        return Object.keys(errors).length === 0;
-    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
-        if (!validateForm()) {
-            return;
-        }
-        
         await login(username, password);
     };
 
@@ -53,7 +28,7 @@ export const Login: React.FC<LoginProps> = ({ onSwitchToForgotPassword }) => {
                     </div>
                 )}
                 <div>
-                    <label htmlFor="username" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Username or Email</label>
+                    <label htmlFor="username" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Username</label>
                     <input
                         id="username"
                         name="username"
@@ -61,22 +36,12 @@ export const Login: React.FC<LoginProps> = ({ onSwitchToForgotPassword }) => {
                         autoComplete="username"
                         required
                         value={username}
-                        onChange={(e) => {
-                            setUsername(e.target.value);
-                            if (validationErrors.username) {
-                                setValidationErrors(prev => ({ ...prev, username: undefined }));
-                            }
-                        }}
-                        className={`mt-1 block w-full bg-slate-100 dark:bg-slate-700 border rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500] ${
-                            validationErrors.username ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
-                        }`}
+                        onChange={(e) => setUsername(e.target.value)}
+                        className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500]"
                     />
-                    {validationErrors.username && (
-                        <p className="mt-1 text-sm text-red-600 dark:text-red-400">{validationErrors.username}</p>
-                    )}
                 </div>
                 <div>
-                    <label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
+                    <label htmlFor="password"className="block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
                     <input
                         id="password"
                         name="password"
@@ -84,25 +49,15 @@ export const Login: React.FC<LoginProps> = ({ onSwitchToForgotPassword }) => {
                         autoComplete="current-password"
                         required
                         value={password}
-                        onChange={(e) => {
-                            setPassword(e.target.value);
-                            if (validationErrors.password) {
-                                setValidationErrors(prev => ({ ...prev, password: undefined }));
-                            }
-                        }}
-                        className={`mt-1 block w-full bg-slate-100 dark:bg-slate-700 border rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500] ${
-                            validationErrors.password ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
-                        }`}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500]"
                     />
-                    {validationErrors.password && (
-                        <p className="mt-1 text-sm text-red-600 dark:text-red-400">{validationErrors.password}</p>
-                    )}
                 </div>
                 <div>
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[--color-primary-500] disabled:opacity-50 transition-colors"
+                        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[--color-primary-500] disabled:opacity-50"
                     >
                         {isLoading ? <Loader /> : 'Sign in'}
                     </button>
