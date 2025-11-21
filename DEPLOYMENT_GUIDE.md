@@ -166,9 +166,9 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
             proxy_cache_bypass $http_upgrade;
         }
 
-        # MikroTik API Backend (port 3002) - REMOVED TRAILING SLASH
+        # MikroTik API Backend (port 3002)
         location /mt-api/ {
-            proxy_pass http://localhost:3002; # <-- No trailing slash here
+            proxy_pass http://localhost:3002/; # <-- Trailing slash is important!
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Forwarded-Proto $scheme;
@@ -177,9 +177,9 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
             proxy_cache_bypass $http_upgrade;
         }
 
-        # WebSocket for the Terminal (port 3002) - REMOVED TRAILING SLASH
+        # WebSocket for the Terminal (port 3002)
         location /ws/ {
-            proxy_pass http://localhost:3002; # <-- No trailing slash here
+            proxy_pass http://localhost:3002/; # <-- Trailing slash is important!
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Forwarded-Proto $scheme;

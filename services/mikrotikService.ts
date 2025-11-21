@@ -256,4 +256,4 @@ export const getRouterLogs = (router: RouterConfigWithId) => apiCall<MikroTikLog
 // --- Misc ---
 
 export const getSslCertificates = (router: RouterConfigWithId) => apiCall<SslCertificate[]>(router, 'certificate/print');
-export const testRouterConnection = (config: any) => apiCall<{success: boolean, message: string}>({ id: 'test', ...config }, 'test-connection', 'POST');
+export const testRouterConnection = (config: any) => apiCall<{success: boolean, message: string}>({ id: 'test' } as RouterConfigWithId, 'test-connection', 'POST', config);

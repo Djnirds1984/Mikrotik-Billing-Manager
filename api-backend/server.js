@@ -1,4 +1,5 @@
 
+
 const express = require('express');
 const cors = require('cors');
 const { RouterOSAPI } = require('node-routeros-v2');
@@ -144,8 +145,38 @@ const normalizeLegacyObject = (obj) => {
     return newObj;
 }
 
+// --- SPECIAL ENDPOINTS (must come before the generic proxy) ---
 
-// 0. SPECIAL ENDPOINT: Interface Stats
+// 0. Test Connection (does not use getRouter middleware as router isn't saved yet)
+app.post('/test/test-connection', async (req, res) => {
+    const config = req.body;
+    try {
+        if (!config || !config.host || !config.user || !config.api_type) {
+            return res.status(400).json({ success: false, message: 'Incomplete router configuration provided for testing.' });
+        }
+
+        const client = createRouterInstance(config);
+        
+        if (config.api_type === 'legacy') {
+            await client.connect();
+            // A quick command to verify we can interact
+            await writeLegacySafe(client, ['/system/resource/print']);
+            await client.close();
+        } else {
+            // For REST, a simple GET request is enough to test connection and auth
+            await client.get('/system/resource');
+        }
+        res.json({ success: true, message: 'Connection successful!' });
+    } catch (e) {
+        console.error("Test Connection Error:", e.message);
+        const status = e.response ? e.response.status : 500;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ success: false, message: `Connection failed: ${msg}` });
+    }
+});
+
+
+// 1. SPECIAL ENDPOINT: Interface Stats
 // This logic was previously in proxy/server.js but belongs here because Nginx routes /mt-api here.
 app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
     try {
@@ -170,7 +201,7 @@ app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
     }
 });
 
-// 1. DHCP Client Update Endpoint
+// 2. DHCP Client Update Endpoint
 app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
     const { 
         macAddress, address, customerInfo, 
@@ -316,7 +347,7 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
     }
 });
 
-// 2. Generic Proxy Handler for all other MikroTik calls
+// 3. Generic Proxy Handler for all other MikroTik calls
 app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
     const { endpoint } = req.params;
     const method = req.method;
