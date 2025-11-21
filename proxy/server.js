@@ -2,8 +2,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { exec, spawn } = require('child_process');
-const util = require('util');
+const { exec } = require('child_process');
 const sqlite3 = require('@vscode/sqlite3');
 const { open } = require('sqlite');
 const bcrypt = require('bcryptjs');
@@ -14,7 +13,7 @@ const axios = require('axios');
 const https = require('https');
 const { Xendit } = require('xendit-node');
 const si = require('systeminformation');
-const { RouterOSAPI } = require('node-routeros-v2');
+// const { RouterOSAPI } = require('node-routeros-v2'); // Not needed here anymore
 
 const PORT = 3001;
 const DB_PATH = path.join(__dirname, 'panel.db');
@@ -299,91 +298,23 @@ const requireSuperadmin = (req, res, next) => {
     next();
 };
 
-// Router Instance Factory
-const createRouterInstance = (config) => {
-    if (!config || !config.host || !config.user) {
-        throw new Error('Invalid router configuration: host and user are required.');
-    }
-    
-    if (config.api_type === 'legacy') {
-        const isTls = config.port === 8729;
-        return new RouterOSAPI({
-            host: config.host,
-            user: config.user,
-            password: config.password || '',
-            port: config.port || 8728,
-            timeout: 15,
-            tls: isTls,
-            tlsOptions: isTls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2' } : undefined,
-        });
-    }
-
-    const protocol = config.port === 443 ? 'https' : 'http';
-    const baseURL = `${protocol}://${config.host}:${config.port}/rest`;
-    const auth = { username: config.user, password: config.password || '' };
-
-    const instance = axios.create({ 
-        baseURL, 
-        auth,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1.2' }),
-        timeout: 15000
-    });
-
-    instance.interceptors.response.use(response => {
-        const mapId = (item) => {
-            if (item && typeof item === 'object' && '.id' in item) {
-                return { ...item, id: item['.id'] };
-            }
-            return item;
-        };
-
-        if (response.data && typeof response.data === 'object') {
-            if (Array.isArray(response.data)) {
-                response.data = response.data.map(mapId);
-            } else {
-                response.data = mapId(response.data);
-            }
-        }
-        return response;
-    }, error => Promise.reject(error));
-
-    return instance;
-};
-
-// Helper middleware for router config
-const routerConfigCache = new Map();
-const getRouterConfig = async (req, res, next) => {
-    const routerId = req.params.routerId || req.body.id;
-
-    if (routerConfigCache.has(routerId)) {
-        req.routerConfig = routerConfigCache.get(routerId);
-        req.routerInstance = createRouterInstance(req.routerConfig);
-        return next();
-    }
-    try {
-        // PERFORMANCE FIX: Query DB directly instead of using axios loopback to avoid deadlocks/timeouts
-        const rows = await db.all('SELECT * FROM routers');
-        const config = rows.find(r => r.id === routerId);
-        
-        if (!config) {
-            routerConfigCache.delete(routerId);
-            return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
-        }
-
-        routerConfigCache.set(routerId, config);
-        req.routerConfig = config;
-        req.routerInstance = createRouterInstance(req.routerConfig);
-        next();
-    } catch (error) {
-        console.error("Error fetching router config:", error);
-        res.status(500).json({ message: `Failed to fetch router config: ${error.message}` });
-    }
-};
-
 // --- Main Application Logic ---
 async function startServer() {
     await Promise.all([initDb(), initSuperadminDb()]);
     const app = express();
+
+    // --- DEV PROXY MIDDLEWARE FOR API BACKEND ---
+    // This allows npm start (without Nginx) to still reach the backend API
+    // If Nginx is used, Nginx handles this routing.
+    const { createProxyMiddleware } = await import('http-proxy-middleware');
+    app.use('/mt-api', createProxyMiddleware({
+        target: 'http://localhost:3002',
+        changeOrigin: true,
+        pathRewrite: {
+            // Nginx config strips /mt-api/ so we do the same here for consistency
+            '^/mt-api': ''
+        }
+    }));
 
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -955,75 +886,13 @@ async function startServer() {
     
     app.use('/api/superadmin', superRouter);
 
-    // --- SPECIAL STATS ENDPOINT FOR DASHBOARD ---
-    app.get('/mt-api/:routerId/interface/stats', getRouterConfig, async (req, res) => {
-        await handleApiRequest(req, res, async () => {
-            if (req.routerConfig.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    // For Legacy API, 'detail' is for configuration, 'stats' is for counters.
-                    // Often stats-detail combines them or print simply with both arguments works.
-                    // We use ['/interface/print', 'stats', 'detail'] to be safe and comprehensive.
-                    // 'without-paging' prevents large lists from getting stuck.
-                    const result = await writeLegacySafe(client, ['/interface/print', 'stats', 'detail', 'without-paging']);
-                    return result.map(normalizeLegacyObject);
-                } finally {
-                    await client.close();
-                }
-            } else {
-                // For REST API (v7+), sending boolean flags 'stats' and 'detail' ensures we get full data.
-                const response = await req.routerInstance.post('/interface/print', { 'stats': true, 'detail': true });
-                return response.data;
-            }
-        });
-    });
-
-    // --- VITE MIDDLEWARE (The Critical Fix) ---
-    // Ensure this comes AFTER API routes but BEFORE the catch-all handler.
+    // --- VITE MIDDLEWARE ---
     app.use(vite.middlewares);
 
     app.listen(PORT, () => {
         console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
         console.log(`   Mode: Development (Vite Middleware Active)`);
     });
-}
-
-const handleApiRequest = async (req, res, action) => {
-    try {
-        const result = await action();
-        if (result === '') res.status(204).send();
-        else res.json(result);
-    } catch (error) {
-        if (error.isAxiosError && error.response) {
-             res.status(error.response.status).json({ message: error.response.data.message || error.message });
-        } else {
-             res.status(500).json({ message: error.message });
-        }
-    }
-};
-
-const writeLegacySafe = async (client, query) => {
-    try {
-        return await client.write(query);
-    } catch (error) {
-        if (error.errno === 'UNKNOWNREPLY' && error.message.includes('!empty')) {
-            return [];
-        }
-        throw error;
-    }
-};
-
-const normalizeLegacyObject = (obj) => {
-     if (!obj || typeof obj !== 'object') return obj;
-    const newObj = {};
-    for (const key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
-            newObj[key.replace(/_/g, '-')] = obj[key];
-        }
-    }
-    if (newObj['.id']) newObj.id = newObj['.id'];
-    return newObj;
 }
 
 startServer();

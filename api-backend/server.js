@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const { RouterOSAPI } = require('node-routeros-v2');
@@ -14,17 +15,21 @@ app.use(cors());
 app.use(express.json());
 
 // Database setup - pointing to the proxy's DB
-const DB_PATH = path.join(__dirname, '../proxy/panel.db');
+const DB_PATH = path.resolve(__dirname, '../proxy/panel.db');
 
 let db;
 async function getDb() {
     if (!db) {
+        console.log(`[Backend] Connecting to DB at: ${DB_PATH}`);
         db = await open({
             filename: DB_PATH,
             driver: sqlite3.Database
         });
         
-        // Resilience: Ensure routers table exists if proxy hasn't initialized it yet
+        // Enable WAL mode for concurrency
+        await db.exec('PRAGMA journal_mode = WAL;');
+        
+        // Resilience: Ensure routers table exists
         await db.exec(`
             CREATE TABLE IF NOT EXISTS routers (
                 id TEXT PRIMARY KEY,
@@ -40,6 +45,58 @@ async function getDb() {
     return db;
 }
 
+// Helper to create router instance based on config
+const createRouterInstance = (config) => {
+    if (!config || !config.host || !config.user) {
+        throw new Error('Invalid router configuration');
+    }
+    
+    if (config.api_type === 'legacy') {
+        const isTls = config.port === 8729;
+        return new RouterOSAPI({
+            host: config.host,
+            user: config.user,
+            password: config.password || '',
+            port: config.port || 8728,
+            timeout: 15,
+            tls: isTls,
+            tlsOptions: isTls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2' } : undefined,
+        });
+    }
+
+    const protocol = config.port === 443 ? 'https' : 'http';
+    const baseURL = `${protocol}://${config.host}:${config.port}/rest`;
+    const auth = { username: config.user, password: config.password || '' };
+
+    const instance = axios.create({ 
+        baseURL, 
+        auth,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1.2' }),
+        timeout: 15000
+    });
+
+    // Normalize ID fields
+    instance.interceptors.response.use(response => {
+        const mapId = (item) => {
+            if (item && typeof item === 'object' && '.id' in item) {
+                return { ...item, id: item['.id'] };
+            }
+            return item;
+        };
+
+        if (response.data && typeof response.data === 'object') {
+            if (Array.isArray(response.data)) {
+                response.data = response.data.map(mapId);
+            } else {
+                response.data = mapId(response.data);
+            }
+        }
+        return response;
+    }, error => Promise.reject(error));
+
+    return instance;
+};
+
 // Middleware to attach router config based on ID
 const getRouter = async (req, res, next) => {
     try {
@@ -48,15 +105,70 @@ const getRouter = async (req, res, next) => {
         
         const database = await getDb();
         const router = await database.get('SELECT * FROM routers WHERE id = ?', [routerId]);
-        if (!router) return res.status(404).json({ message: 'Router not found' });
+        if (!router) {
+            console.warn(`[Backend] Router ID ${routerId} not found in DB.`);
+            return res.status(404).json({ message: 'Router not found' });
+        }
         
         req.router = router;
+        req.routerInstance = createRouterInstance(router);
         next();
     } catch (e) {
-        console.error("DB Error:", e);
+        console.error("DB Error in getRouter:", e);
         res.status(500).json({ message: 'Internal Server Error' });
     }
 };
+
+// Helper for Legacy Writes
+const writeLegacySafe = async (client, query) => {
+    try {
+        return await client.write(query);
+    } catch (error) {
+        // Suppress "empty response" errors which are common in node-routeros-v2 for empty lists
+        if (error.errno === 'UNKNOWNREPLY' && error.message.includes('!empty')) {
+            return [];
+        }
+        throw error;
+    }
+};
+
+const normalizeLegacyObject = (obj) => {
+     if (!obj || typeof obj !== 'object') return obj;
+    const newObj = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            newObj[key.replace(/_/g, '-')] = obj[key];
+        }
+    }
+    if (newObj['.id']) newObj.id = newObj['.id'];
+    return newObj;
+}
+
+
+// 0. SPECIAL ENDPOINT: Interface Stats
+// This logic was previously in proxy/server.js but belongs here because Nginx routes /mt-api here.
+app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // For Legacy API, we need specific commands to get stats
+                const result = await writeLegacySafe(client, ['/interface/print', 'stats', 'detail', 'without-paging']);
+                res.json(result.map(normalizeLegacyObject));
+            } finally {
+                await client.close();
+            }
+        } else {
+            // REST API (v7+)
+            const response = await req.routerInstance.post('/interface/print', { 'stats': true, 'detail': true });
+            res.json(response.data);
+        }
+    } catch (e) {
+        console.error("Stats Error:", e.message);
+        res.status(500).json({ message: e.message });
+    }
+});
 
 // 1. DHCP Client Update Endpoint
 app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
@@ -105,17 +217,11 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
 
         // --- API Interaction ---
         if (req.router.api_type === 'legacy') {
-            const client = new RouterOSAPI({
-                host: req.router.host,
-                user: req.router.user,
-                password: req.router.password,
-                port: req.router.port || 8728,
-                timeout: 20
-            });
+            const client = req.routerInstance;
             await client.connect();
 
             // 1. Update Address List Comment
-            const addressLists = await client.write('/ip/firewall/address-list/print', ['?address=' + address, '?list=authorized-dhcp-users']);
+            const addressLists = await writeLegacySafe(client, ['/ip/firewall/address-list/print', '?address=' + address, '?list=authorized-dhcp-users']);
             if (addressLists.length > 0) {
                 await client.write('/ip/firewall/address-list/set', {
                     '.id': addressLists[0]['.id'],
@@ -126,7 +232,7 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             // 2. Update/Create Simple Queue (Speed Limit)
             if (speedLimit) {
                 const limitString = `${speedLimit}M/${speedLimit}M`;
-                const queues = await client.write('/queue/simple/print', ['?name=' + customerInfo]);
+                const queues = await writeLegacySafe(client, ['/queue/simple/print', '?name=' + customerInfo]);
                 if (queues.length > 0) {
                     await client.write('/queue/simple/set', {
                         '.id': queues[0]['.id'],
@@ -142,7 +248,7 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             }
             
             // 3. Manage Scheduler
-            const scheds = await client.write('/system/scheduler/print', ['?name=' + schedName]);
+            const scheds = await writeLegacySafe(client, ['/system/scheduler/print', '?name=' + schedName]);
             if (scheds.length > 0) {
                 await client.write('/system/scheduler/remove', { '.id': scheds[0]['.id'] });
             }
@@ -157,51 +263,50 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             await client.close();
         } else {
             // REST API Logic
-            const protocol = req.router.port === 443 ? 'https' : 'http';
-            const baseUrl = `${protocol}://${req.router.host}:${req.router.port}/rest`;
-            const auth = { username: req.router.user, password: req.router.password };
-            const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+            const instance = req.routerInstance;
 
             // 1. Update Address List
-            const alRes = await axios.get(`${baseUrl}/ip/firewall/address-list?address=${address}&list=authorized-dhcp-users`, { auth, httpsAgent });
-            if (alRes.data && alRes.data.length > 0) {
-                await axios.patch(`${baseUrl}/ip/firewall/address-list/${alRes.data[0]['.id']}`, {
-                    comment: JSON.stringify(commentData)
-                }, { auth, httpsAgent });
-            }
+            try {
+                const alRes = await instance.get(`/ip/firewall/address-list?address=${address}&list=authorized-dhcp-users`);
+                if (alRes.data && alRes.data.length > 0) {
+                    await instance.patch(`/ip/firewall/address-list/${alRes.data[0]['.id']}`, {
+                        comment: JSON.stringify(commentData)
+                    });
+                }
+            } catch (e) { console.warn("Address list update warning", e.message); }
 
             // 2. Update Queue
             if (speedLimit) {
                  const limitString = `${speedLimit}M/${speedLimit}M`;
                  try {
-                    const qRes = await axios.get(`${baseUrl}/queue/simple?name=${customerInfo}`, { auth, httpsAgent });
-                    if (qRes.data.length > 0) {
-                        await axios.patch(`${baseUrl}/queue/simple/${qRes.data[0]['.id']}`, { 'max-limit': limitString }, { auth, httpsAgent });
+                    const qRes = await instance.get(`/queue/simple?name=${customerInfo}`);
+                    if (qRes.data && qRes.data.length > 0) {
+                        await instance.patch(`/queue/simple/${qRes.data[0]['.id']}`, { 'max-limit': limitString });
                     } else {
-                        await axios.put(`${baseUrl}/queue/simple`, {
+                        await instance.put(`/queue/simple`, {
                            name: customerInfo,
                            target: address,
                            'max-limit': limitString
-                        }, { auth, httpsAgent });
+                        });
                     }
-                 } catch (e) { console.error("Queue update error", e); }
+                 } catch (e) { console.error("Queue update error", e.message); }
             }
 
             // 3. Update Scheduler
             try {
-                const sRes = await axios.get(`${baseUrl}/system/scheduler?name=${schedName}`, { auth, httpsAgent });
-                if (sRes.data.length > 0) {
-                    await axios.delete(`${baseUrl}/system/scheduler/${sRes.data[0]['.id']}`, { auth, httpsAgent });
+                const sRes = await instance.get(`/system/scheduler?name=${schedName}`);
+                if (sRes.data && sRes.data.length > 0) {
+                    await instance.delete(`/system/scheduler/${sRes.data[0]['.id']}`);
                 }
                 
-                await axios.put(`${baseUrl}/system/scheduler`, {
+                await instance.put(`/system/scheduler`, {
                     name: schedName,
                     'start-date': rosDate,
                     'start-time': rosTime,
                     interval: '0s',
                     'on-event': onEvent
-                }, { auth, httpsAgent });
-            } catch (e) { console.error("Scheduler update error", e); }
+                });
+            } catch (e) { console.error("Scheduler update error", e.message); }
         }
         
         res.json({ message: 'Updated successfully' });
@@ -219,42 +324,33 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
 
     try {
         if (req.router.api_type === 'legacy') {
-             const client = new RouterOSAPI({
-                host: req.router.host,
-                user: req.router.user,
-                password: req.router.password,
-                port: req.router.port || 8728,
-                timeout: 15
-            });
-            await client.connect();
+             const client = req.routerInstance;
+             await client.connect();
             
-            const cmd = '/' + endpoint; 
+             const cmd = '/' + endpoint; 
             
-            if (method === 'POST' && body) {
-                 await client.write(cmd, body);
-                 res.json({ message: 'Command executed' });
-            } else {
-                 const data = await client.write(cmd);
-                 res.json(data);
-            }
-            await client.close();
+             if (method === 'POST' && body) {
+                  // For legacy add/set/remove commands
+                  await client.write(cmd, body);
+                  res.json({ message: 'Command executed' });
+             } else {
+                  // For legacy print commands
+                  const data = await writeLegacySafe(client, [cmd]);
+                  res.json(data.map(normalizeLegacyObject));
+             }
+             await client.close();
         } else {
             // REST API Proxy
-            const protocol = req.router.port === 443 ? 'https' : 'http';
-            const url = `${protocol}://${req.router.host}:${req.router.port}/rest/${endpoint}`;
-            const agent = new https.Agent({ rejectUnauthorized: false });
-            
-            const response = await axios({
+            const instance = req.routerInstance;
+            const response = await instance.request({
                 method: method,
-                url: url,
-                auth: { username: req.router.user, password: req.router.password },
-                data: body,
-                httpsAgent: agent
+                url: `/${endpoint}`,
+                data: body
             });
             res.json(response.data);
         }
     } catch (e) {
-        console.error("Proxy Error:", e.message);
+        console.error(`Proxy Error (${endpoint}):`, e.message);
         const status = e.response ? e.response.status : 500;
         const msg = e.response && e.response.data ? (e.response.data.message || e.response.data.detail) : e.message;
         res.status(status).json({ message: msg });
