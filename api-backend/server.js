@@ -278,8 +278,13 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
 app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
     const data = req.body || {};
     try {
-        const id = data['.id'] || data.id;
+        const secretData = data.secretData || data;
+        const initialSecret = data.initialSecret || null;
+        const subscription = data.subscriptionData || null;
+        const id = secretData['.id'] || secretData.id || initialSecret?.id;
+
         const toRosPayload = (obj) => {
+            if (!obj || typeof obj !== 'object') return obj;
             const out = {};
             for (const k of Object.keys(obj)) {
                 if (k === 'id' || k === '.id') continue;
@@ -288,29 +293,107 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
             return out;
         };
 
-        if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                if (id) {
-                    await client.write('/ppp/secret/set', { '.id': id, ...toRosPayload(data) });
-                } else {
-                    await client.write('/ppp/secret/add', toRosPayload(data));
+        const profileName = secretData.profile;
+
+        // Ensure profile exists when requested (composite op)
+        const ensureProfileIfMissing = async () => {
+            if (!profileName) return;
+            const profilePayload = toRosPayload(data.profileData || { name: profileName });
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                const existing = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
+                if (!existing || existing.length === 0) {
+                    await client.write('/ppp/profile/add', { name: profileName, ...profilePayload });
                 }
-                res.json({ message: 'Saved' });
-            } finally {
-                await client.close();
-            }
-        } else {
-            const payload = toRosPayload(data);
-            if (id) {
-                const response = await req.routerInstance.patch(`/ppp/secret/${id}`, payload);
-                return res.json(response.data);
             } else {
-                const response = await req.routerInstance.post('/ppp/secret', payload);
-                return res.json(response.data);
+                const listResp = await req.routerInstance.get('/ppp/profile');
+                const exists = Array.isArray(listResp.data) && listResp.data.some(p => p.name === profileName);
+                if (!exists) {
+                    await req.routerInstance.post('/ppp/profile', { name: profileName, ...profilePayload });
+                }
             }
-        }
+        };
+
+        // Save PPP secret
+        const saveSecret = async () => {
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    if (id) {
+                        await client.write('/ppp/secret/set', { '.id': id, ...toRosPayload(secretData) });
+                    } else {
+                        await client.write('/ppp/secret/add', toRosPayload(secretData));
+                    }
+                } finally {
+                    await client.close();
+                }
+            } else {
+                const payload = toRosPayload(secretData);
+                if (id) {
+                    await req.routerInstance.patch(`/ppp/secret/${id}`, payload);
+                } else {
+                    await req.routerInstance.post('/ppp/secret', payload);
+                }
+            }
+        };
+
+        // Optional scheduler to switch profile on due date/grace (composite op)
+        const upsertScheduler = async () => {
+            if (!subscription) return;
+            const username = secretData.name || initialSecret?.name;
+            if (!username) return;
+            const targetProfile = subscription.nonPaymentProfile;
+            const graceDays = subscription.graceDays;
+            const graceTime = subscription.graceTime; // HH:mm
+            const dueDateIso = subscription.dueDate;
+            let scheduleDate = null;
+            if (dueDateIso) {
+                scheduleDate = new Date(dueDateIso);
+            } else if (graceDays) {
+                const now = new Date();
+                if (graceTime) {
+                    const [h, m] = String(graceTime).split(':').map(Number);
+                    now.setHours(h || 0, m || 0, 0, 0);
+                }
+                scheduleDate = new Date(now.getTime() + (Number(graceDays) * 24 * 60 * 60 * 1000));
+            }
+            if (!scheduleDate || !targetProfile) return;
+
+            const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+            const startDate = `${months[scheduleDate.getMonth()]}/${String(scheduleDate.getDate()).padStart(2,'0')}/${scheduleDate.getFullYear()}`;
+            const startTime = scheduleDate.toTimeString().split(' ')[0];
+            const schedName = `deactivate-ppp-${username}`;
+            const onEvent = `/ppp secret set [find where name=\"${username}\"] profile=\"${targetProfile}\"`;
+
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    const existing = await writeLegacySafe(client, ['/system/scheduler/print', '?name=' + schedName]);
+                    if (existing && existing.length > 0) {
+                        await client.write('/system/scheduler/set', { '.id': existing[0]['.id'], 'name': schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
+                    } else {
+                        await client.write('/system/scheduler/add', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
+                    }
+                } finally { await client.close(); }
+            } else {
+                const list = await req.routerInstance.get('/system/scheduler');
+                const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
+                const payload = { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent };
+                if (existing && existing.id) {
+                    await req.routerInstance.patch(`/system/scheduler/${existing.id}`, payload);
+                } else {
+                    await req.routerInstance.post('/system/scheduler', payload);
+                }
+            }
+        };
+
+        await ensureProfileIfMissing();
+        await saveSecret();
+        await upsertScheduler();
+
+        res.json({ message: 'Saved', composite: true });
     } catch (e) {
         const status = e.response ? e.response.status : 400;
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
