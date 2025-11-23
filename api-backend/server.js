@@ -201,6 +201,80 @@ app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
     }
 });
 
+// 1b. Interfaces List
+app.get('/:routerId/interface/print', getRouter, async (req, res) => {
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const result = await writeLegacySafe(client, ['/interface/print']);
+                res.json(result.map(normalizeLegacyObject));
+            } finally {
+                await client.close();
+            }
+        } else {
+            const response = await req.routerInstance.get('/interface');
+            res.json(response.data);
+        }
+    } catch (e) {
+        console.error("Interface Print Error:", e.message);
+        const status = e.response ? e.response.status : 500;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ message: msg });
+    }
+});
+
+// 2b. System Resource Print
+app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const result = await writeLegacySafe(client, ['/system/resource/print']);
+                // Legacy returns array with single object; normalize for consistency
+                const normalized = Array.isArray(result) ? result.map(normalizeLegacyObject) : [normalizeLegacyObject(result)];
+                res.json(normalized);
+            } finally {
+                await client.close();
+            }
+        } else {
+            const response = await req.routerInstance.get('/system/resource');
+            res.json(response.data);
+        }
+    } catch (e) {
+        console.error("System Resource Error:", e.message);
+        const status = e.response ? e.response.status : 500;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ message: msg });
+    }
+});
+
+// 3. PPP Active Print
+app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const result = await writeLegacySafe(client, ['/ppp/active/print']);
+                res.json(result.map(normalizeLegacyObject));
+            } finally {
+                await client.close();
+            }
+        } else {
+            const response = await req.routerInstance.get('/ppp/active');
+            res.json(response.data);
+        }
+    } catch (e) {
+        console.error("PPP Active Error:", e.message);
+        const status = e.response ? e.response.status : 500;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ message: msg });
+    }
+});
+
 // 2. DHCP Client Update Endpoint
 app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
     const { 
