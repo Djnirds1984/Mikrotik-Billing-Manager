@@ -302,6 +302,7 @@ const requireSuperadmin = (req, res, next) => {
 async function startServer() {
     await Promise.all([initDb(), initSuperadminDb()]);
     const app = express();
+    const isProd = process.env.NODE_ENV === 'production';
 
     // --- DEV PROXY MIDDLEWARE FOR API BACKEND ---
     // This allows npm start (without Nginx) to still reach the backend API
@@ -316,12 +317,15 @@ async function startServer() {
         }
     }));
 
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: 'spa',
-        root: path.resolve(__dirname, '..'), // Project root
-    });
+    let vite = null;
+    if (!isProd) {
+        const { createServer: createViteServer } = await import('vite');
+        vite = await createViteServer({
+            server: { middlewareMode: true },
+            appType: 'spa',
+            root: path.resolve(__dirname, '..'),
+        });
+    }
 
     app.use(express.json({ limit: '10mb' }));
     app.use(express.text({ limit: '10mb' }));
@@ -886,12 +890,43 @@ async function startServer() {
     
     app.use('/api/superadmin', superRouter);
 
-    // --- VITE MIDDLEWARE ---
-    app.use(vite.middlewares);
+    // --- Production Static Serving ---
+    if (isProd) {
+        const distDir = path.resolve(__dirname, '..', 'dist');
+        const assetsDir = path.join(distDir, 'assets');
+
+        app.use((req, res, next) => {
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+            res.setHeader('Referrer-Policy', 'no-referrer');
+            next();
+        });
+
+        app.use('/assets', express.static(assetsDir, { maxAge: '1y', immutable: true }));
+        app.use(express.static(distDir, { maxAge: 0 }));
+        app.get('*', (req, res) => {
+            res.setHeader('Cache-Control', 'no-cache');
+            res.sendFile(path.join(distDir, 'index.html'));
+        });
+    } else if (vite) {
+        // --- VITE MIDDLEWARE (Development) ---
+        app.use(vite.middlewares);
+    }
+
+    // Health check endpoint
+    app.get('/healthz', (req, res) => {
+        res.json({ status: 'ok', mode: isProd ? 'production' : 'development', uptime: process.uptime() });
+    });
+
+    // Global error handler
+    app.use((err, req, res, next) => {
+        console.error('UI Server Error:', err.message);
+        res.status(500).json({ message: err.message || 'Internal Server Error' });
+    });
 
     app.listen(PORT, () => {
         console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
-        console.log(`   Mode: Development (Vite Middleware Active)`);
+        console.log(`   Mode: ${isProd ? 'Production' : 'Development (Vite Middleware Active)'}`);
     });
 }
 
