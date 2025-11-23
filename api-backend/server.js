@@ -275,6 +275,49 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
     }
 });
 
+app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
+    const data = req.body || {};
+    try {
+        const id = data['.id'] || data.id;
+        const toRosPayload = (obj) => {
+            const out = {};
+            for (const k of Object.keys(obj)) {
+                if (k === 'id' || k === '.id') continue;
+                out[k.replace(/_/g, '-')] = obj[k];
+            }
+            return out;
+        };
+
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                if (id) {
+                    await client.write('/ppp/secret/set', { '.id': id, ...toRosPayload(data) });
+                } else {
+                    await client.write('/ppp/secret/add', toRosPayload(data));
+                }
+                res.json({ message: 'Saved' });
+            } finally {
+                await client.close();
+            }
+        } else {
+            const payload = toRosPayload(data);
+            if (id) {
+                const response = await req.routerInstance.patch(`/ppp/secret/${id}`, payload);
+                return res.json(response.data);
+            } else {
+                const response = await req.routerInstance.post('/ppp/secret', payload);
+                return res.json(response.data);
+            }
+        }
+    } catch (e) {
+        const status = e.response ? e.response.status : 400;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ message: msg });
+    }
+});
+
 // 2. DHCP Client Update Endpoint
 app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
     const { 
