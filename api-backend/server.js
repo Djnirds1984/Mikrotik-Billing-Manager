@@ -285,10 +285,17 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
 
         const toRosPayload = (obj) => {
             if (!obj || typeof obj !== 'object') return obj;
+            const allowed = new Set(['name','service','profile','comment','disabled','password','rate-limit','rate_limit']);
             const out = {};
             for (const k of Object.keys(obj)) {
                 if (k === 'id' || k === '.id') continue;
-                out[k.replace(/_/g, '-')] = obj[k];
+                if (!allowed.has(k)) continue;
+                const key = k.replace(/_/g, '-');
+                let val = obj[k];
+                if (key === 'service' && !val) val = 'pppoe';
+                if (key === 'disabled' && typeof val === 'boolean') val = val ? 'true' : 'false';
+                if (key === 'password' && !val) val = '';
+                out[key] = val;
             }
             return out;
         };
