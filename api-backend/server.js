@@ -281,7 +281,7 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         const secretData = data.secretData || data;
         const initialSecret = data.initialSecret || null;
         const subscription = data.subscriptionData || null;
-        const id = secretData['.id'] || secretData.id || initialSecret?.id;
+        let id = secretData['.id'] || secretData.id || initialSecret?.id;
 
         const toRosPayload = (obj) => {
             if (!obj || typeof obj !== 'object') return obj;
@@ -323,6 +323,27 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
                 if (!exists) {
                     await req.routerInstance.post('/ppp/profile', { name: profileName, ...profilePayload });
                 }
+            }
+        };
+
+        // Attempt to resolve secret id by name if missing
+        const ensureSecretId = async () => {
+            if (id) return;
+            const name = secretData.name || initialSecret?.name;
+            if (!name) return;
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    const found = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + name]);
+                    if (Array.isArray(found) && found[0] && found[0]['.id']) {
+                        id = found[0]['.id'];
+                    }
+                } finally { await client.close(); }
+            } else {
+                const list = await req.routerInstance.get('/ppp/secret');
+                const item = (Array.isArray(list.data) ? list.data : []).find(s => s.name === name);
+                if (item && item.id) id = item.id;
             }
         };
 
@@ -426,6 +447,7 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         };
 
         await propagateRateLimitToSecret();
+        await ensureSecretId();
         await saveSecret();
         await upsertScheduler();
 
