@@ -47,7 +47,9 @@ export const Register: React.FC = () => {
             { question: q3, answer: a3 },
         ];
         
+        console.log('DEBUG: Register submitting');
         await register(username, password, securityQuestions);
+        console.log('DEBUG: Register completed, expecting App to render dashboard');
     };
 
     const error = localError || authError;

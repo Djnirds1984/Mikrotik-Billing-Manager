@@ -169,7 +169,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     }
 
     const licensedViews: View[] = [
-        'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
+        'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
         'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal'
     ];
 
@@ -300,6 +300,7 @@ const AppRouter: React.FC = () => {
             }
             const data: LicenseStatus = await res.json();
             setLicenseStatus(data);
+            console.log('DEBUG: License status updated', data);
         } catch (error) {
             console.error(error);
             setLicenseStatus(null); // Treat errors as unlicensed
@@ -312,8 +313,10 @@ const AppRouter: React.FC = () => {
         if (!isLoading) {
             if (!hasUsers) {
                 setAuthView('register');
+                console.log('DEBUG: No users found, showing Register');
             } else {
                 setAuthView('login');
+                console.log('DEBUG: Users exist, showing Login');
             }
         }
     }, [isLoading, hasUsers]);
@@ -373,16 +376,9 @@ const AppRouter: React.FC = () => {
         return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
     }
 
-    if (!licenseStatus?.licensed && user.role.name.toLowerCase() !== 'superadmin') {
-         return (
-             <ThemeProvider>
-                <LocalizationProvider>
-                    <License onLicenseChange={handleLicenseChange} licenseStatus={licenseStatus} />
-                </LocalizationProvider>
-            </ThemeProvider>
-         );
-    }
+    console.log('DEBUG: Authenticated user. License status:', licenseStatus);
     
+    console.log('DEBUG: Rendering AppContent (dashboard should be default)');
     return (
         <ThemeProvider>
             <LocalizationProvider>
