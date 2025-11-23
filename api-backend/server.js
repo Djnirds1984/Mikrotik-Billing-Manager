@@ -429,35 +429,73 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
 
     try {
         if (req.router.api_type === 'legacy') {
-             const client = req.routerInstance;
-             await client.connect();
-            
-             const cmd = '/' + endpoint; 
-            
-             if (method === 'POST' && body) {
-                  // For legacy add/set/remove commands
-                  await client.write(cmd, body);
-                  res.json({ message: 'Command executed' });
-             } else {
-                  // For legacy print commands
-                  const data = await writeLegacySafe(client, [cmd]);
-                  res.json(data.map(normalizeLegacyObject));
-             }
-             await client.close();
+            const client = req.routerInstance;
+            await client.connect();
+
+            const cmd = '/' + endpoint;
+
+            if (method === 'POST' && body) {
+                await client.write(cmd, body);
+                res.json({ message: 'Command executed' });
+            } else {
+                const data = await writeLegacySafe(client, [cmd]);
+                res.json(data.map(normalizeLegacyObject));
+            }
+            await client.close();
         } else {
-            // REST API Proxy
+            // REST API translation layer for legacy-style endpoints
             const instance = req.routerInstance;
+
+            const translateToRest = (ep, m, b) => {
+                const parts = ep.split('/').filter(Boolean);
+                const last = parts[parts.length - 1];
+                let restMethod = m.toUpperCase();
+                let restUrl = '/' + parts.join('/');
+                let restData = b;
+
+                if (last === 'print') {
+                    parts.pop();
+                    restUrl = '/' + parts.join('/');
+                    restMethod = 'GET';
+                    restData = undefined;
+                } else if (last === 'add') {
+                    parts.pop();
+                    restUrl = '/' + parts.join('/');
+                    restMethod = 'POST';
+                } else if (last === 'set') {
+                    parts.pop();
+                    const id = b?.['.id'] || b?.id;
+                    if (!id) throw new Error('Missing .id for set operation');
+                    restUrl = '/' + parts.join('/') + '/' + id;
+                    restMethod = 'PATCH';
+                    // Remove legacy id field
+                    if (restData?.['.id']) delete restData['.id'];
+                } else if (last === 'remove') {
+                    parts.pop();
+                    const id = b?.['.id'] || b?.id;
+                    if (!id) throw new Error('Missing .id for remove operation');
+                    restUrl = '/' + parts.join('/') + '/' + id;
+                    restMethod = 'DELETE';
+                    restData = undefined;
+                }
+
+                return { restMethod, restUrl, restData };
+            };
+
+            const { restMethod, restUrl, restData } = translateToRest(endpoint, method, body);
+            console.log(`[REST Proxy] ${restMethod} ${restUrl}`);
+
             const response = await instance.request({
-                method: method,
-                url: `/${endpoint}`,
-                data: body
+                method: restMethod,
+                url: restUrl,
+                data: restData
             });
             res.json(response.data);
         }
     } catch (e) {
         console.error(`Proxy Error (${endpoint}):`, e.message);
         const status = e.response ? e.response.status : 500;
-        const msg = e.response && e.response.data ? (e.response.data.message || e.response.data.detail) : e.message;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
         res.status(status).json({ message: msg });
     }
 });
