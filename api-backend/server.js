@@ -301,9 +301,14 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
             const profilePayload = toRosPayload(data.profileData || { name: profileName });
             if (req.router.api_type === 'legacy') {
                 const client = req.routerInstance;
-                const existing = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                if (!existing || existing.length === 0) {
-                    await client.write('/ppp/profile/add', { name: profileName, ...profilePayload });
+                await client.connect();
+                try {
+                    const existing = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
+                    if (!existing || existing.length === 0) {
+                        await client.write('/ppp/profile/add', { name: profileName, ...profilePayload });
+                    }
+                } finally {
+                    await client.close();
                 }
             } else {
                 const listResp = await req.routerInstance.get('/ppp/profile');
@@ -390,8 +395,100 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         };
 
         await ensureProfileIfMissing();
+        // If profile has rate-limit, propagate to secret before saving
+        const propagateRateLimitToSecret = async () => {
+            try {
+                if (!secretData) return;
+                if (secretData['rate-limit'] || secretData.rate_limit) return;
+                if (!profileName) return;
+                if (req.router.api_type === 'legacy') {
+                    const client = req.routerInstance;
+                    await client.connect();
+                    try {
+                        const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
+                        const rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
+                        if (rate) secretData['rate-limit'] = rate;
+                    } finally { await client.close(); }
+                } else {
+                    const listResp = await req.routerInstance.get('/ppp/profile');
+                    const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
+                    const rate = prof ? (prof['rate-limit'] || prof.rate_limit) : null;
+                    if (rate) secretData['rate-limit'] = rate;
+                }
+            } catch (_) { /* ignore */ }
+        };
+
+        await propagateRateLimitToSecret();
         await saveSecret();
         await upsertScheduler();
+
+        // Upsert simple queue based on rate-limit and active address
+        const upsertSimpleQueueFromProfile = async () => {
+            try {
+                const username = secretData.name || initialSecret?.name;
+                if (!username) return;
+                // Determine rate-limit to use
+                let rate = secretData['rate-limit'] || secretData.rate_limit;
+                if (!rate && profileName) {
+                    if (req.router.api_type === 'legacy') {
+                        const client = req.routerInstance;
+                        await client.connect();
+                        try {
+                            const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
+                            rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : rate;
+                        } finally { await client.close(); }
+                    } else {
+                        const listResp = await req.routerInstance.get('/ppp/profile');
+                        const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
+                        rate = prof ? (prof['rate-limit'] || prof.rate_limit || rate) : rate;
+                    }
+                }
+                if (!rate) return; // No rate to enforce
+
+                // Find active address for target
+                let address = null;
+                if (req.router.api_type === 'legacy') {
+                    const client = req.routerInstance;
+                    await client.connect();
+                    try {
+                        const active = await writeLegacySafe(client, ['/ppp/active/print', '?name=' + username]);
+                        address = Array.isArray(active) && active[0] ? (active[0].address || active[0]['address']) : null;
+                    } finally { await client.close(); }
+                } else {
+                    const activeResp = await req.routerInstance.get('/ppp/active');
+                    const found = (Array.isArray(activeResp.data) ? activeResp.data : []).find(a => a.name === username);
+                    address = found ? (found.address || found['address']) : null;
+                }
+                if (!address) return; // No active IP, skip queue creation
+
+                const limitString = typeof rate === 'string' ? rate : String(rate);
+                if (req.router.api_type === 'legacy') {
+                    const client = req.routerInstance;
+                    await client.connect();
+                    try {
+                        const queues = await writeLegacySafe(client, ['/queue/simple/print', '?name=' + username]);
+                        if (queues && queues.length > 0) {
+                            await client.write('/queue/simple/set', { '.id': queues[0]['.id'], 'max-limit': limitString, target: address });
+                        } else {
+                            await client.write('/queue/simple/add', { name: username, target: address, 'max-limit': limitString });
+                        }
+                    } finally { await client.close(); }
+                } else {
+                    const list = await req.routerInstance.get('/queue/simple');
+                    const existing = (Array.isArray(list.data) ? list.data : []).find(q => q.name === username);
+                    const payload = { name: username, target: address, 'max-limit': limitString };
+                    if (existing && existing.id) {
+                        await req.routerInstance.patch(`/queue/simple/${existing.id}`, payload);
+                    } else {
+                        await req.routerInstance.post('/queue/simple', payload);
+                    }
+                }
+            } catch (_) {
+                // Non-fatal; continue
+            }
+        };
+
+        await upsertSimpleQueueFromProfile();
 
         res.json({ message: 'Saved', composite: true });
     } catch (e) {
