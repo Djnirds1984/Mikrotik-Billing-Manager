@@ -1,71 +1,55 @@
 
 
+
 const express = require('express');
-const cors = require('cors');
-const { RouterOSAPI } = require('node-routeros-v2');
 const axios = require('axios');
+const cors = require('cors');
+const http = require('http');
 const https = require('https');
-const path = require('path');
-const sqlite3 = require('@vscode/sqlite3');
-const { open } = require('sqlite');
+const WebSocket = require('ws');
+const { Client } = require('ssh2');
+const os = require('os');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const { RouterOSAPI } = require('node-routeros-v2');
 
 const app = express();
 const PORT = 3002;
+const DB_SERVER_URL = 'http://localhost:3001';
+const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret-string-for-licenses-!@#$%^&*()';
 
 app.use(cors());
 app.use(express.json());
 
-app.use((req, res, next) => {
-    const started = Date.now();
-    let body = '';
-    try { body = JSON.stringify(req.body); } catch {}
-    if (body) body = body.replace(/"password"\s*:\s*".*?"/gi, '"password":"***"');
-    console.log(`[REQ] ${req.method} ${req.originalUrl} body=${body.slice(0,1000)}`);
-    res.on('finish', () => {
-        console.log(`[RES] ${req.method} ${req.originalUrl} status=${res.statusCode} time=${Date.now()-started}ms`);
-    });
-    next();
-});
+const routerConfigCache = new Map();
+const trafficStatsCache = new Map();
 
-// Database setup - pointing to the proxy's DB
-const DB_PATH = path.resolve(__dirname, '../proxy/panel.db');
+// --- Data Normalization for Legacy API ---
+const toKebabCase = (str) => str.replace(/_/g, '-');
 
-let db;
-async function getDb() {
-    if (!db) {
-        console.log(`[Backend] Connecting to DB at: ${DB_PATH}`);
-        db = await open({
-            filename: DB_PATH,
-            driver: sqlite3.Database
-        });
-        
-        // Enable WAL mode for concurrency
-        await db.exec('PRAGMA journal_mode = WAL;');
-        
-        // Resilience: Ensure routers table exists
-        await db.exec(`
-            CREATE TABLE IF NOT EXISTS routers (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                host TEXT,
-                user TEXT,
-                password TEXT,
-                port INTEGER,
-                api_type TEXT
-            );
-        `);
+const normalizeLegacyObject = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const newObj = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            newObj[toKebabCase(key)] = obj[key];
+        }
     }
-    return db;
-}
+    if (newObj['.id']) {
+        newObj.id = newObj['.id'];
+    }
+    return newObj;
+};
 
-// Helper to create router instance based on config
+// --- Client Factory ---
 const createRouterInstance = (config) => {
     if (!config || !config.host || !config.user) {
-        throw new Error('Invalid router configuration');
+        throw new Error('Invalid router configuration: host and user are required.');
     }
     
     if (config.api_type === 'legacy') {
-        const isTls = config.port === 8729;
+        const isTls = config.port === 8729; // Common legacy SSL port
         return new RouterOSAPI({
             host: config.host,
             user: config.user,
@@ -73,7 +57,12 @@ const createRouterInstance = (config) => {
             port: config.port || 8728,
             timeout: 15,
             tls: isTls,
-            tlsOptions: isTls ? { rejectUnauthorized: false, minVersion: 'TLSv1.2' } : undefined,
+            tlsOptions: isTls ? {
+                rejectUnauthorized: false,
+                // Force TLSv1.2 to be compatible with older RouterOS versions
+                minVersion: 'TLSv1.2',
+                maxVersion: 'TLSv1.2',
+            } : undefined,
         });
     }
 
@@ -84,11 +73,15 @@ const createRouterInstance = (config) => {
     const instance = axios.create({ 
         baseURL, 
         auth,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1.2' }),
+        httpsAgent: new https.Agent({ 
+            rejectUnauthorized: false,
+            // Force TLSv1.2 to be compatible with older RouterOS versions
+            minVersion: 'TLSv1.2',
+            maxVersion: 'TLSv1.2',
+        }),
         timeout: 15000
     });
 
-    // Normalize ID fields
     instance.interceptors.response.use(response => {
         const mapId = (item) => {
             if (item && typeof item === 'object' && '.id' in item) {
@@ -99,8 +92,10 @@ const createRouterInstance = (config) => {
 
         if (response.data && typeof response.data === 'object') {
             if (Array.isArray(response.data)) {
+                // It's an array of objects
                 response.data = response.data.map(mapId);
             } else {
+                // It's a single object
                 response.data = mapId(response.data);
             }
         }
@@ -110,1117 +105,1087 @@ const createRouterInstance = (config) => {
     return instance;
 };
 
-// Middleware to attach router config based on ID
-const getRouter = async (req, res, next) => {
-    try {
-        const routerId = req.params.routerId;
-        if (!routerId) return res.status(400).json({ message: 'Router ID missing' });
-        
-        const database = await getDb();
-        const router = await database.get('SELECT * FROM routers WHERE id = ?', [routerId]);
-        if (!router) {
-            console.warn(`[Backend] Router ID ${routerId} not found in DB.`);
-            return res.status(404).json({ message: 'Router not found' });
-        }
-        
-        req.router = router;
-        req.routerInstance = createRouterInstance(router);
-        next();
-    } catch (e) {
-        console.error("DB Error in getRouter:", e);
-        res.status(500).json({ message: 'Internal Server Error' });
-    }
-};
+// --- Error Handling ---
 
-// Helper for Legacy Writes
+// Helper to wrap legacy write commands to handle '!empty' responses gracefully.
 const writeLegacySafe = async (client, query) => {
     try {
         return await client.write(query);
     } catch (error) {
-        // Suppress "empty response" errors which are common in node-routeros-v2 for empty lists
+        // The node-routeros library throws an error on '!empty' responses, which are valid for some action commands.
+        // We'll catch this specific error and treat it as a success (empty result).
         if (error.errno === 'UNKNOWNREPLY' && error.message.includes('!empty')) {
-            return [];
+            const command = Array.isArray(query) ? query[0] : query;
+            console.log(`Gracefully handling '!empty' reply for command: ${command}`);
+            // For print commands, an empty array is the correct "empty" response.
+            if (command.includes('/print')) {
+                return [];
+            }
+            // For action commands, just return an empty object to signify success with no data.
+            return {};
         }
+        // Re-throw any other errors.
         throw error;
     }
 };
 
-const normalizeLegacyObject = (obj) => {
-     if (!obj || typeof obj !== 'object') return obj;
-    const newObj = {};
-    for (const key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
-            newObj[key.replace(/_/g, '-')] = obj[key];
+const handleApiRequest = async (req, res, action) => {
+    try {
+        const result = await action();
+        if (result === '') {
+            res.status(204).send();
+        } else {
+            res.json(result);
+        }
+    } catch (error) {
+        if (error.isAxiosError) {
+            console.error("Axios Error:", `[${error.config?.method?.toUpperCase()}] ${error.config?.url} - ${error.message}`);
+            if (error.response) {
+                const status = error.response.status || 500;
+                let message = `MikroTik REST API Error: ${error.response.data.message || 'Bad Request'}`;
+                if (error.response.data.detail) message += ` - ${error.response.data.detail}`;
+                res.status(status).json({ message });
+            } else {
+                res.status(500).json({ message: error.message });
+            }
+        } else {
+            console.error("API Request Error:", error);
+            let message = error.message || 'An internal server error occurred.';
+            if (message.includes('ECONNREFUSED')) message = 'Connection refused. Check the IP address, port, and ensure the API service is enabled on the router.';
+            if (message.includes('authentication failed')) message = 'Authentication failed. Please check your username and password.';
+            if (message.includes('timeout')) message = 'Connection timed out. The router is not responding.';
+            res.status(500).json({ message });
         }
     }
-    if (newObj['.id']) newObj.id = newObj['.id'];
-    return newObj;
-}
+};
 
-// --- SPECIAL ENDPOINTS (must come before the generic proxy) ---
+// --- Middleware ---
+const getRouterConfig = async (req, res, next) => {
+    const routerId = req.params.routerId || req.body.id;
+    const authHeader = req.headers.authorization;
+    const internalRequestHeaders = authHeader ? { 'Authorization': authHeader } : {};
 
-// 0. Test Connection (does not use getRouter middleware as router isn't saved yet)
-app.post('/test/test-connection', async (req, res) => {
-    const config = req.body;
+    if (routerConfigCache.has(routerId)) {
+        req.routerConfig = routerConfigCache.get(routerId);
+        req.routerInstance = createRouterInstance(req.routerConfig);
+        return next();
+    }
     try {
-        if (!config || !config.host || !config.user || !config.api_type) {
-            return res.status(400).json({ success: false, message: 'Incomplete router configuration provided for testing.' });
-        }
-
-        const client = createRouterInstance(config);
+        const response = await axios.get(`${DB_SERVER_URL}/api/db/routers`, { headers: internalRequestHeaders });
+        const config = response.data.find(r => r.id === routerId);
         
-        if (config.api_type === 'legacy') {
-            await client.connect();
-            // A quick command to verify we can interact
-            await writeLegacySafe(client, ['/system/resource/print']);
-            await client.close();
-        } else {
-            // For REST, a simple GET request is enough to test connection and auth
-            await client.get('/system/resource');
+        if (!config) {
+            routerConfigCache.delete(routerId);
+            return res.status(404).json({ message: `Router config for ID ${routerId} not found.` });
         }
-        res.json({ success: true, message: 'Connection successful!' });
-    } catch (e) {
-        console.error("Test Connection Error:", e.message);
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ success: false, message: `Connection failed: ${msg}` });
+
+        routerConfigCache.set(routerId, config);
+        req.routerConfig = config;
+        req.routerInstance = createRouterInstance(req.routerConfig);
+        next();
+    } catch (error) {
+        res.status(500).json({ message: `Failed to fetch router config: ${error.message}` });
     }
+};
+
+// --- Special Endpoints ---
+
+const parseMemory = (memStr) => {
+    if (!memStr || typeof memStr !== 'string') return 0;
+    const value = parseFloat(memStr);
+    if (memStr.toLowerCase().includes('kib')) return value * 1024;
+    if (memStr.toLowerCase().includes('mib')) return value * 1024 * 1024;
+    if (memStr.toLowerCase().includes('gib')) return value * 1024 * 1024 * 1024;
+    return value;
+};
+
+const formatBytes = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+};
+
+app.post('/mt-api/test-connection', async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const instance = createRouterInstance(req.body);
+        if (req.body.api_type === 'legacy') {
+            await instance.connect();
+            await instance.close();
+        } else {
+            await instance.get('/system/resource');
+        }
+        return { success: true, message: 'Connection successful!' };
+    });
 });
 
+app.post('/mt-api/:routerId/system/clock/sync-time', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const now = new Date();
+        
+        // Format date and time for MikroTik API
+        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const date = `${monthNames[now.getMonth()]}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}`;
+        const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
-// 1. SPECIAL ENDPOINT: Interface Stats
-// This logic was previously in proxy/server.js but belongs here because Nginx routes /mt-api here.
-app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
-    try {
-        if (req.router.api_type === 'legacy') {
+        const payload = { date, time };
+
+        if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
-                // For Legacy API, we need specific commands to get stats
-                const result = await writeLegacySafe(client, ['/interface/print', 'stats', 'detail', 'without-paging']);
-                res.json(result.map(normalizeLegacyObject));
+                // Legacy API uses '/system/clock/set' command with parameters
+                await writeLegacySafe(client, ['/system/clock/set', `=date=${date}`, `=time=${time}`]);
             } finally {
                 await client.close();
             }
         } else {
-            // REST API (v7+)
-            const response = await req.routerInstance.post('/interface/print', { 'stats': true, 'detail': true });
-            res.json(response.data);
+            // REST API requires patching the specific clock resource, not the collection.
+            // 1. Get the clock resource to find its ID.
+            const response = await req.routerInstance.get('/system/clock');
+            // The response for a resource that can only have one item can be a single object or an array with one object.
+            const clockResource = Array.isArray(response.data) ? response.data[0] : response.data;
+
+            if (!clockResource || !clockResource.id) {
+                throw new Error('Could not find system clock resource on the router.');
+            }
+            const clockId = clockResource.id;
+
+            // 2. Patch the resource by its ID.
+            await req.routerInstance.patch(`/system/clock/${encodeURIComponent(clockId)}`, payload);
         }
-    } catch (e) {
-        console.error("Stats Error:", e.message);
-        res.status(500).json({ message: e.message });
-    }
+
+        return { message: 'Router time synchronized successfully with the panel server.' };
+    });
 });
 
-// 1b. Interfaces List
-app.get('/:routerId/interface/print', getRouter, async (req, res) => {
-    try {
-        if (req.router.api_type === 'legacy') {
+app.post('/mt-api/:routerId/system/reboot', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
-                const result = await writeLegacySafe(client, ['/interface/print']);
-                res.json(result.map(normalizeLegacyObject));
+                // Legacy API uses '/system/reboot' command
+                await writeLegacySafe(client, '/system/reboot');
             } finally {
                 await client.close();
             }
         } else {
-            const response = await req.routerInstance.get('/interface');
-            res.json(response.data);
+            // REST API uses POST to the /reboot resource
+            await req.routerInstance.post('/system/reboot');
         }
-    } catch (e) {
-        console.error("Interface Print Error:", e.message);
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
-    }
+        // This response might not be sent if the router reboots too quickly, but we send it optimistically.
+        return { message: 'Router is rebooting.' };
+    });
 });
 
-// 2b. System Resource Print
-app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
-    try {
-        if (req.router.api_type === 'legacy') {
+
+app.get('/mt-api/:routerId/system/resource', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        let resource;
+        if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
-                const result = await writeLegacySafe(client, ['/system/resource/print']);
-                // Legacy returns array with single object; normalize for consistency
-                const normalized = Array.isArray(result) ? result.map(normalizeLegacyObject) : [normalizeLegacyObject(result)];
-                res.json(normalized);
+                const result = await writeLegacySafe(client, '/system/resource/print');
+                resource = result.length > 0 ? normalizeLegacyObject(result[0]) : null;
             } finally {
                 await client.close();
             }
         } else {
             const response = await req.routerInstance.get('/system/resource');
-            res.json(response.data);
+            // The REST API for /system/resource returns a single object, not an array.
+            resource = response.data;
         }
-    } catch (e) {
-        console.error("System Resource Error:", e.message);
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
-    }
+
+        if (!resource || Object.keys(resource).length === 0) {
+            throw new Error('Could not fetch system resource from router.');
+        }
+
+        const totalMemoryBytes = parseMemory(resource['total-memory']);
+        const freeMemoryBytes = parseMemory(resource['free-memory']);
+        const usedMemoryBytes = totalMemoryBytes - freeMemoryBytes;
+        const memoryUsage = totalMemoryBytes > 0 ? (usedMemoryBytes / totalMemoryBytes) * 100 : 0;
+        
+        return {
+            boardName: resource['board-name'],
+            version: resource.version,
+            cpuLoad: parseFloat(resource['cpu-load']),
+            uptime: resource.uptime,
+            memoryUsage: parseFloat(memoryUsage.toFixed(1)),
+            totalMemory: formatBytes(totalMemoryBytes),
+        };
+    });
 });
 
-// 3. PPP Active Print
-app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
-    try {
-        if (req.router.api_type === 'legacy') {
+app.get('/mt-api/:routerId/ip/wan-routes', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        let routes;
+        if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
-                const result = await writeLegacySafe(client, ['/ppp/active/print']);
-                res.json(result.map(normalizeLegacyObject));
+                routes = await writeLegacySafe(client, '/ip/route/print');
+                routes = routes.map(normalizeLegacyObject);
             } finally {
                 await client.close();
             }
         } else {
-            const response = await req.routerInstance.get('/ppp/active');
-            res.json(response.data);
+            const response = await req.routerInstance.get('/ip/route');
+            routes = response.data;
         }
-    } catch (e) {
-        console.error("PPP Active Error:", e.message);
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
-    }
+        return routes.filter(r => r['check-gateway']);
+    });
 });
 
-app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
-    const data = req.body || {};
-    try {
-        const secretData = data.secretData || data;
-        const initialSecret = data.initialSecret || null;
-        const subscription = data.subscriptionData || null;
-        let id = secretData['.id'] || secretData.id || initialSecret?.id;
-
-        const toRosPayload = (obj) => {
-            if (!obj || typeof obj !== 'object') return obj;
-            const allowed = new Set(['name','service','profile','comment','disabled','password']);
-            const out = {};
-            for (const k of Object.keys(obj)) {
-                if (k === 'id' || k === '.id') continue;
-                if (!allowed.has(k)) continue;
-                const key = k.replace(/_/g, '-');
-                let val = obj[k];
-                if (key === 'service' && !val) val = 'pppoe';
-                if (key === 'disabled' && typeof val === 'boolean') val = val ? 'true' : 'false';
-                if (key === 'password' && !val) continue;
-                out[key] = val;
-            }
-            return out;
-        };
-
-        const profileName = secretData.profile;
-
-        // Ensure profile exists when requested (composite op)
-        const ensureProfileIfMissing = async () => {
-            if (!profileName) return;
-            const profilePayload = toRosPayload(data.profileData || { name: profileName });
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const existing = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                    if (!existing || existing.length === 0) {
-                        await client.write('/ppp/profile/add', { name: profileName, ...profilePayload });
-                    }
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const listResp = await req.routerInstance.get('/ppp/profile');
-                const exists = Array.isArray(listResp.data) && listResp.data.some(p => p.name === profileName);
-                if (!exists) {
-                    await req.routerInstance.post('/ppp/profile', { name: profileName, ...profilePayload });
-                }
-            }
-        };
-
-        // Attempt to resolve secret id by name if missing
-        const ensureSecretId = async () => {
-            if (id) return;
-            const name = secretData.name || initialSecret?.name;
-            if (!name) return;
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const found = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + name]);
-                    if (Array.isArray(found) && found[0] && found[0]['.id']) {
-                        id = found[0]['.id'];
-                    }
-                } finally { await client.close(); }
-            } else {
-                const list = await req.routerInstance.get('/ppp/secret');
-                const item = (Array.isArray(list.data) ? list.data : []).find(s => s.name === name);
-                if (item && item.id) id = item.id;
-            }
-        };
-
-        // Save PPP secret
-        const saveSecret = async () => {
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    if (id) {
-                        await client.write('/ppp/secret/set', { '.id': id, ...toRosPayload(secretData) });
-                    } else {
-                        await client.write('/ppp/secret/add', toRosPayload(secretData));
-                    }
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const payload = toRosPayload(secretData);
-                if (id) {
-                    await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(id)}`, payload);
-                } else {
-                    const resp = await req.routerInstance.put('/ppp/secret', payload);
-                    if (!id && resp && resp.data && resp.data.id) {
-                        id = resp.data.id;
-                    }
-                }
-            }
-        };
-
-        // Optional scheduler to switch profile on due date/grace (composite op)
-        const upsertScheduler = async () => {
-            if (!subscription) return;
-            const username = secretData.name || initialSecret?.name;
-            if (!username) return;
-            const targetProfile = subscription.nonPaymentProfile;
-            const graceDays = subscription.graceDays;
-            const graceTime = subscription.graceTime; // HH:mm
-            const dueDateIso = subscription.dueDate;
-            let scheduleDate = null;
-            if (dueDateIso) {
-                scheduleDate = new Date(dueDateIso);
-            } else if (graceDays) {
-                const now = new Date();
-                if (graceTime) {
-                    const [h, m] = String(graceTime).split(':').map(Number);
-                    now.setHours(h || 0, m || 0, 0, 0);
-                }
-                scheduleDate = new Date(now.getTime() + (Number(graceDays) * 24 * 60 * 60 * 1000));
-            }
-            if (!scheduleDate || !targetProfile) return;
-
-            const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-            const startDate = `${months[scheduleDate.getMonth()]}/${String(scheduleDate.getDate()).padStart(2,'0')}/${scheduleDate.getFullYear()}`;
-            const startTime = scheduleDate.toTimeString().split(' ')[0];
-            const schedName = `deactivate-ppp-${username}`;
-            const onEvent = `/ppp secret set [find where name=\"${username}\"] profile=\"${targetProfile}\"`;
-
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const existing = await writeLegacySafe(client, ['/system/scheduler/print', '?name=' + schedName]);
-                    if (existing && existing.length > 0) {
-                        await client.write('/system/scheduler/set', { '.id': existing[0]['.id'], 'name': schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
-                    } else {
-                        await client.write('/system/scheduler/add', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
-                    }
-                } finally { await client.close(); }
-            } else {
-                const list = await req.routerInstance.get('/system/scheduler');
-                const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
-                const payload = { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent };
-                if (existing && existing.id) {
-                    await req.routerInstance.patch(`/system/scheduler/${encodeURIComponent(existing.id)}`, payload);
-                } else {
-                    await req.routerInstance.put('/system/scheduler', { name: schedName, interval: '0', ...payload });
-                }
-            }
-        };
-
-        await ensureProfileIfMissing();
-        await ensureSecretId();
-        await saveSecret();
-        await upsertScheduler();
-
-        // Upsert simple queue based on rate-limit and active address
-        const upsertSimpleQueueFromProfile = async () => {
+app.get('/mt-api/:routerId/ip/wan-failover-status', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        let routes;
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
             try {
-                const username = secretData.name || initialSecret?.name;
-                if (!username) return;
-                // Determine rate-limit from profile (do not set on secret)
-                let rate = null;
-                if (profileName) {
-                    if (req.router.api_type === 'legacy') {
-                        const client = req.routerInstance;
-                        await client.connect();
-                        try {
-                            const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                            rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
-                        } finally { await client.close(); }
-                    } else {
-                        const listResp = await req.routerInstance.get('/ppp/profile');
-                        const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
-                        rate = prof ? (prof['rate-limit'] || prof.rate_limit || null) : null;
-                    }
-                }
-                if (!rate) return; // No rate to enforce
-
-                // Find active address for target
-                let address = null;
-                if (req.router.api_type === 'legacy') {
-                    const client = req.routerInstance;
-                    await client.connect();
-                    try {
-                        const active = await writeLegacySafe(client, ['/ppp/active/print', '?name=' + username]);
-                        address = Array.isArray(active) && active[0] ? (active[0].address || active[0]['address']) : null;
-                    } finally { await client.close(); }
-                } else {
-                    const activeResp = await req.routerInstance.get('/ppp/active');
-                    const found = (Array.isArray(activeResp.data) ? activeResp.data : []).find(a => a.name === username);
-                    address = found ? (found.address || found['address']) : null;
-                }
-                if (!address) return; // No active IP, skip queue creation
-
-                const limitString = typeof rate === 'string' ? rate : String(rate);
-                if (req.router.api_type === 'legacy') {
-                    const client = req.routerInstance;
-                    await client.connect();
-                    try {
-                        const queues = await writeLegacySafe(client, ['/queue/simple/print', '?name=' + username]);
-                        if (queues && queues.length > 0) {
-                            await client.write('/queue/simple/set', { '.id': queues[0]['.id'], 'max-limit': limitString, target: address });
-                        } else {
-                            await client.write('/queue/simple/add', { name: username, target: address, 'max-limit': limitString });
-                        }
-                    } finally { await client.close(); }
-                } else {
-                    const list = await req.routerInstance.get('/queue/simple');
-                    const existing = (Array.isArray(list.data) ? list.data : []).find(q => q.name === username);
-                    const payload = { name: username, target: address, 'max-limit': limitString };
-                    if (existing && existing.id) {
-                        await req.routerInstance.put(`/queue/simple/${encodeURIComponent(existing.id)}`, payload);
-                    } else {
-                        await req.routerInstance.post('/queue/simple', payload);
-                    }
-                }
-            } catch (_) {
-                // Non-fatal; continue
+                routes = await writeLegacySafe(client, '/ip/route/print');
+                routes = routes.map(normalizeLegacyObject);
+            } finally {
+                await client.close();
             }
-        };
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            routes = response.data;
+        }
+        const wanRoutes = routes.filter(r => r['check-gateway']);
+        const enabled = wanRoutes.some(r => r.disabled === 'false' || r.disabled === false);
+        return { enabled };
+    });
+});
 
-        await upsertSimpleQueueFromProfile();
+app.post('/mt-api/:routerId/ip/wan-failover', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { enabled } = req.body; // true to enable, false to disable
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                let routes = await writeLegacySafe(client, '/ip/route/print');
+                routes = routes.map(normalizeLegacyObject);
+                const wanRoutes = routes.filter(r => r['check-gateway']);
 
-        // Persist customer info to app DB if provided
-        try {
-            const customerData = data.customerData || data.customer || null;
-            const username = secretData.name || initialSecret?.name;
-            if (customerData && username) {
-                const database = await getDb();
-                const newId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-                await database.run(
-                    `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(username) DO UPDATE SET 
-                        fullName=excluded.fullName,
-                        address=excluded.address,
-                        contactNumber=excluded.contactNumber,
-                        email=excluded.email,
-                        routerId=excluded.routerId`,
-                    [
-                        newId,
-                        username,
-                        req.router.id,
-                        customerData.fullName || '',
-                        customerData.address || '',
-                        customerData.contactNumber || '',
-                        customerData.email || ''
-                    ]
+                const promises = wanRoutes.map(r => 
+                    writeLegacySafe(client, ['/ip/route/set', `=.id=${r.id}`, `=disabled=${enabled ? 'no' : 'yes'}`])
                 );
+                await Promise.all(promises);
+            } finally {
+                await client.close();
             }
-        } catch (e) {
-            console.warn('Customer persistence warning:', e.message);
-        }
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            const wanRoutes = response.data.filter(r => r['check-gateway']);
 
-        res.json({ message: 'Saved', composite: true });
-    } catch (e) {
-        const status = e.response ? e.response.status : 400;
-        const details = e.response?.data;
-        console.error('[ERROR] ppp/user/save', e.message, details);
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg, details });
-    }
+            const promises = wanRoutes.map(r => 
+                req.routerInstance.patch(`/ip/route/${r.id}`, { disabled: !enabled })
+            );
+            await Promise.all(promises);
+        }
+        return { message: `WAN failover routes have been ${enabled ? 'enabled' : 'disabled'}.` };
+    });
 });
 
-app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
-    const data = req.body || {};
-    try {
-        const secretData = data.secretData || data;
-        const initialSecret = data.initialSecret || null;
-        const subscription = data.subscriptionData || null;
-        let id = secretData['.id'] || secretData.id || initialSecret?.id;
+app.post('/mt-api/:routerId/ppp/process-payment', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { secret, plan, nonPaymentProfile, discountDays, paymentDate } = req.body;
 
-        const toRosPayload = (obj) => {
-            if (!obj || typeof obj !== 'object') return obj;
-            const allowed = new Set(['name','service','profile','comment','disabled','password']);
-            const out = {};
-            for (const k of Object.keys(obj)) {
-                if (k === 'id' || k === '.id') continue;
-                if (!allowed.has(k)) continue;
-                const key = k.replace(/_/g, '-');
-                let val = obj[k];
-                if (key === 'service' && !val) val = 'pppoe';
-                if (key === 'disabled' && typeof val === 'boolean') val = val ? 'true' : 'false';
-                if (key === 'password' && !val) continue;
-                out[key] = val;
-            }
-            return out;
-        };
-
-        const profileName = secretData.profile;
-
-        const ensureProfileIfMissing = async () => {
-            if (!profileName) return;
-            const profilePayload = toRosPayload(data.profileData || { name: profileName });
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const existing = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                    if (!existing || existing.length === 0) {
-                        await client.write('/ppp/profile/add', { name: profileName, ...profilePayload });
-                    }
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const listResp = await req.routerInstance.get('/ppp/profile');
-                const exists = Array.isArray(listResp.data) && listResp.data.some(p => p.name === profileName);
-                if (!exists) {
-                    await req.routerInstance.post('/ppp/profile', { name: profileName, ...profilePayload });
-                }
-            }
-        };
-
-        const ensureSecretId = async () => {
-            if (id) return;
-            const name = secretData.name || initialSecret?.name;
-            if (!name) return;
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const found = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + name]);
-                    if (Array.isArray(found) && found[0] && found[0]['.id']) {
-                        id = found[0]['.id'];
-                    }
-                } finally { await client.close(); }
-            } else {
-                const list = await req.routerInstance.get('/ppp/secret');
-                const item = (Array.isArray(list.data) ? list.data : []).find(s => s.name === name);
-                if (item && item.id) id = item.id;
-            }
-        };
-
-        const saveSecret = async () => {
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    if (id) {
-                        await client.write('/ppp/secret/set', { '.id': id, ...toRosPayload(secretData) });
-                    } else {
-                        await client.write('/ppp/secret/add', toRosPayload(secretData));
-                    }
-                } finally {
-                    await client.close();
-                }
-            } else {
-                const payload = toRosPayload(secretData);
-                if (id) {
-                    await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(id)}`, payload);
-                } else {
-                    const resp = await req.routerInstance.put('/ppp/secret', payload);
-                    if (!id && resp && resp.data && resp.data.id) {
-                        id = resp.data.id;
-                    }
-                }
-            }
-        };
-
-        const upsertScheduler = async () => {
-            if (!subscription) return;
-            const username = secretData.name || initialSecret?.name;
-            if (!username) return;
-            const targetProfile = subscription.nonPaymentProfile;
-            const graceDays = subscription.graceDays;
-            const graceTime = subscription.graceTime;
-            const dueDateIso = subscription.dueDate;
-            let scheduleDate = null;
-            if (dueDateIso) {
-                scheduleDate = new Date(dueDateIso);
-            } else if (graceDays) {
-                const now = new Date();
-                if (graceTime) {
-                    const [h, m] = String(graceTime).split(':').map(Number);
-                    now.setHours(h || 0, m || 0, 0, 0);
-                }
-                scheduleDate = new Date(now.getTime() + (Number(graceDays) * 24 * 60 * 60 * 1000));
-            }
-            if (!scheduleDate || !targetProfile) return;
-
-            const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-            const startDate = `${months[scheduleDate.getMonth()]}/${String(scheduleDate.getDate()).padStart(2,'0')}/${scheduleDate.getFullYear()}`;
-            const startTime = scheduleDate.toTimeString().split(' ')[0];
-            const schedName = `deactivate-ppp-${username}`;
-            const onEvent = `/ppp secret set [find where name=\"${username}\"] profile=\"${targetProfile}\"`;
-
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const existing = await writeLegacySafe(client, ['/system/scheduler/print', '?name=' + schedName]);
-                    if (existing && existing.length > 0) {
-                        await client.write('/system/scheduler/set', { '.id': existing[0]['.id'], 'name': schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
-                    } else {
-                        await client.write('/system/scheduler/add', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
-                    }
-                } finally { await client.close(); }
-            } else {
-                const list = await req.routerInstance.get('/system/scheduler');
-                const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
-                const payload = { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent };
-                if (existing && existing.id) {
-                    await req.routerInstance.patch(`/system/scheduler/${encodeURIComponent(existing.id)}`, payload);
-                } else {
-                    await req.routerInstance.put('/system/scheduler', { name: schedName, interval: '0', ...payload });
-                }
-            }
-        };
-
-        await ensureProfileIfMissing();
-        await ensureSecretId();
-        await saveSecret();
-        await upsertScheduler();
-
-        const upsertSimpleQueueFromProfile = async () => {
-            try {
-                const username = secretData.name || initialSecret?.name;
-                if (!username) return;
-                let rate = null;
-                if (profileName) {
-                    if (req.router.api_type === 'legacy') {
-                        const client = req.routerInstance;
-                        await client.connect();
-                        try {
-                            const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                            rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
-                        } finally { await client.close(); }
-                    } else {
-                        const listResp = await req.routerInstance.get('/ppp/profile');
-                        const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
-                        rate = prof ? (prof['rate-limit'] || prof.rate_limit || null) : null;
-                    }
-                }
-                if (!rate) return;
-
-                let address = null;
-                if (req.router.api_type === 'legacy') {
-                    const client = req.routerInstance;
-                    await client.connect();
-                    try {
-                        const active = await writeLegacySafe(client, ['/ppp/active/print', '?name=' + username]);
-                        address = Array.isArray(active) && active[0] ? (active[0].address || active[0]['address']) : null;
-                    } finally { await client.close(); }
-                } else {
-                    const activeResp = await req.routerInstance.get('/ppp/active');
-                    const found = (Array.isArray(activeResp.data) ? activeResp.data : []).find(a => a.name === username);
-                    address = found ? (found.address || found['address']) : null;
-                }
-                if (!address) return;
-
-                const limitString = typeof rate === 'string' ? rate : String(rate);
-                if (req.router.api_type === 'legacy') {
-                    const client = req.routerInstance;
-                    await client.connect();
-                    try {
-                        const queues = await writeLegacySafe(client, ['/queue/simple/print', '?name=' + username]);
-                        if (queues && queues.length > 0) {
-                            await client.write('/queue/simple/set', { '.id': queues[0]['.id'], 'max-limit': limitString, target: address });
-                        } else {
-                            await client.write('/queue/simple/add', { name: username, target: address, 'max-limit': limitString });
-                        }
-                    } finally { await client.close(); }
-                } else {
-                    const list = await req.routerInstance.get('/queue/simple');
-                    const existing = (Array.isArray(list.data) ? list.data : []).find(q => q.name === username);
-                    const payload = { name: username, target: address, 'max-limit': limitString };
-                    if (existing && existing.id) {
-                        await req.routerInstance.put(`/queue/simple/${existing.id}`, payload);
-                    } else {
-                        await req.routerInstance.post('/queue/simple', payload);
-                    }
-                }
-            } catch (_) { }
-        };
-
-        await upsertSimpleQueueFromProfile();
-        try {
-            const customerData = data.customerData || data.customer || null;
-            const username = secretData.name || initialSecret?.name;
-            if (customerData && username) {
-                const database = await getDb();
-                const newId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-                await database.run(
-                    `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(username) DO UPDATE SET 
-                        fullName=excluded.fullName,
-                        address=excluded.address,
-                        contactNumber=excluded.contactNumber,
-                        email=excluded.email,
-                        routerId=excluded.routerId`,
-                    [
-                        newId,
-                        username,
-                        req.router.id,
-                        customerData.fullName || '',
-                        customerData.address || '',
-                        customerData.contactNumber || '',
-                        customerData.email || ''
-                    ]
-                );
-            }
-        } catch (e) {
-            console.warn('Customer persistence warning:', e.message);
+        if (!secret || !plan || !nonPaymentProfile || !paymentDate) {
+            throw new Error('Missing required payment data.');
         }
 
-        res.json({ message: 'Saved', composite: true });
-    } catch (e) {
-        const status = e.response ? e.response.status : 400;
-        const details = e.response?.data;
-        console.error('[ERROR] ppp/user/save(PATCH)', e.message, details);
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg, details });
-    }
-});
-
-// Payment processing: apply paid profile, remove non-payment scheduler, update queue
-app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
-    try {
-        const data = req.body || {};
-        const secretData = data.secretData || data.secret || {};
-        const payment = data.paymentData || data.payment || {};
-        const subscription = data.subscriptionData || data.subscription || {};
-        let username = secretData.name || payment.username || (data.secret && data.secret.name);
-        let targetProfile = secretData.profile || payment.profile || (payment.plan && payment.plan.pppoeProfile);
-        const nonPaymentProfile = subscription.nonPaymentProfile || payment.nonPaymentProfile;
-        const paymentDateStr = payment.paymentDate || payment.dueDate || subscription.dueDate || new Date().toISOString().split('T')[0];
-        const graceDays = subscription.graceDays || payment.graceDays || payment.discountDays;
-        const graceTime = subscription.graceTime || payment.graceTime;
-
-        if (!username || !targetProfile) {
-            return res.status(400).json({ message: 'Missing username or target profile' });
-        }
-
-        // Resolve secret id by name
-        let id = null;
-        if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                const found = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + username]);
-                if (Array.isArray(found) && found[0] && found[0]['.id']) id = found[0]['.id'];
-            } finally { await client.close(); }
-        } else {
-            const list = await req.routerInstance.get('/ppp/secret');
-            const item = username ? (Array.isArray(list.data) ? list.data : []).find(s => s.name === username) : null;
-            if (item && item.id) id = item.id;
-            if (!username && item && item.name) username = item.name;
-        }
-
-        // Calculate next due date: add cycle months
-        const addMonths = (d, m) => {
-            const date = new Date(d.getTime());
-            const day = date.getDate();
-            date.setMonth(date.getMonth() + m);
-            if (date.getDate() !== day) { date.setDate(0); }
-            return date;
-        };
-        const cycleToMonths = (cycle) => cycle === 'Yearly' ? 12 : cycle === 'Quarterly' ? 3 : 1;
-        const paymentDate = new Date(paymentDateStr);
-        const monthsToAdd = cycleToMonths(payment?.plan?.cycle);
-        const nextDue = addMonths(paymentDate, monthsToAdd);
-        const nextDueDateStr = nextDue.toISOString().split('T')[0];
-        const nextDueTimeStr = nextDue.toTimeString().split(' ')[0];
-
-        // Update secret: set profile, enable, and update comment dueDate
-        if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                if (!id) {
-                    await client.write('/ppp/secret/add', { name: username, service: 'pppoe', profile: targetProfile, disabled: 'false', comment: (() => {
-                        let c = {};
-                        try { c = JSON.parse(secretData.comment || '{}'); } catch {}
-                        c.dueDate = nextDueDateStr;
-                        c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
-                        c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
-                        return JSON.stringify(c);
-                    })() });
-                } else {
-                    await client.write('/ppp/secret/set', { '.id': id, profile: targetProfile, disabled: 'false', comment: (() => {
-                        let c = {};
-                        try { c = JSON.parse(secretData.comment || '{}'); } catch {}
-                        c.dueDate = nextDueDateStr;
-                        c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
-                        c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
-                        return JSON.stringify(c);
-                    })() });
-                }
-            } finally { await client.close(); }
-            } else {
-                if (!id) {
-                    let c = {};
-                    try { c = JSON.parse(secretData.comment || '{}'); } catch {}
-                    c.dueDate = nextDueDateStr;
-                    c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
-                    c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
-                    const resp = await req.routerInstance.put('/ppp/secret', { name: username, service: 'pppoe', profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
-                    if (resp && resp.data && resp.data.id) {
-                        id = resp.data.id;
-                    }
-                } else {
-                    let c = {};
-                    try { c = JSON.parse(secretData.comment || '{}'); } catch {}
-                    c.dueDate = nextDueDateStr;
-                    c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
-                    c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
-                    await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(id)}`, { profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
-                }
-            }
-
-        // Remove existing deactivate scheduler and (re)create for next due date if provided
-        const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-        let scheduleDate = null;
-        if (nextDue) {
-            scheduleDate = nextDue;
-        } else if (graceDays) {
-            const now = new Date();
-            if (graceTime) {
-                const [h, m] = String(graceTime).split(':').map(Number);
-                now.setHours(h || 0, m || 0, 0, 0);
-            }
-            scheduleDate = new Date(now.getTime() + (Number(graceDays) * 24 * 60 * 60 * 1000));
-        }
-
-        const schedName = `deactivate-ppp-${username}`;
-        const startDate = scheduleDate ? `${months[scheduleDate.getMonth()]}/${String(scheduleDate.getDate()).padStart(2,'0')}/${scheduleDate.getFullYear()}` : null;
-        const startTime = scheduleDate ? scheduleDate.toTimeString().split(' ')[0] : null;
-        const onEvent = nonPaymentProfile ? `/ppp secret set [find where name=\"${username}\"] profile=\"${nonPaymentProfile}\"` : '';
-
-        if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
-            try {
-                const existing = await writeLegacySafe(client, ['/system/scheduler/print', '?name=' + schedName]);
-                if (existing && existing.length > 0) {
-                    await client.write('/system/scheduler/remove', { '.id': existing[0]['.id'] });
-                }
-                if (scheduleDate && nonPaymentProfile) {
-                    await client.write('/system/scheduler/add', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
-                }
-            } finally { await client.close(); }
-        } else {
-            const list = await req.routerInstance.get('/system/scheduler');
-            const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
-            if (existing && existing.id) {
-                await req.routerInstance.delete(`/system/scheduler/${encodeURIComponent(existing.id)}`);
-            }
-            if (scheduleDate && nonPaymentProfile) {
-                await req.routerInstance.put('/system/scheduler', { name: schedName, interval: '0', 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
-            }
-        }
-
-        // Queue update based on profile rate-limit similar to save path
-        try {
-            let rate = null;
-            if (req.router.api_type === 'legacy') {
-                const client = req.routerInstance;
-                await client.connect();
-                try {
-                    const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + targetProfile]);
-                    rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
-                    if (rate) {
-                        const active = await writeLegacySafe(client, ['/ppp/active/print', '?name=' + username]);
-                        const address = Array.isArray(active) && active[0] ? (active[0].address || active[0]['address']) : null;
-                        if (address) {
-                            const queues = await writeLegacySafe(client, ['/queue/simple/print', '?name=' + username]);
-                            const limitString = String(rate);
-                            if (queues && queues.length > 0) {
-                                await client.write('/queue/simple/set', { '.id': queues[0]['.id'], 'max-limit': limitString, target: address });
-                            } else {
-                                await client.write('/queue/simple/add', { name: username, target: address, 'max-limit': limitString });
-                            }
-                        }
-                    }
-                } finally { await client.close(); }
-            } else {
-                const listResp = await req.routerInstance.get('/ppp/profile');
-                const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === targetProfile);
-                rate = prof ? (prof['rate-limit'] || prof.rate_limit) : null;
-                if (rate) {
-                    const activeResp = await req.routerInstance.get('/ppp/active');
-                    const found = (Array.isArray(activeResp.data) ? activeResp.data : []).find(a => a.name === username);
-                    const address = found ? (found.address || found['address']) : null;
-                    if (address) {
-                        const qList = await req.routerInstance.get('/queue/simple');
-                        const existing = (Array.isArray(qList.data) ? qList.data : []).find(q => q.name === username);
-                        const payload = { name: username, target: address, 'max-limit': String(rate) };
-                        if (existing && existing.id) {
-                            await req.routerInstance.put(`/queue/simple/${encodeURIComponent(existing.id)}`, payload);
-                        } else {
-                            await req.routerInstance.post('/queue/simple', payload);
-                        }
-                    }
-                }
-            }
-        } catch (_) {}
-
-        res.json({ message: 'Payment processed' });
-    } catch (e) {
-        const status = e.response ? e.response.status : 400;
-        const details = e.response?.data;
-        console.error('[ERROR] ppp/payment/process', e.message, details);
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg, details });
-    }
-});
-
-// 2. DHCP Client Update Endpoint
-app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
-    const { 
-        macAddress, address, customerInfo, 
-        plan, downtimeDays, planType, graceDays, graceTime, 
-        expiresAt: manualExpiresAt, contactNumber, email, speedLimit 
-    } = req.body;
-
-    try {
-        // Calculate Expiration Date/Time
-        let expiresAt;
-        if (manualExpiresAt) {
-            expiresAt = new Date(manualExpiresAt);
-        } else if (graceDays) {
-            const now = new Date();
-            if (graceTime) {
-                const [hours, minutes] = graceTime.split(':').map(Number);
-                now.setHours(hours, minutes, 0, 0);
-            }
-            expiresAt = new Date(now.getTime() + (graceDays * 24 * 60 * 60 * 1000));
-        } else if (plan && plan.cycle_days) {
-            const now = new Date();
-            expiresAt = new Date(now.getTime() + (plan.cycle_days * 24 * 60 * 60 * 1000));
-        } else {
-            expiresAt = new Date(); 
-        }
-
-        const commentData = {
-            customerInfo,
-            contactNumber,
-            email,
-            planName: plan ? plan.name : '',
-            dueDate: expiresAt.toISOString().split('T')[0],
-            dueDateTime: expiresAt.toISOString(),
-            planType: planType || 'prepaid'
-        };
-
-        // Common Scheduler Script (RouterOS format)
-        const schedName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
-        const onEvent = `/ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; /ip firewall connection remove [find where src-address~"^${address}"]; :local leaseId [/ip dhcp-server lease find where address="${address}"]; if ([:len $leaseId] > 0) do={ /ip firewall address-list add address="${address}" list="pending-dhcp-users" timeout=1d comment="${macAddress}"; }`;
+        // 1. Calculate new due date
+        const startDate = new Date(paymentDate);
+        let cycleDays = 30;
+        if (plan.cycle === 'Yearly') cycleDays = 365;
+        else if (plan.cycle === 'Quarterly') cycleDays = 90;
         
-        const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-        const rosDate = `${months[expiresAt.getMonth()]}/${String(expiresAt.getDate()).padStart(2,'0')}/${expiresAt.getFullYear()}`;
-        const rosTime = expiresAt.toTimeString().split(' ')[0];
+        const totalDays = cycleDays - (discountDays || 0);
+        const dueDate = new Date(startDate);
+        dueDate.setDate(dueDate.getDate() + totalDays);
 
-        // --- API Interaction ---
-        if (req.router.api_type === 'legacy') {
+        // Format for MikroTik scheduler (mmm/dd/yyyy)
+        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
+        const schedulerTime = "23:59:59"; // Run at the end of the day
+
+        // 2. Create new comment
+        const newComment = JSON.stringify({
+            plan: plan.name,
+            price: plan.price,
+            currency: plan.currency,
+            dueDate: dueDate.toISOString().split('T')[0],
+            paidDate: paymentDate
+        });
+
+        // 3. Define script to run on scheduler
+        const scriptSource = `:log info "Subscription expired for ${secret.name}, changing profile."; /ppp secret set [find name="${secret.name}"] profile=${nonPaymentProfile};`;
+        const schedulerName = `disable-${secret.name.replace(/[^a-zA-Z0-9]/g, '_')}`; // Sanitize name for scheduler
+
+        let kickMessage = '';
+
+        // 4. Update secret and create/update scheduler
+        if (req.routerConfig.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
+            try {
+                // Update secret
+                await writeLegacySafe(client, ['/ppp/secret/set',
+                    `=.id=${secret.id}`,
+                    `=profile=${plan.pppoeProfile}`,
+                    `=comment=${newComment}`,
+                    '=disabled=no'
+                ]);
 
-            // 1. Update Address List Comment
-            const addressLists = await writeLegacySafe(client, ['/ip/firewall/address-list/print', '?address=' + address, '?list=authorized-dhcp-users']);
-            if (addressLists.length > 0) {
-                await client.write('/ip/firewall/address-list/set', {
-                    '.id': addressLists[0]['.id'],
-                    comment: JSON.stringify(commentData)
-                });
-            }
+                // Find existing scheduler
+                const existingScheduler = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedulerName}`]);
 
-            // 2. Update/Create Simple Queue (Speed Limit)
-            if (speedLimit) {
-                const limitString = `${speedLimit}M/${speedLimit}M`;
-                const queues = await writeLegacySafe(client, ['/queue/simple/print', '?name=' + customerInfo]);
-                if (queues.length > 0) {
-                    await client.write('/queue/simple/set', {
-                        '.id': queues[0]['.id'],
-                        'max-limit': limitString
-                    });
+                if (existingScheduler.length > 0) {
+                    // Update existing scheduler
+                    await writeLegacySafe(client, ['/system/scheduler/set',
+                        `=.id=${existingScheduler[0]['.id']}`,
+                        `=start-date=${schedulerDate}`,
+                        `=start-time=${schedulerTime}`,
+                        `=on-event=${scriptSource}`
+                    ]);
                 } else {
-                    await client.write('/queue/simple/add', {
-                        name: customerInfo,
-                        target: address,
-                        'max-limit': limitString
-                    });
+                    // Add new scheduler
+                    await writeLegacySafe(client, ['/system/scheduler/add',
+                        `=name=${schedulerName}`,
+                        `=start-date=${schedulerDate}`,
+                        `=start-time=${schedulerTime}`,
+                        `=interval=0`,
+                        `=on-event=${scriptSource}`
+                    ]);
                 }
+                // 5. Kick user to apply new profile
+                const activeConnections = await writeLegacySafe(client, ['/ppp/active/print', `?name=${secret.name}`]);
+                if (activeConnections.length > 0) {
+                    await writeLegacySafe(client, ['/ppp/active/remove', `=.id=${activeConnections[0]['.id']}`]);
+                    kickMessage = "User was kicked to apply new profile.";
+                }
+            } finally {
+                await client.close();
             }
-            
-            // 3. Manage Scheduler
-            const scheds = await writeLegacySafe(client, ['/system/scheduler/print', '?name=' + schedName]);
-            if (scheds.length > 0) {
-                await client.write('/system/scheduler/remove', { '.id': scheds[0]['.id'] });
-            }
-            await client.write('/system/scheduler/add', {
-                name: schedName,
-                'start-date': rosDate,
-                'start-time': rosTime,
-                interval: '0s',
-                'on-event': onEvent
+        } else { // REST API
+            // Update secret
+            await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(secret.id)}`, {
+                profile: plan.pppoeProfile,
+                comment: newComment,
+                disabled: false
             });
 
-            await client.close();
-        } else {
-            // REST API Logic
-            const instance = req.routerInstance;
-
-            // 1. Update Address List
-            try {
-                const alRes = await instance.get(`/ip/firewall/address-list?address=${address}&list=authorized-dhcp-users`);
-                if (alRes.data && alRes.data.length > 0) {
-                    await instance.patch(`/ip/firewall/address-list/${alRes.data[0]['.id']}`, {
-                        comment: JSON.stringify(commentData)
-                    });
-                }
-            } catch (e) { console.warn("Address list update warning", e.message); }
-
-            // 2. Update Queue
-            if (speedLimit) {
-                 const limitString = `${speedLimit}M/${speedLimit}M`;
-                 try {
-                    const qRes = await instance.get(`/queue/simple?name=${customerInfo}`);
-                    if (qRes.data && qRes.data.length > 0) {
-                        await instance.patch(`/queue/simple/${qRes.data[0]['.id']}`, { 'max-limit': limitString });
-                    } else {
-                        await instance.put(`/queue/simple`, {
-                           name: customerInfo,
-                           target: address,
-                           'max-limit': limitString
-                        });
-                    }
-                 } catch (e) { console.error("Queue update error", e.message); }
-            }
-
-            // 3. Update Scheduler
-            try {
-                const sRes = await instance.get(`/system/scheduler?name=${schedName}`);
-                if (sRes.data && sRes.data.length > 0) {
-                    await instance.delete(`/system/scheduler/${sRes.data[0]['.id']}`);
-                }
-                
-                await instance.put(`/system/scheduler`, {
-                    name: schedName,
-                    'start-date': rosDate,
-                    'start-time': rosTime,
-                    interval: '0s',
-                    'on-event': onEvent
+            // Find existing scheduler
+            const schedulersResponse = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+            const existingScheduler = schedulersResponse.data;
+            
+            if (existingScheduler.length > 0) {
+                // Update existing
+                await req.routerInstance.patch(`/system/scheduler/${encodeURIComponent(existingScheduler[0].id)}`, {
+                    'start-date': schedulerDate,
+                    'start-time': schedulerTime,
+                    'on-event': scriptSource
                 });
-            } catch (e) { console.error("Scheduler update error", e.message); }
+            } else {
+                // Add new
+                await req.routerInstance.put('/system/scheduler', {
+                    name: schedulerName,
+                    'start-date': schedulerDate,
+                    'start-time': schedulerTime,
+                    interval: '0',
+                    'on-event': scriptSource
+                });
+            }
+            // 5. Kick user to apply new profile
+            const response = await req.routerInstance.get(`/ppp/active?name=${secret.name}`);
+            if (response.data.length > 0) {
+                await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
+                kickMessage = "User was kicked to apply new profile.";
+            }
         }
         
-        res.json({ message: 'Updated successfully' });
-    } catch (e) {
-        console.error("Update Error:", e.message);
-        res.status(500).json({ message: e.message });
-    }
+        return { message: `Payment processed and subscription updated successfully. ${kickMessage}`.trim() };
+    });
 });
 
-// 3. Generic Proxy Handler for all other MikroTik calls
-app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
-    const { endpoint } = req.params;
-    const method = req.method;
-    const body = req.body;
+app.post('/mt-api/:routerId/ppp/user/save', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { initialSecret, secretData, subscriptionData } = req.body;
+        const isUpdate = !!initialSecret?.id;
 
-    try {
-        if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
+        if (req.routerConfig.api_type === 'legacy') {
+            throw new Error("This feature requires the REST API (RouterOS v7+) and is not supported for legacy API connections.");
+        }
 
-            const cmd = '/' + endpoint;
-
-            if (method === 'POST' && body) {
-                await client.write(cmd, body);
-                res.json({ message: 'Command executed' });
-            } else {
-                const data = await writeLegacySafe(client, [cmd]);
-                res.json(data.map(normalizeLegacyObject));
-            }
-            await client.close();
+        // 1. Save the secret (add or update)
+        let savedSecretId = initialSecret?.id;
+        if (isUpdate) {
+            // For updates, we only send the fields that were actually passed in secretData.
+            await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(initialSecret.id)}`, secretData);
         } else {
-            // REST API translation layer for legacy-style endpoints
-            const instance = req.routerInstance;
+            const response = await req.routerInstance.put('/ppp/secret', secretData);
+            // The response for a PUT is an object with the new ID, not an array.
+            savedSecretId = response.data.id;
+        }
 
-            const translateToRest = (ep, m, b) => {
-                const parts = ep.split('/').filter(Boolean);
-                const last = parts[parts.length - 1];
-                let restMethod = m.toUpperCase();
-                let restUrl = '/' + parts.join('/');
-                let restData = b;
+        if (!savedSecretId) {
+            // Try to find the user if the response didn't include the ID
+            const users = await req.routerInstance.get(`/ppp/secret?name=${secretData.name}`);
+            if (users.data.length > 0) {
+                savedSecretId = users.data[0].id;
+            } else {
+                throw new Error("Could not determine secret ID after save operation.");
+            }
+        }
 
-                if (last === 'print') {
-                    parts.pop();
-                    restUrl = '/' + parts.join('/');
-                    restMethod = 'GET';
-                    restData = undefined;
-                } else if (last === 'add') {
-                    parts.pop();
-                    restUrl = '/' + parts.join('/');
-                    restMethod = 'POST';
-                } else if (last === 'set') {
-                    parts.pop();
-                    const id = b?.['.id'] || b?.id;
-                    if (!id) throw new Error('Missing .id for set operation');
-                    restUrl = '/' + parts.join('/') + '/' + id;
-                    restMethod = 'PATCH';
-                    // Remove legacy id field
-                    if (restData?.['.id']) delete restData['.id'];
-                } else if (last === 'remove') {
-                    parts.pop();
-                    const id = b?.['.id'] || b?.id;
-                    if (!id) throw new Error('Missing .id for remove operation');
-                    restUrl = '/' + parts.join('/') + '/' + id;
-                    restMethod = 'DELETE';
-                    restData = undefined;
-                }
+        // 2. Manage the scheduler
+        const schedulerName = `disable-${secretData.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const schedulersResponse = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+        const existingSchedulers = schedulersResponse.data;
+        
+        // If due date is cleared, delete existing scheduler
+        if (!subscriptionData?.dueDate) {
+            if (existingSchedulers.length > 0) {
+                await req.routerInstance.delete(`/system/scheduler/${existingSchedulers[0].id}`);
+            }
+        } else { // If due date is set, create or update scheduler
+            const dueDate = new Date(subscriptionData.dueDate);
+            const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+            const schedulerDate = `${monthNames[dueDate.getMonth()]}/${String(dueDate.getDate()).padStart(2, '0')}/${dueDate.getFullYear()}`;
+            const schedulerTime = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}:${String(dueDate.getSeconds()).padStart(2, '0')}`;
+            
+            const scriptSource = `:log info "Subscription expired for ${secretData.name}, changing profile."; /ppp secret set [find name="${secretData.name}"] profile=${subscriptionData.nonPaymentProfile};`;
 
-                return { restMethod, restUrl, restData };
+            const schedulerPayload = {
+                'start-date': schedulerDate,
+                'start-time': schedulerTime,
+                'on-event': scriptSource
             };
 
-            const { restMethod, restUrl, restData } = translateToRest(endpoint, method, body);
-            console.log(`[REST Proxy] ${restMethod} ${restUrl}`);
-
-            const response = await instance.request({
-                method: restMethod,
-                url: restUrl,
-                data: restData
-            });
-            res.json(response.data);
+            if (existingSchedulers.length > 0) {
+                await req.routerInstance.patch(`/system/scheduler/${existingSchedulers[0].id}`, schedulerPayload);
+            } else {
+                await req.routerInstance.put('/system/scheduler', {
+                    name: schedulerName,
+                    interval: '0',
+                    ...schedulerPayload
+                });
+            }
         }
-    } catch (e) {
-        console.error(`Proxy Error (${endpoint}):`, e.message);
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
-    }
+        
+        // 3. Kick user if they are active to apply changes
+        let kickMessage = '';
+        try {
+            const response = await req.routerInstance.get(`/ppp/active?name=${secretData.name}`);
+            if (response.data.length > 0) {
+                await req.routerInstance.delete(`/ppp/active/${encodeURIComponent(response.data[0].id)}`);
+                kickMessage = "User was kicked to apply changes.";
+            }
+        } catch (kickError) {
+            // Don't fail the whole operation if kick fails.
+            console.error(`Could not kick user ${secretData.name}: ${kickError.message}`);
+            kickMessage = "Could not kick user; they may need to reconnect manually.";
+        }
+
+        return { message: `User saved and subscription scheduled successfully. ${kickMessage}`.trim() };
+    });
 });
 
-app.listen(PORT, () => {
-    console.log(`MikroTik API Backend listening on port ${PORT}`);
+
+app.post('/mt-api/:routerId/ip/dhcp-server/lease/:leaseId/make-static', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { leaseId } = req.params;
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // Use a query `?` to select the item for an action, not `=`
+                const result = await writeLegacySafe(client, ['/ip/dhcp-server/lease/make-static', `?.id=${leaseId}`]);
+                if (result && result.length > 0 && result[0].message) {
+                    throw new Error(result[0].message);
+                }
+            } finally {
+                await client.close();
+            }
+            return { message: 'Lease made static.' };
+        } else {
+            await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": leaseId });
+            return { message: 'Lease made static.' };
+        }
+    });
+});
+
+app.post('/mt-api/:routerId/ip/dhcp-server/setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { dhcpInterface, dhcpAddressSpace, gateway, addressPool, dnsServers, leaseTime } = req.body;
+        const poolName = `dhcp_pool_${dhcpInterface}`;
+
+        // --- ADDED STEP: Assign IP to interface ---
+        const cidr = dhcpAddressSpace.split('/')[1];
+        if (!cidr) {
+            throw new Error('Invalid DHCP Address Space format. It must be in CIDR notation (e.g., 192.168.88.0/24).');
+        }
+        const interfaceAddress = `${gateway}/${cidr}`;
+        
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                 // 1. Assign IP address to interface
+                await writeLegacySafe(client, ['/ip/address/add', `=address=${interfaceAddress}`, `=interface=${dhcpInterface}`]);
+
+                // 2. Create IP Pool
+                await writeLegacySafe(client, ['/ip/pool/add', `=name=${poolName}`, `=ranges=${addressPool}`]);
+                
+                // 3. Create DHCP Network
+                await writeLegacySafe(client, ['/ip/dhcp-server/network/add',
+                    `=address=${dhcpAddressSpace}`,
+                    `=gateway=${gateway}`,
+                    `=dns-server=${dnsServers}`
+                ]);
+
+                // 4. Create DHCP Server
+                await writeLegacySafe(client, ['/ip/dhcp-server/add',
+                    `=name=dhcp_${dhcpInterface}`,
+                    `=interface=${dhcpInterface}`,
+                    `=address-pool=${poolName}`,
+                    `=lease-time=${leaseTime}`,
+                    '=disabled=no'
+                ]);
+
+            } finally {
+                await client.close();
+            }
+        } else { // REST API
+             // 1. Assign IP address to interface
+            await req.routerInstance.put('/ip/address', {
+                address: interfaceAddress,
+                interface: dhcpInterface,
+            });
+
+             // 2. Create IP Pool
+            await req.routerInstance.put('/ip/pool', {
+                name: poolName,
+                ranges: addressPool,
+            });
+
+            // 3. Create DHCP Network
+            await req.routerInstance.put('/ip/dhcp-server/network', {
+                address: dhcpAddressSpace,
+                gateway: gateway,
+                'dns-server': dnsServers,
+            });
+            
+            // 4. Create DHCP Server
+            await req.routerInstance.put('/ip/dhcp-server', {
+                name: `dhcp_${dhcpInterface}`,
+                interface: dhcpInterface,
+                'address-pool': poolName,
+                'lease-time': leaseTime,
+                disabled: false,
+            });
+        }
+        
+        return { message: 'DHCP Server setup completed successfully.' };
+    });
+});
+
+app.post('/mt-api/:routerId/dhcp-captive-portal/setup', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { panelIp, lanInterface } = req.body;
+        if (!panelIp || !lanInterface) {
+            throw new Error('Panel IP and LAN Interface are required.');
+        }
+
+        const scriptName = "dhcp-lease-add-to-pending";
+        const authorizedListName = "authorized-dhcp-users";
+        const pendingListName = "pending-dhcp-users";
+        const portalRedirectComment = "Redirect pending HTTP to portal";
+        const masqueradeComment = "Masquerade authorized DHCP clients";
+
+        const scriptSource = `
+:local mac $"lease-mac-address";
+:local ip $"lease-address";
+:log info "DHCP Portal Script: Lease event for IP=$ip MAC=$mac.";
+
+:local authorizedList "authorized-dhcp-users";
+:local pendingList "pending-dhcp-users";
+
+:local isAuthorized [/ip firewall address-list find where list=$authorizedList and address=$ip];
+:if ([:len $isAuthorized] > 0) do={
+    :log info "DHCP Portal Script: IP=$ip is already authorized. No action needed.";
+} else={
+    :local pendingEntry [/ip firewall address-list find where list=$pendingList and comment=$mac];
+    :if ([:len $pendingEntry] > 0) do={
+        :local currentIp [/ip firewall address-list get $pendingEntry address];
+        :if ($currentIp != $ip) do={
+            :log info "DHCP Portal Script: MAC=$mac is pending, updating IP from $currentIp to $ip.";
+            /ip firewall address-list set $pendingEntry address=$ip;
+        } else={
+            :log info "DHCP Portal Script: MAC=$mac with IP=$ip is already in pending list. No action needed.";
+        }
+    } else={
+        :log info "DHCP Portal Script: New client. Adding MAC=$mac with IP=$ip to pending list.";
+        /ip firewall address-list add address=$ip list=$pendingList timeout=1d comment=$mac;
+    }
+}`;
+        const compactScriptSource = scriptSource.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        
+        const filterComments = [
+            "Allow established/related connections for Captive Portal",
+            "Drop invalid connections for Captive Portal",
+            "Allow authorized DHCP clients",
+            "Allow LAN access to Captive Portal",
+            "Drop all other traffic from LAN"
+        ];
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // --- Base Setup (Address Lists, Script) ---
+                await writeLegacySafe(client, ['/ip/firewall/address-list/add', `=list=${authorizedListName}`, `=comment=Users authorized by panel`]);
+                await writeLegacySafe(client, ['/ip/firewall/address-list/add', `=list=${pendingListName}`, `=comment=Users pending authorization`]);
+                await writeLegacySafe(client, ['/system/script/add', `=name=${scriptName}`, `=source=${compactScriptSource}`]);
+
+                // --- DHCP Server Script Integration ---
+                const dhcpServers = await writeLegacySafe(client, ['/ip/dhcp-server/print', `?interface=${lanInterface}`]);
+                if (dhcpServers.length === 0) throw new Error(`No DHCP server found on interface "${lanInterface}".`);
+                const serverId = dhcpServers[0]['.id'];
+                await writeLegacySafe(client, ['/ip/dhcp-server/set', `=.id=${serverId}`, `=lease-script=${scriptName}`]);
+                
+                // --- Clean old firewall rules ---
+                const oldFilterRules = await writeLegacySafe(client, '/ip/firewall/filter/print');
+                for (const comment of filterComments) {
+                    const rule = oldFilterRules.find(r => r.comment === comment);
+                    if (rule) await writeLegacySafe(client, ['/ip/firewall/filter/remove', `=.id=${rule['.id']}`]);
+                }
+                
+                // --- Insert new firewall rules in reverse order ---
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=drop', `=chain=forward`, `=in-interface=${lanInterface}`, `=src-address-list=!${authorizedListName}`, '=place-before=0', `=comment=${filterComments[4]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=accept', `=chain=forward`, `=dst-address=${panelIp}`, `=in-interface=${lanInterface}`, '=place-before=0', `=comment=${filterComments[3]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=accept', `=chain=forward`, `=src-address-list=${authorizedListName}`, '=place-before=0', `=comment=${filterComments[2]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=drop', `=chain=forward`, '=connection-state=invalid', '=place-before=0', `=comment=${filterComments[1]}`]);
+                await writeLegacySafe(client, ['/ip/firewall/filter/add', '=action=accept', `=chain=forward`, '=connection-state=established,related', '=place-before=0', `=comment=${filterComments[0]}`]);
+
+                // --- NAT Rule to redirect HTTP traffic to the panel ---
+                const oldNatRule = await writeLegacySafe(client, ['/ip/firewall/nat/print', `?comment=${portalRedirectComment}`]);
+                if (oldNatRule.length > 0) await writeLegacySafe(client, ['/ip/firewall/nat/remove', `=.id=${oldNatRule[0]['.id']}`]);
+                await writeLegacySafe(client, ['/ip/firewall/nat/add', '=chain=dstnat', `=src-address-list=${pendingListName}`, '=protocol=tcp', '=dst-port=80', '=action=dst-nat', `=to-addresses=${panelIp}`, '=to-ports=3001', `=comment=${portalRedirectComment}`]);
+
+                // --- NAT Rule to masquerade authorized users ---
+                const oldMasqueradeRule = await writeLegacySafe(client, ['/ip/firewall/nat/print', `?comment=${masqueradeComment}`]);
+                if (oldMasqueradeRule.length > 0) await writeLegacySafe(client, ['/ip/firewall/nat/remove', `=.id=${oldMasqueradeRule[0]['.id']}`]);
+                await writeLegacySafe(client, ['/ip/firewall/nat/add', '=chain=srcnat', `=src-address-list=${authorizedListName}`, '=action=masquerade', `=comment=${masqueradeComment}`, '=place-before=0']);
+
+            } finally {
+                await client.close();
+            }
+        } else { // REST API
+            // --- Base Setup ---
+            await req.routerInstance.put('/ip/firewall/address-list', { list: authorizedListName, comment: "Users authorized by panel" });
+            await req.routerInstance.put('/ip/firewall/address-list', { list: pendingListName, comment: "Users pending authorization" });
+            await req.routerInstance.put('/system/script', { name: scriptName, source: compactScriptSource });
+            
+            // --- DHCP Server Script ---
+            const dhcpServers = await req.routerInstance.get(`/ip/dhcp-server?interface=${lanInterface}`);
+            if (dhcpServers.data.length === 0) throw new Error(`No DHCP server found on interface "${lanInterface}". Please set one up first.`);
+            const serverId = dhcpServers.data[0].id;
+            await req.routerInstance.patch(`/ip/dhcp-server/${serverId}`, { 'lease-script': scriptName });
+
+            // --- Clean old firewall rules ---
+            const oldFilterRules = await req.routerInstance.get('/ip/firewall/filter');
+            for (const comment of filterComments) {
+                const rule = oldFilterRules.data.find(r => r.comment === comment);
+                if (rule) await req.routerInstance.delete(`/ip/firewall/filter/${rule.id}`);
+            }
+
+            // --- Insert new firewall rules in reverse order ---
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'in-interface': lanInterface, 'src-address-list': `!${authorizedListName}`, 'place-before': '0', comment: filterComments[4] });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'dst-address': panelIp, 'in-interface': lanInterface, 'place-before': '0', comment: filterComments[3] });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'src-address-list': authorizedListName, 'place-before': '0', comment: filterComments[2] });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'drop', chain: 'forward', 'connection-state': 'invalid', 'place-before': '0', comment: filterComments[1] });
+            await req.routerInstance.put('/ip/firewall/filter', { action: 'accept', chain: 'forward', 'connection-state': 'established,related', 'place-before': '0', comment: filterComments[0] });
+            
+            // --- NAT Rule to redirect HTTP traffic to the panel ---
+            const oldNatRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${portalRedirectComment}`);
+            for (const rule of oldNatRules.data) {
+                await req.routerInstance.delete(`/ip/firewall/nat/${rule.id}`);
+            }
+            await req.routerInstance.put('/ip/firewall/nat', { chain: 'dstnat', 'src-address-list': pendingListName, protocol: 'tcp', 'dst-port': '80', action: 'dst-nat', 'to-addresses': panelIp, 'to-ports': '3001', comment: portalRedirectComment });
+            
+            // --- NAT Rule to masquerade authorized users ---
+            const oldMasqueradeRules = await req.routerInstance.get(`/ip/firewall/nat?comment=${masqueradeComment}`);
+            for (const rule of oldMasqueradeRules.data) {
+                await req.routerInstance.delete(`/ip/firewall/nat/${rule.id}`);
+            }
+            await req.routerInstance.put('/ip/firewall/nat', { chain: 'srcnat', 'src-address-list': authorizedListName, action: 'masquerade', comment: masqueradeComment, 'place-before': '0' });
+        }
+        
+        return { message: 'DHCP Captive Portal components installed successfully!' };
+    });
+});
+
+app.post('/mt-api/:routerId/dhcp-captive-portal/uninstall', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const scriptName = "dhcp-lease-add-to-pending";
+        const authorizedListName = "authorized-dhcp-users";
+        const pendingListName = "pending-dhcp-users";
+        const portalRedirectComment = "Redirect pending HTTP to portal";
+        const masqueradeComment = "Masquerade authorized DHCP clients";
+        const filterComments = [
+            "Allow established/related connections for Captive Portal",
+            "Drop invalid connections for Captive Portal",
+            "Allow authorized DHCP clients",
+            "Allow LAN access to Captive Portal",
+            "Drop all other traffic from LAN"
+        ];
+
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const findAndRemove = async (path, query) => {
+                    const items = await writeLegacySafe(client, [path + '/print', ...query]);
+                    for (const item of items) {
+                        await writeLegacySafe(client, [path + '/remove', `=.id=${item['.id']}`]);
+                    }
+                };
+
+                await findAndRemove('/ip/firewall/nat', [`?comment=${portalRedirectComment}`]);
+                await findAndRemove('/ip/firewall/nat', [`?comment=${masqueradeComment}`]);
+
+                for (const comment of filterComments) {
+                    await findAndRemove('/ip/firewall/filter', [`?comment=${comment}`]);
+                }
+
+                const dhcpServers = await writeLegacySafe(client, ['/ip/dhcp-server/print', `?lease-script=${scriptName}`]);
+                for (const server of dhcpServers) {
+                    await writeLegacySafe(client, ['/ip/dhcp-server/set', `=.id=${server['.id']}`, '=lease-script=none']);
+                }
+                
+                await findAndRemove('/system/script', [`?name=${scriptName}`]);
+                
+                await findAndRemove('/ip/firewall/address-list', [`?list=${authorizedListName}`]);
+                await findAndRemove('/ip/firewall/address-list', [`?list=${pendingListName}`]);
+
+            } finally {
+                await client.close();
+            }
+        } else { // REST API
+            const findAndRemove = async (path, query) => {
+                try {
+                    const response = await req.routerInstance.get(`${path}?${query}`);
+                    for (const item of response.data) {
+                        await req.routerInstance.delete(`${path}/${item.id}`);
+                    }
+                } catch (e) { console.warn(`Could not remove items at ${path}:`, e.message); }
+            };
+
+            await findAndRemove('/ip/firewall/nat', `comment=${portalRedirectComment}`);
+            await findAndRemove('/ip/firewall/nat', `comment=${masqueradeComment}`);
+
+            for (const comment of filterComments) {
+                await findAndRemove('/ip/firewall/filter', `comment=${comment}`);
+            }
+
+            try {
+                const dhcpServers = await req.routerInstance.get(`/ip/dhcp-server?lease-script=${scriptName}`);
+                for (const server of dhcpServers.data) {
+                    await req.routerInstance.patch(`/ip/dhcp-server/${server.id}`, { 'lease-script': 'none' });
+                }
+            } catch(e) { console.warn('Could not unset DHCP script:', e.message); }
+            
+            await findAndRemove('/system/script', `name=${scriptName}`);
+            await findAndRemove('/ip/firewall/address-list', `list=${authorizedListName}`);
+            await findAndRemove('/ip/firewall/address-list', `list=${pendingListName}`);
+        }
+
+        return { message: 'DHCP Captive Portal components have been uninstalled.' };
+    });
+});
+
+// --- NEW DHCP CLIENT ENDPOINTS ---
+app.post('/mt-api/:routerId/dhcp-client/update', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const { client: originalClient, params } = req.body;
+        const { customerInfo, contactNumber, email, plan, downtimeDays, expiresAt: manualExpiresAt, speedLimit: manualSpeedLimit } = params;
+        
+        const address = originalClient.address;
+        const macAddress = originalClient.macAddress;
+
+        let expiresAt;
+        let planNameForComment;
+        let speedLimit;
+        
+        if (plan) {
+            // Plan-based logic
+            const startDate = new Date();
+            const totalDays = plan.cycle_days - (downtimeDays || 0);
+            expiresAt = new Date(startDate);
+            expiresAt.setDate(expiresAt.getDate() + totalDays);
+            planNameForComment = plan.name;
+            speedLimit = plan.speedLimit;
+        } else if (manualExpiresAt) {
+            // Manual edit logic
+            expiresAt = new Date(manualExpiresAt);
+            planNameForComment = "Manual Edit";
+            speedLimit = manualSpeedLimit;
+        } else {
+            throw new Error("Either a billing plan or a manual expiration date is required to update a client.");
+        }
+
+        const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+        const schedulerDate = `${monthNames[expiresAt.getMonth()]}/${String(expiresAt.getDate()).padStart(2, '0')}/${expiresAt.getFullYear()}`;
+        const schedulerTime = `${String(expiresAt.getHours()).padStart(2, '0')}:${String(expiresAt.getMinutes()).padStart(2, '0')}:${String(expiresAt.getSeconds()).padStart(2, '0')}`;
+        
+        const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
+        const scriptSource = `:log info "DHCP subscription expired for ${address}, deactivating."; ` +
+            `/ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; ` +
+            `/ip firewall connection remove [find where src-address~"^${address}"]; ` +
+            `:local macAddr "${macAddress}"; ` +
+            `:local leaseId [/ip dhcp-server lease find where mac-address=$macAddr]; ` +
+            `if ([:len $leaseId] > 0) do={ ` +
+                `:local ipAddr [/ip dhcp-server lease get $leaseId address]; ` +
+                `/ip firewall address-list add address=$ipAddr list="pending-dhcp-users" timeout=1d comment=$macAddr; ` +
+            `}`;
+
+        const commentData = { customerInfo, contactNumber, email, planName: planNameForComment, dueDate: expiresAt.toISOString().split('T')[0] };
+        const addressListPayload = {
+            list: 'authorized-dhcp-users',
+            comment: JSON.stringify(commentData),
+            address: address,
+        };
+
+        if (req.routerConfig.api_type === 'legacy') {
+            throw new Error("This feature is not supported for the legacy API.");
+        }
+
+        // 1. Find the lease
+        const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${macAddress}`);
+        if (leases.data.length === 0) {
+            throw new Error(`No DHCP lease found for MAC address ${macAddress}. The client may have disconnected. Please refresh.`);
+        }
+        const lease = leases.data[0];
+
+        // 2. Make lease static if it's dynamic
+        if (lease.dynamic === 'true' || lease.dynamic === true) {
+            await req.routerInstance.post(`/ip/dhcp-server/lease/make-static`, { ".id": lease.id });
+        }
+
+        // 3. Set rate limit on the static lease
+        const speed = speedLimit && !isNaN(parseFloat(speedLimit)) ? parseFloat(speedLimit) : 0;
+        const rateLimitValue = speed > 0 ? `${speed}M/${speed}M` : ''; // Supports empty string to clear limit
+        await req.routerInstance.patch(`/ip/dhcp-server/lease/${lease.id}`, {
+            'rate-limit': rateLimitValue
+        });
+
+        // 4. Update Address List entry (remove from pending, add/update in authorized)
+        const addressLists = await req.routerInstance.get('/ip/firewall/address-list');
+        const pendingEntry = addressLists.data.find(item => item.address === address && item.list === 'pending-dhcp-users');
+        if (pendingEntry) {
+            await req.routerInstance.delete(`/ip/firewall/address-list/${pendingEntry.id}`);
+        }
+        
+        const authorizedEntry = addressLists.data.find(item => item.address === address && item.list === 'authorized-dhcp-users');
+        if (authorizedEntry) {
+             await req.routerInstance.patch(`/ip/firewall/address-list/${authorizedEntry.id}`, addressListPayload);
+        } else {
+             await req.routerInstance.put('/ip/firewall/address-list', addressListPayload);
+        }
+
+        // 5. Manage Scheduler
+        const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+        if(schedulers.data.length > 0) {
+            await req.routerInstance.patch(`/system/scheduler/${schedulers.data[0].id}`, {
+                'start-date': schedulerDate,
+                'start-time': schedulerTime,
+                'on-event': scriptSource
+            });
+        } else {
+            await req.routerInstance.put('/system/scheduler', {
+                name: schedulerName,
+                'start-date': schedulerDate,
+                'start-time': schedulerTime,
+                interval: '0',
+                'on-event': scriptSource
+            });
+        }
+        return { message: 'Client updated successfully with scheduler-based deactivation.' };
+    });
+});
+
+app.post('/mt-api/:routerId/dhcp-client/delete', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const client = req.body;
+        const address = client.address;
+
+        if (req.routerConfig.api_type === 'legacy') {
+            throw new Error("This action is not supported for the legacy API.");
+        }
+
+        // --- Deactivation/Deletion Logic ---
+
+        // 1. If client is active, remove its scheduler.
+        if (client.status === 'active') {
+            try {
+                const schedulerName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
+                const schedulers = await req.routerInstance.get(`/system/scheduler?name=${schedulerName}`);
+                for (const scheduler of schedulers.data) {
+                    await req.routerInstance.delete(`/system/scheduler/${scheduler.id}`);
+                }
+            } catch (e) { console.warn(`Could not remove scheduler for ${address}: ${e.message}`); }
+        }
+
+        // 2. Remove active connections to force re-evaluation by firewall.
+        try {
+            const connections = await req.routerInstance.get(`/ip/firewall/connection?src-address=${address}`);
+            for (const c of connections.data) {
+                await req.routerInstance.delete(`/ip/firewall/connection/${c.id}`);
+            }
+        } catch (e) { console.warn(`Could not remove connections for ${address}: ${e.message}`); }
+
+        // 3. Clear any rate-limit from the static lease.
+        try {
+            const leases = await req.routerInstance.get(`/ip/dhcp-server/lease?mac-address=${client.macAddress}`);
+            if (leases.data.length > 0) {
+                await req.routerInstance.patch(`/ip/dhcp-server/lease/${leases.data[0].id}`, { 'rate-limit': '' });
+            }
+        } catch (e) { console.warn(`Could not clear rate-limit for ${client.macAddress}: ${e.message}`); }
+        
+        // 4. Remove the client's current address list entry (from either 'authorized' or 'pending' list).
+        await req.routerInstance.delete(`/ip/firewall/address-list/${client.id}`);
+
+        // 5. If the client was active, add them back to the 'pending' list to reflect the "deactivated" state.
+        if (client.status === 'active') {
+            await req.routerInstance.put('/ip/firewall/address-list', {
+                list: 'pending-dhcp-users',
+                address: client.address,
+                comment: client.macAddress,
+                timeout: '1d' // A temporary timeout to allow re-activation.
+            });
+            return { message: 'Client has been deactivated and moved to the pending list.' };
+        } else {
+             return { message: 'Pending client has been removed.' };
+        }
+    });
+});
+
+
+
+// Generic proxy handler for all other requests
+app.all('/mt-api/:routerId/*', getRouterConfig, async (req, res) => {
+    await handleApiRequest(req, res, async () => {
+        const apiPath = req.path.replace(`/mt-api/${req.params.routerId}`, '');
+        
+        // --- Legacy API Logic ---
+        if (req.routerConfig.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            let result;
+            try {
+                const method = req.method.toLowerCase();
+                const pathParts = apiPath.split('/').filter(Boolean);
+                const hasId = pathParts.length > 1 && pathParts[pathParts.length-1].startsWith('*');
+                const command = `/${pathParts.join('/')}`;
+                const id = hasId ? pathParts[pathParts.length - 1] : null;
+                const commandWithoutId = hasId ? `/${pathParts.slice(0, -1).join('/')}` : command;
+
+                let query = [];
+
+                if (method === 'get') {
+                    query.push(command + '/print');
+                    Object.entries(req.query).forEach(([key, value]) => query.push(`?${key}=${value}`));
+                } else if (method === 'post' && hasId) { // POST to a resource ID implies an update ('set')
+                    query.push(commandWithoutId + '/set', `=.id=${id}`);
+                    Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
+                } else if (method === 'post' || method === 'put') { // POST/PUT to collection implies 'add'
+                    query.push(command + '/add');
+                    Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
+                } else if (method === 'patch') {
+                    query.push(commandWithoutId + '/set', `=.id=${id}`);
+                    Object.entries(req.body).forEach(([key, value]) => query.push(`=${key}=${value}`));
+                } else if (method === 'delete') {
+                    query.push(commandWithoutId + '/remove', `=.id=${id}`);
+                }
+
+                if (query.length > 0) {
+                    result = await writeLegacySafe(client, query);
+                } else {
+                    throw new Error(`Unsupported legacy method/path combination: ${method.toUpperCase()} ${apiPath}`);
+                }
+            } finally {
+                await client.close();
+            }
+
+            // Normalize and perform any custom logic
+            let finalResult = Array.isArray(result) ? result.map(normalizeLegacyObject) : normalizeLegacyObject(result);
+            return finalResult;
+        } 
+        
+        // --- REST API Logic ---
+        else {
+            const options = {
+                method: req.method,
+                url: apiPath,
+                data: (req.method !== 'GET' && req.body) ? req.body : undefined,
+                params: req.query
+            };
+            const response = await req.routerInstance(options);
+            return response.data;
+        }
+    });
+});
+
+// --- WebSocket Server for SSH ---
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server, path: '/ws/ssh' });
+
+wss.on('connection', (ws) => {
+    console.log('SSH WS Client connected');
+    const ssh = new Client();
+
+    ws.on('message', (message) => {
+        try {
+            const msg = JSON.parse(message);
+
+            if (msg.type === 'auth') {
+                const { host, user, password, term_cols, term_rows } = msg.data;
+                ssh.on('ready', () => {
+                    ws.send('SSH connection established.\r\n');
+                    ssh.shell({ term: 'xterm-color', cols: term_cols, rows: term_rows }, (err, stream) => {
+                        if (err) return ws.send(`\r\nSSH shell error: ${err.message}\r\n`);
+                        stream.on('data', (data) => ws.send(data.toString('utf-8')));
+                        stream.on('close', () => ssh.end());
+                        ws.on('message', (nestedMessage) => {
+                            try {
+                                const nestedMsg = JSON.parse(nestedMessage);
+                                if (nestedMsg.type === 'data' && stream.writable) stream.write(nestedMsg.data);
+                                else if (nestedMsg.type === 'resize' && stream.writable) stream.setWindow(nestedMsg.rows, nestedMsg.cols);
+                            } catch (e) {}
+                        });
+                    });
+                }).on('error', (err) => {
+                    ws.send(`\r\nSSH connection error: ${err.message}\r\n`);
+                }).connect({ host, port: 22, username: user, password });
+            }
+        } catch(e) {
+            console.error("Error processing WS message:", e);
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('SSH WS Client disconnected');
+        ssh.end();
+    });
+});
+
+server.listen(PORT, () => {
+    console.log(`Mikrotik Billling Management API backend server running on http://localhost:${PORT}`);
 });
