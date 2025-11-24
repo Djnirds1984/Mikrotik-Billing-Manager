@@ -200,6 +200,18 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [dueDate, setDueDate] = useState('');
     const [nonPaymentProfile, setNonPaymentProfile] = useState('');
     const [planType, setPlanType] = useState<'prepaid' | 'postpaid'>('prepaid');
+    const toDatetimeLocal = (s: string) => {
+        try {
+            const d = new Date(s);
+            const pad = (n: number) => String(n).padStart(2, '0');
+            const yyyy = d.getFullYear();
+            const mm = pad(d.getMonth() + 1);
+            const dd = pad(d.getDate());
+            const hh = pad(d.getHours());
+            const mi = pad(d.getMinutes());
+            return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+        } catch { return s; }
+    };
 
 
     useEffect(() => {
@@ -221,14 +233,15 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             try {
                 const commentData = JSON.parse(initialData.comment);
                 if (commentData.dueDateTime) {
-                    setDueDate(commentData.dueDateTime);
+                    setDueDate(toDatetimeLocal(commentData.dueDateTime));
                 } else if (commentData.dueDate) {
                     const dateTime = `${commentData.dueDate}T23:59`;
                     setDueDate(dateTime);
                 } else {
                     setDueDate('');
                 }
-                setPlanType((commentData.planType === 'postpaid' ? 'postpaid' : 'prepaid'));
+                const pt = String(commentData.planType || '').toLowerCase().trim();
+                setPlanType(pt === 'postpaid' ? 'postpaid' : 'prepaid');
             } catch (e) {
                 setDueDate('');
                 setPlanType('prepaid');
@@ -386,7 +399,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     } else {
                         subscription.dueDate = parsedComment.dueDate || 'No Info';
                     }
-                    subscription.planType = parsedComment.planType === 'postpaid' ? 'postpaid' : 'prepaid';
+                    const pt = String(parsedComment.planType || '').toLowerCase().trim();
+                    subscription.planType = pt === 'postpaid' ? 'postpaid' : 'prepaid';
                 } catch (e) { /* ignore */ }
             }
             return {
@@ -426,7 +440,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 commentJson.currency = selectedPlan.currency;
             }
             if (subscriptionData.planType) {
-                commentJson.planType = subscriptionData.planType;
+                const pt = String(subscriptionData.planType).toLowerCase().trim();
+                commentJson.planType = pt === 'postpaid' ? 'postpaid' : 'prepaid';
             }
             // Persist customer info in comment on the secret
             if (customerData) {
