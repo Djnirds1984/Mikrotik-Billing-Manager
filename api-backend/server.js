@@ -562,14 +562,14 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
 app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
     try {
         const data = req.body || {};
-        const secretData = data.secretData || {};
-        const payment = data.paymentData || {};
-        const subscription = data.subscriptionData || {};
-        const username = secretData.name || payment.username;
-        const targetProfile = secretData.profile || payment.profile;
+        const secretData = data.secretData || data.secret || {};
+        const payment = data.paymentData || data.payment || {};
+        const subscription = data.subscriptionData || data.subscription || {};
+        let username = secretData.name || payment.username || (data.secret && data.secret.name);
+        let targetProfile = secretData.profile || payment.profile || (payment.plan && payment.plan.pppoeProfile);
         const nonPaymentProfile = subscription.nonPaymentProfile || payment.nonPaymentProfile;
-        const dueDateIso = subscription.dueDate || payment.dueDate;
-        const graceDays = subscription.graceDays || payment.graceDays;
+        const dueDateIso = subscription.dueDate || payment.dueDate || payment.paymentDate;
+        const graceDays = subscription.graceDays || payment.graceDays || payment.discountDays;
         const graceTime = subscription.graceTime || payment.graceTime;
 
         if (!username || !targetProfile) {
@@ -587,8 +587,9 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
             } finally { await client.close(); }
         } else {
             const list = await req.routerInstance.get('/ppp/secret');
-            const item = (Array.isArray(list.data) ? list.data : []).find(s => s.name === username);
+            const item = username ? (Array.isArray(list.data) ? list.data : []).find(s => s.name === username) : null;
             if (item && item.id) id = item.id;
+            if (!username && item && item.name) username = item.name;
         }
 
         // Apply paid profile and enable secret
