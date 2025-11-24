@@ -527,6 +527,153 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
     }
 });
 
+// Payment processing: apply paid profile, remove non-payment scheduler, update queue
+app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
+    try {
+        const data = req.body || {};
+        const secretData = data.secretData || {};
+        const payment = data.paymentData || {};
+        const subscription = data.subscriptionData || {};
+        const username = secretData.name || payment.username;
+        const targetProfile = secretData.profile || payment.profile;
+        const nonPaymentProfile = subscription.nonPaymentProfile || payment.nonPaymentProfile;
+        const dueDateIso = subscription.dueDate || payment.dueDate;
+        const graceDays = subscription.graceDays || payment.graceDays;
+        const graceTime = subscription.graceTime || payment.graceTime;
+
+        if (!username || !targetProfile) {
+            return res.status(400).json({ message: 'Missing username or target profile' });
+        }
+
+        // Resolve secret id by name
+        let id = null;
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const found = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + username]);
+                if (Array.isArray(found) && found[0] && found[0]['.id']) id = found[0]['.id'];
+            } finally { await client.close(); }
+        } else {
+            const list = await req.routerInstance.get('/ppp/secret');
+            const item = (Array.isArray(list.data) ? list.data : []).find(s => s.name === username);
+            if (item && item.id) id = item.id;
+        }
+
+        // Apply paid profile and enable secret
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                if (!id) {
+                    await client.write('/ppp/secret/add', { name: username, service: 'pppoe', profile: targetProfile, disabled: 'false' });
+                } else {
+                    await client.write('/ppp/secret/set', { '.id': id, profile: targetProfile, disabled: 'false' });
+                }
+            } finally { await client.close(); }
+        } else {
+            if (!id) {
+                await req.routerInstance.post('/ppp/secret', { name: username, service: 'pppoe', profile: targetProfile, disabled: false });
+            } else {
+                await req.routerInstance.patch(`/ppp/secret/${id}`, { profile: targetProfile, disabled: false });
+            }
+        }
+
+        // Remove existing deactivate scheduler and (re)create for next due date if provided
+        const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        let scheduleDate = null;
+        if (dueDateIso) {
+            scheduleDate = new Date(dueDateIso);
+        } else if (graceDays) {
+            const now = new Date();
+            if (graceTime) {
+                const [h, m] = String(graceTime).split(':').map(Number);
+                now.setHours(h || 0, m || 0, 0, 0);
+            }
+            scheduleDate = new Date(now.getTime() + (Number(graceDays) * 24 * 60 * 60 * 1000));
+        }
+
+        const schedName = `deactivate-ppp-${username}`;
+        const startDate = scheduleDate ? `${months[scheduleDate.getMonth()]}/${String(scheduleDate.getDate()).padStart(2,'0')}/${scheduleDate.getFullYear()}` : null;
+        const startTime = scheduleDate ? scheduleDate.toTimeString().split(' ')[0] : null;
+        const onEvent = nonPaymentProfile ? `/ppp secret set [find where name=\"${username}\"] profile=\"${nonPaymentProfile}\"` : '';
+
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const existing = await writeLegacySafe(client, ['/system/scheduler/print', '?name=' + schedName]);
+                if (existing && existing.length > 0) {
+                    await client.write('/system/scheduler/remove', { '.id': existing[0]['.id'] });
+                }
+                if (scheduleDate && nonPaymentProfile) {
+                    await client.write('/system/scheduler/add', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
+                }
+            } finally { await client.close(); }
+        } else {
+            const list = await req.routerInstance.get('/system/scheduler');
+            const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
+            if (existing && existing.id) {
+                await req.routerInstance.delete(`/system/scheduler/${existing.id}`);
+            }
+            if (scheduleDate && nonPaymentProfile) {
+                await req.routerInstance.post('/system/scheduler', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
+            }
+        }
+
+        // Queue update based on profile rate-limit similar to save path
+        try {
+            let rate = null;
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + targetProfile]);
+                    rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
+                    if (rate) {
+                        const active = await writeLegacySafe(client, ['/ppp/active/print', '?name=' + username]);
+                        const address = Array.isArray(active) && active[0] ? (active[0].address || active[0]['address']) : null;
+                        if (address) {
+                            const queues = await writeLegacySafe(client, ['/queue/simple/print', '?name=' + username]);
+                            const limitString = String(rate);
+                            if (queues && queues.length > 0) {
+                                await client.write('/queue/simple/set', { '.id': queues[0]['.id'], 'max-limit': limitString, target: address });
+                            } else {
+                                await client.write('/queue/simple/add', { name: username, target: address, 'max-limit': limitString });
+                            }
+                        }
+                    }
+                } finally { await client.close(); }
+            } else {
+                const listResp = await req.routerInstance.get('/ppp/profile');
+                const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === targetProfile);
+                rate = prof ? (prof['rate-limit'] || prof.rate_limit) : null;
+                if (rate) {
+                    const activeResp = await req.routerInstance.get('/ppp/active');
+                    const found = (Array.isArray(activeResp.data) ? activeResp.data : []).find(a => a.name === username);
+                    const address = found ? (found.address || found['address']) : null;
+                    if (address) {
+                        const qList = await req.routerInstance.get('/queue/simple');
+                        const existing = (Array.isArray(qList.data) ? qList.data : []).find(q => q.name === username);
+                        const payload = { name: username, target: address, 'max-limit': String(rate) };
+                        if (existing && existing.id) {
+                            await req.routerInstance.patch(`/queue/simple/${existing.id}`, payload);
+                        } else {
+                            await req.routerInstance.post('/queue/simple', payload);
+                        }
+                    }
+                }
+            }
+        } catch (_) {}
+
+        res.json({ message: 'Payment processed' });
+    } catch (e) {
+        const status = e.response ? e.response.status : 400;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ message: msg });
+    }
+});
+
 // 2. DHCP Client Update Endpoint
 app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
     const { 
