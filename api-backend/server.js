@@ -565,8 +565,283 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         res.json({ message: 'Saved', composite: true });
     } catch (e) {
         const status = e.response ? e.response.status : 400;
+        const details = e.response?.data;
+        console.error('[ERROR] ppp/user/save', e.message, details);
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
+        res.status(status).json({ message: msg, details });
+    }
+});
+
+app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
+    const data = req.body || {};
+    try {
+        const secretData = data.secretData || data;
+        const initialSecret = data.initialSecret || null;
+        const subscription = data.subscriptionData || null;
+        let id = secretData['.id'] || secretData.id || initialSecret?.id;
+
+        const toRosPayload = (obj) => {
+            if (!obj || typeof obj !== 'object') return obj;
+            const allowed = new Set(['name','service','profile','comment','disabled','password','rate-limit','rate_limit']);
+            const out = {};
+            for (const k of Object.keys(obj)) {
+                if (k === 'id' || k === '.id') continue;
+                if (!allowed.has(k)) continue;
+                const key = k.replace(/_/g, '-');
+                let val = obj[k];
+                if (key === 'service' && !val) val = 'pppoe';
+                if (key === 'disabled' && typeof val === 'boolean') val = val ? 'true' : 'false';
+                if (key === 'password' && !val) val = '';
+                out[key] = val;
+            }
+            return out;
+        };
+
+        const profileName = secretData.profile;
+
+        const ensureProfileIfMissing = async () => {
+            if (!profileName) return;
+            const profilePayload = toRosPayload(data.profileData || { name: profileName });
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    const existing = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
+                    if (!existing || existing.length === 0) {
+                        await client.write('/ppp/profile/add', { name: profileName, ...profilePayload });
+                    }
+                } finally {
+                    await client.close();
+                }
+            } else {
+                const listResp = await req.routerInstance.get('/ppp/profile');
+                const exists = Array.isArray(listResp.data) && listResp.data.some(p => p.name === profileName);
+                if (!exists) {
+                    await req.routerInstance.post('/ppp/profile', { name: profileName, ...profilePayload });
+                }
+            }
+        };
+
+        const ensureSecretId = async () => {
+            if (id) return;
+            const name = secretData.name || initialSecret?.name;
+            if (!name) return;
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    const found = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + name]);
+                    if (Array.isArray(found) && found[0] && found[0]['.id']) {
+                        id = found[0]['.id'];
+                    }
+                } finally { await client.close(); }
+            } else {
+                const list = await req.routerInstance.get('/ppp/secret');
+                const item = (Array.isArray(list.data) ? list.data : []).find(s => s.name === name);
+                if (item && item.id) id = item.id;
+            }
+        };
+
+        const saveSecret = async () => {
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    if (id) {
+                        await client.write('/ppp/secret/set', { '.id': id, ...toRosPayload(secretData) });
+                    } else {
+                        await client.write('/ppp/secret/add', toRosPayload(secretData));
+                    }
+                } finally {
+                    await client.close();
+                }
+            } else {
+                const payload = toRosPayload(secretData);
+                if (id) {
+                    await req.routerInstance.patch(`/ppp/secret/${id}`, payload);
+                } else {
+                    await req.routerInstance.post('/ppp/secret', payload);
+                }
+            }
+        };
+
+        const upsertScheduler = async () => {
+            if (!subscription) return;
+            const username = secretData.name || initialSecret?.name;
+            if (!username) return;
+            const targetProfile = subscription.nonPaymentProfile;
+            const graceDays = subscription.graceDays;
+            const graceTime = subscription.graceTime;
+            const dueDateIso = subscription.dueDate;
+            let scheduleDate = null;
+            if (dueDateIso) {
+                scheduleDate = new Date(dueDateIso);
+            } else if (graceDays) {
+                const now = new Date();
+                if (graceTime) {
+                    const [h, m] = String(graceTime).split(':').map(Number);
+                    now.setHours(h || 0, m || 0, 0, 0);
+                }
+                scheduleDate = new Date(now.getTime() + (Number(graceDays) * 24 * 60 * 60 * 1000));
+            }
+            if (!scheduleDate || !targetProfile) return;
+
+            const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+            const startDate = `${months[scheduleDate.getMonth()]}/${String(scheduleDate.getDate()).padStart(2,'0')}/${scheduleDate.getFullYear()}`;
+            const startTime = scheduleDate.toTimeString().split(' ')[0];
+            const schedName = `deactivate-ppp-${username}`;
+            const onEvent = `/ppp secret set [find where name=\"${username}\"] profile=\"${targetProfile}\"`;
+
+            if (req.router.api_type === 'legacy') {
+                const client = req.routerInstance;
+                await client.connect();
+                try {
+                    const existing = await writeLegacySafe(client, ['/system/scheduler/print', '?name=' + schedName]);
+                    if (existing && existing.length > 0) {
+                        await client.write('/system/scheduler/set', { '.id': existing[0]['.id'], 'name': schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
+                    } else {
+                        await client.write('/system/scheduler/add', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
+                    }
+                } finally { await client.close(); }
+            } else {
+                const list = await req.routerInstance.get('/system/scheduler');
+                const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
+                const payload = { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent };
+                if (existing && existing.id) {
+                    await req.routerInstance.patch(`/system/scheduler/${existing.id}`, payload);
+                } else {
+                    await req.routerInstance.post('/system/scheduler', payload);
+                }
+            }
+        };
+
+        await ensureProfileIfMissing();
+        const propagateRateLimitToSecret = async () => {
+            try {
+                if (!secretData) return;
+                if (secretData['rate-limit'] || secretData.rate_limit) return;
+                if (!profileName) return;
+                if (req.router.api_type === 'legacy') {
+                    const client = req.routerInstance;
+                    await client.connect();
+                    try {
+                        const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
+                        const rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
+                        if (rate) secretData['rate-limit'] = rate;
+                    } finally { await client.close(); }
+                } else {
+                    const listResp = await req.routerInstance.get('/ppp/profile');
+                    const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
+                    const rate = prof ? (prof['rate-limit'] || prof.rate_limit) : null;
+                    if (rate) secretData['rate-limit'] = rate;
+                }
+            } catch (_) { }
+        };
+
+        await propagateRateLimitToSecret();
+        await ensureSecretId();
+        await saveSecret();
+        await upsertScheduler();
+
+        const upsertSimpleQueueFromProfile = async () => {
+            try {
+                const username = secretData.name || initialSecret?.name;
+                if (!username) return;
+                let rate = secretData['rate-limit'] || secretData.rate_limit;
+                if (!rate && profileName) {
+                    if (req.router.api_type === 'legacy') {
+                        const client = req.routerInstance;
+                        await client.connect();
+                        try {
+                            const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
+                            rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : rate;
+                        } finally { await client.close(); }
+                    } else {
+                        const listResp = await req.routerInstance.get('/ppp/profile');
+                        const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
+                        rate = prof ? (prof['rate-limit'] || prof.rate_limit || rate) : rate;
+                    }
+                }
+                if (!rate) return;
+
+                let address = null;
+                if (req.router.api_type === 'legacy') {
+                    const client = req.routerInstance;
+                    await client.connect();
+                    try {
+                        const active = await writeLegacySafe(client, ['/ppp/active/print', '?name=' + username]);
+                        address = Array.isArray(active) && active[0] ? (active[0].address || active[0]['address']) : null;
+                    } finally { await client.close(); }
+                } else {
+                    const activeResp = await req.routerInstance.get('/ppp/active');
+                    const found = (Array.isArray(activeResp.data) ? activeResp.data : []).find(a => a.name === username);
+                    address = found ? (found.address || found['address']) : null;
+                }
+                if (!address) return;
+
+                const limitString = typeof rate === 'string' ? rate : String(rate);
+                if (req.router.api_type === 'legacy') {
+                    const client = req.routerInstance;
+                    await client.connect();
+                    try {
+                        const queues = await writeLegacySafe(client, ['/queue/simple/print', '?name=' + username]);
+                        if (queues && queues.length > 0) {
+                            await client.write('/queue/simple/set', { '.id': queues[0]['.id'], 'max-limit': limitString, target: address });
+                        } else {
+                            await client.write('/queue/simple/add', { name: username, target: address, 'max-limit': limitString });
+                        }
+                    } finally { await client.close(); }
+                } else {
+                    const list = await req.routerInstance.get('/queue/simple');
+                    const existing = (Array.isArray(list.data) ? list.data : []).find(q => q.name === username);
+                    const payload = { name: username, target: address, 'max-limit': limitString };
+                    if (existing && existing.id) {
+                        await req.routerInstance.patch(`/queue/simple/${existing.id}`, payload);
+                    } else {
+                        await req.routerInstance.post('/queue/simple', payload);
+                    }
+                }
+            } catch (_) { }
+        };
+
+        await upsertSimpleQueueFromProfile();
+        try {
+            const customerData = data.customerData || data.customer || null;
+            const username = secretData.name || initialSecret?.name;
+            if (customerData && username) {
+                const database = await getDb();
+                const newId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                await database.run(
+                    `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(username) DO UPDATE SET 
+                        fullName=excluded.fullName,
+                        address=excluded.address,
+                        contactNumber=excluded.contactNumber,
+                        email=excluded.email,
+                        routerId=excluded.routerId`,
+                    [
+                        newId,
+                        username,
+                        req.router.id,
+                        customerData.fullName || '',
+                        customerData.address || '',
+                        customerData.contactNumber || '',
+                        customerData.email || ''
+                    ]
+                );
+            }
+        } catch (e) {
+            console.warn('Customer persistence warning:', e.message);
+        }
+
+        res.json({ message: 'Saved', composite: true });
+    } catch (e) {
+        const status = e.response ? e.response.status : 400;
+        const details = e.response?.data;
+        console.error('[ERROR] ppp/user/save(PATCH)', e.message, details);
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ message: msg, details });
     }
 });
 
