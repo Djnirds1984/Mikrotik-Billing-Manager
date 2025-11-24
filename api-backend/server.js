@@ -376,7 +376,7 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
             } else {
                 const payload = toRosPayload(secretData);
                 if (id) {
-                    await req.routerInstance.put(`/ppp/secret/${id}`, payload);
+                    await req.routerInstance.put(`/ppp/secret/${encodeURIComponent(id)}`, payload);
                 } else {
                     await req.routerInstance.post('/ppp/secret', payload);
                 }
@@ -427,7 +427,7 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
                 const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
                 const payload = { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent };
                 if (existing && existing.id) {
-                    await req.routerInstance.put(`/system/scheduler/${existing.id}`, payload);
+                    await req.routerInstance.put(`/system/scheduler/${encodeURIComponent(existing.id)}`, payload);
                 } else {
                     await req.routerInstance.post('/system/scheduler', payload);
                 }
@@ -495,7 +495,7 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
                     const existing = (Array.isArray(list.data) ? list.data : []).find(q => q.name === username);
                     const payload = { name: username, target: address, 'max-limit': limitString };
                     if (existing && existing.id) {
-                        await req.routerInstance.put(`/queue/simple/${existing.id}`, payload);
+                        await req.routerInstance.put(`/queue/simple/${encodeURIComponent(existing.id)}`, payload);
                     } else {
                         await req.routerInstance.post('/queue/simple', payload);
                     }
@@ -634,7 +634,7 @@ app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
             } else {
                 const payload = toRosPayload(secretData);
                 if (id) {
-                    await req.routerInstance.put(`/ppp/secret/${id}`, payload);
+                    await req.routerInstance.put(`/ppp/secret/${encodeURIComponent(id)}`, payload);
                 } else {
                     await req.routerInstance.post('/ppp/secret', payload);
                 }
@@ -684,7 +684,7 @@ app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
                 const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
                 const payload = { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent };
                 if (existing && existing.id) {
-                    await req.routerInstance.put(`/system/scheduler/${existing.id}`, payload);
+                    await req.routerInstance.put(`/system/scheduler/${encodeURIComponent(existing.id)}`, payload);
                 } else {
                     await req.routerInstance.post('/system/scheduler', payload);
                 }
@@ -872,23 +872,23 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
                     })() });
                 }
             } finally { await client.close(); }
-        } else {
-            if (!id) {
-                let c = {};
-                try { c = JSON.parse(secretData.comment || '{}'); } catch {}
-                c.dueDate = nextDueDateStr;
-                c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
-                c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
-                await req.routerInstance.post('/ppp/secret', { name: username, service: 'pppoe', profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
             } else {
-                let c = {};
-                try { c = JSON.parse(secretData.comment || '{}'); } catch {}
-                c.dueDate = nextDueDateStr;
-                c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
-                c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
-                await req.routerInstance.put(`/ppp/secret/${id}`, { profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
+                if (!id) {
+                    let c = {};
+                    try { c = JSON.parse(secretData.comment || '{}'); } catch {}
+                    c.dueDate = nextDueDateStr;
+                    c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
+                    c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
+                    await req.routerInstance.post('/ppp/secret', { name: username, service: 'pppoe', profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
+                } else {
+                    let c = {};
+                    try { c = JSON.parse(secretData.comment || '{}'); } catch {}
+                    c.dueDate = nextDueDateStr;
+                    c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
+                    c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
+                    await req.routerInstance.put(`/ppp/secret/${encodeURIComponent(id)}`, { profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
+                }
             }
-        }
 
         // Remove existing deactivate scheduler and (re)create for next due date if provided
         const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
@@ -925,7 +925,7 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
             const list = await req.routerInstance.get('/system/scheduler');
             const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
             if (existing && existing.id) {
-                await req.routerInstance.delete(`/system/scheduler/${existing.id}`);
+                await req.routerInstance.delete(`/system/scheduler/${encodeURIComponent(existing.id)}`);
             }
             if (scheduleDate && nonPaymentProfile) {
                 await req.routerInstance.post('/system/scheduler', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
@@ -968,7 +968,7 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
                         const existing = (Array.isArray(qList.data) ? qList.data : []).find(q => q.name === username);
                         const payload = { name: username, target: address, 'max-limit': String(rate) };
                         if (existing && existing.id) {
-                            await req.routerInstance.patch(`/queue/simple/${existing.id}`, payload);
+                            await req.routerInstance.put(`/queue/simple/${encodeURIComponent(existing.id)}`, payload);
                         } else {
                             await req.routerInstance.post('/queue/simple', payload);
                         }
