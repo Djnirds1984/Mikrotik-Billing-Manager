@@ -402,7 +402,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         try {
             const existingCustomer = customers.find(c => c.username === secretData.name);
 
-            // Construct comment based on subscription data
+            // Construct comment based on subscription and customer data
             let commentJson: any = {};
             try {
                 if (selectedSecret?.comment) {
@@ -428,6 +428,18 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             if (subscriptionData.planType) {
                 commentJson.planType = subscriptionData.planType;
             }
+            // Persist customer info in comment on the secret
+            if (customerData) {
+                const hasCustomerInfo = Object.values(customerData).some(val => val && String(val).trim() !== '');
+                if (hasCustomerInfo) {
+                    commentJson.customer = {
+                        fullName: customerData.fullName || '',
+                        address: customerData.address || '',
+                        contactNumber: customerData.contactNumber || '',
+                        email: customerData.email || ''
+                    };
+                }
+            }
             secretData.comment = JSON.stringify(commentJson);
 
             // This new service function handles secret creation/update and scheduler management
@@ -435,6 +447,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 initialSecret: selectedSecret,
                 secretData,
                 subscriptionData,
+                customerData,
             });
 
             // Update local customer DB
