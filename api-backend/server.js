@@ -297,7 +297,7 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
 
         const toRosPayload = (obj) => {
             if (!obj || typeof obj !== 'object') return obj;
-            const allowed = new Set(['name','service','profile','comment','disabled','password','rate-limit','rate_limit']);
+            const allowed = new Set(['name','service','profile','comment','disabled','password']);
             const out = {};
             for (const k of Object.keys(obj)) {
                 if (k === 'id' || k === '.id') continue;
@@ -435,30 +435,6 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         };
 
         await ensureProfileIfMissing();
-        // If profile has rate-limit, propagate to secret before saving
-        const propagateRateLimitToSecret = async () => {
-            try {
-                if (!secretData) return;
-                if (secretData['rate-limit'] || secretData.rate_limit) return;
-                if (!profileName) return;
-                if (req.router.api_type === 'legacy') {
-                    const client = req.routerInstance;
-                    await client.connect();
-                    try {
-                        const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                        const rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
-                        if (rate) secretData['rate-limit'] = rate;
-                    } finally { await client.close(); }
-                } else {
-                    const listResp = await req.routerInstance.get('/ppp/profile');
-                    const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
-                    const rate = prof ? (prof['rate-limit'] || prof.rate_limit) : null;
-                    if (rate) secretData['rate-limit'] = rate;
-                }
-            } catch (_) { /* ignore */ }
-        };
-
-        await propagateRateLimitToSecret();
         await ensureSecretId();
         await saveSecret();
         await upsertScheduler();
@@ -468,20 +444,20 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
             try {
                 const username = secretData.name || initialSecret?.name;
                 if (!username) return;
-                // Determine rate-limit to use
-                let rate = secretData['rate-limit'] || secretData.rate_limit;
-                if (!rate && profileName) {
+                // Determine rate-limit from profile (do not set on secret)
+                let rate = null;
+                if (profileName) {
                     if (req.router.api_type === 'legacy') {
                         const client = req.routerInstance;
                         await client.connect();
                         try {
                             const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                            rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : rate;
+                            rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
                         } finally { await client.close(); }
                     } else {
                         const listResp = await req.routerInstance.get('/ppp/profile');
                         const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
-                        rate = prof ? (prof['rate-limit'] || prof.rate_limit || rate) : rate;
+                        rate = prof ? (prof['rate-limit'] || prof.rate_limit || null) : null;
                     }
                 }
                 if (!rate) return; // No rate to enforce
@@ -582,7 +558,7 @@ app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
 
         const toRosPayload = (obj) => {
             if (!obj || typeof obj !== 'object') return obj;
-            const allowed = new Set(['name','service','profile','comment','disabled','password','rate-limit','rate_limit']);
+            const allowed = new Set(['name','service','profile','comment','disabled','password']);
             const out = {};
             for (const k of Object.keys(obj)) {
                 if (k === 'id' || k === '.id') continue;
@@ -716,29 +692,6 @@ app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         };
 
         await ensureProfileIfMissing();
-        const propagateRateLimitToSecret = async () => {
-            try {
-                if (!secretData) return;
-                if (secretData['rate-limit'] || secretData.rate_limit) return;
-                if (!profileName) return;
-                if (req.router.api_type === 'legacy') {
-                    const client = req.routerInstance;
-                    await client.connect();
-                    try {
-                        const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                        const rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
-                        if (rate) secretData['rate-limit'] = rate;
-                    } finally { await client.close(); }
-                } else {
-                    const listResp = await req.routerInstance.get('/ppp/profile');
-                    const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
-                    const rate = prof ? (prof['rate-limit'] || prof.rate_limit) : null;
-                    if (rate) secretData['rate-limit'] = rate;
-                }
-            } catch (_) { }
-        };
-
-        await propagateRateLimitToSecret();
         await ensureSecretId();
         await saveSecret();
         await upsertScheduler();
@@ -747,19 +700,19 @@ app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
             try {
                 const username = secretData.name || initialSecret?.name;
                 if (!username) return;
-                let rate = secretData['rate-limit'] || secretData.rate_limit;
-                if (!rate && profileName) {
+                let rate = null;
+                if (profileName) {
                     if (req.router.api_type === 'legacy') {
                         const client = req.routerInstance;
                         await client.connect();
                         try {
                             const prof = await writeLegacySafe(client, ['/ppp/profile/print', '?name=' + profileName]);
-                            rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : rate;
+                            rate = Array.isArray(prof) && prof[0] ? (prof[0]['rate-limit'] || prof[0]['rate_limit']) : null;
                         } finally { await client.close(); }
                     } else {
                         const listResp = await req.routerInstance.get('/ppp/profile');
                         const prof = (Array.isArray(listResp.data) ? listResp.data : []).find(p => p.name === profileName);
-                        rate = prof ? (prof['rate-limit'] || prof.rate_limit || rate) : rate;
+                        rate = prof ? (prof['rate-limit'] || prof.rate_limit || null) : null;
                     }
                 }
                 if (!rate) return;
