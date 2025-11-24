@@ -376,9 +376,12 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
             } else {
                 const payload = toRosPayload(secretData);
                 if (id) {
-                    await req.routerInstance.put(`/ppp/secret/${encodeURIComponent(id)}`, payload);
+                    await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(id)}`, payload);
                 } else {
-                    await req.routerInstance.post('/ppp/secret', payload);
+                    const resp = await req.routerInstance.put('/ppp/secret', payload);
+                    if (!id && resp && resp.data && resp.data.id) {
+                        id = resp.data.id;
+                    }
                 }
             }
         };
@@ -427,9 +430,9 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
                 const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
                 const payload = { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent };
                 if (existing && existing.id) {
-                    await req.routerInstance.put(`/system/scheduler/${encodeURIComponent(existing.id)}`, payload);
+                    await req.routerInstance.patch(`/system/scheduler/${encodeURIComponent(existing.id)}`, payload);
                 } else {
-                    await req.routerInstance.post('/system/scheduler', payload);
+                    await req.routerInstance.put('/system/scheduler', { name: schedName, interval: '0', ...payload });
                 }
             }
         };
@@ -634,9 +637,12 @@ app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
             } else {
                 const payload = toRosPayload(secretData);
                 if (id) {
-                    await req.routerInstance.put(`/ppp/secret/${encodeURIComponent(id)}`, payload);
+                    await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(id)}`, payload);
                 } else {
-                    await req.routerInstance.post('/ppp/secret', payload);
+                    const resp = await req.routerInstance.put('/ppp/secret', payload);
+                    if (!id && resp && resp.data && resp.data.id) {
+                        id = resp.data.id;
+                    }
                 }
             }
         };
@@ -684,9 +690,9 @@ app.patch('/:routerId/ppp/user/save', getRouter, async (req, res) => {
                 const existing = (Array.isArray(list.data) ? list.data : []).find(s => s.name === schedName);
                 const payload = { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent };
                 if (existing && existing.id) {
-                    await req.routerInstance.put(`/system/scheduler/${encodeURIComponent(existing.id)}`, payload);
+                    await req.routerInstance.patch(`/system/scheduler/${encodeURIComponent(existing.id)}`, payload);
                 } else {
-                    await req.routerInstance.post('/system/scheduler', payload);
+                    await req.routerInstance.put('/system/scheduler', { name: schedName, interval: '0', ...payload });
                 }
             }
         };
@@ -879,14 +885,17 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
                     c.dueDate = nextDueDateStr;
                     c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
                     c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
-                    await req.routerInstance.post('/ppp/secret', { name: username, service: 'pppoe', profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
+                    const resp = await req.routerInstance.put('/ppp/secret', { name: username, service: 'pppoe', profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
+                    if (resp && resp.data && resp.data.id) {
+                        id = resp.data.id;
+                    }
                 } else {
                     let c = {};
                     try { c = JSON.parse(secretData.comment || '{}'); } catch {}
                     c.dueDate = nextDueDateStr;
                     c.dueDateTime = `${nextDueDateStr} ${nextDueTimeStr}`;
                     c.planType = (subscription.planType || payment.plan?.cycle ? 'postpaid' : c.planType);
-                    await req.routerInstance.put(`/ppp/secret/${encodeURIComponent(id)}`, { profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
+                    await req.routerInstance.patch(`/ppp/secret/${encodeURIComponent(id)}`, { profile: targetProfile, disabled: false, comment: JSON.stringify(c) });
                 }
             }
 
@@ -928,7 +937,7 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
                 await req.routerInstance.delete(`/system/scheduler/${encodeURIComponent(existing.id)}`);
             }
             if (scheduleDate && nonPaymentProfile) {
-                await req.routerInstance.post('/system/scheduler', { name: schedName, 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
+                await req.routerInstance.put('/system/scheduler', { name: schedName, interval: '0', 'start-date': startDate, 'start-time': startTime, 'on-event': onEvent });
             }
         }
 
