@@ -145,6 +145,23 @@ const normalizeLegacyObject = (obj) => {
     return newObj;
 }
 
+const maskSensitive = (obj) => {
+    try {
+        if (!obj || typeof obj !== 'object') return obj;
+        const copy = JSON.parse(JSON.stringify(obj));
+        const mask = (o) => {
+            if (!o || typeof o !== 'object') return;
+            for (const k of Object.keys(o)) {
+                if (k.toLowerCase().includes('password')) o[k] = '***';
+                else if (typeof o[k] === 'object') mask(o[k]);
+            }
+        };
+        mask(copy);
+        return copy;
+    } catch (_) { return obj; }
+};
+const safeStringify = (obj) => { try { return JSON.stringify(obj); } catch (_) { return '[unserializable]'; } };
+
 // --- SPECIAL ENDPOINTS (must come before the generic proxy) ---
 
 // 0. Test Connection (does not use getRouter middleware as router isn't saved yet)
@@ -421,6 +438,145 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
     }
 });
 
+// 4. PPP User Save
+app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
+    const { initialSecret, secretData, subscriptionData } = req.body;
+    console.log('[ppp/user/save] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify(maskSensitive({ initialSecret: initialSecret ? { id: initialSecret.id, name: initialSecret.name } : null, secretData, subscriptionData })));
+    if (!secretData || !secretData.name || String(secretData.name).trim() === '') {
+        return res.status(400).json({ message: 'Invalid input: secretData.name is required.' });
+    }
+
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                let targetId = initialSecret?.id;
+                if (!targetId) {
+                    const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
+                    if (Array.isArray(existing) && existing.length > 0) targetId = existing[0]['.id'];
+                }
+
+                const payload = {};
+                if (targetId) payload['.id'] = targetId;
+                if (secretData.name != null) payload['name'] = String(secretData.name);
+                if (secretData.password != null) payload['password'] = String(secretData.password);
+                if (secretData.profile != null) payload['profile'] = String(secretData.profile);
+                if (secretData.service != null) payload['service'] = String(secretData.service);
+                else if (!targetId) payload['service'] = 'pppoe';
+                if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
+                if (subscriptionData != null) payload['comment'] = JSON.stringify(subscriptionData);
+
+                if (targetId) {
+                    await client.write('/ppp/secret/set', payload);
+                } else {
+                    await client.write('/ppp/secret/add', payload);
+                }
+
+                const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
+                res.json(saved.map(normalizeLegacyObject));
+            } finally {
+                await client.close();
+            }
+        } else {
+            const instance = req.routerInstance;
+            const name = encodeURIComponent(String(secretData.name));
+            const qRes = await instance.get(`/ppp/secret?name=${name}`);
+            const existing = Array.isArray(qRes.data) && qRes.data.length > 0 ? qRes.data[0] : null;
+            const payload = {};
+            if (secretData.name != null) payload['name'] = String(secretData.name);
+            if (secretData.password != null) payload['password'] = String(secretData.password);
+            if (secretData.profile != null) payload['profile'] = String(secretData.profile);
+            if (secretData.service != null) payload['service'] = String(secretData.service);
+            else if (!existing) payload['service'] = 'pppoe';
+            if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
+            if (subscriptionData != null) payload['comment'] = JSON.stringify(subscriptionData);
+
+            if (existing) {
+                await instance.patch(`/ppp/secret/${existing['.id']}`, payload);
+            } else {
+                await instance.put(`/ppp/secret`, payload);
+            }
+
+            const savedRes = await instance.get(`/ppp/secret?name=${name}`);
+            res.json(savedRes.data);
+        }
+    } catch (e) {
+        console.error('[ppp/user/save] error:', safeStringify({ routerId: req.params.routerId, message: e.message, status: e.response?.status, data: e.response?.data }));
+        const status = e.response ? e.response.status : 500;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ message: msg });
+    }
+});
+
+// 5. PPP Payment Process
+app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
+    const { secret, plan, nonPaymentProfile, discountDays, paymentDate } = req.body;
+    console.log('[ppp/payment/process] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify(maskSensitive({ secret: secret ? { id: secret.id, name: secret.name } : null, plan, nonPaymentProfile, discountDays, paymentDate })));
+    if (!secret || !secret.name) {
+        return res.status(400).json({ message: 'Invalid input: secret.name is required.' });
+    }
+    if (!plan || !plan.pppoeProfile) {
+        return res.status(400).json({ message: 'Invalid input: plan.pppoeProfile is required.' });
+    }
+
+    try {
+        const cycleDays = Number(plan.cycleDays ?? plan.cycle_days ?? 30);
+        const discount = Number(discountDays ?? 0);
+        const effectiveDays = Math.max(0, cycleDays - discount);
+        const start = paymentDate ? new Date(paymentDate) : new Date();
+        const expires = new Date(start.getTime() + effectiveDays * 24 * 60 * 60 * 1000);
+        const commentData = {
+            planName: plan?.name || '',
+            dueDate: expires.toISOString().split('T')[0],
+            dueDateTime: expires.toISOString(),
+            paymentDate: start.toISOString(),
+            discountDays: discount
+        };
+
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
+                if (!Array.isArray(existing) || existing.length === 0) {
+                    return res.status(404).json({ message: 'PPP secret not found.' });
+                }
+                const id = existing[0]['.id'];
+                const payload = {
+                    '.id': id,
+                    'profile': String(plan.pppoeProfile),
+                    'comment': JSON.stringify(commentData)
+                };
+                await client.write('/ppp/secret/set', payload);
+                const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
+                res.json(saved.map(normalizeLegacyObject));
+            } finally {
+                await client.close();
+            }
+        } else {
+            const instance = req.routerInstance;
+            const name = encodeURIComponent(String(secret.name));
+            const sRes = await instance.get(`/ppp/secret?name=${name}`);
+            if (!Array.isArray(sRes.data) || sRes.data.length === 0) {
+                return res.status(404).json({ message: 'PPP secret not found.' });
+            }
+            const id = sRes.data[0]['.id'];
+            await instance.patch(`/ppp/secret/${id}`, {
+                'profile': String(plan.pppoeProfile),
+                'comment': JSON.stringify(commentData)
+            });
+            const savedRes = await instance.get(`/ppp/secret?name=${name}`);
+            res.json(savedRes.data);
+        }
+    } catch (e) {
+        console.error('[ppp/payment/process] error:', safeStringify({ routerId: req.params.routerId, message: e.message, status: e.response?.status, data: e.response?.data }));
+        const status = e.response ? e.response.status : 500;
+        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(status).json({ message: msg });
+    }
+});
+
 // 3. Generic Proxy Handler for all other MikroTik calls
 app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
     const { endpoint } = req.params;
@@ -493,7 +649,8 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
             res.json(response.data);
         }
     } catch (e) {
-        console.error(`Proxy Error (${endpoint}):`, e.message);
+        const bodyKeys = body && typeof body === 'object' ? Object.keys(body) : [];
+        console.error('[Proxy Error]', safeStringify({ endpoint, method, routerId: req.params.routerId, bodyKeys, message: e.message, status: e.response?.status, data: e.response?.data }));
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
         res.status(status).json({ message: msg });
