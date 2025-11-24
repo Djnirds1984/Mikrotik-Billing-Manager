@@ -519,6 +519,37 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
 
         await upsertSimpleQueueFromProfile();
 
+        // Persist customer info to app DB if provided
+        try {
+            const customerData = data.customerData || data.customer || null;
+            const username = secretData.name || initialSecret?.name;
+            if (customerData && username) {
+                const database = await getDb();
+                const newId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                await database.run(
+                    `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(username) DO UPDATE SET 
+                        fullName=excluded.fullName,
+                        address=excluded.address,
+                        contactNumber=excluded.contactNumber,
+                        email=excluded.email,
+                        routerId=excluded.routerId`,
+                    [
+                        newId,
+                        username,
+                        req.router.id,
+                        customerData.fullName || '',
+                        customerData.address || '',
+                        customerData.contactNumber || '',
+                        customerData.email || ''
+                    ]
+                );
+            }
+        } catch (e) {
+            console.warn('Customer persistence warning:', e.message);
+        }
+
         res.json({ message: 'Saved', composite: true });
     } catch (e) {
         const status = e.response ? e.response.status : 400;
