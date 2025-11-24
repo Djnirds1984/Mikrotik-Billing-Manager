@@ -15,6 +15,18 @@ const PORT = 3002;
 app.use(cors());
 app.use(express.json());
 
+app.use((req, res, next) => {
+    const started = Date.now();
+    let body = '';
+    try { body = JSON.stringify(req.body); } catch {}
+    if (body) body = body.replace(/"password"\s*:\s*".*?"/gi, '"password":"***"');
+    console.log(`[REQ] ${req.method} ${req.originalUrl} body=${body.slice(0,1000)}`);
+    res.on('finish', () => {
+        console.log(`[RES] ${req.method} ${req.originalUrl} status=${res.statusCode} time=${Date.now()-started}ms`);
+    });
+    next();
+});
+
 // Database setup - pointing to the proxy's DB
 const DB_PATH = path.resolve(__dirname, '../proxy/panel.db');
 
@@ -701,8 +713,10 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
         res.json({ message: 'Payment processed' });
     } catch (e) {
         const status = e.response ? e.response.status : 400;
+        const details = e.response?.data;
+        console.error('[ERROR] ppp/payment/process', e.message, details);
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
+        res.status(status).json({ message: msg, details });
     }
 });
 

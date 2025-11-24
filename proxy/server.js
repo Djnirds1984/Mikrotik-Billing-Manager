@@ -312,8 +312,29 @@ async function startServer() {
         target: 'http://localhost:3002',
         changeOrigin: true,
         pathRewrite: {
-            // Nginx config strips /mt-api/ so we do the same here for consistency
             '^/mt-api': ''
+        },
+        logLevel: 'debug',
+        onProxyReq: (proxyReq, req, res) => {
+            try {
+                const chunks = [];
+                req.on('data', c => chunks.push(c));
+                req.on('end', () => {
+                    const body = Buffer.concat(chunks).toString('utf8');
+                    const safe = body.replace(/"password"\s*:\s*".*?"/gi, '"password":"***"');
+                    console.log(`[MT-API REQ] ${req.method} ${req.originalUrl} body=${safe.slice(0,1000)}`);
+                });
+            } catch {}
+        },
+        onProxyRes: (proxyRes, req, res) => {
+            try {
+                const chunks = [];
+                proxyRes.on('data', c => chunks.push(c));
+                proxyRes.on('end', () => {
+                    const buf = Buffer.concat(chunks).toString('utf8');
+                    console.log(`[MT-API RES] ${req.method} ${req.originalUrl} status=${proxyRes.statusCode} body=${buf.slice(0,1000)}`);
+                });
+            } catch {}
         }
     }));
 
