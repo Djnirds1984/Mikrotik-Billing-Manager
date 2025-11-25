@@ -307,11 +307,11 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
 
             {isLegacyApi && (
-                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300 rounded-lg flex items-start gap-3">
-                    <ExclamationTriangleIcon className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-1" />
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-800 dark:text-blue-300 rounded-lg flex items-start gap-3">
+                    <ExclamationTriangleIcon className="w-6 h-6 text-blue-500 flex-shrink-0 mt-1" />
                     <div>
-                        <h4 className="font-bold">Legacy API Mode</h4>
-                        <p className="text-sm">Client management features (Activate, Renew, Edit, Deactivate) are disabled because this router is configured to use the legacy API (RouterOS v6). These features require the REST API (RouterOS v7+).</p>
+                        <h4 className="font-bold">Legacy API Compatibility</h4>
+                        <p className="text-sm">This router uses the legacy API (RouterOS v6). DHCP client actions (Activate, Renew, Edit, Deactivate) are supported via the compatibility layer. PPPoE is unaffected.</p>
                     </div>
                 </div>
             )}
