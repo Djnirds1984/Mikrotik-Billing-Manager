@@ -577,6 +577,132 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
     }
 });
 
+// DHCP Client: Activate
+app.post('/:routerId/ip/dhcp-client/activate', getRouter, async (req, res) => {
+    const { interfaces = [], hostname, addDefaultRoute = true, usePeerDns = true, usePeerNtp = true } = req.body;
+    console.log('[dhcp-client/activate] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify({ interfaces, hostname, addDefaultRoute, usePeerDns, usePeerNtp }));
+    try {
+        const targets = Array.isArray(interfaces) ? interfaces : [interfaces];
+        const results = [];
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try {
+                for (const iface of targets) {
+                    const ifExists = await writeLegacySafe(client, ['/interface/print', `?name=${iface}`]);
+                    if (!Array.isArray(ifExists) || ifExists.length === 0) throw new Error(`Interface not found: ${iface}`);
+                    let dhcps = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]);
+                    if (Array.isArray(dhcps) && dhcps.length > 0) {
+                        await client.write('/ip/dhcp-client/set', { '.id': dhcps[0]['.id'], disabled: 'no', 'add-default-route': addDefaultRoute ? 'yes' : 'no', 'use-peer-dns': usePeerDns ? 'yes' : 'no', 'use-peer-ntp': usePeerNtp ? 'yes' : 'no', ...(hostname ? { 'host-name': String(hostname) } : {}) });
+                    } else {
+                        await client.write('/ip/dhcp-client/add', { interface: iface, disabled: 'no', 'add-default-route': addDefaultRoute ? 'yes' : 'no', 'use-peer-dns': usePeerDns ? 'yes' : 'no', 'use-peer-ntp': usePeerNtp ? 'yes' : 'no', ...(hostname ? { 'host-name': String(hostname) } : {}) });
+                        dhcps = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]);
+                    }
+                    const id = dhcps[0]['.id'];
+                    let status = dhcps[0]['status']; let server = dhcps[0]['dhcp-server'];
+                    const start = Date.now();
+                    while ((status === 'searching' || !server) && Date.now() - start < 10000) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        const refreshed = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]);
+                        status = refreshed[0]['status']; server = refreshed[0]['dhcp-server'];
+                    }
+                    if (status !== 'bound') throw new Error(`DHCP server unavailable or no lease on ${iface}`);
+                    results.push({ interface: iface, id, status, server });
+                }
+                res.json({ message: 'DHCP client activated', results });
+            } finally { await client.close(); }
+        } else {
+            for (const iface of targets) {
+                const r = await req.routerInstance.get(`/ip/dhcp-client?interface=${encodeURIComponent(iface)}`);
+                const existing = Array.isArray(r.data) && r.data.length > 0 ? r.data[0] : null;
+                const payload = { disabled: false, 'add-default-route': addDefaultRoute, 'use-peer-dns': usePeerDns, 'use-peer-ntp': usePeerNtp, ...(hostname ? { 'host-name': String(hostname) } : {}) };
+                if (existing) await req.routerInstance.patch(`/ip/dhcp-client/${existing.id || existing['.id']}`, payload);
+                else await req.routerInstance.put('/ip/dhcp-client', { interface: iface, ...payload });
+                const check = await req.routerInstance.get(`/ip/dhcp-client?interface=${encodeURIComponent(iface)}`);
+                const c = check.data[0]; if (!c || c.status !== 'bound') throw new Error(`Lease not bound on ${iface}`);
+                results.push({ interface: iface, id: c.id || c['.id'], status: c.status, server: c['dhcp-server'] });
+            }
+            res.json({ message: 'DHCP client activated', results });
+        }
+    } catch (e) {
+        const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg });
+    }
+});
+
+// DHCP Client: Renew
+app.post('/:routerId/ip/dhcp-client/renew', getRouter, async (req, res) => {
+    const { interface: iface } = req.body; console.log('[dhcp-client/renew] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify({ interface: iface }));
+    if (!iface) return res.status(400).json({ message: 'interface is required' });
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try {
+                const dhcps = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]);
+                if (!Array.isArray(dhcps) || dhcps.length === 0) return res.status(404).json({ message: `No DHCP client found on ${iface}` });
+                const id = dhcps[0]['.id']; await writeLegacySafe(client, ['/ip/dhcp-client/renew', `=numbers=${id}`]);
+                const start = Date.now(); let status = dhcps[0]['status'];
+                while (status !== 'bound' && Date.now() - start < 10000) { await new Promise(r => setTimeout(r, 1000)); const refreshed = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]); status = refreshed[0]['status']; }
+                if (status !== 'bound') return res.status(500).json({ message: `Renew failed on ${iface}` });
+                res.json({ message: 'Lease renewed', interface: iface, id, status });
+            } finally { await client.close(); }
+        } else {
+            const r = await req.routerInstance.get(`/ip/dhcp-client?interface=${encodeURIComponent(iface)}`);
+            if (!Array.isArray(r.data) || r.data.length === 0) return res.status(404).json({ message: `No DHCP client found on ${iface}` });
+            const id = r.data[0].id || r.data[0]['.id']; await req.routerInstance.post('/ip/dhcp-client/renew', { numbers: id });
+            const check = await req.routerInstance.get(`/ip/dhcp-client/${id}`);
+            const st = check.data.status || check.data['status']; if (st !== 'bound') return res.status(500).json({ message: `Renew failed on ${iface}` });
+            res.json({ message: 'Lease renewed', interface: iface, id, status: st });
+        }
+    } catch (e) { const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg }); }
+});
+
+// DHCP Client: Edit
+app.patch('/:routerId/ip/dhcp-client/edit', getRouter, async (req, res) => {
+    const { interface: iface, params = {} } = req.body; console.log('[dhcp-client/edit] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify({ interface: iface, params }));
+    if (!iface) return res.status(400).json({ message: 'interface is required' });
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try {
+                const dhcps = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]);
+                if (!Array.isArray(dhcps) || dhcps.length === 0) return res.status(404).json({ message: `No DHCP client found on ${iface}` });
+                const payload = { '.id': dhcps[0]['.id'] };
+                for (const [k, v] of Object.entries(params)) payload[k] = typeof v === 'boolean' ? (v ? 'yes' : 'no') : v;
+                await client.write('/ip/dhcp-client/set', payload);
+                const updated = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]);
+                res.json({ message: 'DHCP client updated', client: normalizeLegacyObject(updated[0]) });
+            } finally { await client.close(); }
+        } else {
+            const r = await req.routerInstance.get(`/ip/dhcp-client?interface=${encodeURIComponent(iface)}`);
+            if (!Array.isArray(r.data) || r.data.length === 0) return res.status(404).json({ message: `No DHCP client found on ${iface}` });
+            const id = r.data[0].id || r.data[0]['.id']; await req.routerInstance.patch(`/ip/dhcp-client/${id}`, params);
+            const updated = await req.routerInstance.get(`/ip/dhcp-client/${id}`);
+            res.json({ message: 'DHCP client updated', client: updated.data });
+        }
+    } catch (e) { const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg }); }
+});
+
+// DHCP Client: Deactivate
+app.post('/:routerId/ip/dhcp-client/deactivate', getRouter, async (req, res) => {
+    const { interface: iface, remove = false } = req.body; console.log('[dhcp-client/deactivate] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify({ interface: iface, remove }));
+    if (!iface) return res.status(400).json({ message: 'interface is required' });
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try {
+                const dhcps = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]);
+                if (!Array.isArray(dhcps) || dhcps.length === 0) return res.json({ message: 'No DHCP client found' });
+                const id = dhcps[0]['.id']; if (remove) await client.write('/ip/dhcp-client/remove', { '.id': id }); else await client.write('/ip/dhcp-client/set', { '.id': id, disabled: 'yes' });
+                res.json({ message: remove ? 'DHCP client removed' : 'DHCP client disabled', interface: iface });
+            } finally { await client.close(); }
+        } else {
+            const r = await req.routerInstance.get(`/ip/dhcp-client?interface=${encodeURIComponent(iface)}`);
+            if (!Array.isArray(r.data) || r.data.length === 0) return res.json({ message: 'No DHCP client found' });
+            const id = r.data[0].id || r.data[0]['.id']; if (remove) await req.routerInstance.delete(`/ip/dhcp-client/${id}`); else await req.routerInstance.patch(`/ip/dhcp-client/${id}`, { disabled: true });
+            res.json({ message: remove ? 'DHCP client removed' : 'DHCP client disabled', interface: iface });
+        }
+    } catch (e) { const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg }); }
+});
+
 // 3. Generic Proxy Handler for all other MikroTik calls
 app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
     const { endpoint } = req.params;
