@@ -90,7 +90,9 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
 };
 
 export const updateDhcpClientDetails = (router: RouterConfigWithId, client: DhcpClient, params: DhcpClientActionParams) => {
+    // Route to dedicated backend endpoint handling v6/v7 parity: lease/static, scheduler, rate-limit.
     return apiCall(router, 'dhcp-client/update', 'POST', {
+        clientId: client.id,
         macAddress: client.macAddress,
         address: client.address,
         customerInfo: params.customerInfo,
