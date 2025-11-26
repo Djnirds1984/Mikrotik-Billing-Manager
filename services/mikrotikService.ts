@@ -90,10 +90,21 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
 };
 
 export const updateDhcpClientDetails = (router: RouterConfigWithId, client: DhcpClient, params: DhcpClientActionParams) => {
-    // This usually involves updating the address list entry comment or properties
-    return apiCall(router, 'ip/firewall/address-list/set', 'POST', {
-        '.id': client.id,
-        comment: JSON.stringify(params) // Simplified for this example
+    // Route to dedicated backend endpoint handling v6/v7 parity: lease/static, scheduler, rate-limit.
+    return apiCall(router, 'dhcp-client/update', 'POST', {
+        clientId: client.id,
+        macAddress: client.macAddress,
+        address: client.address,
+        customerInfo: params.customerInfo,
+        plan: params.plan,
+        downtimeDays: params.downtimeDays,
+        planType: params.planType,
+        graceDays: params.graceDays,
+        graceTime: params.graceTime,
+        expiresAt: params.expiresAt,
+        contactNumber: params.contactNumber,
+        email: params.email,
+        speedLimit: params.speedLimit,
     });
 };
 
