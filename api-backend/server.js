@@ -475,7 +475,8 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const rosDate = d ? `${months[d.getMonth()]}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}` : null;
         const rosTime = d ? d.toTimeString().split(' ')[0] : null;
-        const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do { /ppp/active/remove [find name=\"${String(secretData.name)}\"]; } ; /ppp/secret/set [find name=\"${String(secretData.name)}\"] disabled=yes`;
+        const onEventProfile = subscriptionData?.nonPaymentProfile ? ` ; /ppp/secret/set [find name=\"${String(secretData.name)}\"] profile=${String(subscriptionData.nonPaymentProfile)}` : '';
+const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do { /ppp/active/remove [find name=\"${String(secretData.name)}\"]; }` + onEventProfile;
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
@@ -540,7 +541,8 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
         const rosDate = `${months[expires.getMonth()]}/${String(expires.getDate()).padStart(2,'0')}/${expires.getFullYear()}`;
         const rosTime = expires.toTimeString().split(' ')[0];
         const schedName = `ppp-auto-kick-${String(secret.name)}`;
-        const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /ppp/active/remove [find name=\"${String(secret.name)}\"]; } ; /ppp/secret/set [find name=\"${String(secret.name)}\"] disabled=yes`;
+        const onEventProfile = nonPaymentProfile ? ` ; /ppp/secret/set [find name=\"${String(secret.name)}\"] profile=${String(nonPaymentProfile)}` : '';
+const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /ppp/active/remove [find name=\"${String(secret.name)}\"]; }` + onEventProfile;
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
@@ -661,11 +663,11 @@ app.post('/:routerId/ppp/active/kick', getRouter, async (req, res) => {
 
 // PPP Scheduler Refresh
 app.post('/:routerId/ppp/scheduler/refresh', getRouter, async (req, res) => {
-    const { name, dueDateTime } = req.body; if (!name || !dueDateTime) return res.status(400).json({ message: 'name and dueDateTime are required' });
+    const { name, dueDateTime, nonPaymentProfile } = req.body; if (!name || !dueDateTime) return res.status(400).json({ message: 'name and dueDateTime are required' });
     try {
         const d = new Date(dueDateTime); const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const rosDate = `${months[d.getMonth()]}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}`; const rosTime = d.toTimeString().split(' ')[0];
-        const schedName = `ppp-auto-kick-${String(name)}`; const onEvent = `/log info \"PPPoE auto-kick: ${String(name)}\"; :do { /ppp/active/remove [find name=\"${String(name)}\"]; } ; /ppp/secret/set [find name=\"${String(name)}\"] disabled=yes`;
+        const schedName = `ppp-auto-kick-${String(name)}`; const onEventProfile = nonPaymentProfile ? ` ; /ppp/secret/set [find name=\"${String(name)}\"] profile=${String(nonPaymentProfile)}` : ''; const onEvent = `/log info \"PPPoE auto-kick: ${String(name)}\"; :do { /ppp/active/remove [find name=\"${String(name)}\"]; }` + onEventProfile;
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try { const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]); if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] }); await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent }); res.json({ message: 'Scheduler refreshed', name, schedName }); }
