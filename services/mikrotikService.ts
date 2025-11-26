@@ -68,7 +68,8 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
                 address: leaseIp,
                 macAddress: leaseMac,
                 hostName: lease['host-name'] || 'N/A',
-                customerInfo: '', // Default value
+                server: lease['server'] || lease['dhcp-server'] || '',
+                customerInfo: '',
                 timeout: addressListEntry.timeout,
                 creationTime: addressListEntry['creation-time'],
                 comment: addressListEntry.comment
@@ -82,6 +83,7 @@ export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpCl
                 address: leaseIp,
                 macAddress: leaseMac,
                 hostName: lease['host-name'] || 'N/A',
+                server: lease['server'] || lease['dhcp-server'] || '',
              });
         }
     });

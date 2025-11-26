@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { dbApi } from '../services/databaseService.ts';
-import { getDhcpClients, updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
+import { getDhcpClients, getDhcpServers, updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
 import type { DhcpClient, DhcpClientDbRecord, DhcpClientActionParams, RouterConfigWithId, SaleRecord, DhcpBillingPlanWithId } from '../types.ts';
 import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
 import { Loader } from './Loader.tsx';
@@ -112,15 +112,20 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
 
     const isLegacyApi = selectedRouter.api_type === 'legacy';
+    const [portalEnabledServers, setPortalEnabledServers] = useState<string[]>([]);
+    const PORTAL_SCRIPT_NAME = "dhcp-lease-add-to-pending";
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            const [routerClients, localClients] = await Promise.all([
+            const [routerClients, localClients, serversData] = await Promise.all([
                 getDhcpClients(selectedRouter),
-                dbApi.get<DhcpClientDbRecord[]>(`/dhcp_clients?routerId=${selectedRouter.id}`)
+                dbApi.get<DhcpClientDbRecord[]>(`/dhcp_clients?routerId=${selectedRouter.id}`),
+                getDhcpServers(selectedRouter)
             ]);
+            const enabled = serversData.filter(s => s['lease-script'] === PORTAL_SCRIPT_NAME).map(s => s.name);
+            setPortalEnabledServers(enabled);
             setClients(routerClients);
             setDbClients(localClients);
         } catch (err) {
@@ -138,16 +143,16 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
 
     const combinedClients = useMemo(() => {
         const dbClientMap = new Map(dbClients.map(c => [c.macAddress, c]));
-        return clients.map(client => {
+        const visible = clients.filter(c => c.server && portalEnabledServers.includes(c.server as string));
+        return visible.map(client => {
             const dbData = dbClientMap.get(client.macAddress);
             if (dbData) {
-                // FIX: Cast dbData to 'any' to resolve a TypeScript inference issue where the compiler incorrectly sees the type as 'unknown'.
                 const typedDbData = dbData as any;
                 return { ...client, customerInfo: typedDbData.customerInfo, contactNumber: typedDbData.contactNumber, email: typedDbData.email, speedLimit: typedDbData.speedLimit };
             }
             return client;
         });
-    }, [clients, dbClients]);
+    }, [clients, dbClients, portalEnabledServers]);
     
     const upsertDbClient = async (clientData: Omit<DhcpClientDbRecord, 'id'>) => {
         try {
