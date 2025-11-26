@@ -602,6 +602,75 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
     }
 });
 
+// WAN Routes (only routes with check-gateway)
+app.get('/:routerId/ip/wan-routes', getRouter, async (req, res) => {
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try {
+                let routes = await writeLegacySafe(client, ['/ip/route/print']);
+                routes = routes.map(normalizeLegacyObject);
+                res.json(routes.filter(r => r['check-gateway']));
+            } finally { await client.close(); }
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            res.json(response.data.filter(r => r['check-gateway']));
+        }
+    } catch (e) {
+        const s = e.response ? e.response.status : 500;
+        const m = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(s).json({ message: m });
+    }
+});
+
+// WAN Failover Status
+app.get('/:routerId/ip/wan-failover/status', getRouter, async (req, res) => {
+    try {
+        let routes;
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try { routes = await writeLegacySafe(client, ['/ip/route/print']); } finally { await client.close(); }
+            routes = routes.map(normalizeLegacyObject);
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            routes = response.data;
+        }
+        const wanRoutes = routes.filter(r => r['check-gateway']);
+        const enabled = wanRoutes.some(r => r.disabled === 'false' || r.disabled === false);
+        res.json({ enabled });
+    } catch (e) {
+        const s = e.response ? e.response.status : 500;
+        const m = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(s).json({ message: m });
+    }
+});
+
+// Configure WAN Failover (enable/disable check-gateway routes)
+app.post('/:routerId/ip/wan-failover', getRouter, async (req, res) => {
+    try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') return res.status(400).json({ message: 'enabled must be boolean' });
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try {
+                let routes = await writeLegacySafe(client, ['/ip/route/print']);
+                routes = routes.map(normalizeLegacyObject);
+                const wanRoutes = routes.filter(r => r['check-gateway']);
+                await Promise.all(wanRoutes.map(r => client.write('/ip/route/set', { '.id': r.id || r['.id'], disabled: enabled ? 'no' : 'yes' })));
+            } finally { await client.close(); }
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            const wanRoutes = response.data.filter(r => r['check-gateway']);
+            await Promise.all(wanRoutes.map(r => req.routerInstance.patch(`/ip/route/${r.id}`, { disabled: !enabled })));
+        }
+        res.json({ message: `WAN failover routes have been ${enabled ? 'enabled' : 'disabled'}.` });
+    } catch (e) {
+        const s = e.response ? e.response.status : 500;
+        const m = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(s).json({ message: m });
+    }
+});
+
 // 3. Generic Proxy Handler for all other MikroTik calls
 app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
     const { endpoint } = req.params;
