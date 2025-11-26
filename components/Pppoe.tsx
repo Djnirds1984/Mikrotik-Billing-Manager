@@ -388,19 +388,16 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 try { 
                     const parsedComment = JSON.parse(secret.comment);
                     subscription.plan = parsedComment.plan || 'N/A';
-                    if (parsedComment.dueDateTime || parsedComment.dueDate) {
-                        const src = parsedComment.dueDate ? `${parsedComment.dueDate}T00:00:00` : parsedComment.dueDateTime;
-                        const dt = new Date(src);
-                        const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-                        const parts = fmt.formatToParts(dt);
-                        const MM = parts.find(p => p.type === 'month')?.value || '00';
-                        const DD = parts.find(p => p.type === 'day')?.value || '00';
-                        const YY = parts.find(p => p.type === 'year')?.value || '00';
-                        const hh = parts.find(p => p.type === 'hour')?.value || '00';
-                        const mm = parts.find(p => p.type === 'minute')?.value || '00';
-                        subscription.dueDate = `${MM}-${DD}-${YY} ${hh}:${mm}`;
+                    if (parsedComment.dueDateTime) {
+                        const dt = new Date(parsedComment.dueDateTime);
+                        const y = dt.getFullYear();
+                        const m = String(dt.getMonth() + 1).padStart(2, '0');
+                        const d = String(dt.getDate()).padStart(2, '0');
+                        const hh = String(dt.getHours()).padStart(2, '0');
+                        const mm = String(dt.getMinutes()).padStart(2, '0');
+                        subscription.dueDate = `${y}-${m}-${d} ${hh}:${mm}`;
                     } else {
-                        subscription.dueDate = 'No Info';
+                        subscription.dueDate = parsedComment.dueDate || 'No Info';
                     }
                     const pt = String(parsedComment.planType || '').toLowerCase().trim();
                     subscription.planType = pt === 'postpaid' ? 'postpaid' : 'prepaid';
