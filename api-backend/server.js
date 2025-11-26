@@ -839,17 +839,28 @@ app.post('/:routerId/ppp/scheduler/refresh', getRouter, async (req, res) => {
     } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
 });
 
+// Minimal Panel Roles API fallback (unblocks UI when proxy is unavailable)
+app.get('/api/roles', async (req, res) => {
+    try { const dbx = await getDb(); const rows = await dbx.all('SELECT id, name, description FROM roles'); res.json(rows); }
+    catch (e) { res.status(500).json({ message: e.message }); }
+});
+app.get('/api/permissions', async (req, res) => {
+    try { const dbx = await getDb(); const rows = await dbx.all('SELECT id, name, description FROM permissions'); res.json(rows); }
+    catch (e) { res.status(500).json({ message: e.message }); }
+});
+app.get('/api/panel-users', async (req, res) => {
+    try {
+        const dbx = await getDb();
+        const rows = await dbx.all(`SELECT u.id, u.username, r.id AS role_id, r.name AS role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id`);
+        res.json(rows);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
 // Forward /api/* calls to Panel UI server to avoid redirect loops
 app.all('/api/*', async (req, res) => {
     try {
         const target = `http://127.0.0.1:3001${req.originalUrl}`;
-        const axiosResp = await axios({
-            method: req.method,
-            url: target,
-            data: req.body,
-            headers: { authorization: req.headers.authorization, 'content-type': req.headers['content-type'] || 'application/json' },
-            timeout: 10000,
-        });
+        const axiosResp = await axios({ method: req.method, url: target, data: req.body, headers: { authorization: req.headers.authorization, 'content-type': req.headers['content-type'] || 'application/json' }, timeout: 15000 });
         res.status(axiosResp.status).send(axiosResp.data);
     } catch (e) {
         const status = e.response ? e.response.status : 502;
