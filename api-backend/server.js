@@ -393,13 +393,16 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             const client = req.routerInstance;
             await client.connect();
 
-            // 1. Update Address List Comment
+            // 1. Ensure Authorized entry exists; attach expiry metadata
             const addressLists = await writeLegacySafe(client, ['/ip/firewall/address-list/print', '?address=' + address, '?list=authorized-dhcp-users']);
-            if (addressLists.length > 0) {
-                await client.write('/ip/firewall/address-list/set', {
-                    '.id': addressLists[0]['.id'],
-                    comment: JSON.stringify(commentData)
-                });
+            if (Array.isArray(addressLists) && addressLists.length > 0) {
+                await client.write('/ip/firewall/address-list/set', { '.id': addressLists[0]['.id'], comment: JSON.stringify(commentData) });
+            } else {
+                await client.write('/ip/firewall/address-list/add', { address, list: 'authorized-dhcp-users', timeout: '0s', comment: JSON.stringify(commentData) });
+            }
+            const pendingLists = await writeLegacySafe(client, ['/ip/firewall/address-list/print', '?address=' + address, '?list=pending-dhcp-users']);
+            if (Array.isArray(pendingLists) && pendingLists.length > 0) {
+                await client.write('/ip/firewall/address-list/remove', { '.id': pendingLists[0]['.id'] });
             }
 
             // 2. Update/Create Simple Queue (Speed Limit)
@@ -438,15 +441,21 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             // REST API Logic
             const instance = req.routerInstance;
 
-            // 1. Update Address List
+            // 1. Ensure Authorized entry exists; attach expiry metadata
             try {
                 const alRes = await instance.get(`/ip/firewall/address-list?address=${address}&list=authorized-dhcp-users`);
                 if (alRes.data && alRes.data.length > 0) {
-                    await instance.patch(`/ip/firewall/address-list/${alRes.data[0]['.id']}`, {
-                        comment: JSON.stringify(commentData)
-                    });
+                    await instance.patch(`/ip/firewall/address-list/${alRes.data[0]['.id']}`, { comment: JSON.stringify(commentData) });
+                } else {
+                    await instance.put(`/ip/firewall/address-list`, { address, list: 'authorized-dhcp-users', timeout: '0s', comment: JSON.stringify(commentData) });
                 }
             } catch (e) { console.warn("Address list update warning", e.message); }
+            try {
+                const pendRes = await instance.get(`/ip/firewall/address-list?address=${address}&list=pending-dhcp-users`);
+                if (pendRes.data && pendRes.data.length > 0) {
+                    await instance.delete(`/ip/firewall/address-list/${pendRes.data[0]['.id']}`);
+                }
+            } catch (e) { console.warn("Pending list cleanup warning", e.message); }
 
             // 2. Update Queue
             if (speedLimit) {
