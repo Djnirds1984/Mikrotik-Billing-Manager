@@ -839,6 +839,12 @@ app.post('/:routerId/ppp/scheduler/refresh', getRouter, async (req, res) => {
     } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
 });
 
+// Guard: Misrouted panel /api calls should not hit backend
+app.all('/api/*', async (req, res) => {
+    console.warn('[Backend] Misrouted /api call to backend:', req.path);
+    return res.status(400).json({ message: 'UI API route detected; please route /api to the panel server. Backend expects /:routerId/<endpoint>.' });
+});
+
 // 3. Generic Proxy Handler for all other MikroTik calls
 app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
     const { endpoint } = req.params;
