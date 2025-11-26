@@ -6,7 +6,7 @@ import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, ExclamationTriangleIcon } from '../constants.tsx';
 import { ActivationPaymentModal } from './ActivationPaymentModal.tsx';
-import { GracePeriodModal } from './GracePeriodModal.tsx';
+import { GracePeriodModalDhcp } from './GracePeriodModalDhcp.tsx';
 
 // New modal for manual editing
 const EditClientModal: React.FC<{
@@ -302,11 +302,11 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 isSubmitting={isSubmitting}
                 dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
             />
-            <GracePeriodModal
+            <GracePeriodModalDhcp
                 isOpen={isGraceModalOpen}
                 onClose={() => setGraceModalOpen(false)}
                 subject={selectedClient}
-                onSave={handleGraceSave as any}
+                onSave={handleGraceSave}
             />
 
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
