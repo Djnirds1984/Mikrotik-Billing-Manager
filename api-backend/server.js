@@ -467,70 +467,59 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
 app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
     const { initialSecret, secretData, subscriptionData } = req.body;
     console.log('[ppp/user/save] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify(maskSensitive({ initialSecret: initialSecret ? { id: initialSecret.id, name: initialSecret.name } : null, secretData, subscriptionData })));
-    if (!secretData || !secretData.name || String(secretData.name).trim() === '') {
-        return res.status(400).json({ message: 'Invalid input: secretData.name is required.' });
-    }
-
+    if (!secretData || !secretData.name || String(secretData.name).trim() === '') return res.status(400).json({ message: 'Invalid input: secretData.name is required.' });
     try {
+        const schedName = `ppp-auto-kick-${String(secretData.name)}`;
+        const due = subscriptionData?.dueDateTime || subscriptionData?.dueDate;
+        const d = due ? new Date(due) : null;
+        const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        const rosDate = d ? `${months[d.getMonth()]}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}` : null;
+        const rosTime = d ? d.toTimeString().split(' ')[0] : null;
+        const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do { /ppp/active/remove [find name=\"${String(secretData.name)}\"]; } ; /ppp/secret/set [find name=\"${String(secretData.name)}\"] disabled=yes`;
         if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
+            const client = req.routerInstance; await client.connect();
             try {
                 let targetId = initialSecret?.id;
-                if (!targetId) {
-                    const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
-                    if (Array.isArray(existing) && existing.length > 0) targetId = existing[0]['.id'];
-                }
-
+                if (!targetId) { const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]); if (Array.isArray(existing) && existing.length > 0) targetId = existing[0]['.id']; }
                 const payload = {};
                 if (targetId) payload['.id'] = targetId;
                 if (secretData.name != null) payload['name'] = String(secretData.name);
                 if (secretData.password != null) payload['password'] = String(secretData.password);
                 if (secretData.profile != null) payload['profile'] = String(secretData.profile);
-                if (secretData.service != null) payload['service'] = String(secretData.service);
-                else if (!targetId) payload['service'] = 'pppoe';
+                if (secretData.service != null) payload['service'] = String(secretData.service); else if (!targetId) payload['service'] = 'pppoe';
                 if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
                 if (subscriptionData != null) payload['comment'] = JSON.stringify(subscriptionData);
-
-                if (targetId) {
-                    await client.write('/ppp/secret/set', payload);
-                } else {
-                    await client.write('/ppp/secret/add', payload);
+                if (targetId) await client.write('/ppp/secret/set', payload); else await client.write('/ppp/secret/add', payload);
+                if (d) {
+                    const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
+                    if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
+                    await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
                 }
-
                 const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
                 res.json(saved.map(normalizeLegacyObject));
-            } finally {
-                await client.close();
-            }
+            } finally { await client.close(); }
         } else {
-            const instance = req.routerInstance;
-            const name = encodeURIComponent(String(secretData.name));
-            const qRes = await instance.get(`/ppp/secret?name=${name}`);
-            const existing = Array.isArray(qRes.data) && qRes.data.length > 0 ? qRes.data[0] : null;
+            const instance = req.routerInstance; const name = encodeURIComponent(String(secretData.name));
+            const qRes = await instance.get(`/ppp/secret?name=${name}`); const existing = Array.isArray(qRes.data) && qRes.data.length > 0 ? qRes.data[0] : null;
             const payload = {};
             if (secretData.name != null) payload['name'] = String(secretData.name);
             if (secretData.password != null) payload['password'] = String(secretData.password);
             if (secretData.profile != null) payload['profile'] = String(secretData.profile);
-            if (secretData.service != null) payload['service'] = String(secretData.service);
-            else if (!existing) payload['service'] = 'pppoe';
+            if (secretData.service != null) payload['service'] = String(secretData.service); else if (!existing) payload['service'] = 'pppoe';
             if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
             if (subscriptionData != null) payload['comment'] = JSON.stringify(subscriptionData);
-
-            if (existing) {
-                await instance.patch(`/ppp/secret/${existing['.id']}`, payload);
-            } else {
-                await instance.put(`/ppp/secret`, payload);
+            if (existing) await instance.patch(`/ppp/secret/${existing['.id']}`, payload); else await instance.put(`/ppp/secret`, payload);
+            if (d) {
+                const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
+                if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
+                await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
             }
-
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
             res.json(savedRes.data);
         }
     } catch (e) {
         console.error('[ppp/user/save] error:', safeStringify({ routerId: req.params.routerId, message: e.message, status: e.response?.status, data: e.response?.data }));
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
+        const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg });
     }
 });
 
@@ -538,67 +527,51 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
 app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
     const { secret, plan, nonPaymentProfile, discountDays, paymentDate } = req.body;
     console.log('[ppp/payment/process] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify(maskSensitive({ secret: secret ? { id: secret.id, name: secret.name } : null, plan, nonPaymentProfile, discountDays, paymentDate })));
-    if (!secret || !secret.name) {
-        return res.status(400).json({ message: 'Invalid input: secret.name is required.' });
-    }
-    if (!plan || !plan.pppoeProfile) {
-        return res.status(400).json({ message: 'Invalid input: plan.pppoeProfile is required.' });
-    }
-
+    if (!secret || !secret.name) return res.status(400).json({ message: 'Invalid input: secret.name is required.' });
+    if (!plan || !plan.pppoeProfile) return res.status(400).json({ message: 'Invalid input: plan.pppoeProfile is required.' });
     try {
         const cycleDays = Number(plan.cycleDays ?? plan.cycle_days ?? 30);
         const discount = Number(discountDays ?? 0);
         const effectiveDays = Math.max(0, cycleDays - discount);
         const start = paymentDate ? new Date(paymentDate) : new Date();
         const expires = new Date(start.getTime() + effectiveDays * 24 * 60 * 60 * 1000);
-        const commentData = {
-            planName: plan?.name || '',
-            dueDate: expires.toISOString().split('T')[0],
-            dueDateTime: expires.toISOString(),
-            paymentDate: start.toISOString(),
-            discountDays: discount
-        };
-
+        const commentData = { planName: plan?.name || '', dueDate: expires.toISOString().split('T')[0], dueDateTime: expires.toISOString(), paymentDate: start.toISOString(), discountDays: discount, kickFlag: true };
+        const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        const rosDate = `${months[expires.getMonth()]}/${String(expires.getDate()).padStart(2,'0')}/${expires.getFullYear()}`;
+        const rosTime = expires.toTimeString().split(' ')[0];
+        const schedName = `ppp-auto-kick-${String(secret.name)}`;
+        const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /ppp/active/remove [find name=\"${String(secret.name)}\"]; } ; /ppp/secret/set [find name=\"${String(secret.name)}\"] disabled=yes`;
         if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
+            const client = req.routerInstance; await client.connect();
             try {
                 const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
-                if (!Array.isArray(existing) || existing.length === 0) {
-                    return res.status(404).json({ message: 'PPP secret not found.' });
-                }
+                if (!Array.isArray(existing) || existing.length === 0) return res.status(404).json({ message: 'PPP secret not found.' });
                 const id = existing[0]['.id'];
-                const payload = {
-                    '.id': id,
-                    'profile': String(plan.pppoeProfile),
-                    'comment': JSON.stringify(commentData)
-                };
-                await client.write('/ppp/secret/set', payload);
+                await client.write('/ppp/secret/set', { '.id': id, 'profile': String(plan.pppoeProfile), 'comment': JSON.stringify(commentData) });
+                const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
+                if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
+                await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
+                await writeLegacySafe(client, ['/ppp/active/remove', `?name=${String(secret.name)}`]);
                 const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
                 res.json(saved.map(normalizeLegacyObject));
-            } finally {
-                await client.close();
-            }
+            } finally { await client.close(); }
         } else {
             const instance = req.routerInstance;
             const name = encodeURIComponent(String(secret.name));
             const sRes = await instance.get(`/ppp/secret?name=${name}`);
-            if (!Array.isArray(sRes.data) || sRes.data.length === 0) {
-                return res.status(404).json({ message: 'PPP secret not found.' });
-            }
+            if (!Array.isArray(sRes.data) || sRes.data.length === 0) return res.status(404).json({ message: 'PPP secret not found.' });
             const id = sRes.data[0]['.id'];
-            await instance.patch(`/ppp/secret/${id}`, {
-                'profile': String(plan.pppoeProfile),
-                'comment': JSON.stringify(commentData)
-            });
+            await instance.patch(`/ppp/secret/${id}`, { 'profile': String(plan.pppoeProfile), 'comment': JSON.stringify(commentData) });
+            const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
+            if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
+            await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
+            try { await instance.post('/ppp/active/remove', { name: String(secret.name) }); } catch (_) {}
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
             res.json(savedRes.data);
         }
     } catch (e) {
         console.error('[ppp/payment/process] error:', safeStringify({ routerId: req.params.routerId, message: e.message, status: e.response?.status, data: e.response?.data }));
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
+        const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg });
     }
 });
 
@@ -669,6 +642,38 @@ app.post('/:routerId/ip/wan-failover', getRouter, async (req, res) => {
         const m = e.response?.data?.message || e.response?.data?.detail || e.message;
         res.status(s).json({ message: m });
     }
+});
+
+// PPP Active Kick
+app.post('/:routerId/ppp/active/kick', getRouter, async (req, res) => {
+    const { name } = req.body; if (!name) return res.status(400).json({ message: 'name is required' });
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try { await writeLegacySafe(client, ['/ppp/active/remove', `?name=${String(name)}`]); res.json({ message: 'Active sessions removed', name }); }
+            finally { await client.close(); }
+        } else {
+            try { await req.routerInstance.post('/ppp/active/remove', { name: String(name) }); res.json({ message: 'Active sessions removed', name }); }
+            catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
+        }
+    } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
+});
+
+// PPP Scheduler Refresh
+app.post('/:routerId/ppp/scheduler/refresh', getRouter, async (req, res) => {
+    const { name, dueDateTime } = req.body; if (!name || !dueDateTime) return res.status(400).json({ message: 'name and dueDateTime are required' });
+    try {
+        const d = new Date(dueDateTime); const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        const rosDate = `${months[d.getMonth()]}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}`; const rosTime = d.toTimeString().split(' ')[0];
+        const schedName = `ppp-auto-kick-${String(name)}`; const onEvent = `/log info \"PPPoE auto-kick: ${String(name)}\"; :do { /ppp/active/remove [find name=\"${String(name)}\"]; } ; /ppp/secret/set [find name=\"${String(name)}\"] disabled=yes`;
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try { const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]); if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] }); await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent }); res.json({ message: 'Scheduler refreshed', name, schedName }); }
+            finally { await client.close(); }
+        } else {
+            const sch = await req.routerInstance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`); if (Array.isArray(sch.data) && sch.data.length > 0) await req.routerInstance.delete(`/system/scheduler/${sch.data[0]['.id']}`); await req.routerInstance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent }); res.json({ message: 'Scheduler refreshed', name, schedName });
+        }
+    } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
 });
 
 // 3. Generic Proxy Handler for all other MikroTik calls
