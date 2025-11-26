@@ -245,48 +245,23 @@ app.get('/:routerId/interface/print', getRouter, async (req, res) => {
 // 2b. System Resource Print
 app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
     try {
-        let resource;
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
                 const result = await writeLegacySafe(client, ['/system/resource/print']);
+                // Legacy returns array with single object; normalize for consistency
                 const normalized = Array.isArray(result) ? result.map(normalizeLegacyObject) : [normalizeLegacyObject(result)];
-                resource = normalized[0] || {};
-            } finally { await client.close(); }
+                res.json(normalized);
+            } finally {
+                await client.close();
+            }
         } else {
             const response = await req.routerInstance.get('/system/resource');
-            resource = Array.isArray(response.data) ? response.data[0] : response.data;
+            res.json(response.data);
         }
-        const parseMemory = (memStr) => {
-            if (!memStr || typeof memStr !== 'string') return 0;
-            const value = parseFloat(memStr);
-            const s = memStr.toLowerCase();
-            if (s.includes('kib')) return value * 1024;
-            if (s.includes('mib')) return value * 1024 * 1024;
-            if (s.includes('gib')) return value * 1024 * 1024 * 1024;
-            return value;
-        };
-        const formatBytes = (bytes) => {
-            if (!bytes || bytes <= 0) return '0 B';
-            const k = 1024; const sizes = ['B','KB','MB','GB','TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            const v = parseFloat((bytes / Math.pow(k, i)).toFixed(1));
-            return `${v}${sizes[i]}`;
-        };
-        const totalMemoryBytes = parseMemory(resource['total-memory']);
-        const freeMemoryBytes = parseMemory(resource['free-memory']);
-        const usedMemoryBytes = totalMemoryBytes > 0 ? (totalMemoryBytes - freeMemoryBytes) : 0;
-        const memoryUsage = totalMemoryBytes > 0 ? parseFloat(((usedMemoryBytes / totalMemoryBytes) * 100).toFixed(1)) : 0;
-        res.json({
-            boardName: resource['board-name'] || resource['boardName'] || '',
-            version: resource.version || '',
-            cpuLoad: Number(resource['cpu-load'] || resource['cpuLoad'] || 0),
-            uptime: resource.uptime || '',
-            memoryUsage,
-            totalMemory: formatBytes(totalMemoryBytes)
-        });
     } catch (e) {
+        console.error("System Resource Error:", e.message);
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
         res.status(status).json({ message: msg });
