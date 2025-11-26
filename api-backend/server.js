@@ -852,8 +852,29 @@ app.get('/api/panel-users', async (req, res) => {
     try {
         const dbx = await getDb();
         const rows = await dbx.all(`SELECT u.id, u.username, r.id AS role_id, r.name AS role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id`);
-        res.json(rows);
+        const mapped = rows.map(r => ({ id: r.id, username: r.username, role: { id: r.role_id, name: r.role_name || '' } }));
+        res.json(mapped);
     } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// Role permissions (fallback)
+app.get('/api/roles/:roleId/permissions', async (req, res) => {
+    try {
+        const dbx = await getDb();
+        const rows = await dbx.all(`SELECT permission_id FROM role_permissions WHERE role_id = ?`, [req.params.roleId]);
+        res.json(rows.map(r => r.permission_id));
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+app.put('/api/roles/:roleId/permissions', async (req, res) => {
+    try {
+        const dbx = await getDb();
+        const ids = Array.isArray(req.body?.permissionIds) ? req.body.permissionIds : [];
+        await dbx.exec('BEGIN');
+        await dbx.run('DELETE FROM role_permissions WHERE role_id = ?', [req.params.roleId]);
+        for (const pid of ids) { await dbx.run('INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [req.params.roleId, pid]); }
+        await dbx.exec('COMMIT');
+        res.json({ success: true });
+    } catch (e) { try { const dbx = await getDb(); await dbx.exec('ROLLBACK'); } catch {} res.status(500).json({ message: e.message }); }
 });
 
 // Forward /api/* calls to Panel UI server to avoid redirect loops
