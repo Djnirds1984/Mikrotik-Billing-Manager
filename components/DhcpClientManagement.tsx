@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { dbApi } from '../services/databaseService.ts';
-import { getDhcpClients, updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
+import { getDhcpClients, getDhcpServers, updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
 import type { DhcpClient, DhcpClientDbRecord, DhcpClientActionParams, RouterConfigWithId, SaleRecord, DhcpBillingPlanWithId } from '../types.ts';
 import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, ExclamationTriangleIcon } from '../constants.tsx';
 import { ActivationPaymentModal } from './ActivationPaymentModal.tsx';
-import { GracePeriodModal } from './GracePeriodModal.tsx';
+import { GracePeriodModalDhcp } from './GracePeriodModalDhcp.tsx';
 
 // New modal for manual editing
 const EditClientModal: React.FC<{
@@ -112,15 +112,20 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
 
     const isLegacyApi = selectedRouter.api_type === 'legacy';
+    const [portalEnabledServers, setPortalEnabledServers] = useState<string[]>([]);
+    const PORTAL_SCRIPT_NAME = "dhcp-lease-add-to-pending";
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            const [routerClients, localClients] = await Promise.all([
+            const [routerClients, localClients, serversData] = await Promise.all([
                 getDhcpClients(selectedRouter),
-                dbApi.get<DhcpClientDbRecord[]>(`/dhcp_clients?routerId=${selectedRouter.id}`)
+                dbApi.get<DhcpClientDbRecord[]>(`/dhcp_clients?routerId=${selectedRouter.id}`),
+                getDhcpServers(selectedRouter)
             ]);
+            const enabled = serversData.filter(s => s['lease-script'] === PORTAL_SCRIPT_NAME).map(s => s.name);
+            setPortalEnabledServers(enabled);
             setClients(routerClients);
             setDbClients(localClients);
         } catch (err) {
@@ -138,16 +143,16 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
 
     const combinedClients = useMemo(() => {
         const dbClientMap = new Map(dbClients.map(c => [c.macAddress, c]));
-        return clients.map(client => {
+        const visible = clients.filter(c => c.server && portalEnabledServers.includes(c.server as string));
+        return visible.map(client => {
             const dbData = dbClientMap.get(client.macAddress);
             if (dbData) {
-                // FIX: Cast dbData to 'any' to resolve a TypeScript inference issue where the compiler incorrectly sees the type as 'unknown'.
                 const typedDbData = dbData as any;
                 return { ...client, customerInfo: typedDbData.customerInfo, contactNumber: typedDbData.contactNumber, email: typedDbData.email, speedLimit: typedDbData.speedLimit };
             }
             return client;
         });
-    }, [clients, dbClients]);
+    }, [clients, dbClients, portalEnabledServers]);
     
     const upsertDbClient = async (clientData: Omit<DhcpClientDbRecord, 'id'>) => {
         try {
@@ -297,11 +302,11 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 isSubmitting={isSubmitting}
                 dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
             />
-            <GracePeriodModal
+            <GracePeriodModalDhcp
                 isOpen={isGraceModalOpen}
                 onClose={() => setGraceModalOpen(false)}
                 subject={selectedClient}
-                onSave={handleGraceSave as any}
+                onSave={handleGraceSave}
             />
 
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
@@ -350,15 +355,16 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                                     <td className="px-6 py-4 text-right space-x-1">
                                          {client.status === 'pending' ? (
                                              <>
-                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold" title="Activate Client">Activate</button>
+                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold" title="Pay & Reactivate Client">Pay/Reactivate</button>
+                                                <button onClick={() => { setSelectedClient(client); setGraceModalOpen(true); }} className="px-3 py-1 text-sm bg-purple-600 text-white rounded-md font-semibold" title="Grant Grace Period">Grace</button>
                                                 <button onClick={() => handleDeactivateOrDelete(client)} className="p-2 text-slate-500 hover:text-red-500" title="Delete from pending list"><TrashIcon className="w-5 h-5"/></button>
                                              </>
                                          ) : (
                                             <>
-                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold" title="Pay/Renew">Pay/Renew</button>
-                                                <button onClick={() => { setSelectedClient(client); setGraceModalOpen(true); }} className="px-3 py-1 text-sm bg-purple-600 text-white rounded-md font-semibold" title="Grant Grace Period">Grace</button>
-                                                <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client"><EditIcon className="w-5 h-5"/></button>
-                                                <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold" title="Deactivate">Deactivate</button>
+                                               <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold" title="Pay/Renew">Pay/Renew</button>
+                                               <button onClick={() => { setSelectedClient(client); setGraceModalOpen(true); }} className="px-3 py-1 text-sm bg紫-600 text-white rounded-md font-semibold" title="Grant Grace Period">Grace</button>
+                                               <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client"><EditIcon className="w-5 h-5"/></button>
+                                               <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold" title="Deactivate">Deactivate</button>
                                             </>
                                          )}
                                     </td>

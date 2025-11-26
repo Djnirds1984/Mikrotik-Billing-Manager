@@ -683,6 +683,7 @@ export interface DhcpClient {
     address: string;
     macAddress: string;
     hostName: string;
+    server?: string;
     customerInfo?: string;
     contactNumber?: string;
     email?: string;
