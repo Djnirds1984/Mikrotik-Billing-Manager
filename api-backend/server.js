@@ -499,7 +499,17 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 if (secretData.profile != null) payload['profile'] = String(secretData.profile);
                 if (secretData.service != null) payload['service'] = String(secretData.service); else if (!targetId) payload['service'] = 'pppoe';
                 if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
-                if (subscriptionData != null) payload['comment'] = JSON.stringify(subscriptionData);
+                if (subscriptionData != null) {
+                    const meta = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
+                    let preservedPlanType = '';
+                    try { const c = JSON.parse(meta[0]?.comment || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
+                    const db = await getDb(); const row = await db.get('SELECT original_plan_type FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secretData.name)]);
+                    if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
+                    let base = {}; try { base = JSON.parse(meta[0]?.comment || '{}'); } catch (_) {}
+                    const merged = { ...base, ...subscriptionData, planType: preservedPlanType || (subscriptionData.planType || '').toLowerCase() };
+                    payload['comment'] = JSON.stringify(merged);
+                    console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
+                }
                 if (targetId) await client.write('/ppp/secret/set', payload); else await client.write('/ppp/secret/add', payload);
                 if (d) {
                     const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
@@ -518,7 +528,18 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
             if (secretData.profile != null) payload['profile'] = String(secretData.profile);
             if (secretData.service != null) payload['service'] = String(secretData.service); else if (!existing) payload['service'] = 'pppoe';
             if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
-            if (subscriptionData != null) payload['comment'] = JSON.stringify(subscriptionData);
+            if (subscriptionData != null) {
+                const encName = encodeURIComponent(String(secretData.name));
+                const s = await instance.get(`/ppp/secret?name=${encName}`);
+                let preservedPlanType = '';
+                try { const c = JSON.parse((Array.isArray(s.data) && s.data[0]?.comment) || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
+                const db = await getDb(); const row = await db.get('SELECT original_plan_type FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secretData.name)]);
+                if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
+                let base = {}; try { base = JSON.parse((Array.isArray(s.data) && s.data[0]?.comment) || '{}'); } catch (_) {}
+                const merged = { ...base, ...subscriptionData, planType: preservedPlanType || (subscriptionData.planType || '').toLowerCase() };
+                payload['comment'] = JSON.stringify(merged);
+                console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
+            }
             if (existing) await instance.patch(`/ppp/secret/${existing['.id']}`, payload); else await instance.put(`/ppp/secret`, payload);
             if (d) {
                 const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
