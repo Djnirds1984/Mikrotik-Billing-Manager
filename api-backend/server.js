@@ -48,6 +48,7 @@ async function getDb() {
                 expires_at TEXT NOT NULL,
                 original_profile TEXT,
                 original_plan_type TEXT,
+                non_payment_profile TEXT,
                 metadata TEXT,
                 PRIMARY KEY (router_id, name)
             );
@@ -622,7 +623,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
 
 // PPP Grace: Grant
 app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
-    const { name, graceDays, originalPlanType, originalProfile } = req.body; if (!name || !graceDays) return res.status(400).json({ message: 'name and graceDays are required' });
+    const { name, graceDays, originalPlanType, originalProfile, nonPaymentProfile } = req.body; if (!name || !graceDays) return res.status(400).json({ message: 'name and graceDays are required' });
     try {
         const database = await getDb();
         const existing = await database.get('SELECT * FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(name)]);
@@ -631,8 +632,7 @@ app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
         const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const rosDate = `${months[expiresAt.getMonth()]}/${String(expiresAt.getDate()).padStart(2,'0')}/${expiresAt.getFullYear()}`; const rosTime = expiresAt.toTimeString().split(' ')[0];
         const schedName = `ppp-grace-expire-${String(name)}`;
-        const onEventProfile = (originalProfile ? ` ; /ppp/secret/set [find name=\"${String(name)}\"] profile=${String(originalProfile)}` : '');
-        const onEvent = `/log info \"PPPoE grace expired: ${String(name)}\"; :do { /ppp/active/remove [find name=\"${String(name)}\"]; }` + onEventProfile;
+        const onEvent = `/log info \"PPPoE grace expired: ${String(name)}\"; :do { /ppp/active/remove [find name=\"${String(name)}\"]; }`;
         const commentExtend = { graceDays: Number(graceDays), graceActivatedAt: activatedAt, kickFlag: true, originalPlanType: originalPlanType || '' };
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
@@ -642,6 +642,7 @@ app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
                 try { const c = JSON.parse(currentComment || '{}'); const preservedPlanType = (c.planType || originalPlanType || '').toLowerCase(); const merged = { ...c, ...commentExtend, planType: preservedPlanType }; payloadComment = JSON.stringify(merged); console.log('[ppp/grace/grant] preserve planType:', preservedPlanType || 'unknown'); }
                 catch (_) { payloadComment = JSON.stringify({ ...commentExtend, planType: (originalPlanType || '').toLowerCase() }); }
                 await client.write('/ppp/secret/set', { '.id': id, comment: payloadComment });
+                if (originalProfile) await client.write('/ppp/secret/set', { '.id': id, profile: String(originalProfile) });
                 const sch = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]); if (Array.isArray(sch) && sch.length > 0) await client.write('/system/scheduler/remove', { '.id': sch[0]['.id'] });
                 await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
             } finally { await client.close(); }
@@ -652,10 +653,11 @@ app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
             try { const c = JSON.parse(currentComment || '{}'); const preservedPlanType = (c.planType || originalPlanType || '').toLowerCase(); const merged = { ...c, ...commentExtend, planType: preservedPlanType }; payloadComment = JSON.stringify(merged); console.log('[ppp/grace/grant] preserve planType:', preservedPlanType || 'unknown'); }
             catch (_) { payloadComment = JSON.stringify({ ...commentExtend, planType: (originalPlanType || '').toLowerCase() }); }
             await instance.patch(`/ppp/secret/${id}`, { comment: payloadComment });
+            if (originalProfile) await instance.patch(`/ppp/secret/${id}`, { profile: String(originalProfile) });
             const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`); if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
             await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
         }
-        await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, metadata) VALUES (?,?,?,?,?,?,?)', [req.params.routerId, String(name), activatedAt, expiresAt.toISOString(), originalProfile || null, originalPlanType || null, JSON.stringify({ graceDays })]);
+        await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, non_payment_profile, metadata) VALUES (?,?,?,?,?,?,?,?)', [req.params.routerId, String(name), activatedAt, expiresAt.toISOString(), originalProfile || null, originalPlanType || null, nonPaymentProfile || null, JSON.stringify({ graceDays })]);
         res.json({ message: 'Grace period granted', name, activatedAt, expiresAt: expiresAt.toISOString() });
     } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
 });
@@ -847,6 +849,48 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
         res.status(status).json({ message: msg });
     }
 });
+
+let graceWorkerRunning = false;
+const processExpiredGrace = async () => {
+    if (graceWorkerRunning) return; graceWorkerRunning = true;
+    try {
+        const database = await getDb();
+        const nowIso = new Date().toISOString();
+        const rows = await database.all('SELECT * FROM ppp_grace WHERE expires_at <= ?', [nowIso]);
+        for (const row of rows) {
+            try {
+                const router = await database.get('SELECT * FROM routers WHERE id = ?', [row.router_id]);
+                if (!router) continue;
+                const instance = createRouterInstance(router);
+                const nameEnc = encodeURIComponent(String(row.name));
+                if (router.api_type === 'legacy') {
+                    await instance.connect();
+                    try {
+                        const s = await writeLegacySafe(instance, ['/ppp/secret/print', `?name=${String(row.name)}`]);
+                        if (Array.isArray(s) && s.length > 0 && row.non_payment_profile) {
+                            await instance.write('/ppp/secret/set', { '.id': s[0]['.id'], profile: String(row.non_payment_profile) });
+                        }
+                        await writeLegacySafe(instance, ['/ppp/active/remove', `?name=${String(row.name)}`]);
+                        const sched = await writeLegacySafe(instance, ['/system/scheduler/print', `?name=ppp-grace-expire-${String(row.name)}`]);
+                        if (Array.isArray(sched) && sched.length > 0) await instance.write('/system/scheduler/remove', { '.id': sched[0]['.id'] });
+                    } finally { await instance.close(); }
+                } else {
+                    const sRes = await instance.get(`/ppp/secret?name=${nameEnc}`);
+                    if (Array.isArray(sRes.data) && sRes.data.length > 0 && row.non_payment_profile) {
+                        await instance.patch(`/ppp/secret/${sRes.data[0]['.id']}`, { profile: String(row.non_payment_profile) });
+                    }
+                    try { await instance.post('/ppp/active/remove', { name: String(row.name) }); } catch (_) {}
+                    const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(`ppp-grace-expire-${String(row.name)}`)}`);
+                    if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
+                }
+                await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [row.router_id, String(row.name)]);
+                console.log('[ppp/grace/expire] applied non-payment profile and cleaned record', row.router_id, row.name);
+            } catch (err) { console.error('[ppp/grace/expire] error', err.message); }
+        }
+    } catch (e) { console.error('[ppp/grace/worker] error', e.message); }
+    finally { graceWorkerRunning = false; }
+};
+setInterval(processExpiredGrace, 60000);
 
 app.listen(PORT, () => {
     console.log(`MikroTik API Backend listening on port ${PORT}`);
