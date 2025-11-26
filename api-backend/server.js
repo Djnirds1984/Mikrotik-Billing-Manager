@@ -530,6 +530,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
                     let base = {}; try { base = JSON.parse(meta[0]?.comment || '{}'); } catch (_) {}
                     const merged = { ...base, ...subscriptionData, planType: preservedPlanType || (subscriptionData.planType || '').toLowerCase() };
+                    if (subscriptionData?.dueDate) { const s = String(subscriptionData.dueDate); const datePart = s.split('T')[0]; merged.dueDate = datePart; merged.dueDateTime = s; }
                     payload['comment'] = JSON.stringify(merged);
                     console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
                 }
@@ -569,6 +570,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
                 let base = {}; try { base = JSON.parse((Array.isArray(s.data) && s.data[0]?.comment) || '{}'); } catch (_) {}
                 const merged = { ...base, ...subscriptionData, planType: preservedPlanType || (subscriptionData.planType || '').toLowerCase() };
+                if (subscriptionData?.dueDate) { const sVal = String(subscriptionData.dueDate); const datePart = sVal.split('T')[0]; merged.dueDate = datePart; merged.dueDateTime = sVal; }
                 payload['comment'] = JSON.stringify(merged);
                 console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
             }
