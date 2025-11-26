@@ -495,9 +495,20 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
     console.log('[ppp/user/save] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify(maskSensitive({ initialSecret: initialSecret ? { id: initialSecret.id, name: initialSecret.name } : null, secretData, subscriptionData })));
     if (!secretData || !secretData.name || String(secretData.name).trim() === '') return res.status(400).json({ message: 'Invalid input: secretData.name is required.' });
     try {
-        const schedName = `ppp-auto-kick-${String(secretData.name)}`;
+        const isGrace = subscriptionData && Number(subscriptionData.graceDays) > 0;
         const due = subscriptionData?.dueDateTime || subscriptionData?.dueDate;
-        const d = due ? new Date(due) : null;
+        let d = due ? new Date(due) : null;
+        if (!d && isGrace) {
+            const now = new Date();
+            d = new Date(now.getTime() + Number(subscriptionData.graceDays) * 86400000);
+            if (subscriptionData.graceTime) {
+                const parts = String(subscriptionData.graceTime).split(':');
+                const hours = Number(parts[0] || 0);
+                const minutes = Number(parts[1] || 0);
+                d.setHours(hours, minutes, 0, 0);
+            }
+        }
+        const schedName = isGrace ? `ppp-grace-expire-${String(secretData.name)}` : `ppp-auto-kick-${String(secretData.name)}`;
         const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const rosDate = d ? `${months[d.getMonth()]}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}` : null;
         const rosTime = d ? d.toTimeString().split(' ')[0] : null;
@@ -518,7 +529,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     const cur = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
                     if (Array.isArray(cur) && cur.length > 0) originalProfileVal = cur[0]['profile'] || originalProfileVal;
                 } catch (_) {}
-                if (isGrace) payload['profile'] = String(originalProfileVal || secretData.profile || '');
+                if (isGrace) payload['profile'] = String(secretData.profile || originalProfileVal || '');
                 else if (secretData.profile != null) payload['profile'] = String(secretData.profile);
                 if (secretData.service != null) payload['service'] = String(secretData.service); else if (!targetId) payload['service'] = 'pppoe';
                 if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
@@ -541,7 +552,8 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
                     const database = await getDb();
                     const nowIso = new Date().toISOString();
-                    await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, non_payment_profile, metadata) VALUES (?,?,?,?,?,?,?,?)', [req.params.routerId, String(secretData.name), nowIso, d.toISOString(), String(originalProfileVal || ''), (subscriptionData?.planType || '').toLowerCase(), String(subscriptionData?.nonPaymentProfile || ''), JSON.stringify({ graceDays: Number(subscriptionData?.graceDays || 0), graceTime: subscriptionData?.graceTime || null })]);
+                    const originalProfileToStore = String(payload['profile'] || originalProfileVal || '');
+                    await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, non_payment_profile, metadata) VALUES (?,?,?,?,?,?,?,?)', [req.params.routerId, String(secretData.name), nowIso, d.toISOString(), originalProfileToStore, (subscriptionData?.planType || '').toLowerCase(), String(subscriptionData?.nonPaymentProfile || ''), JSON.stringify({ graceDays: Number(subscriptionData?.graceDays || 0), graceTime: subscriptionData?.graceTime || null })]);
                 }
                 const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
                 res.json(saved.map(normalizeLegacyObject));
@@ -557,7 +569,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
             if (!originalProfileVal) {
                 try { const s2 = await instance.get(`/ppp/secret?name=${name}`); if (Array.isArray(s2.data) && s2.data.length > 0) originalProfileVal = s2.data[0]['profile']; } catch (_) {}
             }
-            if (isGrace) payload['profile'] = String(originalProfileVal || secretData.profile || '');
+            if (isGrace) payload['profile'] = String(secretData.profile || originalProfileVal || '');
             else if (secretData.profile != null) payload['profile'] = String(secretData.profile);
             if (secretData.service != null) payload['service'] = String(secretData.service); else if (!existing) payload['service'] = 'pppoe';
             if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
@@ -581,7 +593,8 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
                 const database = await getDb();
                 const nowIso = new Date().toISOString();
-                await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, non_payment_profile, metadata) VALUES (?,?,?,?,?,?,?,?)', [req.params.routerId, String(secretData.name), nowIso, d.toISOString(), String(originalProfileVal || ''), (subscriptionData?.planType || '').toLowerCase(), String(subscriptionData?.nonPaymentProfile || ''), JSON.stringify({ graceDays: Number(subscriptionData?.graceDays || 0), graceTime: subscriptionData?.graceTime || null })]);
+                const originalProfileToStore = String(payload['profile'] || originalProfileVal || '');
+                await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, non_payment_profile, metadata) VALUES (?,?,?,?,?,?,?,?)', [req.params.routerId, String(secretData.name), nowIso, d.toISOString(), originalProfileToStore, (subscriptionData?.planType || '').toLowerCase(), String(subscriptionData?.nonPaymentProfile || ''), JSON.stringify({ graceDays: Number(subscriptionData?.graceDays || 0), graceTime: subscriptionData?.graceTime || null })]);
             }
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
             const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secretData.name)]);
