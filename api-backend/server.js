@@ -602,6 +602,7 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
 // DHCP Client: Activate
 app.post('/:routerId/ip/dhcp-client/activate', getRouter, async (req, res) => {
     const { interfaces = [], hostname, addDefaultRoute = true, usePeerDns = true, usePeerNtp = true } = req.body;
@@ -657,10 +658,15 @@ app.post('/:routerId/ip/dhcp-client/activate', getRouter, async (req, res) => {
 app.post('/:routerId/ip/dhcp-client/renew', getRouter, async (req, res) => {
     const { interface: iface } = req.body; console.log('[dhcp-client/renew] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify({ interface: iface }));
     if (!iface) return res.status(400).json({ message: 'interface is required' });
+=======
+// WAN Routes (filtered)
+app.get('/:routerId/ip/wan-routes', getRouter, async (req, res) => {
+>>>>>>> 884f795 (feat(wan-failover): update API endpoints for wan routes and failover)
     try {
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
+<<<<<<< HEAD
                 const dhcps = await writeLegacySafe(client, ['/ip/dhcp-client/print', `?interface=${iface}`]);
                 if (!Array.isArray(dhcps) || dhcps.length === 0) return res.status(404).json({ message: `No DHCP client found on ${iface}` });
                 const id = dhcps[0]['.id']; await writeLegacySafe(client, ['/ip/dhcp-client/renew', `=numbers=${id}`]);
@@ -726,6 +732,57 @@ app.post('/:routerId/ip/dhcp-client/deactivate', getRouter, async (req, res) => 
             res.json({ message: remove ? 'DHCP client removed' : 'DHCP client disabled', interface: iface });
         }
     } catch (e) { const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg }); }
+=======
+                let routes = await writeLegacySafe(client, ['/ip/route/print']);
+                routes = routes.map(normalizeLegacyObject);
+                res.json(routes.filter(r => r['check-gateway']));
+            } finally { await client.close(); }
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            res.json(response.data.filter(r => r['check-gateway']));
+        }
+    } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
+});
+
+// WAN Failover Status
+app.get('/:routerId/ip/wan-failover/status', getRouter, async (req, res) => {
+    try {
+        let routes;
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try { routes = await writeLegacySafe(client, ['/ip/route/print']); } finally { await client.close(); }
+            routes = routes.map(normalizeLegacyObject);
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            routes = response.data;
+        }
+        const wanRoutes = routes.filter(r => r['check-gateway']);
+        const enabled = wanRoutes.some(r => r.disabled === 'false' || r.disabled === false);
+        res.json({ enabled });
+    } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
+});
+
+// Configure WAN Failover (enable/disable check-gateway routes)
+app.post('/:routerId/ip/wan-failover', getRouter, async (req, res) => {
+    try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') return res.status(400).json({ message: 'enabled must be boolean' });
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try {
+                let routes = await writeLegacySafe(client, ['/ip/route/print']);
+                routes = routes.map(normalizeLegacyObject);
+                const wanRoutes = routes.filter(r => r['check-gateway']);
+                await Promise.all(wanRoutes.map(r => client.write('/ip/route/set', { '.id': r.id, disabled: enabled ? 'no' : 'yes' })));
+            } finally { await client.close(); }
+        } else {
+            const response = await req.routerInstance.get('/ip/route');
+            const wanRoutes = response.data.filter(r => r['check-gateway']);
+            await Promise.all(wanRoutes.map(r => req.routerInstance.patch(`/ip/route/${r.id}`, { disabled: !enabled })));
+        }
+        res.json({ message: `WAN failover routes have been ${enabled ? 'enabled' : 'disabled'}.` });
+    } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
+>>>>>>> 884f795 (feat(wan-failover): update API endpoints for wan routes and failover)
 });
 
 // 3. Generic Proxy Handler for all other MikroTik calls
