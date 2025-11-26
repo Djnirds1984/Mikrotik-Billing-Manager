@@ -193,10 +193,10 @@ export const addIpRoute = (router: RouterConfigWithId, data: IpRouteData) => api
 export const updateIpRoute = (router: RouterConfigWithId, id: string, data: Partial<IpRouteData>) => apiCall(router, 'ip/route/set', 'POST', { ...data, '.id': id });
 export const deleteIpRoute = (router: RouterConfigWithId, id: string) => apiCall(router, 'ip/route/remove', 'POST', { '.id': id });
 
-export const getWanRoutes = (router: RouterConfigWithId) => apiCall<WanRoute[]>(router, 'ip/route/print', 'GET'); // Filter logic might be needed on backend or frontend
-export const getWanFailoverStatus = (router: RouterConfigWithId) => apiCall<FailoverStatus>(router, 'system/script/wan-failover-status'); // Hypothetical script/check
+export const getWanRoutes = (router: RouterConfigWithId) => apiCall<WanRoute[]>(router, 'ip/wan-routes', 'GET');
+export const getWanFailoverStatus = (router: RouterConfigWithId) => apiCall<FailoverStatus>(router, 'ip/wan-failover/status', 'GET');
 export const setRouteProperty = (router: RouterConfigWithId, id: string, props: any) => apiCall(router, 'ip/route/set', 'POST', { ...props, '.id': id });
-export const configureWanFailover = (router: RouterConfigWithId, enabled: boolean) => apiCall(router, 'system/script/configure-wan-failover', 'POST', { enabled });
+export const configureWanFailover = (router: RouterConfigWithId, enabled: boolean) => apiCall(router, 'ip/wan-failover', 'POST', { enabled });
 
 export const getVlans = (router: RouterConfigWithId) => apiCall<VlanInterface[]>(router, 'interface/vlan/print');
 export const addVlan = (router: RouterConfigWithId, data: any) => apiCall(router, 'interface/vlan/add', 'POST', data);
