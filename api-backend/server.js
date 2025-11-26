@@ -547,7 +547,11 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
                 }
                 if (targetId) await client.write('/ppp/secret/set', payload); else await client.write('/ppp/secret/add', payload);
-                await writeLegacySafe(client, ['/ppp/active/remove', `?name=${String(secretData.name)}`]);
+                const before = await writeLegacySafe(client, ['/ppp/active/print', `?name=${String(secretData.name)}`]);
+console.log('[ppp/grace/transition] legacy active before:', Array.isArray(before) ? before.length : 0);
+await new Promise(r => setTimeout(r, 1500));
+const after = await writeLegacySafe(client, ['/ppp/active/print', `?name=${String(secretData.name)}`]);
+console.log('[ppp/grace/transition] legacy active after:', Array.isArray(after) ? after.length : 0);
                 if (d) {
                     const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
                     if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
@@ -590,7 +594,11 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
             }
             if (existing) await instance.patch(`/ppp/secret/${existing['.id']}`, payload); else await instance.put(`/ppp/secret`, payload);
-            try { await instance.post('/ppp/active/remove', { name: String(secretData.name) }); } catch (_) {}
+            const before = await req.routerInstance.get(`/ppp/active?name=${encodeURIComponent(String(secretData.name))}`);
+console.log('[ppp/grace/transition] rest active before:', Array.isArray(before.data) ? before.data.length : 0);
+await new Promise(r => setTimeout(r, 1500));
+const after = await req.routerInstance.get(`/ppp/active?name=${encodeURIComponent(String(secretData.name))}`);
+console.log('[ppp/grace/transition] rest active after:', Array.isArray(after.data) ? after.data.length : 0);
             if (d) {
                 const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
                 if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
