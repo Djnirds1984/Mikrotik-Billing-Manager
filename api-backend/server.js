@@ -41,6 +41,16 @@ async function getDb() {
                 port INTEGER,
                 api_type TEXT
             );
+            CREATE TABLE IF NOT EXISTS ppp_grace (
+                router_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                activated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                original_profile TEXT,
+                original_plan_type TEXT,
+                metadata TEXT,
+                PRIMARY KEY (router_id, name)
+            );
         `);
     }
     return db;
@@ -516,6 +526,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
             }
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
+            const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
             res.json(savedRes.data);
         }
     } catch (e) {
@@ -555,6 +566,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
                 await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
                 await writeLegacySafe(client, ['/ppp/active/remove', `?name=${String(secret.name)}`]);
                 const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
+                const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
                 res.json(saved.map(normalizeLegacyObject));
             } finally { await client.close(); }
         } else {
@@ -575,6 +587,51 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
         console.error('[ppp/payment/process] error:', safeStringify({ routerId: req.params.routerId, message: e.message, status: e.response?.status, data: e.response?.data }));
         const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg });
     }
+});
+
+// PPP Grace: Grant
+app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
+    const { name, graceDays, originalPlanType, originalProfile } = req.body; if (!name || !graceDays) return res.status(400).json({ message: 'name and graceDays are required' });
+    try {
+        const database = await getDb();
+        const existing = await database.get('SELECT * FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(name)]);
+        if (existing) return res.status(409).json({ message: 'Grace period already active for this user' });
+        const now = new Date(); const activatedAt = now.toISOString(); const expiresAt = new Date(now.getTime() + Number(graceDays) * 86400000);
+        const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        const rosDate = `${months[expiresAt.getMonth()]}/${String(expiresAt.getDate()).padStart(2,'0')}/${expiresAt.getFullYear()}`; const rosTime = expiresAt.toTimeString().split(' ')[0];
+        const schedName = `ppp-grace-expire-${String(name)}`;
+        const onEventProfile = (originalProfile ? ` ; /ppp/secret/set [find name=\"${String(name)}\"] profile=${String(originalProfile)}` : '');
+        const onEvent = `/log info \"PPPoE grace expired: ${String(name)}\"; :do { /ppp/active/remove [find name=\"${String(name)}\"]; }` + onEventProfile;
+        const commentExtend = { graceDays: Number(graceDays), graceActivatedAt: activatedAt, kickFlag: true, originalPlanType: originalPlanType || '' };
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance; await client.connect();
+            try {
+                const s = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${String(name)}`]); if (!Array.isArray(s) || s.length === 0) return res.status(404).json({ message: 'PPP secret not found' });
+                const id = s[0]['.id']; const currentComment = s[0]['comment']; let payloadComment;
+                try { const c = JSON.parse(currentComment || '{}'); payloadComment = JSON.stringify({ ...c, ...commentExtend }); } catch (_) { payloadComment = JSON.stringify(commentExtend); }
+                await client.write('/ppp/secret/set', { '.id': id, comment: payloadComment });
+                const sch = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]); if (Array.isArray(sch) && sch.length > 0) await client.write('/system/scheduler/remove', { '.id': sch[0]['.id'] });
+                await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
+            } finally { await client.close(); }
+        } else {
+            const instance = req.routerInstance; const encName = encodeURIComponent(String(name));
+            const sRes = await instance.get(`/ppp/secret?name=${encName}`); if (!Array.isArray(sRes.data) || sRes.data.length === 0) return res.status(404).json({ message: 'PPP secret not found' });
+            const id = sRes.data[0]['.id']; const currentComment = sRes.data[0]['comment']; let payloadComment;
+            try { const c = JSON.parse(currentComment || '{}'); payloadComment = JSON.stringify({ ...c, ...commentExtend }); } catch (_) { payloadComment = JSON.stringify(commentExtend); }
+            await instance.patch(`/ppp/secret/${id}`, { comment: payloadComment });
+            const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`); if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
+            await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
+        }
+        await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, metadata) VALUES (?,?,?,?,?,?,?)', [req.params.routerId, String(name), activatedAt, expiresAt.toISOString(), originalProfile || null, originalPlanType || null, JSON.stringify({ graceDays })]);
+        res.json({ message: 'Grace period granted', name, activatedAt, expiresAt: expiresAt.toISOString() });
+    } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
+});
+
+// PPP Grace: Status
+app.get('/:routerId/ppp/grace/status', async (req, res) => {
+    const { name } = req.query; if (!name) return res.status(400).json({ message: 'name is required' });
+    try { const database = await getDb(); const row = await database.get('SELECT * FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(name)]); res.json(row || {}); }
+    catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
 });
 
 // WAN Routes (only routes with check-gateway)
