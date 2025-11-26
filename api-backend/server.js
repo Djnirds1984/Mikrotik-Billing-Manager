@@ -547,6 +547,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
                 }
                 if (targetId) await client.write('/ppp/secret/set', payload); else await client.write('/ppp/secret/add', payload);
+                await writeLegacySafe(client, ['/ppp/active/remove', `?name=${String(secretData.name)}`]);
                 if (d) {
                     const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
                     if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
@@ -589,6 +590,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
             }
             if (existing) await instance.patch(`/ppp/secret/${existing['.id']}`, payload); else await instance.put(`/ppp/secret`, payload);
+            try { await instance.post('/ppp/active/remove', { name: String(secretData.name) }); } catch (_) {}
             if (d) {
                 const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
                 if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
