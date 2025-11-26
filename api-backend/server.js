@@ -547,11 +547,15 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
                 }
                 if (targetId) await client.write('/ppp/secret/set', payload); else await client.write('/ppp/secret/add', payload);
-                const before = await writeLegacySafe(client, ['/ppp/active/print', `?name=${String(secretData.name)}`]);
-console.log('[ppp/grace/transition] legacy active before:', Array.isArray(before) ? before.length : 0);
-await new Promise(r => setTimeout(r, 1500));
-const after = await writeLegacySafe(client, ['/ppp/active/print', `?name=${String(secretData.name)}`]);
-console.log('[ppp/grace/transition] legacy active after:', Array.isArray(after) ? after.length : 0);
+                const prevProfile = String(originalProfileVal || '');
+const desiredProfile = String(payload['profile'] || '');
+const shouldKick = isGrace && desiredProfile && (desiredProfile !== prevProfile || prevProfile === String(subscriptionData?.nonPaymentProfile || 'Non-Payment'));
+if (shouldKick) {
+    try { await writeLegacySafe(client, ['/ppp/active/remove', `?name=${String(secretData.name)}`]); console.log('[ppp/grace/transition] legacy kick applied for', secretData.name); }
+    catch (e) { console.warn('[ppp/grace/transition] legacy kick failed:', e.message); }
+} else {
+    console.log('[ppp/grace/transition] legacy no kick (profile unchanged or not grace)');
+}
                 if (d) {
                     const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
                     if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
@@ -594,11 +598,15 @@ console.log('[ppp/grace/transition] legacy active after:', Array.isArray(after) 
                 console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
             }
             if (existing) await instance.patch(`/ppp/secret/${existing['.id']}`, payload); else await instance.put(`/ppp/secret`, payload);
-            const before = await req.routerInstance.get(`/ppp/active?name=${encodeURIComponent(String(secretData.name))}`);
-console.log('[ppp/grace/transition] rest active before:', Array.isArray(before.data) ? before.data.length : 0);
-await new Promise(r => setTimeout(r, 1500));
-const after = await req.routerInstance.get(`/ppp/active?name=${encodeURIComponent(String(secretData.name))}`);
-console.log('[ppp/grace/transition] rest active after:', Array.isArray(after.data) ? after.data.length : 0);
+            const prevProfile = String(originalProfileVal || '');
+const desiredProfile = String(payload['profile'] || '');
+const shouldKick = isGrace && desiredProfile && (desiredProfile !== prevProfile || prevProfile === String(subscriptionData?.nonPaymentProfile || 'Non-Payment'));
+if (shouldKick) {
+    try { await req.routerInstance.post('/ppp/active/remove', { name: String(secretData.name) }); console.log('[ppp/grace/transition] rest kick applied for', secretData.name); }
+    catch (e) { console.warn('[ppp/grace/transition] rest kick failed:', e.message); }
+} else {
+    console.log('[ppp/grace/transition] rest no kick (profile unchanged or not grace)');
+}
             if (d) {
                 const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
                 if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
