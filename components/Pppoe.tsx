@@ -387,7 +387,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             if (secret.comment) {
                 try { 
                     const parsedComment = JSON.parse(secret.comment);
-                    subscription.plan = parsedComment.plan || 'N/A';
+                    subscription.plan = parsedComment.planName || parsedComment.plan || 'N/A';
+                    subscription.planId = parsedComment.planId || subscription.planId;
                     if (parsedComment.dueDateTime) {
                         const s = String(parsedComment.dueDateTime);
                         const [date, time] = s.includes('T') ? s.split('T') : [s.split(' ')[0], s.split(' ')[1] || '00:00'];
@@ -511,19 +512,22 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const handleGraceSave = async ({ graceDays, nonPaymentProfile, graceTime }: { graceDays: number; nonPaymentProfile: string; graceTime: string }) => {
         if (!selectedSecret) return false;
         try {
-            const planName = (selectedSecret as any).subscription?.plan;
-            const originalPlan = plans.find(p => p.name === planName);
+            const sub = (selectedSecret as any).subscription || {};
+            const planByName = plans.find(p => p.name === sub.plan);
+            const planById = sub.planId ? plans.find(p => p.id === sub.planId) : undefined;
+            const chosenPlan = planByName || planById;
+            const chosenProfile = chosenPlan?.pppoeProfile || selectedSecret.profile;
             const secretData: PppSecretData = {
                 name: selectedSecret.name,
                 service: 'pppoe',
-                profile: originalPlan?.pppoeProfile || selectedSecret.profile,
+                profile: chosenProfile,
                 comment: selectedSecret.comment,
                 disabled: selectedSecret.disabled,
             };
             await savePppUser(selectedRouter, {
                 initialSecret: selectedSecret,
                 secretData,
-                subscriptionData: { dueDate: '', nonPaymentProfile, graceDays, graceTime, planId: originalPlan?.id }
+                subscriptionData: { dueDate: '', nonPaymentProfile, graceDays, graceTime, planId: chosenPlan?.id }
             });
             setGraceModalOpen(false);
             await fetchData();
