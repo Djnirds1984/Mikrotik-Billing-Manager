@@ -559,8 +559,13 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
             try {
                 const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
                 if (!Array.isArray(existing) || existing.length === 0) return res.status(404).json({ message: 'PPP secret not found.' });
-                const id = existing[0]['.id'];
-                await client.write('/ppp/secret/set', { '.id': id, 'profile': String(plan.pppoeProfile), 'comment': JSON.stringify(commentData) });
+                const id = existing[0]['.id']; const currentComment = existing[0]['comment']; let preservedPlanType = '';
+                try { const c = JSON.parse(currentComment || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
+                const db = await getDb(); const row = await db.get('SELECT original_plan_type FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
+                if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
+                const finalComment = JSON.stringify({ ...commentData, planType: preservedPlanType || (plan.planType || '').toLowerCase() });
+                console.log('[ppp/payment/process] preserve planType:', preservedPlanType || plan.planType || 'unknown');
+                await client.write('/ppp/secret/set', { '.id': id, 'profile': String(plan.pppoeProfile), 'comment': finalComment });
                 const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
                 if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
                 await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
@@ -574,8 +579,13 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
             const name = encodeURIComponent(String(secret.name));
             const sRes = await instance.get(`/ppp/secret?name=${name}`);
             if (!Array.isArray(sRes.data) || sRes.data.length === 0) return res.status(404).json({ message: 'PPP secret not found.' });
-            const id = sRes.data[0]['.id'];
-            await instance.patch(`/ppp/secret/${id}`, { 'profile': String(plan.pppoeProfile), 'comment': JSON.stringify(commentData) });
+            const id = sRes.data[0]['.id']; const currentComment = sRes.data[0]['comment']; let preservedPlanType = '';
+            try { const c = JSON.parse(currentComment || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
+            const db = await getDb(); const row = await db.get('SELECT original_plan_type FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
+            if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
+            const finalComment = JSON.stringify({ ...commentData, planType: preservedPlanType || (plan.planType || '').toLowerCase() });
+            console.log('[ppp/payment/process] preserve planType:', preservedPlanType || plan.planType || 'unknown');
+            await instance.patch(`/ppp/secret/${id}`, { 'profile': String(plan.pppoeProfile), 'comment': finalComment });
             const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
             if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
             await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
@@ -608,7 +618,8 @@ app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
             try {
                 const s = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${String(name)}`]); if (!Array.isArray(s) || s.length === 0) return res.status(404).json({ message: 'PPP secret not found' });
                 const id = s[0]['.id']; const currentComment = s[0]['comment']; let payloadComment;
-                try { const c = JSON.parse(currentComment || '{}'); payloadComment = JSON.stringify({ ...c, ...commentExtend }); } catch (_) { payloadComment = JSON.stringify(commentExtend); }
+                try { const c = JSON.parse(currentComment || '{}'); const preservedPlanType = (c.planType || originalPlanType || '').toLowerCase(); const merged = { ...c, ...commentExtend, planType: preservedPlanType }; payloadComment = JSON.stringify(merged); console.log('[ppp/grace/grant] preserve planType:', preservedPlanType || 'unknown'); }
+                catch (_) { payloadComment = JSON.stringify({ ...commentExtend, planType: (originalPlanType || '').toLowerCase() }); }
                 await client.write('/ppp/secret/set', { '.id': id, comment: payloadComment });
                 const sch = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]); if (Array.isArray(sch) && sch.length > 0) await client.write('/system/scheduler/remove', { '.id': sch[0]['.id'] });
                 await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
@@ -617,7 +628,8 @@ app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
             const instance = req.routerInstance; const encName = encodeURIComponent(String(name));
             const sRes = await instance.get(`/ppp/secret?name=${encName}`); if (!Array.isArray(sRes.data) || sRes.data.length === 0) return res.status(404).json({ message: 'PPP secret not found' });
             const id = sRes.data[0]['.id']; const currentComment = sRes.data[0]['comment']; let payloadComment;
-            try { const c = JSON.parse(currentComment || '{}'); payloadComment = JSON.stringify({ ...c, ...commentExtend }); } catch (_) { payloadComment = JSON.stringify(commentExtend); }
+            try { const c = JSON.parse(currentComment || '{}'); const preservedPlanType = (c.planType || originalPlanType || '').toLowerCase(); const merged = { ...c, ...commentExtend, planType: preservedPlanType }; payloadComment = JSON.stringify(merged); console.log('[ppp/grace/grant] preserve planType:', preservedPlanType || 'unknown'); }
+            catch (_) { payloadComment = JSON.stringify({ ...commentExtend, planType: (originalPlanType || '').toLowerCase() }); }
             await instance.patch(`/ppp/secret/${id}`, { comment: payloadComment });
             const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`); if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
             await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
