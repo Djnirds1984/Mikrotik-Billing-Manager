@@ -389,12 +389,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     const parsedComment = JSON.parse(secret.comment);
                     subscription.plan = parsedComment.plan || 'N/A';
                     if (parsedComment.dueDateTime) {
-                        const dt = new Date(parsedComment.dueDateTime);
-                        const y = dt.getFullYear();
-                        const m = String(dt.getMonth() + 1).padStart(2, '0');
-                        const d = String(dt.getDate()).padStart(2, '0');
-                        const hh = String(dt.getHours()).padStart(2, '0');
-                        const mm = String(dt.getMinutes()).padStart(2, '0');
+                        const s = String(parsedComment.dueDateTime);
+                        const [date, time] = s.includes('T') ? s.split('T') : [s.split(' ')[0], s.split(' ')[1] || '00:00'];
+                        const [y, m, d] = date.split('-');
+                        const [hh, mm] = (time || '00:00').split(':');
                         subscription.dueDate = `${y}-${m}-${d} ${hh}:${mm}`;
                     } else {
                         subscription.dueDate = parsedComment.dueDate || 'No Info';
