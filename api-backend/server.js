@@ -30,7 +30,7 @@ async function getDb() {
         // Enable WAL mode for concurrency
         await db.exec('PRAGMA journal_mode = WAL;');
         
-        // Resilience: Ensure routers table exists
+        // Resilience: Ensure routers table exists and migrate schema
         await db.exec(`
             CREATE TABLE IF NOT EXISTS routers (
                 id TEXT PRIMARY KEY,
@@ -53,6 +53,21 @@ async function getDb() {
                 PRIMARY KEY (router_id, name)
             );
         `);
+        try {
+            const cols = await db.all("PRAGMA table_info(ppp_grace)");
+            const names = cols.map(c => c.name);
+            if (!names.includes('non_payment_profile')) {
+                await db.exec("ALTER TABLE ppp_grace ADD COLUMN non_payment_profile TEXT");
+            }
+            if (!names.includes('original_plan_type')) {
+                await db.exec("ALTER TABLE ppp_grace ADD COLUMN original_plan_type TEXT");
+            }
+            if (!names.includes('metadata')) {
+                await db.exec("ALTER TABLE ppp_grace ADD COLUMN metadata TEXT");
+            }
+        } catch (mErr) {
+            console.warn('[DB Migration] ppp_grace migration warning:', mErr.message);
+        }
     }
     return db;
 }
