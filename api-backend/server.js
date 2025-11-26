@@ -839,17 +839,11 @@ app.post('/:routerId/ppp/scheduler/refresh', getRouter, async (req, res) => {
     } catch (e) { const s = e.response ? e.response.status : 500; const m = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(s).json({ message: m }); }
 });
 
-// Forward /api/* calls to Panel UI server to avoid misrouting
-app.all('/api/*', async (req, res) => {
-    try {
-        const target = `http://localhost:3001${req.originalUrl}`;
-        const axiosResp = await axios({ method: req.method, url: target, data: req.body, headers: { 'Content-Type': req.headers['content-type'] || 'application/json', authorization: req.headers.authorization } });
-        res.status(axiosResp.status).send(axiosResp.data);
-    } catch (e) {
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.message;
-        res.status(status).json({ message: msg });
-    }
+// Redirect /api/* to Panel UI server (same host, port 3001)
+app.all('/api/*', (req, res) => {
+    const host = req.hostname || (req.headers.host ? req.headers.host.split(':')[0] : 'localhost');
+    const target = `http://${host}:3001${req.originalUrl}`;
+    res.redirect(302, target);
 });
 
 // 3. Generic Proxy Handler for all other MikroTik calls
