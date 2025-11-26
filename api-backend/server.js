@@ -603,6 +603,7 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
 });
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 // DHCP Client: Activate
 app.post('/:routerId/ip/dhcp-client/activate', getRouter, async (req, res) => {
     const { interfaces = [], hostname, addDefaultRoute = true, usePeerDns = true, usePeerNtp = true } = req.body;
@@ -785,6 +786,8 @@ app.post('/:routerId/ip/wan-failover', getRouter, async (req, res) => {
 >>>>>>> 884f795ba7be9b94ab2ff2b5b9d8301d5a9e5af8
 });
 
+=======
+>>>>>>> 70d1268289c1eb810f5472464f3e9ef348f5d46d
 // 3. Generic Proxy Handler for all other MikroTik calls
 app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
     const { endpoint } = req.params;
