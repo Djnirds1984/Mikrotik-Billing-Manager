@@ -568,7 +568,18 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                         if (payload['service'] != null) args.push(`service=${String(payload['service'])}`);
                         if (payload['disabled'] != null) args.push(`disabled=${String(payload['disabled'])}`);
                         if (payload['comment'] != null) args.push(`comment=${String(payload['comment'])}`);
-                        await writeLegacySafe(client, args);
+                        try {
+                            await writeLegacySafe(client, args);
+                        } catch (e1) {
+                            const args2 = ['/ppp/secret/set', `numbers=${targetId}`];
+                            if (payload['name'] != null) args2.push(`name=${String(payload['name'])}`);
+                            if (payload['password'] != null) args2.push(`password=${String(payload['password'])}`);
+                            if (payload['profile'] != null) args2.push(`profile=${String(payload['profile'])}`);
+                            if (payload['service'] != null) args2.push(`service=${String(payload['service'])}`);
+                            if (payload['disabled'] != null) args2.push(`disabled=${String(payload['disabled'])}`);
+                            if (payload['comment'] != null) args2.push(`comment=${String(payload['comment'])}`);
+                            await writeLegacySafe(client, args2);
+                        }
                     } catch (err) {
                         console.warn('[ppp/user/save][legacy] set failed, falling back to add:', err.message);
                         const addArgs = ['/ppp/secret/add', `name=${String(secretData.name)}`, `service=${String(payload['service'] || 'pppoe')}`];
