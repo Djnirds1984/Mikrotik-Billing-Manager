@@ -555,6 +555,8 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     } catch (err) {
                         console.warn('[ppp/user/save][legacy] set failed, falling back to add:', err.message);
                         delete payload['.id'];
+                        payload['name'] = String(secretData.name);
+                        if (!payload['service']) payload['service'] = 'pppoe';
                         await client.write('/ppp/secret/add', payload);
                     }
                 } else {
