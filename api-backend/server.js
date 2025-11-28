@@ -526,8 +526,11 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
-                let targetId = initialSecret?.id;
-                if (!targetId) { const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]); if (Array.isArray(existing) && existing.length > 0) targetId = existing[0]['.id']; }
+                let targetId = null;
+                try {
+                    const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
+                    if (Array.isArray(existing) && existing.length > 0) targetId = existing[0]['.id'];
+                } catch (_) {}
                 const payload = {};
                 if (targetId) payload['.id'] = targetId;
                 if (secretData.name != null) payload['name'] = String(secretData.name);
@@ -555,7 +558,17 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     payload['comment'] = JSON.stringify(merged);
                     console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
                 }
-                if (targetId) await client.write('/ppp/secret/set', payload); else await client.write('/ppp/secret/add', payload);
+                if (targetId) {
+                    try {
+                        await client.write('/ppp/secret/set', payload);
+                    } catch (err) {
+                        console.warn('[ppp/user/save][legacy] set failed, falling back to add:', err.message);
+                        delete payload['.id'];
+                        await client.write('/ppp/secret/add', payload);
+                    }
+                } else {
+                    await client.write('/ppp/secret/add', payload);
+                }
                 const prevProfile = String(originalProfileVal || '');
 const desiredProfile = String(payload['profile'] || '');
 const shouldKick = isGrace && desiredProfile && (desiredProfile !== prevProfile || prevProfile === String(subscriptionData?.nonPaymentProfile || 'Non-Payment'));
