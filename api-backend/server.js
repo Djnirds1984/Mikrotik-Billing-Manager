@@ -545,6 +545,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 else if (secretData.profile != null) payload['profile'] = String(secretData.profile);
                 if (secretData.service != null) payload['service'] = String(secretData.service); else if (!targetId) payload['service'] = 'pppoe';
                 if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
+                else if (typeof secretData.disabled === 'string') payload['disabled'] = secretData.disabled === 'true' ? 'yes' : 'no';
                 if (subscriptionData != null) {
                     const meta = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
                     let preservedPlanType = '';
@@ -560,14 +561,30 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 }
                 if (targetId) {
                     try {
-                        await client.write('/ppp/secret/set', payload);
+                        const args = ['/ppp/secret/set', `=.id=${targetId}`];
+                        if (payload['name'] != null) args.push(`name=${String(payload['name'])}`);
+                        if (payload['password'] != null) args.push(`password=${String(payload['password'])}`);
+                        if (payload['profile'] != null) args.push(`profile=${String(payload['profile'])}`);
+                        if (payload['service'] != null) args.push(`service=${String(payload['service'])}`);
+                        if (payload['disabled'] != null) args.push(`disabled=${String(payload['disabled'])}`);
+                        if (payload['comment'] != null) args.push(`comment=${String(payload['comment'])}`);
+                        await writeLegacySafe(client, args);
                     } catch (err) {
                         console.warn('[ppp/user/save][legacy] set failed, falling back to add:', err.message);
-                        delete payload['.id'];
-                        await client.write('/ppp/secret/add', payload);
+                        const addArgs = ['/ppp/secret/add', `name=${String(secretData.name)}`, `service=${String(payload['service'] || 'pppoe')}`];
+                        if (payload['password'] != null) addArgs.push(`password=${String(payload['password'])}`);
+                        if (payload['profile'] != null) addArgs.push(`profile=${String(payload['profile'])}`);
+                        if (payload['disabled'] != null) addArgs.push(`disabled=${String(payload['disabled'])}`);
+                        if (payload['comment'] != null) addArgs.push(`comment=${String(payload['comment'])}`);
+                        await writeLegacySafe(client, addArgs);
                     }
                 } else {
-                    await client.write('/ppp/secret/add', payload);
+                    const addArgs = ['/ppp/secret/add', `name=${String(secretData.name)}`, `service=${String(payload['service'] || 'pppoe')}`];
+                    if (payload['password'] != null) addArgs.push(`password=${String(payload['password'])}`);
+                    if (payload['profile'] != null) addArgs.push(`profile=${String(payload['profile'])}`);
+                    if (payload['disabled'] != null) addArgs.push(`disabled=${String(payload['disabled'])}`);
+                    if (payload['comment'] != null) addArgs.push(`comment=${String(payload['comment'])}`);
+                    await writeLegacySafe(client, addArgs);
                 }
                 const prevProfile = String(originalProfileVal || '');
 const desiredProfile = String(payload['profile'] || '');
@@ -605,6 +622,7 @@ if (shouldKick) {
             else if (secretData.profile != null) payload['profile'] = String(secretData.profile);
             if (secretData.service != null) payload['service'] = String(secretData.service); else if (!existing) payload['service'] = 'pppoe';
             if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
+            else if (typeof secretData.disabled === 'string') payload['disabled'] = secretData.disabled === 'true' ? 'yes' : 'no';
             if (subscriptionData != null) {
                 const encName = encodeURIComponent(String(secretData.name));
                 const s = await instance.get(`/ppp/secret?name=${encName}`);
@@ -678,7 +696,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
                 if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
                 const finalComment = JSON.stringify({ ...commentData, planType: preservedPlanType || (plan.planType || '').toLowerCase() });
                 console.log('[ppp/payment/process] preserve planType:', preservedPlanType || plan.planType || 'unknown');
-                await client.write('/ppp/secret/set', { '.id': id, 'profile': String(plan.pppoeProfile), 'comment': finalComment });
+                await writeLegacySafe(client, ['/ppp/secret/set', `=.id=${id}`, `profile=${String(plan.pppoeProfile)}`, `comment=${finalComment}`]);
                 const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
                 if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
                 await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
