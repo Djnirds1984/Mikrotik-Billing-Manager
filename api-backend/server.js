@@ -562,7 +562,6 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 if (targetId) {
                     try {
                         const args = ['/ppp/secret/set', `=.id=${targetId}`];
-                        if (payload['name'] != null) args.push(`name=${String(payload['name'])}`);
                         if (payload['password'] != null) args.push(`password=${String(payload['password'])}`);
                         if (payload['profile'] != null) args.push(`profile=${String(payload['profile'])}`);
                         if (payload['service'] != null) args.push(`service=${String(payload['service'])}`);
@@ -572,7 +571,6 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                             await writeLegacySafe(client, args);
                         } catch (e1) {
                             const args2 = ['/ppp/secret/set', `numbers=${targetId}`];
-                            if (payload['name'] != null) args2.push(`name=${String(payload['name'])}`);
                             if (payload['password'] != null) args2.push(`password=${String(payload['password'])}`);
                             if (payload['profile'] != null) args2.push(`profile=${String(payload['profile'])}`);
                             if (payload['service'] != null) args2.push(`service=${String(payload['service'])}`);
