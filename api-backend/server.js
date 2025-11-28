@@ -536,6 +536,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                 else if (secretData.profile != null) payload['profile'] = String(secretData.profile);
                 if (secretData.service != null) payload['service'] = String(secretData.service); else if (!targetId) payload['service'] = 'pppoe';
                 if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
+                else if (typeof secretData.disabled === 'string') payload['disabled'] = secretData.disabled === 'true' ? 'yes' : 'no';
                 if (subscriptionData != null) {
                     const meta = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
                     let preservedPlanType = '';
@@ -598,6 +599,7 @@ if (shouldKick) {
             else if (secretData.profile != null) payload['profile'] = String(secretData.profile);
             if (secretData.service != null) payload['service'] = String(secretData.service); else if (!existing) payload['service'] = 'pppoe';
             if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
+            else if (typeof secretData.disabled === 'string') payload['disabled'] = secretData.disabled === 'true' ? 'yes' : 'no';
             if (subscriptionData != null) {
                 const encName = encodeURIComponent(String(secretData.name));
                 const s = await instance.get(`/ppp/secret?name=${encName}`);
