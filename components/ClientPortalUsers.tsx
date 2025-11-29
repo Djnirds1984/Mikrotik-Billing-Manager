@@ -27,7 +27,7 @@ export const ClientPortalUsers: React.FC = () => {
         setIsLoading(true);
         try {
             const res = await fetch('/api/client-portal/users', {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
             });
             if (!res.ok) throw new Error('Failed to fetch users');
             const data = await res.json();
@@ -55,7 +55,7 @@ export const ClientPortalUsers: React.FC = () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    'Authorization': `Bearer ${localStorage.getItem('authToken')}`
                 },
                 body: JSON.stringify({ username, password, routerId, pppoeUsername })
             });
@@ -80,7 +80,7 @@ export const ClientPortalUsers: React.FC = () => {
         try {
             const res = await fetch(`/api/client-portal/users/${id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
             });
             if (!res.ok) throw new Error('Failed to delete');
             fetchData();
