@@ -567,7 +567,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                         if (payload['service'] != null) args.push(`=service=${String(payload['service'])}`);
                         if (payload['disabled'] != null) args.push(`=disabled=${String(payload['disabled'])}`);
                         if (payload['comment'] != null) args.push(`=comment=${String(payload['comment'])}`);
-                        await writeLegacySafe(client, args);
+                        await client.write('/ppp/secret/set', args.slice(1));
                     } catch (err) {
                         console.warn('[ppp/user/save][legacy] set failed, falling back to add:', err.message);
                         const addArgs = ['/ppp/secret/add', `=name=${String(secretData.name)}`, `=service=${String(payload['service'] || 'pppoe')}`];
@@ -575,7 +575,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                         if (payload['profile'] != null) addArgs.push(`=profile=${String(payload['profile'])}`);
                         if (payload['disabled'] != null) addArgs.push(`=disabled=${String(payload['disabled'])}`);
                         if (payload['comment'] != null) addArgs.push(`=comment=${String(payload['comment'])}`);
-                        await writeLegacySafe(client, addArgs);
+                        await client.write('/ppp/secret/add', addArgs.slice(1));
                     }
                 } else {
                     const addArgs = ['/ppp/secret/add', `=name=${String(secretData.name)}`, `=service=${String(payload['service'] || 'pppoe')}`];
@@ -583,11 +583,11 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     if (payload['profile'] != null) addArgs.push(`=profile=${String(payload['profile'])}`);
                     if (payload['disabled'] != null) addArgs.push(`=disabled=${String(payload['disabled'])}`);
                     if (payload['comment'] != null) addArgs.push(`=comment=${String(payload['comment'])}`);
-                    await writeLegacySafe(client, addArgs);
+                    await client.write('/ppp/secret/add', addArgs.slice(1));
                 }
                 if (targetId && initialSecret?.name && String(initialSecret.name) !== String(secretData.name)) {
-                    try { await writeLegacySafe(client, ['/ppp/secret/set', `=.id=${targetId}`, `=name=${String(secretData.name)}`]); }
-                    catch (e) { try { await writeLegacySafe(client, ['/ppp/secret/set', `=numbers=${targetId}`, `=name=${String(secretData.name)}`]); } catch (_) {} }
+                    try { await client.write('/ppp/secret/set', [`=.id=${targetId}`, `=name=${String(secretData.name)}`]); }
+                    catch (e) { try { await client.write('/ppp/secret/set', [`=numbers=${targetId}`, `=name=${String(secretData.name)}`]); } catch (_) {} }
                 }
                 const prevProfile = String(originalProfileVal || '');
 const desiredProfile = String(payload['profile'] || '');
@@ -699,7 +699,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
                 if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
                 const finalComment = JSON.stringify({ ...commentData, planType: preservedPlanType || (plan.planType || '').toLowerCase() });
                 console.log('[ppp/payment/process] preserve planType:', preservedPlanType || plan.planType || 'unknown');
-                await writeLegacySafe(client, ['/ppp/secret/set', `=.id=${id}`, `=profile=${String(plan.pppoeProfile)}`, `=comment=${finalComment}`]);
+                await client.write('/ppp/secret/set', [`=.id=${id}`, `=profile=${String(plan.pppoeProfile)}`, `=comment=${finalComment}`]);
                 const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
                 if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
                 await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
@@ -753,8 +753,8 @@ app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
                 const id = s[0]['.id']; const currentComment = s[0]['comment']; let payloadComment;
                 try { const c = JSON.parse(currentComment || '{}'); const preservedPlanType = (c.planType || originalPlanType || '').toLowerCase(); const merged = { ...c, ...commentExtend, planType: preservedPlanType }; payloadComment = JSON.stringify(merged); console.log('[ppp/grace/grant] preserve planType:', preservedPlanType || 'unknown'); }
                 catch (_) { payloadComment = JSON.stringify({ ...commentExtend, planType: (originalPlanType || '').toLowerCase() }); }
-                await writeLegacySafe(client, ['/ppp/secret/set', `=.id=${id}`, `=comment=${payloadComment}`]);
-                if (originalProfile) await writeLegacySafe(client, ['/ppp/secret/set', `=.id=${id}`, `=profile=${String(originalProfile)}`]);
+                await client.write('/ppp/secret/set', [`=.id=${id}`, `=comment=${payloadComment}`]);
+                if (originalProfile) await client.write('/ppp/secret/set', [`=.id=${id}`, `=profile=${String(originalProfile)}`]);
                 const sch = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]); if (Array.isArray(sch) && sch.length > 0) await client.write('/system/scheduler/remove', { '.id': sch[0]['.id'] });
                 await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
             } finally { await client.close(); }
