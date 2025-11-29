@@ -585,6 +585,10 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     if (payload['comment'] != null) payloadAdd['comment'] = String(payload['comment']);
                     await client.write('/ppp/secret/add', payloadAdd);
                 }
+                if (targetId && initialSecret?.name && String(initialSecret.name) !== String(secretData.name)) {
+                    try { await client.write('/ppp/secret/set', { '.id': targetId, name: String(secretData.name) }); }
+                    catch (e) { try { await client.write('/ppp/secret/set', { numbers: targetId, name: String(secretData.name) }); } catch (_) {} }
+                }
                 const prevProfile = String(originalProfileVal || '');
 const desiredProfile = String(payload['profile'] || '');
 const shouldKick = isGrace && desiredProfile && (desiredProfile !== prevProfile || prevProfile === String(subscriptionData?.nonPaymentProfile || 'Non-Payment'));
