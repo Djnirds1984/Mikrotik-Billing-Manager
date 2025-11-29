@@ -592,18 +592,25 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     catch (e) { try { await client.write('/ppp/secret/set', [`=numbers=${targetId}`, `=name=${String(secretData.name)}`]); } catch (_) {} }
                 }
                 const prevProfile = String(originalProfileVal || '');
-const desiredProfile = String(payload['profile'] || '');
-const shouldKick = isGrace && desiredProfile && (desiredProfile !== prevProfile || prevProfile === String(subscriptionData?.nonPaymentProfile || 'Non-Payment'));
-if (shouldKick) {
-    try { await writeLegacySafe(client, ['/ppp/active/remove', `?name=${String(secretData.name)}`]); console.log('[ppp/grace/transition] legacy kick applied for', secretData.name); }
-    catch (e) { console.warn('[ppp/grace/transition] legacy kick failed:', e.message); }
-} else {
-    console.log('[ppp/grace/transition] legacy no kick (profile unchanged or not grace)');
-}
+                const desiredProfile = String(payload['profile'] || '');
+                const shouldKick = isGrace && desiredProfile && (desiredProfile !== prevProfile || prevProfile === String(subscriptionData?.nonPaymentProfile || 'Non-Payment'));
+                if (shouldKick) {
+                    try {
+                        const active = await writeLegacySafe(client, ['/ppp/active/print', `?name=${String(secretData.name)}`]);
+                        if (active.length > 0 && active[0]['.id']) {
+                            await client.write('/ppp/active/remove', { '.id': active[0]['.id'] });
+                        }
+                        console.log('[ppp/grace/transition] legacy kick applied for', secretData.name);
+                    } catch (e) { console.warn('[ppp/grace/transition] legacy kick failed:', e.message); }
+                } else {
+                    console.log('[ppp/grace/transition] legacy no kick (profile unchanged or not grace)');
+                }
                 if (d) {
-                    const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
-                    if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
-                    await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
+                    try {
+                        const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
+                        if (Array.isArray(s) && s.length > 0 && s[0]['.id']) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
+                        await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
+                    } catch (e) { console.warn('[ppp/user/save] scheduler update failed:', e.message); }
                     const database = await getDb();
                     const nowIso = new Date().toISOString();
                     const originalProfileToStore = String(payload['profile'] || originalProfileVal || '');
@@ -711,10 +718,19 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
                 const finalComment = JSON.stringify({ ...commentData, planType: preservedPlanType || (plan.planType || '').toLowerCase() });
                 console.log('[ppp/payment/process] preserve planType:', preservedPlanType || plan.planType || 'unknown');
                 await client.write('/ppp/secret/set', [`=.id=${id}`, `=profile=${String(plan.pppoeProfile)}`, `=comment=${finalComment}`]);
-                const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
-                if (Array.isArray(s) && s.length > 0) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
-                await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
-                await writeLegacySafe(client, ['/ppp/active/remove', `?name=${String(secret.name)}`]);
+                try {
+                    const s = await writeLegacySafe(client, ['/system/scheduler/print', `?name=${schedName}`]);
+                    if (Array.isArray(s) && s.length > 0 && s[0]['.id']) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
+                    await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
+                } catch (e) { console.warn('[ppp/payment/process] scheduler update failed:', e.message); }
+                
+                try {
+                    const active = await writeLegacySafe(client, ['/ppp/active/print', `?name=${String(secret.name)}`]);
+                    if (active.length > 0 && active[0]['.id']) {
+                        await client.write('/ppp/active/remove', { '.id': active[0]['.id'] });
+                    }
+                } catch (e) { console.warn('[ppp/payment/process] active remove failed:', e.message); }
+                
                 const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
                 const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
                 res.json(saved.map(normalizeLegacyObject));
