@@ -245,6 +245,15 @@ async function initDb() {
                 lastSeen TEXT,
                 UNIQUE(routerId, macAddress)
             );
+            CREATE TABLE IF NOT EXISTS client_users (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                router_id TEXT,
+                pppoe_username TEXT,
+                created_at TEXT
+            );
         `);
         console.log('Database initialized successfully');
     } catch (err) {
@@ -597,6 +606,65 @@ async function startServer() {
     });
 
     app.use('/api/xendit', xenditRouter);
+
+
+    // --- Client Portal Endpoints ---
+    const clientPortalRouter = express.Router();
+    
+    // Admin: Create Client User (Protected)
+    clientPortalRouter.post('/users', protect, async (req, res) => {
+        const { username, password, routerId, pppoeUsername } = req.body;
+        if (!username || !password) return res.status(400).json({ message: 'Username and password required' });
+        try {
+            const salt = crypto.randomBytes(16).toString('hex');
+            const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+            const id = `u_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await db.run('INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, created_at) VALUES (?,?,?,?,?,?,?)',
+                [id, username, hash, salt, routerId, pppoeUsername, new Date().toISOString()]);
+            res.json({ message: 'User created', id });
+        } catch (e) {
+            if (e.message.includes('UNIQUE constraint failed')) return res.status(409).json({ message: 'Username already exists' });
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Admin: List Client Users (Protected)
+    clientPortalRouter.get('/users', protect, async (req, res) => {
+        try {
+            const users = await db.all('SELECT id, username, router_id, pppoe_username, created_at FROM client_users ORDER BY created_at DESC');
+            res.json(users);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Admin: Delete Client User (Protected)
+    clientPortalRouter.delete('/users/:id', protect, async (req, res) => {
+        try {
+            await db.run('DELETE FROM client_users WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    app.use('/api/client-portal', clientPortalRouter);
+
+    // Public Client Login
+    app.post('/api/public/client-portal/login', async (req, res) => {
+        const { username, password } = req.body;
+        if (!username || !password) return res.status(400).json({ message: 'Credentials required' });
+        try {
+            const user = await db.get('SELECT * FROM client_users WHERE username = ?', [username]);
+            if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+            
+            const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
+            if (hash !== user.password_hash) return res.status(401).json({ message: 'Invalid credentials' });
+            
+            res.json({
+                id: user.id,
+                username: user.username,
+                routerId: user.router_id,
+                pppoeUsername: user.pppoe_username
+            });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
 
 
     // --- License ---

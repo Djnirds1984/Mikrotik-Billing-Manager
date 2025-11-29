@@ -1093,65 +1093,6 @@ const processExpiredGrace = async () => {
 setInterval(processExpiredGrace, 60000);
 
 
-// --- Client Portal Endpoints ---
-
-// Admin: Create Client User
-app.post('/api/client-portal/users', async (req, res) => {
-    const { username, password, routerId, pppoeUsername } = req.body;
-    if (!username || !password) return res.status(400).json({ message: 'Username and password required' });
-    try {
-        const db = await getDb();
-        const salt = crypto.randomBytes(16).toString('hex');
-        const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-        const id = `u_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        await db.run('INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, created_at) VALUES (?,?,?,?,?,?,?)',
-            [id, username, hash, salt, routerId, pppoeUsername, new Date().toISOString()]);
-        res.json({ message: 'User created', id });
-    } catch (e) {
-        if (e.message.includes('UNIQUE constraint failed')) return res.status(409).json({ message: 'Username already exists' });
-        res.status(500).json({ message: e.message });
-    }
-});
-
-// Admin: List Client Users
-app.get('/api/client-portal/users', async (req, res) => {
-    try {
-        const db = await getDb();
-        const users = await db.all('SELECT id, username, router_id, pppoe_username, created_at FROM client_users ORDER BY created_at DESC');
-        res.json(users);
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-
-// Admin: Delete Client User
-app.delete('/api/client-portal/users/:id', async (req, res) => {
-    try {
-        const db = await getDb();
-        await db.run('DELETE FROM client_users WHERE id = ?', [req.params.id]);
-        res.json({ message: 'Deleted' });
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-
-// Client: Login
-app.post('/api/public/client-portal/login', async (req, res) => {
-    const { username, password } = req.body;
-    if (!username || !password) return res.status(400).json({ message: 'Credentials required' });
-    try {
-        const db = await getDb();
-        const user = await db.get('SELECT * FROM client_users WHERE username = ?', [username]);
-        if (!user) return res.status(401).json({ message: 'Invalid credentials' });
-        
-        const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
-        if (hash !== user.password_hash) return res.status(401).json({ message: 'Invalid credentials' });
-        
-        res.json({
-            id: user.id,
-            username: user.username,
-            routerId: user.router_id,
-            pppoeUsername: user.pppoe_username
-        });
-    } catch (e) { res.status(500).json({ message: e.message }); }
-});
-
 app.listen(PORT, () => {
     console.log(`MikroTik API Backend listening on port ${PORT}`);
 });
