@@ -526,10 +526,12 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
-                let targetId = null;
+                let targetId = initialSecret?.id || null;
                 try {
-                    const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
-                    if (Array.isArray(existing) && existing.length > 0) targetId = existing[0]['.id'];
+                    if (!targetId) {
+                        const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
+                        if (Array.isArray(existing) && existing.length > 0) targetId = existing[0]['.id'];
+                    }
                 } catch (_) {}
                 const payload = {};
                 if (targetId) payload['.id'] = targetId;
@@ -691,9 +693,18 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
-                const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
-                if (!Array.isArray(existing) || existing.length === 0) return res.status(404).json({ message: 'PPP secret not found.' });
-                const id = existing[0]['.id']; const currentComment = existing[0]['comment']; let preservedPlanType = '';
+                let id = secret?.id || null;
+                let currentComment = null; let preservedPlanType = '';
+                try {
+                    if (!id) {
+                        const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
+                        if (!Array.isArray(existing) || existing.length === 0) return res.status(404).json({ message: 'PPP secret not found.' });
+                        id = existing[0]['.id']; currentComment = existing[0]['comment'];
+                    } else {
+                        const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?numbers=' + String(id)]);
+                        currentComment = Array.isArray(existing) && existing[0] ? existing[0]['comment'] : null;
+                    }
+                } catch (_) {}
                 try { const c = JSON.parse(currentComment || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
                 const db = await getDb(); const row = await db.get('SELECT original_plan_type FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
                 if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
