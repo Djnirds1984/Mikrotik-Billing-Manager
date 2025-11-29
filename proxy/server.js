@@ -458,13 +458,76 @@ async function startServer() {
     createCrud('/inventory', 'inventory');
     createCrud('/expenses', 'expenses');
     createCrud('/employees', 'employees');
-    createCrud('/customers', 'customers');
+    // Customers handled manually for upsert
+    // createCrud('/customers', 'customers');
     createCrud('/routers', 'routers');
     createCrud('/employee-benefits', 'employee_benefits');
     createCrud('/time-records', 'time_records');
     createCrud('/dhcp-billing-plans', 'dhcp_billing_plans');
     createCrud('/dhcp_clients', 'dhcp_clients');
     createCrud('/sales', 'sales_records');
+
+    // Customers API (Manual Upsert)
+    dbRouter.get('/customers', async (req, res) => {
+        try {
+            const { routerId } = req.query;
+            let query = `SELECT * FROM customers`;
+            let params = [];
+            if (routerId) {
+                query += ` WHERE routerId = ?`;
+                params.push(routerId);
+            }
+            const rows = await db.all(query, params);
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    dbRouter.post('/customers', async (req, res) => {
+        try {
+            const { username } = req.body;
+            if (!username) return res.status(400).json({ message: 'Username required' });
+
+            // Check existence
+            const existing = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
+            
+            if (existing) {
+                // Update existing
+                const keys = Object.keys(req.body).filter(k => k !== 'id' && k !== 'username'); // don't update id or username
+                const values = keys.map(k => req.body[k]);
+                if (keys.length > 0) {
+                    const setClause = keys.map(k => `${k} = ?`).join(',');
+                    await db.run(`UPDATE customers SET ${setClause} WHERE id = ?`, [...values, existing.id]);
+                }
+                res.json({ message: 'Updated existing customer', id: existing.id });
+            } else {
+                // Insert new
+                const keys = Object.keys(req.body);
+                const values = Object.values(req.body);
+                const placeholders = keys.map(() => '?').join(',');
+                await db.run(`INSERT INTO customers (${keys.join(',')}) VALUES (${placeholders})`, values);
+                res.json({ message: 'Created new customer' });
+            }
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.patch('/customers/:id', async (req, res) => {
+        try {
+            const { id } = req.params;
+            const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
+            const values = [...Object.values(req.body), id];
+            await db.run(`UPDATE customers SET ${updates} WHERE id = ?`, values);
+            res.json({ message: 'Updated' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    dbRouter.delete('/customers/:id', async (req, res) => {
+        try {
+            await db.run(`DELETE FROM customers WHERE id = ?`, req.params.id);
+            res.json({ message: 'Deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
 
     // Special handling for settings
     dbRouter.get('/panel-settings', async (req, res) => {
