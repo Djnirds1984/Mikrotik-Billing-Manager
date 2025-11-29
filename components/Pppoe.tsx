@@ -470,11 +470,17 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             } else {
                 const hasCustomerInfo = Object.values(customerData).some(val => val && String(val).trim() !== '');
                 if (hasCustomerInfo) {
-                    await addCustomer({ 
-                        routerId: selectedRouter.id, 
-                        username: secretData.name, 
-                        ...customerData 
-                    });
+                    // Check if a customer with this username already exists (defensive check)
+                    const alreadyExists = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
+                    if (!alreadyExists) {
+                        await addCustomer({ 
+                            routerId: selectedRouter.id, 
+                            username: secretData.name, 
+                            ...customerData 
+                        });
+                    } else {
+                        await updateCustomer({ ...alreadyExists, ...customerData });
+                    }
                 }
             }
             
