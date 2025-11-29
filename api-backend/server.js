@@ -701,7 +701,7 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
                         if (!Array.isArray(existing) || existing.length === 0) return res.status(404).json({ message: 'PPP secret not found.' });
                         id = existing[0]['.id']; currentComment = existing[0]['comment'];
                     } else {
-                        const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?numbers=' + String(id)]);
+                        const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?.id=' + String(id)]);
                         currentComment = Array.isArray(existing) && existing[0] ? existing[0]['comment'] : null;
                     }
                 } catch (_) {}
