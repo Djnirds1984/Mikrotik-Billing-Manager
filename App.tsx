@@ -29,6 +29,8 @@ import { License } from './components/License.tsx';
 import { SuperAdmin } from './components/SuperAdmin.tsx';
 import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
 import { DhcpPortal } from './components/DhcpPortal.tsx';
+import { ClientPortal } from './components/ClientPortal.tsx';
+import { ClientPortalUsers } from './components/ClientPortalUsers.tsx';
 import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
 import { NotificationsPage } from './components/NotificationsPage.tsx';
 import { Payroll } from './components/Payroll.tsx';
@@ -170,7 +172,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
 
     const licensedViews: View[] = [
         'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
-        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal'
+        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'client_portal_users'
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
@@ -227,6 +229,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
         return <Logs selectedRouter={selectedRouter} />;
       case 'panel_roles':
         return <PanelRoles />;
+      case 'client_portal_users':
+        return <ClientPortalUsers />;
       case 'license':
           return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
       case 'super_admin':
@@ -285,6 +289,16 @@ const AppRouter: React.FC = () => {
             <ThemeProvider>
                 <LocalizationProvider>
                     <CaptivePortalPage />
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
+    if (window.location.pathname.startsWith('/client_portal')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <ClientPortal selectedRouter={null} />
                 </LocalizationProvider>
             </ThemeProvider>
         );
