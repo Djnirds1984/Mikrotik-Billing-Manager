@@ -100,6 +100,10 @@ sudo npm install -g pm2
     # Install for API Backend Server
     npm install --prefix api-backend
     ```
+    ```bash
+   cd Mikrotik-Billing-Manager
+   npm install --verbose
+   npm run build
 
 5.  **Configure Gemini API Key:**
     Edit the `env.js` file and paste your Gemini API key.
