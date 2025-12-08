@@ -91,18 +91,19 @@ sudo npm install -g pm2
     cd Mikrotik-Billing-Manager
     ```
 
-4.  **Install Dependencies:**
-    Run these commands from the project's **root directory** (`/var/www/html/Mikrotik-Billing-Manager`).
-    ```bash
-    # Install for UI Server (proxy)
-    npm install --prefix proxy
-   
-    # Install for API Backend Server
-    npm install --prefix api-backend
-    ```bash
-   cd Mikrotik-Billing-Manager
-   npm install --verbose
-   npm run build
+Install Dependencies and Build:
+Run these commands from the project's root directory (/var/www/html/Mikrotik-Billing-Manager).
+
+# 1. Install dependencies for UI Server (proxy)
+npm install --prefix proxy
+
+# 2. Install dependencies for API Backend Server
+npm install --prefix api-backend
+
+# 3. Install root dependencies and perform the build step
+npm install --verbose
+npm run build
+
 
 5.  **Configure Gemini API Key:**
     Edit the `env.js` file and paste your Gemini API key.
