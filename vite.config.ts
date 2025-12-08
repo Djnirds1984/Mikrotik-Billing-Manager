@@ -12,7 +12,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      allowedHosts: ['egestive-lemming-9933.dataplicity.io', 'localhost', '127.0.0.1'],
+      allowedHosts: ['verecund-millipede-5831.dataplicity.io', 'localhost', '127.0.0.1'],
       proxy: {
         '/mt-api': {
           target: 'http://localhost:3001',
