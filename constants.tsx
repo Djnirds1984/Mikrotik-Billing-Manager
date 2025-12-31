@@ -20,6 +20,18 @@ export const EXAMPLE_PROMPTS = [
   }
 ];
 
+export const PlusIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    </svg>
+);
+
+export const XMarkIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+);
+
 export const MikroTikLogoIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1 5a1 1 0 10-2 0v8a1 1 0 102 0V7zm-2 2.5a.5.5 0 000 1h2a.5.5 0 000-1h-2zM15 7a1 1 0 10-2 0v8a1 1 0 102 0V7zm-2 2.5a.5.5 0 000 1h2a.5.5 0 000-1h-2z" fill="currentColor"/>

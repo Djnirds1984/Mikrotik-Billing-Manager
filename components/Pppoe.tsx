@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import type { RouterConfigWithId, PppProfile, IpPool, PppProfileData, PppSecret, PppActiveConnection, SaleRecord, BillingPlanWithId, Customer, PppSecretData, PppServer, PppServerData, Interface } from '../types.ts';
+import { TrafficChart } from './chart.tsx';
+import type { RouterConfigWithId, PppProfile, IpPool, PppProfileData, PppSecret, PppActiveConnection, SaleRecord, BillingPlanWithId, Customer, PppSecretData, PppServer, PppServerData, Interface, TrafficHistoryPoint } from '../types.ts';
 import { 
     getPppProfiles, getIpPools, addPppProfile, updatePppProfile, deletePppProfile,
-    getPppSecrets, getPppActiveConnections, addPppSecret, updatePppSecret, deletePppSecret, processPppPayment,
+    getPppSecrets, getPppActiveConnections, getPppActiveTraffic, addPppSecret, updatePppSecret, deletePppSecret, processPppPayment,
     deletePppActiveConnection,
     getPppServers, addPppServer, updatePppServer, deletePppServer, getInterfaces,
     savePppUser // Import the new service function
@@ -10,7 +11,7 @@ import {
 import { useBillingPlans } from '../hooks/useBillingPlans.ts';
 import { useCustomers } from '../hooks/useCustomers.ts';
 import { Loader } from './Loader.tsx';
-import { RouterIcon, EditIcon, TrashIcon, ExclamationTriangleIcon, UsersIcon, SignalIcon, CurrencyDollarIcon, KeyIcon, SearchIcon, EyeIcon, EyeSlashIcon, ServerIcon } from '../constants.tsx';
+import { RouterIcon, EditIcon, TrashIcon, ExclamationTriangleIcon, UsersIcon, SignalIcon, CurrencyDollarIcon, KeyIcon, SearchIcon, EyeIcon, EyeSlashIcon, ServerIcon, XMarkIcon } from '../constants.tsx';
 import { PaymentModal } from './PaymentModal.tsx';
 import { GracePeriodModal } from './GracePeriodModal.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
@@ -18,6 +19,25 @@ import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 
 // --- Reusable Components ---
+
+const HighlightText = ({ text, highlight }: { text: string; highlight: string }) => {
+    if (!highlight || !text) return <>{text}</>;
+    // Escape regex special characters
+    const escapedHighlight = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${escapedHighlight})`, 'gi'));
+    return (
+        <span>
+            {parts.map((part, i) => 
+                part.toLowerCase() === highlight.toLowerCase() ? (
+                    <span key={i} className="bg-yellow-200 dark:bg-yellow-900/50 rounded-sm px-0.5">{part}</span>
+                ) : (
+                    part
+                )
+            )}
+        </span>
+    );
+};
+
 const TabButton: React.FC<{ label: string, icon: React.ReactNode, isActive: boolean, onClick: () => void }> = ({ label, icon, isActive, onClick }) => (
     <button
         onClick={onClick}
@@ -359,6 +379,27 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
     const [isGraceModalOpen, setGraceModalOpen] = useState(false);
     const [selectedSecret, setSelectedSecret] = useState<PppSecret | null>(null);
+    
+    // Sorting State
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+    
+    // Search State
+    const [searchTerm, setSearchTerm] = useState('');
+    const [searchInput, setSearchInput] = useState('');
+
+    // Debounce search input
+    useEffect(() => {
+        if (searchInput === '') {
+            setSearchTerm('');
+            return;
+        }
+
+        const timeoutId = setTimeout(() => {
+            setSearchTerm(searchInput);
+        }, 500); // 500ms delay for "suggestions" feel
+
+        return () => clearTimeout(timeoutId);
+    }, [searchInput]);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -410,6 +451,76 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         });
     }, [secrets, customers]);
     
+    // Sorting Logic
+    const sortedUsers = useMemo(() => {
+        let sortableItems = [...combinedUsers];
+
+        // Apply Search
+        if (searchTerm) {
+            const lowerTerm = searchTerm.toLowerCase().trim();
+            if (lowerTerm) {
+                sortableItems = sortableItems.filter(user => 
+                    (user.name || '').toLowerCase().includes(lowerTerm) ||
+                    (user.customer?.fullName || '').toLowerCase().includes(lowerTerm) ||
+                    (user.profile || '').toLowerCase().includes(lowerTerm) ||
+                    (user.subscription?.planType || '').toLowerCase().includes(lowerTerm) ||
+                    (user.subscription?.dueDate || '').toLowerCase().includes(lowerTerm) ||
+                    (user.subscription?.plan || '').toLowerCase().includes(lowerTerm)
+                );
+            }
+        }
+
+        if (sortConfig !== null) {
+            sortableItems.sort((a, b) => {
+                let aValue: any = '';
+                let bValue: any = '';
+
+                switch (sortConfig.key) {
+                    case 'username':
+                        aValue = (a.name || '').toLowerCase();
+                        bValue = (b.name || '').toLowerCase();
+                        break;
+                    case 'profile':
+                        aValue = (a.profile || '').toLowerCase();
+                        bValue = (b.profile || '').toLowerCase();
+                        break;
+                    case 'planType':
+                        aValue = (a.subscription.planType || '').toLowerCase();
+                        bValue = (b.subscription.planType || '').toLowerCase();
+                        break;
+                    case 'subscriptionDue':
+                         const getTimestamp = (u: any) => {
+                             if (!u.subscription.dueDate || u.subscription.dueDate === 'No Info') return sortConfig.direction === 'asc' ? Infinity : -Infinity;
+                             // dueDate format is YYYY-MM-DD HH:mm
+                             return new Date(u.subscription.dueDate).getTime();
+                         };
+                         aValue = getTimestamp(a);
+                         bValue = getTimestamp(b);
+                        break;
+                    default:
+                        return 0;
+                }
+
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'asc' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        return sortableItems;
+    }, [combinedUsers, sortConfig]);
+
+    const requestSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
     const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string; planId: string; planType?: 'prepaid' | 'postpaid' }) => {
         setIsSubmitting(true);
         try {
@@ -562,89 +673,203 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />
             <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} profiles={profiles} onSave={handleGraceSave} />
 
-             <div className="flex justify-end mb-4">
+             <div className="flex justify-between items-center mb-4">
+                <div className="relative w-64">
+                    <input
+                        type="text"
+                        placeholder="Search users..."
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                setSearchTerm(searchInput);
+                            }
+                        }}
+                        className="w-full pl-10 pr-4 py-2 rounded-lg border dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                    <button 
+                        className="absolute left-3 top-2.5 text-slate-400 hover:text-primary-500 focus:outline-none"
+                        onClick={() => setSearchTerm(searchInput)}
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </button>
+                </div>
                 <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
                  <table className="w-full text-sm">
                     <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                         <tr>
-                            <th className="px-6 py-3">Username/Customer</th>
-                            <th className="px-6 py-3">Profile</th>
-                            <th className="px-6 py-3">Plan Type</th>
-                            <th className="px-6 py-3">Subscription Due</th>
+                            <th 
+                                className="px-6 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('username')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Username/Customer
+                                    {sortConfig?.key === 'username' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('profile')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Profile
+                                    {sortConfig?.key === 'profile' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('planType')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Plan Type
+                                    {sortConfig?.key === 'planType' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('subscriptionDue')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Subscription Due
+                                    {sortConfig?.key === 'subscriptionDue' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
                             <th className="px-6 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {combinedUsers.map(user => (
-                            <tr key={user.id} className={`border-b dark:border-slate-700 ${user.disabled === 'true' ? 'opacity-50' : ''}`}>
-                                <td className="px-6 py-4 font-medium">
-                                    <p className="text-slate-900 dark:text-slate-100">{user.name}</p>
-                                    <p className="text-xs text-slate-500">{user.customer?.fullName}</p>
-                                </td>
-                                <td>{user.profile}</td>
-                                <td>
-                                    {user.subscription.planType === 'postpaid' ? (
-                                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300">Postpaid</span>
+                        {sortedUsers.length === 0 ? (
+                            <tr>
+                                <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                    {searchTerm ? (
+                                        <div className="flex flex-col items-center gap-2">
+                                            <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                            </svg>
+                                            <p>No users found matching "{searchTerm}"</p>
+                                        </div>
                                     ) : (
-                                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">Prepaid</span>
-                                    )}
-                                </td>
-                                <td>{user.subscription.dueDate}</td>
-                                <td className="px-6 py-4 text-right space-x-2">
-                                    <button
-                                        onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }}
-                                        className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition-colors"
-                                        title="Process Payment"
-                                    >
-                                        Pay
-                                    </button>
-                                    {(() => {
-                                        const isPostpaid = user.subscription.planType === 'postpaid';
-                                        let isDue = false;
-                                        try {
-                                            if (user.comment) {
-                                                const parsed = JSON.parse(user.comment);
-                                                if (parsed.dueDateTime) {
-                                                    isDue = new Date(parsed.dueDateTime).getTime() <= Date.now();
-                                                } else if (parsed.dueDate) {
-                                                    const dt = new Date(`${parsed.dueDate}T23:59:59`);
-                                                    isDue = dt.getTime() <= Date.now();
-                                                }
-                                            }
-                                        } catch (_) {}
-                                        const profileName = (user.profile || '').toLowerCase();
-                                        const isNonPayProfile = ['non-payment','nonpayment','cut','disable','disabled'].some(tag => profileName.includes(tag));
-                                        return (isPostpaid && (isDue || isNonPayProfile)) ? (
-                                            <button
-                                                onClick={() => { setSelectedSecret(user); setGraceModalOpen(true); }}
-                                                className="px-3 py-1 text-sm bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition-colors"
-                                                title="Grant Grace Period"
-                                            >
-                                                Grace
-                                            </button>
-                                        ) : null;
-                                    })()}
-                                    <button
-                                        onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }}
-                                        className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700 transition-colors"
-                                        title="Edit User"
-                                    >
-                                        Edit
-                                    </button>
-                                    {hasPermission('pppoe_users:delete') && (
-                                        <button
-                                            onClick={() => handleDeleteUser(user.id)}
-                                            className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700 transition-colors"
-                                            title="Delete User"
-                                        >
-                                            Delete
-                                        </button>
+                                        <p>No PPPoE users found.</p>
                                     )}
                                 </td>
                             </tr>
-                        ))}
+                        ) : (
+                            sortedUsers.map(user => (
+                                <tr key={user.id} className={`border-b dark:border-slate-700 ${user.disabled === 'true' ? 'opacity-50' : ''}`}>
+                                    <td className="px-6 py-4 font-medium text-center">
+                                        <p className="text-slate-900 dark:text-slate-100">
+                                            <HighlightText text={user.name || ''} highlight={searchTerm} />
+                                        </p>
+                                        <p className="text-xs text-slate-500">
+                                            <HighlightText text={user.customer?.fullName || ''} highlight={searchTerm} />
+                                        </p>
+                                    </td>
+                                    <td className="text-center">
+                                        <HighlightText text={user.profile || ''} highlight={searchTerm} />
+                                    </td>
+                                    <td className="text-center">
+                                        {user.subscription.planType === 'postpaid' ? (
+                                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300">
+                                                <HighlightText text="Postpaid" highlight={searchTerm} />
+                                            </span>
+                                        ) : (
+                                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
+                                                <HighlightText text="Prepaid" highlight={searchTerm} />
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="text-center">
+                                        <HighlightText text={user.subscription.dueDate || ''} highlight={searchTerm} />
+                                    </td>
+                                    <td className="px-6 py-4 text-right space-x-2">
+                                        <button
+                                            onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }}
+                                            className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition-colors"
+                                            title="Process Payment"
+                                        >
+                                            Pay
+                                        </button>
+                                        {(() => {
+                                            const isPostpaid = user.subscription.planType === 'postpaid';
+                                            let isDue = false;
+                                            try {
+                                                if (user.comment) {
+                                                    const parsed = JSON.parse(user.comment);
+                                                    if (parsed.dueDateTime) {
+                                                        isDue = new Date(parsed.dueDateTime).getTime() <= Date.now();
+                                                    } else if (parsed.dueDate) {
+                                                        const dt = new Date(`${parsed.dueDate}T23:59:59`);
+                                                        isDue = dt.getTime() <= Date.now();
+                                                    }
+                                                }
+                                            } catch (_) {}
+                                            const profileName = (user.profile || '').toLowerCase();
+                                            const isNonPayProfile = ['non-payment','nonpayment','cut','disable','disabled'].some(tag => profileName.includes(tag));
+                                            return (isPostpaid && (isDue || isNonPayProfile)) ? (
+                                                <button
+                                                    onClick={() => { setSelectedSecret(user); setGraceModalOpen(true); }}
+                                                    className="px-3 py-1 text-sm bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition-colors"
+                                                    title="Grant Grace Period"
+                                                >
+                                                    Grace
+                                                </button>
+                                            ) : null;
+                                        })()}
+                                        <button
+                                            onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }}
+                                            className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700 transition-colors"
+                                            title="Edit User"
+                                        >
+                                            Edit
+                                        </button>
+                                        <button
+                                            className={`px-3 py-1 text-sm rounded-md font-semibold transition-colors ${
+                                                user.disabled === 'true' 
+                                                ? 'bg-slate-500 text-white hover:bg-slate-600' 
+                                                : 'bg-teal-600 text-white hover:bg-teal-700'
+                                            }`}
+                                            title={user.disabled === 'true' ? 'Enable Account' : 'Disable Account'}
+                                            onClick={async () => {
+                                                if (!window.confirm(`Are you sure you want to ${user.disabled === 'true' ? 'enable' : 'disable'} this account?`)) return;
+                                                try {
+                                                    await savePppUser(selectedRouter, {
+                                                        initialSecret: user,
+                                                        secretData: { ...user, disabled: user.disabled === 'true' ? 'false' : 'true' },
+                                                        subscriptionData: user.subscription // Preserve existing subscription data
+                                                    });
+                                                    await fetchData();
+                                                } catch (err) {
+                                                    alert(`Failed to update status: ${(err as Error).message}`);
+                                                }
+                                            }}
+                                        >
+                                            {user.disabled === 'true' ? 'Enable' : 'Disable'}
+                                        </button>
+                                        {hasPermission('pppoe_users:delete') && (
+                                            <button
+                                                onClick={() => handleDeleteUser(user.id)}
+                                                className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700 transition-colors"
+                                                title="Delete User"
+                                            >
+                                                Delete
+                                            </button>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -652,12 +877,120 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     );
 }
 
+// --- User Hover Card ---
+const UserHoverCard: React.FC<{
+    user: PppActiveConnection;
+    currentStats: { rx: number; tx: number };
+    position: { x: number; y: number };
+}> = ({ user, currentStats, position }) => {
+    const [history, setHistory] = useState<TrafficHistoryPoint[]>([]);
+
+    // Safely parse stats to numbers to prevent crashes if API returns strings or invalid data
+    const safeRx = Number(currentStats?.rx);
+    const rx = isNaN(safeRx) ? 0 : safeRx;
+    const safeTx = Number(currentStats?.tx);
+    const tx = isNaN(safeTx) ? 0 : safeTx;
+
+    useEffect(() => {
+        const now = new Date();
+        const timeLabel = now.toLocaleTimeString([], { hour12: false });
+        
+        setHistory(prev => {
+            const newPoint = {
+                name: timeLabel,
+                rx: rx,
+                tx: tx
+            };
+            const newHistory = [...prev, newPoint];
+            if (newHistory.length > 30) newHistory.shift(); // Keep last 30 seconds
+            return newHistory;
+        });
+    }, [rx, tx]);
+
+    const formatBits = (bits: number) => {
+        if (!bits || isNaN(bits)) return '0 bps';
+        if (bits < 1000) return `${bits.toFixed(0)} bps`;
+        const k = 1000;
+        const sizes = ['Kbps', 'Mbps', 'Gbps', 'Tbps'];
+        const i = Math.floor(Math.log(bits) / Math.log(k));
+        return `${(bits / Math.pow(k, i)).toFixed(2)} ${sizes[i - 1] || 'Kbps'}`;
+    };
+
+    // Calculate position to keep card on screen
+    // We assume the card is roughly 300px wide and 400px tall
+    const cardStyle: React.CSSProperties = {
+        position: 'fixed',
+        left: Math.min(position.x + 20, window.innerWidth - 320), // Prevent overflow right
+        top: Math.min(position.y + 10, window.innerHeight - 450), // Prevent overflow bottom
+        zIndex: 9999,
+        pointerEvents: 'none' // Let mouse events pass through so we don't flicker if mouse moves over it
+    };
+
+    return (
+        <div style={cardStyle} className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 w-[300px] animate-in fade-in zoom-in duration-200">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 rounded-t-xl">
+                <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    {user.name}
+                </h3>
+                <div className="text-xs text-slate-500 mt-1 font-mono">{user.address || 'N/A'}</div>
+            </div>
+            
+            <div className="p-4 space-y-4">
+                 {/* Live Graph */}
+                <div className="h-[120px] -mx-2">
+                    <TrafficChart data={history} height={120} showXAxis={false} />
+                </div>
+                
+                {/* Stats Grid */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                     <div className="bg-slate-50 dark:bg-slate-900/50 p-2 rounded border border-slate-100 dark:border-slate-700">
+                        <div className="text-slate-400 uppercase text-[10px] font-bold">Download</div>
+                        <div className="font-mono font-bold text-emerald-500">{formatBits(rx)}</div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 p-2 rounded border border-slate-100 dark:border-slate-700">
+                        <div className="text-slate-400 uppercase text-[10px] font-bold">Upload</div>
+                        <div className="font-mono font-bold text-sky-500">{formatBits(tx)}</div>
+                    </div>
+                </div>
+
+                {/* Details */}
+                <div className="space-y-1 pt-2 border-t border-slate-100 dark:border-slate-700">
+                     <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Service:</span>
+                        <span className="font-medium">{user.service || 'N/A'}</span>
+                    </div>
+                     <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Caller ID:</span>
+                        <span className="font-mono">{user['caller-id'] || 'N/A'}</span>
+                    </div>
+                     <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Uptime:</span>
+                        <span className="font-mono">{user.uptime || 'N/A'}</span>
+                    </div>
+                    {user.comment && (
+                        <div className="text-xs text-slate-500 italic mt-1 truncate">
+                            {user.comment}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- Active Users Manager ---
 const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
     const [activeUsers, setActiveUsers] = useState<PppActiveConnection[]>([]);
+    const [trafficStats, setTrafficStats] = useState<Record<string, { rx: number, tx: number }>>({});
+    const [hoveredUser, setHoveredUser] = useState<PppActiveConnection | null>(null);
+    const [hoverPosition, setHoverPosition] = useState<{x: number, y: number} | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isKicking, setIsKicking] = useState<string | null>(null);
+    
+    // Sorting State
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -672,9 +1005,28 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
         }
     }, [selectedRouter]);
 
+    // Separate effect for traffic monitoring (polls faster or same rate)
+    useEffect(() => {
+        if (activeUsers.length === 0) return;
+        
+        const fetchTraffic = async () => {
+            const names = activeUsers.map(u => u.name);
+            try {
+                const stats = await getPppActiveTraffic(selectedRouter, names);
+                setTrafficStats(stats);
+            } catch (e) {
+                console.warn("Traffic fetch error", e);
+            }
+        };
+
+        fetchTraffic();
+        const interval = setInterval(fetchTraffic, 1000); // Update speeds every 1 second
+        return () => clearInterval(interval);
+    }, [activeUsers, selectedRouter]);
+
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 5000); // Poll every 5 seconds
+        const interval = setInterval(fetchData, 10000); // Poll list every 10 seconds
         return () => clearInterval(interval);
     }, [fetchData]);
 
@@ -691,48 +1043,303 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
         }
     };
 
+    const handleMouseEnter = (e: React.MouseEvent, user: PppActiveConnection) => {
+        setHoveredUser(user);
+        setHoverPosition({ x: e.clientX, y: e.clientY });
+    };
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (hoveredUser) {
+             setHoverPosition({ x: e.clientX, y: e.clientY });
+        }
+    };
+
+    const handleMouseLeave = () => {
+        setHoveredUser(null);
+        setHoverPosition(null);
+    };
+
+    const formatSpeed = (bits: number) => {
+        if (!bits) return '0 Mbps';
+        const mbps = bits / 1000000;
+        return `${mbps.toFixed(2)} Mbps`;
+    };
+
+    // Sorting Logic
+    const sortedActiveUsers = useMemo(() => {
+        let sortableItems = [...activeUsers];
+        if (sortConfig !== null) {
+            sortableItems.sort((a, b) => {
+                let aValue: any = '';
+                let bValue: any = '';
+
+                switch (sortConfig.key) {
+                    case 'username':
+                        aValue = (a.name || '').toLowerCase();
+                        bValue = (b.name || '').toLowerCase();
+                        break;
+                    case 'service':
+                        aValue = (a.service || '').toLowerCase();
+                        bValue = (b.service || '').toLowerCase();
+                        break;
+                    case 'address':
+                         const ipToNum = (ip: string) => {
+                            const parts = ip.split('.').map(Number);
+                            return parts.length === 4 ? parts[0] * 16777216 + parts[1] * 65536 + parts[2] * 256 + parts[3] : 0;
+                         };
+                         aValue = ipToNum(a.address || '');
+                         bValue = ipToNum(b.address || '');
+                        break;
+                    case 'callerId':
+                        aValue = (a['caller-id'] || '').toLowerCase();
+                        bValue = (b['caller-id'] || '').toLowerCase();
+                        break;
+                    case 'uptime':
+                        aValue = a.uptime || '';
+                        bValue = b.uptime || '';
+                        break;
+                    case 'traffic':
+                        const statsA = trafficStats[a.name] || { rx: 0, tx: 0 };
+                        const statsB = trafficStats[b.name] || { rx: 0, tx: 0 };
+                        aValue = (statsA.rx || 0) + (statsA.tx || 0);
+                        bValue = (statsB.rx || 0) + (statsB.tx || 0);
+                        break;
+                    default:
+                        return 0;
+                }
+
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'asc' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        return sortableItems;
+    }, [activeUsers, sortConfig, trafficStats]);
+
+    const requestSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
     if (isLoading && activeUsers.length === 0) return <div className="flex justify-center p-8"><Loader /></div>;
     if (error) return <div className="p-4 text-red-600">{error}</div>;
 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
+            {hoveredUser && hoverPosition && (
+                <UserHoverCard 
+                    user={hoveredUser}
+                    currentStats={trafficStats[hoveredUser.name] || { rx: 0, tx: 0 }}
+                    position={hoverPosition}
+                />
+            )}
             <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                     <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                         <tr>
-                            <th className="px-6 py-3">Username</th>
-                            <th className="px-6 py-3">Service</th>
-                            <th className="px-6 py-3">IP Address</th>
-                            <th className="px-6 py-3">Caller ID (MAC)</th>
-                            <th className="px-6 py-3">Uptime</th>
-                            <th className="px-6 py-3 text-right">Actions</th>
+                            <th 
+                                className="px-6 py-3 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('username')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Username
+                                    {sortConfig?.key === 'username' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('service')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Service
+                                    {sortConfig?.key === 'service' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('address')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    IP Address
+                                    {sortConfig?.key === 'address' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('callerId')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Caller ID (MAC)
+                                    {sortConfig?.key === 'callerId' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('uptime')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Uptime
+                                    {sortConfig?.key === 'uptime' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('traffic')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Traffic (TX/RX)
+                                    {sortConfig?.key === 'traffic' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th className="px-6 py-3 text-center">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {activeUsers.map(user => (
-                            <tr key={user.id} className="border-b dark:border-slate-700">
-                                <td className="px-6 py-4 font-medium">{user.name}</td>
-                                <td className="px-6 py-4">{user.service}</td>
-                                <td className="px-6 py-4 font-mono">{user.address}</td>
-                                <td className="px-6 py-4 font-mono">{user['caller-id']}</td>
-                                <td className="px-6 py-4 font-mono">{user.uptime}</td>
-                                <td className="px-6 py-4 text-right">
-                                    <button 
-                                        onClick={() => handleKickUser(user.id)} 
-                                        disabled={isKicking === user.id}
-                                        className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold disabled:opacity-50"
-                                    >
-                                        {isKicking === user.id ? 'Kicking...' : 'Kick'}
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                         {activeUsers.length === 0 && (
+                        {sortedActiveUsers.map(user => {
+                            const stats = trafficStats[user.name] || { rx: 0, tx: 0 };
+                            return (
+                                <tr key={user.id} className="border-b dark:border-slate-700">
+                                    <td className="px-6 py-4 font-medium text-center">
+                                        <div
+                                            onMouseEnter={(e) => handleMouseEnter(e, user)}
+                                            onMouseMove={handleMouseMove}
+                                            onMouseLeave={handleMouseLeave}
+                                            className="text-blue-600 dark:text-blue-400 font-bold cursor-help inline-block border-b border-dotted border-blue-400"
+                                        >
+                                            {user.name}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">{user.service}</td>
+                                    <td className="px-6 py-4 font-mono text-center">{user.address}</td>
+                                    <td className="px-6 py-4 font-mono text-center">{user['caller-id']}</td>
+                                    <td className="px-6 py-4 font-mono text-center">{user.uptime}</td>
+                                    <td className="px-6 py-4 font-mono text-xs text-center">
+                                        <div className="flex flex-col items-center">
+                                            <span className="text-green-600">▲ {formatSpeed(stats.tx)}</span>
+                                            <span className="text-blue-600">▼ {formatSpeed(stats.rx)}</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                        <button 
+                                            onClick={() => handleKickUser(user.id)} 
+                                            disabled={isKicking === user.id}
+                                            className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold disabled:opacity-50"
+                                        >
+                                            {isKicking === user.id ? 'Kicking...' : 'Kick'}
+                                        </button>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                         {sortedActiveUsers.length === 0 && (
                             <tr>
-                                <td colSpan={6} className="text-center py-8 text-slate-500">
+                                <td colSpan={7} className="text-center py-8 text-slate-500">
                                     No active PPPoE users.
                                 </td>
                             </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+// --- Offline Users Manager ---
+const OfflineUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
+    const [secrets, setSecrets] = useState<PppSecret[]>([]);
+    const [activeUsers, setActiveUsers] = useState<PppActiveConnection[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchData = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const [secretsData, activeData] = await Promise.all([
+                getPppSecrets(selectedRouter),
+                getPppActiveConnections(selectedRouter)
+            ]);
+            setSecrets(secretsData);
+            setActiveUsers(activeData);
+        } catch (err) {
+            setError(`Failed to fetch data: ${(err as Error).message}`);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [selectedRouter]);
+
+    useEffect(() => { fetchData(); }, [fetchData]);
+
+    const offlineUsers = useMemo(() => {
+        const activeNames = new Set(activeUsers.map(u => u.name));
+        return secrets.filter(s => !activeNames.has(s.name) && s.disabled !== 'true');
+    }, [secrets, activeUsers]);
+
+    if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
+    if (error) return <div className="p-4 text-red-600">{error}</div>;
+
+    return (
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                    <ExclamationTriangleIcon className="w-5 h-5 text-amber-500" />
+                    <span className="font-semibold">
+                        Found {offlineUsers.length} offline users (enabled but not connected)
+                    </span>
+                </div>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
+                        <tr>
+                            <th className="px-6 py-3 text-center">Username</th>
+                            <th className="px-6 py-3 text-center">Profile</th>
+                            <th className="px-6 py-3 text-center">Service</th>
+                            <th className="px-6 py-3 text-center">Caller ID</th>
+                            <th className="px-6 py-3 text-center">Comment</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {offlineUsers.length === 0 ? (
+                            <tr>
+                                <td colSpan={5} className="text-center py-8 text-slate-500">
+                                    All enabled users are currently online!
+                                </td>
+                            </tr>
+                        ) : (
+                            offlineUsers.map(user => (
+                                <tr key={user.id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                    <td className="px-6 py-4 font-medium text-center text-slate-900 dark:text-slate-100">
+                                        {user.name}
+                                    </td>
+                                    <td className="px-6 py-4 text-center">{user.profile}</td>
+                                    <td className="px-6 py-4 text-center">{user.service}</td>
+                                    <td className="px-6 py-4 font-mono text-center text-slate-500">{user['caller-id'] || '-'}</td>
+                                    <td className="px-6 py-4 text-center text-slate-500 italic truncate max-w-xs">
+                                        {user.comment || '-'}
+                                    </td>
+                                </tr>
+                            ))
                         )}
                     </tbody>
                 </table>
@@ -895,7 +1502,7 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
 
 
 // --- Main Container Component ---
-type PppoeTab = 'users' | 'active_users' | 'profiles' | 'servers';
+type PppoeTab = 'users' | 'active_users' | 'offline_users' | 'profiles' | 'servers';
 
 export const Pppoe: React.FC<{ 
     selectedRouter: RouterConfigWithId | null;
@@ -920,6 +1527,7 @@ export const Pppoe: React.FC<{
                 <nav className="flex space-x-2" aria-label="Tabs">
                     <TabButton label={t('pppoe.users')} icon={<UsersIcon className="w-5 h-5" />} isActive={activeTab === 'users'} onClick={() => setActiveTab('users')} />
                     <TabButton label={t('pppoe.active_users')} icon={<UsersIcon className="w-5 h-5" />} isActive={activeTab === 'active_users'} onClick={() => setActiveTab('active_users')} />
+                    <TabButton label="Offline Users" icon={<ExclamationTriangleIcon className="w-5 h-5" />} isActive={activeTab === 'offline_users'} onClick={() => setActiveTab('offline_users')} />
                     <TabButton label={t('pppoe.profiles')} icon={<SignalIcon className="w-5 h-5" />} isActive={activeTab === 'profiles'} onClick={() => setActiveTab('profiles')} />
                     <TabButton label={t('pppoe.servers')} icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'servers'} onClick={() => setActiveTab('servers')} />
                 </nav>
@@ -927,6 +1535,7 @@ export const Pppoe: React.FC<{
 
             {activeTab === 'users' && <UsersManager selectedRouter={selectedRouter} addSale={addSale} />}
             {activeTab === 'active_users' && <ActiveUsersManager selectedRouter={selectedRouter} />}
+            {activeTab === 'offline_users' && <OfflineUsersManager selectedRouter={selectedRouter} />}
             {activeTab === 'profiles' && <ProfilesManager selectedRouter={selectedRouter} />}
             {activeTab === 'servers' && <ServersManager selectedRouter={selectedRouter} />}
         </div>

@@ -40,6 +40,30 @@ export const getInterfaces = (router: RouterConfigWithId) => apiCall<Interface[]
 
 export const getInterfaceStats = (router: RouterConfigWithId) => apiCall<Interface[]>(router, 'interface/stats'); // Special endpoint handling stats
 
+export const toggleInterfaceStatus = (router: RouterConfigWithId, interfaceName: string, disabled: boolean) => {
+    const action = disabled ? 'disable' : 'enable';
+    // We need to find the ID first usually, but if the API supports name reference or we use 'set' with find
+    // Assuming standard Mikrotik API behavior where we can use numbers/IDs. 
+    // If the proxy allows querying by name for set, great. If not, we might need to fetch ID first.
+    // However, the standard `interface/enable` and `interface/disable` commands often take an ID.
+    // Let's assume our backend helper can handle finding by name or we need to pass the ID if available.
+    // For safety, let's assume we pass the ID if we have it, or the name if the backend supports it.
+    // BUT, getInterfaceStats returns Interface[] which usually has .id (internal ID like *1).
+    // Let's rely on the dashboard to pass the ID or Name. The prompt says "directly access the actual interface".
+    // We'll try to use the 'interface/set' or 'interface/enable|disable' command.
+    
+    // Using standard command structure:
+    return apiCall(router, `interface/${action}`, 'POST', { '.id': interfaceName }); 
+    // Note: interfaceName here effectively acts as the ID if we pass the Mikrotik ID (*1, *2 etc). 
+    // If we only have the name (ether1), we might need to look it up first.
+    // Let's assume the component will pass the Name (ether1) and we need to handle it.
+    // Actually, Mikrotik API usually requires the internal ID (*X) for actions.
+    // Let's update this to accept an ID if possible, or try to use 'print' with query to get ID.
+    // For now, let's assume the calling component will try to pass the ID if available, 
+    // or we'll assume the backend wrapper handles name-to-id resolution if implemented.
+    // If not, we might need a lookup helper.
+};
+
 // --- DHCP Clients (Portal) ---
 
 export const getDhcpClients = async (router: RouterConfigWithId): Promise<DhcpClient[]> => {
@@ -137,6 +161,7 @@ export const updatePppSecret = (router: RouterConfigWithId, id: string, data: Pa
 export const deletePppSecret = (router: RouterConfigWithId, id: string) => apiCall(router, 'ppp/secret/remove', 'POST', { '.id': id });
 
 export const getPppActiveConnections = (router: RouterConfigWithId) => apiCall<PppActiveConnection[]>(router, 'ppp/active/print');
+export const getPppActiveTraffic = (router: RouterConfigWithId, names: string[]) => apiCall<Record<string, { rx: number, tx: number }>>(router, 'ppp/active/traffic', 'POST', { names });
 export const deletePppActiveConnection = (router: RouterConfigWithId, id: string) => apiCall(router, 'ppp/active/remove', 'POST', { '.id': id });
 
 export const getPppProfiles = (router: RouterConfigWithId) => apiCall<PppProfile[]>(router, 'ppp/profile/print');

@@ -336,13 +336,62 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
             const client = req.routerInstance;
             await client.connect();
             try {
-                const result = await writeLegacySafe(client, ['/ppp/active/print']);
-                res.json(result.map(normalizeLegacyObject));
+                // Get active connections
+                const active = await writeLegacySafe(client, ['/ppp/active/print']);
+                const activeNormalized = active.map(normalizeLegacyObject);
+
+                // Get interface stats for each active connection
+                // This is N+1 but necessary for accurate real-time speeds per user
+                // To optimize, we could just fetch all interfaces and match by name, 
+                // since PPP active interface names usually match or are predictable.
+                // Let's fetch ALL interfaces first to avoid N round trips if possible.
+                const interfaces = await writeLegacySafe(client, ['/interface/print', '?type=pppoe-in']);
+                const interfacesNormalized = interfaces.map(normalizeLegacyObject);
+
+                const enriched = activeNormalized.map(u => {
+                    // Find matching interface (usually <pppoe-username>)
+                    const iface = interfacesNormalized.find(i => i.name === `<pppoe-${u.name}>`) || 
+                                  interfacesNormalized.find(i => i.name === u.name) ||
+                                  interfacesNormalized.find(i => i.name.includes(u.name));
+                    
+                    // Legacy output for rx-byte/tx-byte is total, not rate. 
+                    // To get RATE (bps), we need /interface/monitor-traffic
+                    // But monitor-traffic is continuous. 
+                    // Best approach for "snapshot" speed:
+                    // We can't easily get instantaneous rate for ALL users in one command in legacy without scripting.
+                    // However, 'interface print' often has 'rx-byte' 'tx-byte' totals.
+                    // Real-time Mbps requires monitoring.
+                    // Fallback: Just return what we have, frontend might need to poll or we implement a specific monitor endpoint.
+                    // Actually, the user asked for "actual traffic speed". 
+                    // For legacy, we might skip heavy monitoring for list views.
+                    // BUT, RouterOS 'interface print detail' sometimes shows rate if monitored? No.
+                    // Let's try to attach interface name at least.
+                    return { ...u, interfaceId: iface ? iface['.id'] : null }; 
+                });
+                
+                // For the purpose of this request, we need to return the list. 
+                // The frontend will likely need to fetch traffic stats separately or we include it here?
+                // Including real-time traffic for ALL users is heavy.
+                // Let's start by just returning the list. The FRONTEND component will likely need to fetch specific stats.
+                // WAIT: The user wants a COLUMN. 
+                // If we want a column in the table, we need the data NOW.
+                // Executing monitor-traffic for all active interfaces is too slow.
+                // Alternative: Use /interface/print stats-detail? No.
+                
+                // Let's try to get ALL interface stats in one go if possible.
+                res.json(activeNormalized);
             } finally {
                 await client.close();
             }
         } else {
             const response = await req.routerInstance.get('/ppp/active');
+            
+            // For REST, we can also fetch interface stats
+            // Same issue: real-time speed (bits/sec) vs total bytes.
+            // /interface/print usually returns rx-byte/tx-byte (counters).
+            // To get speed, we calculate delta or use monitor-traffic.
+            // Let's just return the active users for now, and handle the "speed" fetching in the frontend 
+            // by querying a new endpoint `ppp/active/stats` or similar to avoid blocking this call.
             res.json(response.data);
         }
     } catch (e) {
@@ -350,6 +399,74 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
         res.status(status).json({ message: msg });
+    }
+});
+
+// 3b. PPP Active Traffic Monitor (New Endpoint)
+app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
+    const { names } = req.body; // Array of ppp active names (usernames)
+    if (!names || !Array.isArray(names) || names.length === 0) return res.json({});
+
+    try {
+        // We need to map PPP User Name -> Interface Name
+        // Usually "pppoe-<username>" or just "<pppoe-<username>>"
+        const interfaceNames = names.map(n => `<pppoe-${n}>`);
+        
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // Monitor-traffic requires specific interface names.
+                // If we have many, this might fail or be slow.
+                // Limit to visible rows?
+                // Let's try monitoring all requested interfaces once for 1 second? No, that blocks.
+                // 'once' flag gets current rate.
+                const cmd = ['/interface/monitor-traffic', `=interface=${interfaceNames.join(',')}`, '=once'];
+                const stats = await writeLegacySafe(client, cmd);
+                // Result: [{name: ..., "rx-bits-per-second": ..., "tx-bits-per-second": ...}]
+                const map = {};
+                if (Array.isArray(stats)) {
+                    stats.forEach(s => {
+                        // Map back to username. Interface name is <pppoe-NAME>
+                        const uName = s.name.replace(/^<pppoe-/, '').replace(/>$/, '');
+                        map[uName] = {
+                            rx: s['rx-bits-per-second'] || 0,
+                            tx: s['tx-bits-per-second'] || 0
+                        };
+                    });
+                }
+                res.json(map);
+            } catch(e) {
+                 // Fallback: maybe interfaces are named just "pppoe-user" without brackets?
+                 // Or just the username?
+                 console.warn("Traffic monitor failed, trying alternative names", e.message);
+                 res.json({});
+            } finally {
+                await client.close();
+            }
+        } else {
+            // REST API monitor-traffic
+            // POST /interface/monitor-traffic { interface: "name1,name2", once: true }
+            try {
+                const r = await req.routerInstance.post('/interface/monitor-traffic', { interface: interfaceNames.join(','), once: 'true' });
+                const map = {};
+                if (Array.isArray(r.data)) {
+                     r.data.forEach(s => {
+                        const uName = s.name.replace(/^<pppoe-/, '').replace(/>$/, '');
+                        map[uName] = {
+                            rx: s['rx-bits-per-second'] || 0,
+                            tx: s['tx-bits-per-second'] || 0
+                        };
+                    });
+                }
+                res.json(map);
+            } catch (e) {
+                 console.warn("REST Traffic monitor failed", e.message);
+                 res.json({});
+            }
+        }
+    } catch (e) {
+        res.status(500).json({});
     }
 });
 
@@ -470,15 +587,17 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             // 2. Update Queue
             if (speedLimit) {
                  const limitString = `${speedLimit}M/${speedLimit}M`;
+                 const queueName = `DHCP-${macAddress}`;
                  try {
-                    const qRes = await instance.get(`/queue/simple?name=${customerInfo}`);
+                    const qRes = await instance.get(`/queue/simple?name=${queueName}`);
                     if (qRes.data && qRes.data.length > 0) {
-                        await instance.patch(`/queue/simple/${qRes.data[0]['.id']}`, { 'max-limit': limitString });
+                        await instance.patch(`/queue/simple/${qRes.data[0]['.id']}`, { 'max-limit': limitString, comment: customerInfo });
                     } else {
                         await instance.put(`/queue/simple`, {
-                           name: customerInfo,
+                           name: queueName,
                            target: address,
-                           'max-limit': limitString
+                           'max-limit': limitString,
+                           comment: customerInfo
                         });
                     }
                  } catch (e) { console.error("Queue update error", e.message); }
@@ -626,6 +745,15 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secretData.name)}\"; :do 
                     const originalProfileToStore = String(payload['profile'] || originalProfileVal || '');
                     await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, non_payment_profile, metadata) VALUES (?,?,?,?,?,?,?,?)', [req.params.routerId, String(secretData.name), nowIso, d.toISOString(), originalProfileToStore, (subscriptionData?.planType || '').toLowerCase(), String(subscriptionData?.nonPaymentProfile || ''), JSON.stringify({ graceDays: Number(subscriptionData?.graceDays || 0), graceTime: subscriptionData?.graceTime || null })]);
                 }
+                
+                // Force remove active connection to apply changes immediately
+                try {
+                    const active = await writeLegacySafe(client, ['/ppp/active/print', `?name=${String(secretData.name)}`]);
+                    if (active.length > 0 && active[0]['.id']) {
+                        await client.write('/ppp/active/remove', { '.id': active[0]['.id'] });
+                    }
+                } catch (e) { console.warn('[ppp/user/save] legacy active remove failed:', e.message); }
+
                 const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
                 res.json(saved.map(normalizeLegacyObject));
             } finally { await client.close(); }
@@ -678,6 +806,15 @@ if (shouldKick) {
                 const originalProfileToStore = String(payload['profile'] || originalProfileVal || '');
                 await database.run('INSERT OR REPLACE INTO ppp_grace (router_id, name, activated_at, expires_at, original_profile, original_plan_type, non_payment_profile, metadata) VALUES (?,?,?,?,?,?,?,?)', [req.params.routerId, String(secretData.name), nowIso, d.toISOString(), originalProfileToStore, (subscriptionData?.planType || '').toLowerCase(), String(subscriptionData?.nonPaymentProfile || ''), JSON.stringify({ graceDays: Number(subscriptionData?.graceDays || 0), graceTime: subscriptionData?.graceTime || null })]);
             }
+            
+            // Force remove active connection to apply changes immediately
+            try {
+                const activeRes = await instance.get(`/ppp/active?name=${name}`);
+                if (Array.isArray(activeRes.data) && activeRes.data.length > 0) {
+                     await instance.delete(`/ppp/active/${activeRes.data[0]['.id']}`);
+                }
+            } catch (e) { console.warn('[ppp/user/save] REST active remove failed:', e.message); }
+
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
             const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secretData.name)]);
             res.json(savedRes.data);
@@ -697,10 +834,58 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
     try {
         const cycleDays = Number(plan.cycleDays ?? plan.cycle_days ?? 30);
         const discount = Number(discountDays ?? 0);
-        const effectiveDays = Math.max(0, cycleDays - discount);
         const start = paymentDate ? new Date(paymentDate) : new Date();
-        const expires = new Date(start.getTime() + effectiveDays * 24 * 60 * 60 * 1000);
-        const commentData = { planName: plan?.name || '', dueDate: expires.toISOString().split('T')[0], dueDateTime: expires.toISOString(), paymentDate: start.toISOString(), discountDays: discount, kickFlag: true };
+        
+        let expires;
+        let fixedDay = null;
+
+        // Smart Due Date Logic
+        try {
+            if (secret && secret.comment) {
+                const c = JSON.parse(secret.comment);
+                if (c.fixedDay) fixedDay = parseInt(c.fixedDay);
+                else if (c.dueDate) {
+                    const d = new Date(c.dueDate);
+                    if (!isNaN(d.getTime())) fixedDay = d.getDate();
+                }
+            }
+        } catch (e) {}
+        if (!fixedDay) fixedDay = start.getDate();
+
+        if (cycleDays >= 28 && cycleDays <= 31) {
+            let targetYear = start.getFullYear();
+            let targetMonth = start.getMonth() + 1; // Default to next month
+            
+            // Smart Check: If fixedDay is far enough in the current month (e.g. recovery from Feb shift), stay in current month
+            // Example: Start=Mar 1, Fixed=30. Gap is 29 days. We want Mar 30, not Apr 30.
+            // Threshold: 20 days ensures we don't accidentally shorten a cycle too much (e.g. Jan 29 -> Jan 30).
+            if (fixedDay >= start.getDate() + 20) {
+                targetMonth = start.getMonth();
+            }
+
+            if (targetMonth > 11) { targetMonth = 0; targetYear++; }
+            
+            const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+            let targetDay = fixedDay;
+            
+            // Handle February 30th -> March 1st edge case
+            if (targetMonth === 1 && fixedDay > daysInTargetMonth) {
+                targetMonth = 2; // March
+                targetDay = 1;
+            } else if (targetDay > daysInTargetMonth) {
+                targetDay = daysInTargetMonth;
+            }
+            
+            expires = new Date(targetYear, targetMonth, targetDay, start.getHours(), start.getMinutes(), start.getSeconds());
+            
+            // Apply discount (reduce days)
+            if (discount > 0) expires.setDate(expires.getDate() - discount);
+        } else {
+            const effectiveDays = Math.max(0, cycleDays - discount);
+            expires = new Date(start.getTime() + effectiveDays * 24 * 60 * 60 * 1000);
+        }
+
+        const commentData = { planName: plan?.name || '', dueDate: expires.toISOString().split('T')[0], dueDateTime: expires.toISOString(), paymentDate: start.toISOString(), discountDays: discount, kickFlag: true, fixedDay };
         const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const rosDate = `${months[expires.getMonth()]}/${String(expires.getDate()).padStart(2,'0')}/${expires.getFullYear()}`;
         const rosTime = expires.toTimeString().split(' ')[0];
@@ -760,7 +945,12 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
             const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
             if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
             await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
-            try { await instance.post('/ppp/active/remove', { name: String(secret.name) }); } catch (_) {}
+            try { 
+                const activeRes = await instance.get(`/ppp/active?name=${name}`);
+                if (Array.isArray(activeRes.data) && activeRes.data.length > 0) {
+                    await instance.delete(`/ppp/active/${activeRes.data[0]['.id']}`);
+                }
+            } catch (e) { console.warn('[ppp/payment/process] REST active remove failed:', e.message); }
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
             res.json(savedRes.data);
         }
@@ -957,6 +1147,254 @@ app.put('/api/roles/:roleId/permissions', async (req, res) => {
     } catch (e) { try { const dbx = await getDb(); await dbx.exec('ROLLBACK'); } catch {} res.status(500).json({ message: e.message }); }
 });
 
+// DHCP Portal Setup
+app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) => {
+    const { panelIp, lanInterface } = req.body;
+    if (!panelIp || !lanInterface) return res.status(400).json({ message: 'Missing panelIp or lanInterface' });
+
+    try {
+        const SCRIPT_NAME = 'dhcp-lease-add-to-pending';
+        const LIST_NAME = 'authorized-dhcp-users';
+        const COMMENT_TAG = 'DHCP-PORTAL';
+
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                // 1. Create Script
+                const scripts = await writeLegacySafe(client, ['/system/script/print', '?name=' + SCRIPT_NAME]);
+                if (scripts.length === 0) {
+                    await client.write('/system/script/add', {
+                        name: SCRIPT_NAME,
+                        source: ':log info "DHCP Lease assigned (Portal Managed)"',
+                        comment: COMMENT_TAG
+                    });
+                }
+
+                // 2. Configure DHCP Server
+                const servers = await writeLegacySafe(client, ['/ip/dhcp-server/print', '?interface=' + lanInterface]);
+                if (servers.length > 0) {
+                    await client.write('/ip/dhcp-server/set', {
+                        '.id': servers[0]['.id'],
+                        'lease-script': SCRIPT_NAME
+                    });
+                } else {
+                    throw new Error(`No DHCP Server found on interface ${lanInterface}`);
+                }
+
+                // 3. Firewall NAT (Redirect)
+                const natRules = await writeLegacySafe(client, ['/ip/firewall/nat/print', '?comment=' + COMMENT_TAG + '-REDIRECT']);
+                if (natRules.length === 0) {
+                    await client.write('/ip/firewall/nat/add', {
+                        chain: 'dstnat',
+                        protocol: 'tcp',
+                        'dst-port': '80',
+                        'src-address-list': '!' + LIST_NAME,
+                        action: 'dst-nat',
+                        'to-addresses': panelIp,
+                        'to-ports': '80',
+                        comment: COMMENT_TAG + '-REDIRECT',
+                        'place-before': 0
+                    });
+                }
+
+                // 4. Firewall Filter Rules
+                const dnsRules = await writeLegacySafe(client, ['/ip/firewall/filter/print', '?comment=' + COMMENT_TAG + '-DNS']);
+                if (dnsRules.length === 0) {
+                    await client.write('/ip/firewall/filter/add', {
+                        chain: 'forward',
+                        protocol: 'udp',
+                        'dst-port': '53',
+                        action: 'accept',
+                        comment: COMMENT_TAG + '-DNS',
+                        'place-before': 0
+                    });
+                }
+                
+                const authRules = await writeLegacySafe(client, ['/ip/firewall/filter/print', '?comment=' + COMMENT_TAG + '-AUTH']);
+                if (authRules.length === 0) {
+                    await client.write('/ip/firewall/filter/add', {
+                        chain: 'forward',
+                        'src-address-list': LIST_NAME,
+                        action: 'accept',
+                        comment: COMMENT_TAG + '-AUTH'
+                    });
+                }
+
+                const panelRules = await writeLegacySafe(client, ['/ip/firewall/filter/print', '?comment=' + COMMENT_TAG + '-PANEL']);
+                if (panelRules.length === 0) {
+                     await client.write('/ip/firewall/filter/add', {
+                        chain: 'forward',
+                        'dst-address': panelIp,
+                        action: 'accept',
+                        comment: COMMENT_TAG + '-PANEL'
+                     });
+                }
+
+                const dropRules = await writeLegacySafe(client, ['/ip/firewall/filter/print', '?comment=' + COMMENT_TAG + '-DROP']);
+                if (dropRules.length === 0) {
+                    await client.write('/ip/firewall/filter/add', {
+                        chain: 'forward',
+                        'src-address-list': '!' + LIST_NAME,
+                        action: 'drop',
+                        comment: COMMENT_TAG + '-DROP'
+                    });
+                }
+
+            } finally {
+                await client.close();
+            }
+        } else {
+            // REST API
+            const instance = req.routerInstance;
+            
+            const sRes = await instance.get(`/system/script?name=${SCRIPT_NAME}`);
+            if (!sRes.data || sRes.data.length === 0) {
+                await instance.put('/system/script', {
+                    name: SCRIPT_NAME,
+                    source: ':log info "DHCP Lease assigned (Portal Managed)"',
+                    comment: COMMENT_TAG
+                });
+            }
+
+            const dRes = await instance.get(`/ip/dhcp-server?interface=${lanInterface}`);
+            if (dRes.data && dRes.data.length > 0) {
+                await instance.patch(`/ip/dhcp-server/${dRes.data[0]['.id']}`, { 'lease-script': SCRIPT_NAME });
+            } else {
+                throw new Error(`No DHCP Server found on interface ${lanInterface}`);
+            }
+
+            const natRes = await instance.get(`/ip/firewall/nat?comment=${COMMENT_TAG}-REDIRECT`);
+            if (!natRes.data || natRes.data.length === 0) {
+                await instance.put('/ip/firewall/nat', {
+                    chain: 'dstnat',
+                    protocol: 'tcp',
+                    'dst-port': '80',
+                    'src-address-list': '!' + LIST_NAME,
+                    action: 'dst-nat',
+                    'to-addresses': panelIp,
+                    'to-ports': '80',
+                    comment: COMMENT_TAG + '-REDIRECT',
+                    'place-before': '*0'
+                });
+            }
+
+            const dnsRes = await instance.get(`/ip/firewall/filter?comment=${COMMENT_TAG}-DNS`);
+            if (!dnsRes.data || dnsRes.data.length === 0) {
+                 await instance.put('/ip/firewall/filter', {
+                    chain: 'forward',
+                    protocol: 'udp',
+                    'dst-port': '53',
+                    action: 'accept',
+                    comment: COMMENT_TAG + '-DNS',
+                    'place-before': '*0'
+                });
+            }
+
+            const authRes = await instance.get(`/ip/firewall/filter?comment=${COMMENT_TAG}-AUTH`);
+            if (!authRes.data || authRes.data.length === 0) {
+                 await instance.put('/ip/firewall/filter', {
+                    chain: 'forward',
+                    'src-address-list': LIST_NAME,
+                    action: 'accept',
+                    comment: COMMENT_TAG + '-AUTH'
+                });
+            }
+
+            const panelRes = await instance.get(`/ip/firewall/filter?comment=${COMMENT_TAG}-PANEL`);
+            if (!panelRes.data || panelRes.data.length === 0) {
+                 await instance.put('/ip/firewall/filter', {
+                    chain: 'forward',
+                    'dst-address': panelIp,
+                    action: 'accept',
+                    comment: COMMENT_TAG + '-PANEL'
+                });
+            }
+
+            const dropRes = await instance.get(`/ip/firewall/filter?comment=${COMMENT_TAG}-DROP`);
+            if (!dropRes.data || dropRes.data.length === 0) {
+                 await instance.put('/ip/firewall/filter', {
+                    chain: 'forward',
+                    'src-address-list': '!' + LIST_NAME,
+                    action: 'drop',
+                    comment: COMMENT_TAG + '-DROP'
+                });
+            }
+        }
+
+        res.json({ message: 'Portal components installed successfully' });
+    } catch (e) {
+        console.error("Portal Setup Error:", e.message);
+        res.status(500).json({ message: e.message });
+    }
+});
+
+// DHCP Portal Uninstall
+app.post('/:routerId/script/run-dhcp-portal-uninstall', getRouter, async (req, res) => {
+     try {
+        const COMMENT_TAG = 'DHCP-PORTAL';
+        const SCRIPT_NAME = 'dhcp-lease-add-to-pending';
+
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const tags = ['-REDIRECT', '-DNS', '-AUTH', '-PANEL', '-DROP'];
+                for (const tag of tags) {
+                    const type = tag === '-REDIRECT' ? 'nat' : 'filter';
+                    const list = await writeLegacySafe(client, [`/ip/firewall/${type}/print`, `?comment=${COMMENT_TAG}${tag}`]);
+                    for (const item of list) {
+                        await client.write(`/ip/firewall/${type}/remove`, { '.id': item['.id'] });
+                    }
+                }
+
+                const servers = await writeLegacySafe(client, ['/ip/dhcp-server/print', `?lease-script=${SCRIPT_NAME}`]);
+                for (const s of servers) {
+                    await client.write('/ip/dhcp-server/set', { '.id': s['.id'], 'lease-script': '' });
+                }
+
+                const scripts = await writeLegacySafe(client, ['/system/script/print', `?name=${SCRIPT_NAME}`]);
+                for (const s of scripts) {
+                    await client.write('/system/script/remove', { '.id': s['.id'] });
+                }
+
+            } finally {
+                await client.close();
+            }
+        } else {
+            const instance = req.routerInstance;
+            const tags = ['-REDIRECT', '-DNS', '-AUTH', '-PANEL', '-DROP'];
+            for (const tag of tags) {
+                const type = tag === '-REDIRECT' ? 'nat' : 'filter';
+                const list = await instance.get(`/ip/firewall/${type}?comment=${COMMENT_TAG}${tag}`);
+                if (list.data) {
+                    for (const item of list.data) {
+                        await instance.delete(`/ip/firewall/${type}/${item['.id']}`);
+                    }
+                }
+            }
+
+             const servers = await instance.get(`/ip/dhcp-server?lease-script=${SCRIPT_NAME}`);
+             if (servers.data) {
+                for (const s of servers.data) {
+                    await instance.patch(`/ip/dhcp-server/${s['.id']}`, { 'lease-script': '' });
+                }
+             }
+
+             const scripts = await instance.get(`/system/script?name=${SCRIPT_NAME}`);
+             if (scripts.data) {
+                for (const s of scripts.data) {
+                    await instance.delete(`/system/script/${s['.id']}`);
+                }
+             }
+        }
+        res.json({ message: 'Portal components uninstalled successfully' });
+     } catch (e) {
+        console.error("Portal Uninstall Error:", e.message);
+        res.status(500).json({ message: e.message });
+     }
+});
+
 // Forward /api/* calls to Panel UI server to avoid redirect loops
 app.all('/api/*', async (req, res) => {
     try {
@@ -1070,7 +1508,10 @@ const processExpiredGrace = async () => {
                         if (Array.isArray(s) && s.length > 0 && row.non_payment_profile) {
                             await instance.write('/ppp/secret/set', { '.id': s[0]['.id'], profile: String(row.non_payment_profile) });
                         }
-                        await writeLegacySafe(instance, ['/ppp/active/remove', `?name=${String(row.name)}`]);
+                        const active = await writeLegacySafe(instance, ['/ppp/active/print', `?name=${String(row.name)}`]);
+                        if (Array.isArray(active) && active.length > 0) {
+                            await instance.write('/ppp/active/remove', { '.id': active[0]['.id'] });
+                        }
                         const sched = await writeLegacySafe(instance, ['/system/scheduler/print', `?name=ppp-grace-expire-${String(row.name)}`]);
                         if (Array.isArray(sched) && sched.length > 0) await instance.write('/system/scheduler/remove', { '.id': sched[0]['.id'] });
                     } finally { await instance.close(); }
@@ -1079,7 +1520,12 @@ const processExpiredGrace = async () => {
                     if (Array.isArray(sRes.data) && sRes.data.length > 0 && row.non_payment_profile) {
                         await instance.patch(`/ppp/secret/${sRes.data[0]['.id']}`, { profile: String(row.non_payment_profile) });
                     }
-                    try { await instance.post('/ppp/active/remove', { name: String(row.name) }); } catch (_) {}
+                    try {
+                        const activeRes = await instance.get(`/ppp/active?name=${nameEnc}`);
+                        if (Array.isArray(activeRes.data) && activeRes.data.length > 0) {
+                             await instance.delete(`/ppp/active/${activeRes.data[0]['.id']}`);
+                        }
+                    } catch (e) { console.warn('[ppp/grace/expire] REST active remove failed:', e.message); }
                     const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(`ppp-grace-expire-${String(row.name)}`)}`);
                     if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
                 }

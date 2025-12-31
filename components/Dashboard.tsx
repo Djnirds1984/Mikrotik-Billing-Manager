@@ -1,16 +1,16 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, SystemInfo, Interface, TrafficHistoryPoint, PanelHostStatus } from '../types.ts';
-import { getSystemInfo, getInterfaceStats, getPppActiveConnections } from '../services/mikrotikService.ts';
+import { getSystemInfo, getInterfaceStats, getPppActiveConnections, toggleInterfaceStatus } from '../services/mikrotikService.ts';
 import { getPanelHostStatus } from '../services/panelService.ts';
 import { Loader } from './Loader.tsx';
 import { TrafficChart } from './chart.tsx';
-import { RouterIcon, ExclamationTriangleIcon, UsersIcon, ChipIcon, SignalIcon, ShareIcon } from '../constants.tsx';
+import { RouterIcon, ExclamationTriangleIcon, UsersIcon, ChipIcon, SignalIcon, ShareIcon, PlusIcon, XMarkIcon } from '../constants.tsx';
 import { AIFixer } from './AIFixer.tsx';
 
 // --- CONSTANTS ---
 const MAX_HISTORY_POINTS = 60;
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 1000;
 
 // --- UTILITY ---
 const formatBits = (bits: number): string => {
@@ -55,31 +55,34 @@ const ProgressBar: React.FC<{ percent: number; colorClass: string }> = ({ percen
 const TrafficCard: React.FC<{ 
     interfaceName: string | null; 
     allInterfaces: string[]; 
-    onSelect: (name: string) => void; 
+    onSelect: (name: string) => void;
+    onRemove: () => void;
+    onToggleStatus: (name: string, currentStatus: boolean) => void;
+    isDisabled: boolean;
     data: TrafficHistoryPoint[];
     currentRx: number;
     currentTx: number;
-}> = ({ interfaceName, allInterfaces, onSelect, data, currentRx, currentTx }) => {
+}> = ({ interfaceName, allInterfaces, onSelect, onRemove, onToggleStatus, isDisabled, data, currentRx, currentTx }) => {
     if (!interfaceName) return <div className="h-full bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse"></div>;
 
     return (
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col h-full">
+        <div className={`bg-white dark:bg-slate-800 rounded-xl border ${isDisabled ? 'border-red-200 dark:border-red-900/50' : 'border-slate-200 dark:border-slate-700'} shadow-sm overflow-hidden flex flex-col h-full relative group transition-colors duration-300`}>
             {/* Header */}
-            <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+            <div className={`relative p-4 border-b ${isDisabled ? 'border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50'} flex flex-col sm:flex-row justify-between items-center gap-4 transition-colors duration-300`}>
+                <div className="flex items-center gap-3 z-10">
+                    <div className={`p-2 rounded-lg ${isDisabled ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'}`}>
                         <SignalIcon className="w-5 h-5" />
                     </div>
                     <div>
                         <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1">
-                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Live
+                            <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${isDisabled ? 'text-red-500' : 'text-emerald-500'}`}>
+                                <span className={`w-2 h-2 rounded-full ${isDisabled ? 'bg-red-500' : 'bg-emerald-500 animate-pulse'}`}></span> {isDisabled ? 'Disabled' : 'Live'}
                             </span>
                         </div>
                         <select 
                             value={interfaceName} 
                             onChange={(e) => onSelect(e.target.value)}
-                            className="mt-1 bg-transparent font-bold text-slate-800 dark:text-slate-100 text-lg focus:outline-none cursor-pointer hover:text-blue-600 transition-colors"
+                            className="mt-1 bg-transparent font-bold text-slate-800 dark:text-slate-100 text-base focus:outline-none cursor-pointer hover:text-blue-600 transition-colors pr-8 max-w-[140px] truncate"
                         >
                             {allInterfaces.map(iface => (
                                 <option key={iface} value={iface}>{iface}</option>
@@ -88,22 +91,48 @@ const TrafficCard: React.FC<{
                     </div>
                 </div>
 
-                <div className="flex gap-6 text-right">
-                    <div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-0.5">Download</p>
-                        <p className="text-lg font-mono font-bold text-emerald-600 dark:text-emerald-400">{formatBits(currentRx)}</p>
+                <div className={`flex gap-4 sm:absolute sm:right-10 sm:top-1/2 sm:-translate-y-1/2 text-center pointer-events-none transition-opacity duration-300 ${isDisabled ? 'opacity-50 grayscale' : 'opacity-100'}`}>
+                    <div className="flex flex-col items-center">
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-0.5">Download</p>
+                        <p className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">{formatBits(currentRx)}</p>
                     </div>
-                    <div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-0.5">Upload</p>
-                        <p className="text-lg font-mono font-bold text-sky-600 dark:text-sky-400">{formatBits(currentTx)}</p>
+                    <div className="flex flex-col items-center">
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-0.5">Upload</p>
+                        <p className="text-sm font-mono font-bold text-sky-600 dark:text-sky-400">{formatBits(currentTx)}</p>
                     </div>
+                </div>
+
+                <div className="absolute top-2 right-2 flex flex-col gap-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                        onClick={onRemove}
+                        className="p-1 text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400 transition-colors"
+                        title="Remove Graph"
+                    >
+                        <XMarkIcon className="w-5 h-5" />
+                    </button>
+                    <button 
+                        onClick={() => onToggleStatus(interfaceName, isDisabled)}
+                        className={`p-1 transition-colors ${isDisabled ? 'text-emerald-500 hover:text-emerald-600' : 'text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400'}`}
+                        title={isDisabled ? "Enable Interface" : "Disable Interface"}
+                    >
+                         <div className={`w-8 h-4 rounded-full p-0.5 flex items-center transition-colors ${isDisabled ? 'bg-slate-300 dark:bg-slate-600 justify-start' : 'bg-emerald-500 justify-end'}`}>
+                            <div className="w-3 h-3 rounded-full bg-white shadow-sm"></div>
+                        </div>
+                    </button>
                 </div>
             </div>
 
             {/* Chart Area */}
-            <div className="flex-grow p-4 min-h-[250px]">
+            <div className={`flex-grow p-4 min-h-[250px] transition-opacity duration-300 ${isDisabled ? 'opacity-25 grayscale pointer-events-none' : 'opacity-100'}`}>
                 <TrafficChart data={data} height={250} />
             </div>
+            {isDisabled && (
+                <div className="absolute inset-0 top-[80px] flex items-center justify-center pointer-events-none">
+                    <div className="bg-slate-900/50 text-white px-4 py-2 rounded-lg font-bold backdrop-blur-sm">
+                        INTERFACE DISABLED
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -115,6 +144,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     
     // Interface Names List
     const [availableInterfaces, setAvailableInterfaces] = useState<string[]>([]);
+    const [interfaceDetails, setInterfaceDetails] = useState<Interface[]>([]); // Full interface details for status
     
     // Traffic Data: Map<InterfaceName, HistoryArray>
     const [trafficHistory, setTrafficHistory] = useState<Record<string, TrafficHistoryPoint[]>>({});
@@ -123,8 +153,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     const [currentRates, setCurrentRates] = useState<Record<string, {rx: number, tx: number}>>({});
 
     // Selected Interfaces for Charts
-    const [chart1Interface, setChart1Interface] = useState<string | null>(null);
-    const [chart2Interface, setChart2Interface] = useState<string | null>(null);
+    const [activeCharts, setActiveCharts] = useState<string[]>([]);
 
     // Host States
     const [hostStatus, setHostStatus] = useState<PanelHostStatus | null>(null);
@@ -173,6 +202,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                 const now = Date.now();
                 const interfaceNames = interfacesData.map((i: any) => i.name);
                 
+                // Store full details for status checking (disabled/running state)
+                setInterfaceDetails(interfacesData);
+
                 // Update available interfaces list if changed (deep compare approximation)
                 setAvailableInterfaces(prev => {
                     if (prev.length !== interfaceNames.length || !prev.every((val, index) => val === interfaceNames[index])) {
@@ -263,6 +295,21 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         isInitialLoad.current = true;
         setError(null);
 
+        // Load persisted charts for this router
+        if (selectedRouter?.id) {
+            try {
+                const savedCharts = localStorage.getItem(`dashboard_charts_${selectedRouter.id}`);
+                if (savedCharts) {
+                    setActiveCharts(JSON.parse(savedCharts));
+                } else {
+                    setActiveCharts([]); // Reset if no save, will trigger auto-select
+                }
+            } catch (e) {
+                console.warn("Failed to load chart prefs", e);
+                setActiveCharts([]);
+            }
+        }
+
         if (selectedRouter) {
             fetchRouterData(); // Initial fetch
             const interval = setInterval(fetchRouterData, POLL_INTERVAL_MS);
@@ -272,20 +319,73 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         }
     }, [selectedRouter, fetchRouterData]);
 
+    // Save active charts when they change
+    useEffect(() => {
+        if (selectedRouter?.id && activeCharts.length > 0) {
+            localStorage.setItem(`dashboard_charts_${selectedRouter.id}`, JSON.stringify(activeCharts));
+        } else if (selectedRouter?.id && activeCharts.length === 0 && availableInterfaces.length > 0) {
+            // Only clear if we actually have interfaces but chose to have 0 charts (manual clear)
+            // If availableInterfaces is empty, it might be initial load, so don't wipe storage yet
+             localStorage.setItem(`dashboard_charts_${selectedRouter.id}`, JSON.stringify([]));
+        }
+    }, [activeCharts, selectedRouter?.id, availableInterfaces.length]);
+
     // Auto-select defaults for charts if not set
     useEffect(() => {
-        if (availableInterfaces.length > 0) {
-            if (!chart1Interface || !availableInterfaces.includes(chart1Interface)) {
-                const wan = availableInterfaces.find(i => i.toLowerCase().includes('wan') || i.includes('ether1')) || availableInterfaces[0];
-                setChart1Interface(wan);
-            }
-            if (!chart2Interface || !availableInterfaces.includes(chart2Interface)) {
-                const lan = availableInterfaces.find(i => (i.toLowerCase().includes('lan') || i.includes('bridge')) && i !== chart1Interface) || availableInterfaces[1] || availableInterfaces[0];
-                setChart2Interface(lan);
+        if (availableInterfaces.length > 0 && activeCharts.length === 0) {
+            const wan = availableInterfaces.find(i => i.toLowerCase().includes('wan') || i.includes('ether1')) || availableInterfaces[0];
+            const lan = availableInterfaces.find(i => (i.toLowerCase().includes('lan') || i.includes('bridge')) && i !== wan) || availableInterfaces[1] || availableInterfaces[0];
+            
+            // Default to showing 2 charts if possible, otherwise just 1
+            if (wan && lan && wan !== lan) {
+                setActiveCharts([wan, lan]);
+            } else {
+                setActiveCharts([wan]);
             }
         }
-    }, [availableInterfaces, chart1Interface, chart2Interface]);
+    }, [availableInterfaces, activeCharts.length]);
 
+
+    // --- ACTIONS ---
+    const addNewChart = () => {
+        if (availableInterfaces.length === 0) return;
+        // Try to find an interface not currently shown
+        const unusedInterface = availableInterfaces.find(iface => !activeCharts.includes(iface));
+        if (unusedInterface) {
+            setActiveCharts([...activeCharts, unusedInterface]);
+        } else {
+            // Duplicate allowed if all are shown, just pick the first one
+            setActiveCharts([...activeCharts, availableInterfaces[0]]);
+        }
+    };
+
+    const removeChart = (index: number) => {
+        const newCharts = [...activeCharts];
+        newCharts.splice(index, 1);
+        setActiveCharts(newCharts);
+    };
+
+    const updateChartInterface = (index: number, newInterface: string) => {
+        const newCharts = [...activeCharts];
+        newCharts[index] = newInterface;
+        setActiveCharts(newCharts);
+    };
+
+    const handleToggleInterface = async (interfaceName: string, currentStatus: boolean) => {
+        if (!selectedRouter) return;
+        
+        // Optimistic update (optional, but might be tricky with polling. Let's just wait for poll or refresh)
+        // Actually, we should probably set a loading state for that card, but for now let's just fire the request
+        
+        try {
+            await toggleInterfaceStatus(selectedRouter, interfaceName, !currentStatus);
+            // Force a refresh of data
+            fetchRouterData();
+        } catch (err) {
+            console.error("Failed to toggle interface:", err);
+            // Optionally show a toast or error
+        }
+    };
 
     // --- RENDER ---
 
@@ -364,27 +464,40 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
             </div>
             
             {/* BOTTOM: TRAFFIC TELEMETRY */}
-            <div>
-                <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200 mb-4 flex items-center gap-2">
-                    <SignalIcon className="w-6 h-6 text-sky-500" /> Live Traffic Telemetry
-                </h2>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <TrafficCard 
-                        interfaceName={chart1Interface}
-                        allInterfaces={availableInterfaces}
-                        onSelect={setChart1Interface}
-                        data={chart1Interface ? (trafficHistory[chart1Interface] || []) : []}
-                        currentRx={chart1Interface ? (currentRates[chart1Interface]?.rx || 0) : 0}
-                        currentTx={chart1Interface ? (currentRates[chart1Interface]?.tx || 0) : 0}
-                    />
-                    <TrafficCard 
-                        interfaceName={chart2Interface}
-                        allInterfaces={availableInterfaces}
-                        onSelect={setChart2Interface}
-                        data={chart2Interface ? (trafficHistory[chart2Interface] || []) : []}
-                        currentRx={chart2Interface ? (currentRates[chart2Interface]?.rx || 0) : 0}
-                        currentTx={chart2Interface ? (currentRates[chart2Interface]?.tx || 0) : 0}
-                    />
+            <div className="relative">
+                <div className="flex items-center gap-4 mb-4">
+                    <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                        <SignalIcon className="w-6 h-6 text-sky-500" /> Live Traffic Telemetry
+                    </h2>
+                    <button 
+                        onClick={addNewChart}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors text-sm font-semibold border border-blue-200 dark:border-blue-700/50"
+                        title="Add New Traffic Graph"
+                    >
+                        <PlusIcon className="w-4 h-4" />
+                        <span>Add Graph</span>
+                    </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-20">
+                    {activeCharts.map((iface, index) => {
+                        const ifaceDetail = interfaceDetails.find(i => i.name === iface);
+                        const isDisabled = ifaceDetail ? (ifaceDetail.disabled === true || ifaceDetail.disabled === 'true') : false;
+                        
+                        return (
+                            <TrafficCard 
+                                key={`${iface}-${index}`}
+                                interfaceName={iface}
+                                allInterfaces={availableInterfaces}
+                                onSelect={(newName) => updateChartInterface(index, newName)}
+                                onRemove={() => removeChart(index)}
+                                onToggleStatus={handleToggleInterface}
+                                isDisabled={isDisabled}
+                                data={iface ? (trafficHistory[iface] || []) : []}
+                                currentRx={iface ? (currentRates[iface]?.rx || 0) : 0}
+                                currentTx={iface ? (currentRates[iface]?.tx || 0) : 0}
+                            />
+                        );
+                    })}
                 </div>
             </div>
         </div>

@@ -76,6 +76,7 @@ export interface Interface {
   txRate: number;
   'rx-byte'?: number;
   'tx-byte'?: number;
+  disabled?: boolean | string;
 }
 
 export interface TrafficHistoryPoint {
@@ -258,6 +259,10 @@ export interface PppActiveConnection {
     'caller-id': string;
     address: string;
     uptime: string;
+    'limit-bytes-in'?: number;
+    'limit-bytes-out'?: number;
+    comment?: string;
+    interface?: string; // Often implied, but good to have
 }
 
 export interface NtpSettings {
