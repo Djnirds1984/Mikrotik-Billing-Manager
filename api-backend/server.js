@@ -927,7 +927,16 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
                 } catch (e) { console.warn('[ppp/payment/process] active remove failed:', e.message); }
                 
                 const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
-                const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
+                const database = await getDb();
+                await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
+
+                // Mark corresponding invoice as paid
+                try {
+                    await database.run('UPDATE invoices SET status = "paid" WHERE customerId = ? AND routerId = ? AND status = "pending"', [String(secret.name), req.params.routerId]);
+                } catch (invErr) {
+                    console.warn('[ppp/payment/process] invoice update failed:', invErr.message);
+                }
+
                 res.json(saved.map(normalizeLegacyObject));
             } finally { await client.close(); }
         } else {
@@ -952,6 +961,15 @@ const onEvent = `/log info \"PPPoE auto-kick: ${String(secret.name)}\"; :do { /p
                 }
             } catch (e) { console.warn('[ppp/payment/process] REST active remove failed:', e.message); }
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
+
+            // Mark corresponding invoice as paid
+            try {
+                const db = await getDb();
+                await db.run('UPDATE invoices SET status = "paid" WHERE customerId = ? AND routerId = ? AND status = "pending"', [String(secret.name), req.params.routerId]);
+            } catch (invErr) {
+                console.warn('[ppp/payment/process] invoice update failed:', invErr.message);
+            }
+
             res.json(savedRes.data);
         }
     } catch (e) {

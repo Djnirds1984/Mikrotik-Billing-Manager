@@ -15,6 +15,7 @@ import { SystemSettings } from './components/SystemSettings.tsx';
 import { SalesReport } from './components/SalesReport.tsx';
 import { Network } from './components/Network.tsx';
 import { Inventory } from './components/Inventory.tsx';
+import { Invoices } from './components/Invoices.tsx';
 import { Company } from './components/Company.tsx';
 import { Terminal } from './components/Terminal.tsx';
 import { Loader } from './components/Loader.tsx';
@@ -171,7 +172,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     }
 
     const licensedViews: View[] = [
-        'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
+        'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales', 'invoices',
         'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'client_portal_users'
     ];
 
@@ -200,6 +201,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           return <Billing selectedRouter={selectedRouter} />;
       case 'sales':
           return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} />;
+      case 'invoices':
+          return <Invoices selectedRouter={selectedRouter} />;
       case 'inventory':
           return <Inventory 
                     items={items} 

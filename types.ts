@@ -26,7 +26,8 @@ export type View =
   | 'super_admin'
   | 'dhcp-portal'
   | 'client_portal_users'
-  | 'notifications';
+  | 'notifications'
+  | 'invoices';
 
 export interface Notification {
   id: string;
@@ -319,6 +320,29 @@ export interface SaleRecord {
     clientAddress?: string;
     clientContact?: string;
     clientEmail?: string;
+}
+
+export interface Invoice {
+    id: string;
+    customerId: string;
+    customerName: string;
+    customerEmail?: string;
+    customerContact?: string;
+    customerAddress?: string;
+    routerId: string;
+    routerName: string;
+    planName: string;
+    planPrice: number;
+    currency: string;
+    billingCycle: string;
+    dueDate: string;
+    issueDate: string;
+    status: 'pending' | 'paid' | 'overdue' | 'cancelled';
+    paymentUrl?: string;
+    invoiceNumber: string;
+    description?: string;
+    discountAmount?: number;
+    finalAmount: number;
 }
 
 export interface InventoryItem {

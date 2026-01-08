@@ -245,6 +245,28 @@ async function initDb() {
                 lastSeen TEXT,
                 UNIQUE(routerId, macAddress)
             );
+            CREATE TABLE IF NOT EXISTS invoices (
+                id TEXT PRIMARY KEY,
+                customerId TEXT,
+                customerName TEXT NOT NULL,
+                customerEmail TEXT,
+                customerContact TEXT,
+                customerAddress TEXT,
+                routerId TEXT NOT NULL,
+                routerName TEXT,
+                planName TEXT NOT NULL,
+                planPrice REAL NOT NULL,
+                currency TEXT NOT NULL,
+                billingCycle TEXT NOT NULL,
+                dueDate TEXT NOT NULL,
+                issueDate TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                paymentUrl TEXT,
+                invoiceNumber TEXT NOT NULL UNIQUE,
+                description TEXT,
+                discountAmount REAL DEFAULT 0,
+                finalAmount REAL NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS client_users (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
@@ -475,6 +497,7 @@ async function startServer() {
     createCrud('/dhcp-billing-plans', 'dhcp_billing_plans');
     createCrud('/dhcp_clients', 'dhcp_clients');
     createCrud('/sales', 'sales_records');
+    createCrud('/invoices', 'invoices');
 
     // Customers API (Manual Upsert)
     dbRouter.get('/customers', async (req, res) => {
@@ -619,6 +642,76 @@ async function startServer() {
              await db.run('DELETE FROM sales_records');
         }
         res.json({ message: 'Sales cleared' });
+    });
+
+    // Generate invoices for customers with upcoming due dates
+    dbRouter.post('/invoices/generate', async (req, res) => {
+        const { routerId, daysAhead = 7 } = req.body;
+        if (!routerId) return res.status(400).json({ message: 'routerId required' });
+
+        try {
+            const router = await db.get('SELECT * FROM routers WHERE id = ?', [routerId]);
+            if (!router) return res.status(404).json({ message: 'Router not found' });
+
+            const now = new Date();
+            const futureDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+            // Get PPPoE secrets with due dates
+            const pppoeSecrets = await axios.get(`http://localhost:3002/${routerId}/ppp/secret/print`);
+            const customers = await db.all('SELECT * FROM customers WHERE routerId = ?', [routerId]);
+
+            let generatedCount = 0;
+
+            for (const secret of pppoeSecrets.data) {
+                if (!secret.comment) continue;
+                try {
+                    const comment = JSON.parse(secret.comment);
+                    if (!comment.dueDate) continue;
+
+                    const dueDate = new Date(comment.dueDate);
+                    if (dueDate <= futureDate && dueDate >= now) {
+                        // Check if invoice already exists
+                        const existing = await db.get('SELECT id FROM invoices WHERE customerId = ? AND dueDate = ? AND status = "pending"', [secret.name, comment.dueDate]);
+                        if (existing) continue;
+
+                        const customer = customers.find(c => c.username === secret.name);
+                        const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+
+                        await db.run(`INSERT INTO invoices (
+                            id, customerId, customerName, customerEmail, customerContact, customerAddress,
+                            routerId, routerName, planName, planPrice, currency, billingCycle,
+                            dueDate, issueDate, status, invoiceNumber, finalAmount
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+                            `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                            secret.name,
+                            customer?.fullName || secret.name,
+                            customer?.email || comment.customerEmail,
+                            customer?.contactNumber || comment.customerContact,
+                            customer?.address || comment.customerAddress,
+                            routerId,
+                            router.name,
+                            comment.planName || 'Unknown Plan',
+                            comment.planPrice || 0,
+                            comment.currency || 'USD',
+                            comment.planType === 'prepaid' ? 'Prepaid' : 'Postpaid',
+                            comment.dueDate,
+                            now.toISOString(),
+                            'pending',
+                            invoiceNumber,
+                            comment.planPrice || 0
+                        ]);
+                        generatedCount++;
+                    }
+                } catch (e) {
+                    console.warn('Error parsing comment for', secret.name, e.message);
+                }
+            }
+
+            res.json({ message: `Generated ${generatedCount} invoices` });
+        } catch (e) {
+            console.error('Invoice generation error:', e);
+            res.status(500).json({ message: e.message });
+        }
     });
 
     app.use('/api/db', dbRouter);
@@ -1016,6 +1109,34 @@ async function startServer() {
     });
     
     app.use('/api/superadmin', superRouter);
+
+    // Invoice generation worker
+    let invoiceWorkerRunning = false;
+    const generatePendingInvoices = async () => {
+        if (invoiceWorkerRunning) return; invoiceWorkerRunning = true;
+        try {
+            const routers = await db.all('SELECT * FROM routers');
+            for (const router of routers) {
+                try {
+                    await axios.post(`http://localhost:3002/${router.id}/invoices/generate`, { routerId: router.id, daysAhead: 7 });
+                } catch (err) {
+                    console.warn(`[invoice/worker] failed for router ${router.id}:`, err.message);
+                }
+            }
+        } catch (e) { console.error('[invoice/worker] error', e.message); }
+        finally { invoiceWorkerRunning = false; }
+    };
+    // Run invoice generation daily at 9 AM
+    const scheduleInvoiceGeneration = () => {
+        const now = new Date();
+        const nextRun = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
+        const timeUntilNext = nextRun.getTime() - now.getTime();
+        setTimeout(() => {
+            generatePendingInvoices();
+            setInterval(generatePendingInvoices, 24 * 60 * 60 * 1000); // Daily
+        }, timeUntilNext);
+    };
+    scheduleInvoiceGeneration();
 
     // --- VITE MIDDLEWARE ---
     app.use(vite.middlewares);
