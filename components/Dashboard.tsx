@@ -442,6 +442,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         <StatItem label="CPU Usage" value={`${(hostStatus.cpuUsage || 0).toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage || 0} colorClass="bg-green-500" /></StatItem>
                         <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used}/${hostStatus.memory?.total})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
                         <StatItem label="Disk Usage" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used}/${hostStatus.disk?.total})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
+                        {hostStatus.temperature !== undefined && hostStatus.temperature !== null && (
+                             <StatItem label="Temperature" value={`${hostStatus.temperature.toFixed(1)}°C`}><ProgressBar percent={hostStatus.temperature} colorClass="bg-orange-500" /></StatItem>
+                        )}
                     </>
                     )}
                 </StatCard>
@@ -452,9 +455,12 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                             <StatItem label="OS Version" value={systemInfo.version} />
                             <StatItem label="CPU Load" value={`${systemInfo.cpuLoad}%`}><ProgressBar percent={systemInfo.cpuLoad} colorClass="bg-emerald-500" /></StatItem>
                             <StatItem label="Memory" value={`${systemInfo.memoryUsage}%`} subtext={`of ${systemInfo.totalMemory}`}><ProgressBar percent={systemInfo.memoryUsage} colorClass="bg-blue-500" /></StatItem>
-                            <div className="col-span-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+                            <div className="col-span-2 pt-2 border-t border-slate-100 dark:border-slate-700 grid grid-cols-2 gap-4">
                                 <StatItem label="Uptime" value={systemInfo.uptime} icon={<ShareIcon className="w-5 h-5 text-slate-400"/>} />
                                 <StatItem label="Active PPPoE" value={pppoeCount} icon={<UsersIcon className="w-5 h-5 text-slate-400"/>} />
+                                {systemInfo.temperature !== undefined && (
+                                    <StatItem label="Temperature" value={`${systemInfo.temperature}°C`} icon={<ChipIcon className="w-5 h-5 text-red-400"/>} />
+                                )}
                             </div>
                         </div>
                     ) : (

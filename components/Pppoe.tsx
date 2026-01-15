@@ -674,27 +674,33 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} profiles={profiles} onSave={handleGraceSave} />
 
              <div className="flex justify-between items-center mb-4">
-                <div className="relative w-64">
-                    <input
-                        type="text"
-                        placeholder="Search users..."
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                setSearchTerm(searchInput);
-                            }
-                        }}
-                        className="w-full pl-10 pr-4 py-2 rounded-lg border dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                    <button 
-                        className="absolute left-3 top-2.5 text-slate-400 hover:text-primary-500 focus:outline-none"
-                        onClick={() => setSearchTerm(searchInput)}
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                    </button>
+                <div className="flex items-center gap-4">
+                    <div className="relative w-64">
+                        <input
+                            type="text"
+                            placeholder="Search users..."
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    setSearchTerm(searchInput);
+                                }
+                            }}
+                            className="w-full pl-10 pr-4 py-2 rounded-lg border dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                        <button 
+                            className="absolute left-3 top-2.5 text-slate-400 hover:text-primary-500 focus:outline-none"
+                            onClick={() => setSearchTerm(searchInput)}
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm font-medium">
+                         <UsersIcon className="w-5 h-5 text-blue-500" />
+                         <span>Total Users: {secrets.length}</span>
+                    </div>
                 </div>
                 <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>
             </div>
@@ -882,7 +888,8 @@ const UserHoverCard: React.FC<{
     user: PppActiveConnection;
     currentStats: { rx: number; tx: number };
     position: { x: number; y: number };
-}> = ({ user, currentStats, position }) => {
+    lastUpdated: number;
+}> = ({ user, currentStats, position, lastUpdated }) => {
     const [history, setHistory] = useState<TrafficHistoryPoint[]>([]);
 
     // Safely parse stats to numbers to prevent crashes if API returns strings or invalid data
@@ -905,7 +912,7 @@ const UserHoverCard: React.FC<{
             if (newHistory.length > 30) newHistory.shift(); // Keep last 30 seconds
             return newHistory;
         });
-    }, [rx, tx]);
+    }, [rx, tx, lastUpdated]);
 
     const formatBits = (bits: number) => {
         if (!bits || isNaN(bits)) return '0 bps';
@@ -988,6 +995,7 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isKicking, setIsKicking] = useState<string | null>(null);
+    const [lastUpdated, setLastUpdated] = useState(Date.now());
     
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -1014,6 +1022,7 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
             try {
                 const stats = await getPppActiveTraffic(selectedRouter, names);
                 setTrafficStats(stats);
+                setLastUpdated(Date.now());
             } catch (e) {
                 console.warn("Traffic fetch error", e);
             }
@@ -1026,7 +1035,7 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 10000); // Poll list every 10 seconds
+        const interval = setInterval(fetchData, 1000); // Poll list every 1 second
         return () => clearInterval(interval);
     }, [fetchData]);
 
@@ -1131,13 +1140,24 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     if (isLoading && activeUsers.length === 0) return <div className="flex justify-center p-8"><Loader /></div>;
     if (error) return <div className="p-4 text-red-600">{error}</div>;
 
+    const freshHoveredUser = hoveredUser ? (activeUsers.find(u => u.name === hoveredUser.name) || hoveredUser) : null;
+
     return (
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
-            {hoveredUser && hoverPosition && (
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                    <SignalIcon className="w-5 h-5 text-emerald-500" />
+                    <span className="font-semibold">
+                        Found {activeUsers.length} online users (active connections)
+                    </span>
+                </div>
+            </div>
+            {freshHoveredUser && hoverPosition && (
                 <UserHoverCard 
-                    user={hoveredUser}
-                    currentStats={trafficStats[hoveredUser.name] || { rx: 0, tx: 0 }}
+                    user={freshHoveredUser}
+                    currentStats={trafficStats[freshHoveredUser.name] || { rx: 0, tx: 0 }}
                     position={hoverPosition}
+                    lastUpdated={lastUpdated}
                 />
             )}
             <div className="overflow-x-auto">

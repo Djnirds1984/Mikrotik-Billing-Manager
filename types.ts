@@ -66,6 +66,7 @@ export interface SystemInfo {
   uptime: string;
   memoryUsage: number;
   totalMemory: string;
+  temperature?: number;
 }
 
 export interface Interface {
@@ -393,19 +394,21 @@ export interface ZeroTierStatusResponse {
 }
 
 export interface PanelHostStatus {
-    cpuUsage: number;
-    memory: {
-        total: string;
-        free: string;
-        used: string;
-        percent: number;
-    };
-    disk: {
-        total: string;
-        used: string;
-        free: string;
-        percent: number;
-    };
+  cpuUsage: number;
+  memory: {
+    total: string;
+    used: string;
+    free: string;
+    percent: number;
+  };
+  disk: {
+    total: string;
+    used: string;
+    free: string;
+    percent: number;
+  };
+  uptime: string;
+  temperature?: number;
 }
 
 export interface TelegramSettings {
@@ -622,7 +625,7 @@ export interface HostNetworkConfig {
 export interface MikroTikLogEntry {
     id: string;
     time: string;
-    topics: string;
+    topics: string | string[];
     message: string;
 }
 

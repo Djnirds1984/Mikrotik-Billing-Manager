@@ -159,7 +159,9 @@ export const Logs: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ 
                                 {routerLogs.map(log => (
                                     <div key={log.id} className="flex border-b border-slate-200 dark:border-slate-800 py-1">
                                         <span className="w-28 flex-shrink-0 text-slate-500">{log.time}</span>
-                                        <span className="w-32 flex-shrink-0 text-cyan-500">{log.topics}</span>
+                                        <span className="w-32 flex-shrink-0 text-cyan-500">
+                                            {Array.isArray(log.topics) ? log.topics.join(', ') : log.topics}
+                                        </span>
                                         <span className="text-slate-700 dark:text-slate-300">{log.message}</span>
                                     </div>
                                 ))}

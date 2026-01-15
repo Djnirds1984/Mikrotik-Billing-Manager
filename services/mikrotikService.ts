@@ -36,6 +36,8 @@ const apiCall = async <T>(router: RouterConfigWithId, endpoint: string, method: 
 
 export const getSystemInfo = (router: RouterConfigWithId) => apiCall<SystemInfo>(router, 'system/resource/print');
 
+export const getSystemLogs = (router: RouterConfigWithId) => apiCall<MikroTikLogEntry[]>(router, 'log/print');
+
 export const getInterfaces = (router: RouterConfigWithId) => apiCall<Interface[]>(router, 'interface/print');
 
 export const getInterfaceStats = (router: RouterConfigWithId) => apiCall<Interface[]>(router, 'interface/stats'); // Special endpoint handling stats

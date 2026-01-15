@@ -782,6 +782,16 @@ async function startServer() {
             // Use root volume or first available
             const disk = fsSize.find(d => d.mount === '/') || fsSize[0] || { size: 1, used: 0, use: 0 };
             
+            let temperature = null;
+            try {
+                const temp = await si.cpuTemperature();
+                if (temp && temp.main !== null && temp.main !== undefined) {
+                    temperature = temp.main;
+                }
+            } catch (err) {
+                console.warn("Failed to get CPU temperature", err);
+            }
+            
             res.json({
                 cpuUsage: cpu.currentLoad,
                 memory: {
@@ -795,7 +805,9 @@ async function startServer() {
                     used: (disk.used / 1024 / 1024 / 1024).toFixed(2) + ' GB',
                     free: ((disk.size - disk.used) / 1024 / 1024 / 1024).toFixed(2) + ' GB',
                     percent: disk.use
-                }
+                },
+                temperature,
+                uptime: os.uptime() + 's' // Adding uptime as per interface, though not in original response
             });
         } catch (e) {
             res.status(500).json({ message: e.message });

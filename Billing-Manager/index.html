@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en" class="font-sans">
+  <head>
+    <meta charset="UTF-8" />
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mikrotik Billling Management by AJC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/style.css" />
+    <script>
+      // Apply themes from localStorage before page load to prevent FOUC
+      // Dark/Light Mode
+      if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      // Color Theme
+      const colorTheme = localStorage.getItem('colorTheme') || 'orange';
+      document.documentElement.classList.add(`theme-${colorTheme}`);
+    </script>
+    
+<style>
+  /* Base styles */
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  /* Define CSS variables for color themes */
+  .theme-orange {
+    --color-primary-300: #fdba74;
+    --color-primary-400: #fb923c;
+    --color-primary-500: #f97316;
+    --color-primary-600: #ea580c;
+    --color-primary-700: #c2410c;
+    --color-primary-800: #9a3412;
+  }
+  .theme-sky {
+    --color-primary-300: #7dd3fc;
+    --color-primary-400: #38bdf8;
+    --color-primary-500: #0ea5e9;
+    --color-primary-600: #0284c7;
+    --color-primary-700: #0369a1;
+    --color-primary-800: #075985;
+  }
+  .theme-emerald {
+    --color-primary-300: #6ee7b7;
+    --color-primary-400: #34d399;
+    --color-primary-500: #10b981;
+    --color-primary-600: #059669;
+    --color-primary-700: #047857;
+    --color-primary-800: #065f46;
+  }
+  .theme-violet {
+    --color-primary-300: #c4b5fd;
+    --color-primary-400: #a78bfa;
+    --color-primary-500: #8b5cf6;
+    --color-primary-600: #7c3aed;
+    --color-primary-700: #6d28d9;
+    --color-primary-800: #5b21b6;
+  }
+
+  @media print {
+    body * {
+      visibility: hidden;
+    }
+    .printable-area, .printable-area * {
+      visibility: visible;
+    }
+    .printable-area {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+    }
+    .no-print {
+      display: none !important;
+    }
+  }
+
+  /* xterm.js styles */
+  .xterm {
+    position: relative;
+    user-select: none;
+    -ms-user-select: none;
+    -webkit-user-select: none;
+  }
+  .xterm.focus,
+  .xterm:focus {
+    outline: none;
+  }
+  .xterm .xterm-helpers {
+    position: absolute;
+    top: 0;
+    z-index: 5;
+  }
+  .xterm .xterm-helper-textarea {
+    padding: 0;
+    border: 0;
+    margin: 0;
+    position: absolute;
+    opacity: 0;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    z-index: -5;
+    white-space: nowrap;
+    overflow: hidden;
+    resize: none;
+  }
+  .xterm .xterm-composition-view {
+    color: #000;
+    display: none;
+    position: absolute;
+    white-space: nowrap;
+    z-index: 1;
+  }
+  .xterm .xterm-composition-view.active {
+    display: block;
+  }
+  .xterm .xterm-viewport {
+    background-color: #000;
+    overflow-y: scroll;
+    cursor: default;
+    position: absolute;
+    right: 0;
+    left: 0;
+    top: 0;
+    bottom: 0;
+  }
+  .xterm .xterm-screen {
+    position: relative;
+  }
+  .xterm .xterm-screen canvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+  .xterm .xterm-scroll-area {
+    visibility: hidden;
+  }
+  .xterm-char-measure-element {
+    display: inline-block;
+    visibility: hidden;
+    position: absolute;
+    top: 0;
+    left: -9999em;
+    line-height: normal;
+  }
+  .xterm {
+    cursor: text;
+  }
+  .xterm.enable-mouse-events {
+    cursor: default;
+  }
+  .xterm.xterm-cursor-pointer {
+    cursor: pointer;
+  }
+  .xterm.column-select.focus {
+    cursor: crosshair;
+  }
+  .xterm .xterm-accessibility,
+  .xterm .xterm-message {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 10;
+    color: #fff;
+  }
+  .xterm .live-region {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .xterm-dim {
+    opacity: 0.5;
+  }
+  .xterm-normal {
+    font-weight: 400;
+  }
+  .xterm-bold {
+    font-weight: 700;
+  }
+  .xterm-italic {
+    font-style: italic;
+  }
+  .xterm-underline {
+    text-decoration: underline;
+  }
+  .xterm-strikethrough {
+    text-decoration: line-through;
+  }
+  .xterm-overline {
+    text-decoration: overline;
+  }
+  .xterm-inverse {
+  }
+  .xterm-invisible {
+    visibility: hidden;
+  }
+  .xterm-cursor {
+    color: #000;
+    background: #fff;
+  }
+  .xterm-cursor-blink {
+    animation: xterm-cursor-blink 1s step-end infinite;
+  }
+  .xterm-cursor-style-block.xterm-cursor-blink.focus:not(.xterm-cursor-focussed) {
+    outline: 1px solid #fff;
+    outline-offset: -1px;
+  }
+  .xterm-cursor-style-bar.xterm-cursor-blink:not(.focus) {
+    animation: none;
+  }
+  .xterm-cursor-style-underline.xterm-cursor-blink:not(.focus) {
+    animation: none;
+  }
+  @keyframes xterm-cursor-blink {
+    50% {
+      background: transparent;
+      color: inherit;
+    }
+  }
+  .xterm-decoration-container .xterm-decoration {
+    z-index: 6;
+    position: absolute;
+  }
+  .xterm-decoration-container .xterm-decoration-overview-ruler {
+    z-index: 7;
+    position: absolute;
+    top: 0;
+    right: 0;
+    pointer-events: none;
+  }
+  .xterm-decoration-container .xterm-decoration-top {
+    z-index: 2;
+    position: relative;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "recharts": "https://aistudiocdn.com/recharts@^3.4.1",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "vite": "https://aistudiocdn.com/vite@^7.2.2",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "url": "https://aistudiocdn.com/url@^0.11.4",
+    "xterm": "https://aistudiocdn.com/xterm@^5.3.0",
+    "xterm-addon-web-links": "https://aistudiocdn.com/xterm-addon-web-links@^0.9.0",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "xterm-addon-fit": "https://aistudiocdn.com/xterm-addon-fit@^0.8.0",
+    "xendit-node": "https://aistudiocdn.com/xendit-node@^7.0.0",
+    "@vscode/sqlite3": "https://aistudiocdn.com/@vscode/sqlite3@^5.1.8-vscode",
+    "sqlite": "https://aistudiocdn.com/sqlite@^5.1.1",
+    "http-proxy-middleware": "https://aistudiocdn.com/http-proxy-middleware@^3.0.5"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/env.js"></script>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

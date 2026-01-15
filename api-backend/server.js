@@ -282,6 +282,8 @@ app.get('/:routerId/interface/print', getRouter, async (req, res) => {
 app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
     try {
         let resource;
+        let temperature = null;
+
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
@@ -289,10 +291,36 @@ app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
                 const result = await writeLegacySafe(client, ['/system/resource/print']);
                 const normalized = Array.isArray(result) ? result.map(normalizeLegacyObject) : [normalizeLegacyObject(result)];
                 resource = normalized[0] || {};
+                
+                // Try fetching health for temperature
+                try {
+                    const health = await writeLegacySafe(client, ['/system/health/print']);
+                    if (Array.isArray(health) && health.length > 0) {
+                        const h = normalizeLegacyObject(health[0]);
+                        // Usually 'temperature' or 'cpu-temperature'
+                        if (h.temperature) temperature = parseFloat(h.temperature);
+                        else if (h['cpu-temperature']) temperature = parseFloat(h['cpu-temperature']);
+                    }
+                } catch (hErr) {
+                    // Ignore health fetch errors (some routers don't support it)
+                }
+
             } finally { await client.close(); }
         } else {
             const response = await req.routerInstance.get('/system/resource');
             resource = Array.isArray(response.data) ? response.data[0] : response.data;
+
+            // Try fetching health for temperature
+            try {
+                const hRes = await req.routerInstance.get('/system/health');
+                const h = Array.isArray(hRes.data) ? hRes.data[0] : hRes.data;
+                if (h) {
+                     if (h.temperature) temperature = parseFloat(h.temperature);
+                     else if (h['cpu-temperature']) temperature = parseFloat(h['cpu-temperature']);
+                }
+            } catch (hErr) {
+                // Ignore
+            }
         }
         const parseMemory = (memStr) => {
             if (!memStr || typeof memStr !== 'string') return 0;
@@ -314,14 +342,21 @@ app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
         const freeMemoryBytes = parseMemory(resource['free-memory']);
         const usedMemoryBytes = totalMemoryBytes > 0 ? (totalMemoryBytes - freeMemoryBytes) : 0;
         const memoryUsage = totalMemoryBytes > 0 ? parseFloat(((usedMemoryBytes / totalMemoryBytes) * 100).toFixed(1)) : 0;
-        res.json({
+        
+        const responseData = {
             boardName: resource['board-name'] || resource['boardName'] || '',
             version: resource.version || '',
             cpuLoad: Number(resource['cpu-load'] || resource['cpuLoad'] || 0),
             uptime: resource.uptime || '',
             memoryUsage,
             totalMemory: formatBytes(totalMemoryBytes)
-        });
+        };
+        
+        if (temperature !== null && !isNaN(temperature)) {
+            responseData.temperature = temperature;
+        }
+
+        res.json(responseData);
     } catch (e) {
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
@@ -402,70 +437,151 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
     }
 });
 
+// 3c. System Logs (New Endpoint)
+app.get('/:routerId/log/print', getRouter, async (req, res) => {
+    try {
+        const client = req.routerInstance;
+        if (req.router.api_type === 'legacy') {
+            await client.connect();
+            const logs = await writeLegacySafe(client, ['/log/print']);
+            // Keep connection? No, usually close for stateless unless caching.
+            // But writeLegacySafe doesn't close.
+            await client.close();
+            // Normalize to ensure 'id' field exists and keys are consistent
+            res.json(logs.map(normalizeLegacyObject));
+        } else {
+            // REST API: Use /log for the collection, not /log/print
+            const response = await client.get('/log');
+            res.json(response.data);
+        }
+    } catch (e) {
+        console.error("Log Fetch Error:", e.message);
+        if (req.router && req.router.api_type === 'legacy' && req.routerInstance) {
+             try { await req.routerInstance.close(); } catch(_) {}
+        }
+        res.status(500).json({ message: e.message });
+    }
+});
+
 // 3b. PPP Active Traffic Monitor (New Endpoint)
 app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
     const { names } = req.body; // Array of ppp active names (usernames)
     if (!names || !Array.isArray(names) || names.length === 0) return res.json({});
 
     try {
-        // We need to map PPP User Name -> Interface Name
-        // Usually "pppoe-<username>" or just "<pppoe-<username>>"
-        const interfaceNames = names.map(n => `<pppoe-${n}>`);
+        const client = req.routerInstance;
         
+        // 1. Resolve Interface Names
+        // We need to map PPP User Name -> Actual Interface Name
+        // Standard is <pppoe-username>, but it varies.
+        // We fetch ALL pppoe-in interfaces to find matches.
+        let interfaces = [];
+        try {
+            if (req.router.api_type === 'legacy') {
+                await client.connect();
+                // Try fetching pppoe-in first
+                interfaces = await writeLegacySafe(client, ['/interface/print', '?type=pppoe-in']);
+                // If empty, fetch all dynamic interfaces as fallback
+                if (!interfaces || interfaces.length === 0) {
+                     interfaces = await writeLegacySafe(client, ['/interface/print', '?dynamic=true']);
+                }
+            } else {
+                const r = await client.get('/interface?type=pppoe-in');
+                interfaces = r.data;
+                if (!interfaces || interfaces.length === 0) {
+                     const r2 = await client.get('/interface?dynamic=true');
+                     interfaces = r2.data;
+                }
+            }
+        } catch (err) {
+            console.warn("Failed to fetch interfaces for mapping:", err.message);
+        }
+
+        const interfaceMap = {}; // username -> interfaceName
+        const validInterfaceNames = [];
+
+        if (Array.isArray(interfaces)) {
+            names.forEach(uName => {
+                // Try to find the interface
+                // Matches: name === uName OR name === <pppoe-uName> OR name === pppoe-uName
+                // Also check if name contains the username (loose match) for edge cases
+                const match = interfaces.find(i => 
+                    i.name === uName || 
+                    i.name === `<pppoe-${uName}>` || 
+                    i.name === `pppoe-${uName}` ||
+                    (i.name.includes(uName) && i.name.includes('pppoe'))
+                );
+
+                if (match) {
+                    interfaceMap[uName] = match.name;
+                    validInterfaceNames.push(match.name);
+                }
+            });
+        }
+
+        // Deduplicate
+        const uniqueInterfaces = [...new Set(validInterfaceNames)];
+        if (uniqueInterfaces.length === 0) {
+             if (req.router.api_type === 'legacy') await client.close();
+             return res.json({});
+        }
+
+        // 2. Monitor Traffic
+        const result = {};
+
         if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance;
-            await client.connect();
+            // Legacy monitor-traffic
             try {
-                // Monitor-traffic requires specific interface names.
-                // If we have many, this might fail or be slow.
-                // Limit to visible rows?
-                // Let's try monitoring all requested interfaces once for 1 second? No, that blocks.
-                // 'once' flag gets current rate.
-                const cmd = ['/interface/monitor-traffic', `=interface=${interfaceNames.join(',')}`, '=once'];
+                // client is already connected
+                const cmd = ['/interface/monitor-traffic', `=interface=${uniqueInterfaces.join(',')}`, '=once'];
                 const stats = await writeLegacySafe(client, cmd);
-                // Result: [{name: ..., "rx-bits-per-second": ..., "tx-bits-per-second": ...}]
-                const map = {};
+                
                 if (Array.isArray(stats)) {
                     stats.forEach(s => {
-                        // Map back to username. Interface name is <pppoe-NAME>
-                        const uName = s.name.replace(/^<pppoe-/, '').replace(/>$/, '');
-                        map[uName] = {
-                            rx: s['rx-bits-per-second'] || 0,
-                            tx: s['tx-bits-per-second'] || 0
-                        };
+                        // We have stats for interface s.name.
+                        // Find which user(s) map to this interface.
+                        // This is reverse lookup.
+                        Object.entries(interfaceMap).forEach(([u, iName]) => {
+                            if (iName === s.name) {
+                                result[u] = {
+                                    rx: parseInt(s['rx-bits-per-second'] || 0),
+                                    tx: parseInt(s['tx-bits-per-second'] || 0)
+                                };
+                            }
+                        });
                     });
                 }
-                res.json(map);
-            } catch(e) {
-                 // Fallback: maybe interfaces are named just "pppoe-user" without brackets?
-                 // Or just the username?
-                 console.warn("Traffic monitor failed, trying alternative names", e.message);
-                 res.json({});
             } finally {
                 await client.close();
             }
         } else {
-            // REST API monitor-traffic
-            // POST /interface/monitor-traffic { interface: "name1,name2", once: true }
+            // REST
             try {
-                const r = await req.routerInstance.post('/interface/monitor-traffic', { interface: interfaceNames.join(','), once: 'true' });
-                const map = {};
-                if (Array.isArray(r.data)) {
-                     r.data.forEach(s => {
-                        const uName = s.name.replace(/^<pppoe-/, '').replace(/>$/, '');
-                        map[uName] = {
-                            rx: s['rx-bits-per-second'] || 0,
-                            tx: s['tx-bits-per-second'] || 0
-                        };
+                const r = await client.post('/interface/monitor-traffic', { interface: uniqueInterfaces.join(','), once: 'true' });
+                const data = Array.isArray(r.data) ? r.data : [r.data]; // Handle single result
+                data.forEach(s => {
+                    Object.entries(interfaceMap).forEach(([u, iName]) => {
+                        if (iName === s.name) {
+                            result[u] = {
+                                rx: parseInt(s['rx-bits-per-second'] || 0),
+                                tx: parseInt(s['tx-bits-per-second'] || 0)
+                            };
+                        }
                     });
-                }
-                res.json(map);
+                });
             } catch (e) {
                  console.warn("REST Traffic monitor failed", e.message);
-                 res.json({});
             }
         }
+        
+        res.json(result);
+
     } catch (e) {
+        console.error("Traffic Endpoint Error:", e);
+        // Ensure close if legacy and error happened before inner try/finally
+        if (req.router && req.router.api_type === 'legacy' && req.routerInstance) {
+             try { await req.routerInstance.close(); } catch(_) {}
+        }
         res.status(500).json({});
     }
 });

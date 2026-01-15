@@ -1,9 +1,16 @@
 
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import type { Notification } from '../types.ts';
-import { dbApi } from '../services/databaseService.ts';
+import type { Notification, PanelSettings } from '../types.ts';
+import { dbApi, getPanelSettings } from '../services/databaseService.ts';
 import { useAuth } from './AuthContext.tsx';
+import { useRouters } from '../hooks/useRouters.ts';
+import { 
+    generateDhcpPortalNotifications, 
+    generateNetworkNotifications, 
+    generateBilledNotifications,
+    generateSystemLogNotifications
+} from '../services/notificationGenerators.ts';
 
 interface NotificationContextType {
     notifications: Notification[];
@@ -17,7 +24,35 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { user } = useAuth();
+    const { routers } = useRouters();
     const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [panelSettings, setPanelSettings] = useState<PanelSettings | undefined>(undefined);
+    const notificationsRef = React.useRef(notifications);
+
+    useEffect(() => { notificationsRef.current = notifications; }, [notifications]);
+
+    useEffect(() => {
+        if (user) {
+            getPanelSettings().then(setPanelSettings).catch(console.error);
+        }
+    }, [user]);
+
+    useEffect(() => {
+        if (!user || routers.length === 0) return;
+
+        const runGenerators = async () => {
+            const currentNotifs = notificationsRef.current;
+            await generateSystemLogNotifications(routers, currentNotifs, panelSettings?.notificationSettings, panelSettings);
+            await generateNetworkNotifications(routers, currentNotifs, panelSettings?.notificationSettings, panelSettings);
+            await generateDhcpPortalNotifications(routers, currentNotifs, panelSettings?.notificationSettings, panelSettings);
+            // Billed notifications can be added if needed
+        };
+
+        const interval = setInterval(runGenerators, 60000); // Check every minute
+        runGenerators(); // Initial run
+
+        return () => clearInterval(interval);
+    }, [user, routers, panelSettings]);
 
     const fetchNotifications = useCallback(async () => {
         if (!user) {

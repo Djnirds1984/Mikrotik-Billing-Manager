@@ -12,7 +12,8 @@ import {
   getPppSecrets,
   getDhcpClients,
   getWanRoutes,
-  getWanFailoverStatus
+  getWanFailoverStatus,
+  getSystemLogs
 } from './mikrotikService.ts';
 
 // Utility: parse MikroTik duration strings like "29d23h59m58s" into seconds
@@ -252,6 +253,56 @@ export const generateBilledNotifications = async (
     }
   } catch (e) {
     console.warn('Failed to generate billed notifications:', e);
+  }
+};
+
+// Generate System Log notifications
+export const generateSystemLogNotifications = async (
+  routers: RouterConfigWithId[],
+  existingNotifications: Notification[],
+  settings?: PanelSettings['notificationSettings'],
+  panelSettings?: PanelSettings
+): Promise<void> => {
+  for (const router of routers) {
+    try {
+      const logs = await getSystemLogs(router);
+      // Process only recent logs (e.g., last 20) to check for new entries
+      const recentLogs = logs.slice(-20);
+      
+      // Filter logs based on user requirements: only PPPoE and DHCP topics
+      const filteredLogs = recentLogs.filter(log => {
+        const topicsStr = Array.isArray(log.topics) ? log.topics.join(',') : (log.topics || '');
+        const t = topicsStr.toLowerCase();
+        // 'ppp' covers PPPoE logs as well; 'dhcp' covers DHCP logs
+        return t.includes('ppp') || t.includes('dhcp');
+      });
+      
+      for (const log of filteredLogs) {
+        const msg = `[${router.name}] ${log.topics}: ${log.message}`;
+        const debounceMin = settings?.debounceMinutes ?? 15;
+        
+        if (hasDuplicateMessage(existingNotifications, msg)) continue;
+        if (hasRecentMessage(existingNotifications, msg, debounceMin)) continue;
+
+        const notif: Notification = {
+          id: makeId(),
+          type: 'info',
+          message: msg,
+          is_read: 0,
+          timestamp: new Date().toISOString(),
+          link_to: 'logs',
+          context_json: JSON.stringify({ routerId: router.id, logId: (log as any)['.id'] || log.id })
+        };
+        
+        try {
+          await dbApi.post('/notifications', notif);
+        } catch (err) {
+          console.error('Failed to create system log notification:', err);
+        }
+      }
+    } catch (e) {
+      console.warn(`Log fetch failed for router ${router.name}:`, e);
+    }
   }
 };
 
