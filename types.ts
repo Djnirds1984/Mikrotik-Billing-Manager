@@ -595,6 +595,30 @@ export interface NewVersionInfo {
     description: string;
     changelog: string;
 }
+
+export interface GitHubRepository {
+    owner: string;
+    repo: string;
+    url: string;
+    isValid: boolean;
+}
+
+export interface GitHubBranch {
+    name: string;
+    protected: boolean;
+    sha: string;
+}
+
+export interface GitHubPullResult {
+    success: boolean;
+    message: string;
+    changes?: {
+        filesChanged: number;
+        insertions: number;
+        deletions: number;
+    };
+    error?: string;
+}
 export interface DataplicityStatus {
     installed: boolean;
     url?: string;
