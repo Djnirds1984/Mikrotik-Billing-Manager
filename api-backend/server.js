@@ -1575,7 +1575,7 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
                 } else if (last === 'add') {
                     parts.pop();
                     restUrl = '/' + parts.join('/');
-                    restMethod = 'POST';
+                    restMethod = 'PUT';
                 } else if (last === 'set') {
                     parts.pop();
                     const id = b?.['.id'] || b?.id;
@@ -1599,12 +1599,25 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
             const { restMethod, restUrl, restData } = translateToRest(endpoint, method, body);
             console.log(`[REST Proxy] ${restMethod} ${restUrl}`);
 
-            const response = await instance.request({
-                method: restMethod,
-                url: restUrl,
-                data: restData
-            });
-            res.json(response.data);
+            try {
+                const response = await instance.request({
+                    method: restMethod,
+                    url: restUrl,
+                    data: restData
+                });
+                res.json(response.data);
+            } catch (err) {
+                if (restMethod === 'PUT') {
+                    const fallback = await instance.request({
+                        method: 'POST',
+                        url: restUrl,
+                        data: restData
+                    });
+                    res.json(fallback.data);
+                } else {
+                    throw err;
+                }
+            }
         }
     } catch (e) {
         const bodyKeys = body && typeof body === 'object' ? Object.keys(body) : [];
