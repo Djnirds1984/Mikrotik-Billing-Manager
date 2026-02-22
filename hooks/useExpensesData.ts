@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { ExpenseRecord } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
 
-export const useExpensesData = () => {
+export const useExpensesData = (autoLoad: boolean = true) => {
     const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -23,8 +23,12 @@ export const useExpensesData = () => {
     }, []);
 
     useEffect(() => {
+        if (!autoLoad) {
+            setIsLoading(false);
+            return;
+        }
         fetchExpenses();
-    }, [fetchExpenses]);
+    }, [fetchExpenses, autoLoad]);
 
     const addExpense = async (newExpenseData: Omit<ExpenseRecord, 'id'>) => {
         try {
@@ -59,5 +63,5 @@ export const useExpensesData = () => {
         }
     };
 
-    return { expenses, addExpense, updateExpense, deleteExpense, isLoading, error };
+    return { expenses, addExpense, updateExpense, deleteExpense, isLoading, error, reload: fetchExpenses };
 };

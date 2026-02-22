@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { SaleRecord } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
 
-export const useSalesData = (routerId: string | null) => {
+export const useSalesData = (routerId: string | null, autoLoad: boolean = true) => {
     const [sales, setSales] = useState<SaleRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -19,7 +19,6 @@ export const useSalesData = (routerId: string | null) => {
         setError(null);
         try {
             const data = await dbApi.get<SaleRecord[]>(`/sales?routerId=${routerId}`);
-            // Sort by date descending
             data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
             setSales(data);
         } catch (err) {
@@ -31,8 +30,12 @@ export const useSalesData = (routerId: string | null) => {
     }, [routerId]);
 
     useEffect(() => {
+        if (!autoLoad) {
+            setIsLoading(false);
+            return;
+        }
         fetchSales();
-    }, [fetchSales]);
+    }, [fetchSales, autoLoad]);
 
     const addSale = async (saleData: Omit<SaleRecord, 'id'>) => {
         if (!routerId) {
@@ -73,5 +76,5 @@ export const useSalesData = (routerId: string | null) => {
         }
     };
 
-    return { sales, addSale, deleteSale, clearSales, isLoading, error };
+    return { sales, addSale, deleteSale, clearSales, isLoading, error, reload: fetchSales };
 };

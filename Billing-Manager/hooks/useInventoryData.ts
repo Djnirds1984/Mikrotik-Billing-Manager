@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { InventoryItem } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
 
-export const useInventoryData = () => {
+export const useInventoryData = (autoLoad: boolean = true) => {
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -22,8 +22,12 @@ export const useInventoryData = () => {
     }, []);
 
     useEffect(() => {
+        if (!autoLoad) {
+            setIsLoading(false);
+            return;
+        }
         fetchItems();
-    }, [fetchItems]);
+    }, [fetchItems, autoLoad]);
 
     const addItem = async (newItemData: Omit<InventoryItem, 'id' | 'dateAdded'>) => {
         try {
@@ -57,5 +61,5 @@ export const useInventoryData = () => {
         }
     };
 
-    return { items, addItem, updateItem, deleteItem, isLoading, error };
+    return { items, addItem, updateItem, deleteItem, isLoading, error, reload: fetchItems };
 };

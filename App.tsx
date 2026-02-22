@@ -1,39 +1,9 @@
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
-import { Dashboard } from './components/Dashboard.tsx';
-import { Scripting } from './components/Scripting.tsx';
-import { Routers } from './components/Routers.tsx';
-import { Updater } from './components/Updater.tsx';
-import { Pppoe } from './components/Pppoe.tsx';
-import { Billing } from './components/Billing.tsx';
-import { Remote } from './components/Remote.tsx';
-import { Hotspot } from './components/Hotspot.tsx';
-import { Help } from './components/Help.tsx';
-import { SystemSettings } from './components/SystemSettings.tsx';
-import { SalesReport } from './components/SalesReport.tsx';
-import { Network } from './components/Network.tsx';
-import { Inventory } from './components/Inventory.tsx';
-import { Company } from './components/Company.tsx';
-import { Terminal } from './components/Terminal.tsx';
 import { Loader } from './components/Loader.tsx';
-import { Login } from './components/Login.tsx';
-import { Register } from './components/Register.tsx';
-import { ForgotPassword } from './components/ForgotPassword.tsx';
 import { AuthLayout } from './components/AuthLayout.tsx';
-import { Logs } from './components/Logs.tsx';
-import { PanelRoles } from './components/PanelRoles.tsx';
-import { MikrotikFiles } from './components/MikrotikFiles.tsx';
-import { License } from './components/License.tsx';
-import { SuperAdmin } from './components/SuperAdmin.tsx';
-import { UnlicensedComponent } from './components/UnlicensedComponent.tsx';
-import { DhcpPortal } from './components/DhcpPortal.tsx';
-import { ClientPortal } from './components/ClientPortal.tsx';
-import { ClientPortalUsers } from './components/ClientPortalUsers.tsx';
-import { CaptivePortalPage } from './components/CaptivePortalPage.tsx';
-import { NotificationsPage } from './components/NotificationsPage.tsx';
-import { Payroll } from './components/Payroll.tsx';
 import { useRouters } from './hooks/useRouters.ts';
 import { useSalesData } from './hooks/useSalesData.ts';
 import { useInventoryData } from './hooks/useInventoryData.ts';
@@ -48,6 +18,37 @@ import type { View, LicenseStatus, PanelSettings } from './types.ts';
 import { getAuthHeader, getPanelSettings } from './services/databaseService.ts';
 import { initializeAiClient } from './services/geminiService.ts';
 import { initializeXenditService } from './services/xenditService.ts';
+
+const Dashboard = React.lazy(() => import('./components/Dashboard.tsx').then(m => ({ default: m.Dashboard })));
+const Scripting = React.lazy(() => import('./components/Scripting.tsx').then(m => ({ default: m.Scripting })));
+const Routers = React.lazy(() => import('./components/Routers.tsx').then(m => ({ default: m.Routers })));
+const Updater = React.lazy(() => import('./components/Updater.tsx').then(m => ({ default: m.Updater })));
+const Pppoe = React.lazy(() => import('./components/Pppoe.tsx').then(m => ({ default: m.Pppoe })));
+const Billing = React.lazy(() => import('./components/Billing.tsx').then(m => ({ default: m.Billing })));
+const Remote = React.lazy(() => import('./components/Remote.tsx').then(m => ({ default: m.Remote })));
+const Hotspot = React.lazy(() => import('./components/Hotspot.tsx').then(m => ({ default: m.Hotspot })));
+const Help = React.lazy(() => import('./components/Help.tsx').then(m => ({ default: m.Help })));
+const SystemSettings = React.lazy(() => import('./components/SystemSettings.tsx').then(m => ({ default: m.SystemSettings })));
+const SalesReport = React.lazy(() => import('./components/SalesReport.tsx').then(m => ({ default: m.SalesReport })));
+const Network = React.lazy(() => import('./components/Network.tsx').then(m => ({ default: m.Network })));
+const Inventory = React.lazy(() => import('./components/Inventory.tsx').then(m => ({ default: m.Inventory })));
+const Company = React.lazy(() => import('./components/Company.tsx').then(m => ({ default: m.Company })));
+const Terminal = React.lazy(() => import('./components/Terminal.tsx').then(m => ({ default: m.Terminal })));
+const Login = React.lazy(() => import('./components/Login.tsx').then(m => ({ default: m.Login })));
+const Register = React.lazy(() => import('./components/Register.tsx').then(m => ({ default: m.Register })));
+const ForgotPassword = React.lazy(() => import('./components/ForgotPassword.tsx').then(m => ({ default: m.ForgotPassword })));
+const Logs = React.lazy(() => import('./components/Logs.tsx').then(m => ({ default: m.Logs })));
+const PanelRoles = React.lazy(() => import('./components/PanelRoles.tsx').then(m => ({ default: m.PanelRoles })));
+const MikrotikFiles = React.lazy(() => import('./components/MikrotikFiles.tsx').then(m => ({ default: m.MikrotikFiles })));
+const License = React.lazy(() => import('./components/License.tsx').then(m => ({ default: m.License })));
+const SuperAdmin = React.lazy(() => import('./components/SuperAdmin.tsx').then(m => ({ default: m.SuperAdmin })));
+const UnlicensedComponent = React.lazy(() => import('./components/UnlicensedComponent.tsx').then(m => ({ default: m.UnlicensedComponent })));
+const DhcpPortal = React.lazy(() => import('./components/DhcpPortal.tsx').then(m => ({ default: m.DhcpPortal })));
+const ClientPortal = React.lazy(() => import('./components/ClientPortal.tsx').then(m => ({ default: m.ClientPortal })));
+const ClientPortalUsers = React.lazy(() => import('./components/ClientPortalUsers.tsx').then(m => ({ default: m.ClientPortalUsers })));
+const CaptivePortalPage = React.lazy(() => import('./components/CaptivePortalPage.tsx').then(m => ({ default: m.CaptivePortalPage })));
+const NotificationsPage = React.lazy(() => import('./components/NotificationsPage.tsx').then(m => ({ default: m.NotificationsPage })));
+const Payroll = React.lazy(() => import('./components/Payroll.tsx').then(m => ({ default: m.Payroll })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -94,10 +95,13 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
   
   const { routers, addRouter, updateRouter, deleteRouter, isLoading: isLoadingRouters } = useRouters();
-  const { sales, addSale, deleteSale, clearSales } = useSalesData(selectedRouterId);
-  const { items, addItem, updateItem, deleteItem } = useInventoryData();
-  const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData();
-  const payrollData = usePayrollData();
+  const { sales, addSale, deleteSale, clearSales } = useSalesData(
+    selectedRouterId,
+    currentView === 'sales' || currentView === 'dhcp-portal' || currentView === 'pppoe'
+  );
+  const { items, addItem, updateItem, deleteItem } = useInventoryData(currentView === 'inventory');
+  const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData(currentView === 'inventory');
+  const payrollData = usePayrollData(currentView === 'payroll');
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
 
@@ -176,68 +180,87 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
-        return <UnlicensedComponent setCurrentView={setCurrentView} />;
+        return (
+            <Suspense fallback={<div className="flex flex-col items-center justify-center h-full"><Loader /></div>}>
+                <UnlicensedComponent setCurrentView={setCurrentView} />
+            </Suspense>
+        );
     }
 
-    switch (currentView) {
-      case 'dashboard':
-        return <Dashboard selectedRouter={selectedRouter} />;
-      case 'notifications':
-        return <NotificationsPage setCurrentView={setCurrentView} />;
-      case 'scripting':
-        return <Scripting />;
-      case 'routers':
-        return <Routers routers={routers} onAddRouter={addRouter} onUpdateRouter={updateRouter} onDeleteRouter={deleteRouter} />;
-      case 'network':
-          return <Network selectedRouter={selectedRouter} />;
-      case 'terminal':
-          return <Terminal selectedRouter={selectedRouter} />;
-      case 'dhcp-portal':
-          return <DhcpPortal selectedRouter={selectedRouter} addSale={addSale} />;
-      case 'pppoe':
-          return <Pppoe selectedRouter={selectedRouter} addSale={addSale} />;
-      case 'billing':
-          return <Billing selectedRouter={selectedRouter} />;
-      case 'sales':
-          return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} />;
-      case 'inventory':
-          return <Inventory 
-                    items={items} 
-                    addItem={addItem} 
-                    updateItem={updateItem} 
-                    deleteItem={deleteItem}
-                    expenses={expenses}
-                    addExpense={addExpense}
-                    updateExpense={updateExpense}
-                    deleteExpense={deleteExpense}
-                 />;
-      case 'payroll':
-          return <Payroll {...payrollData} />;
-      case 'hotspot':
-          return <Hotspot selectedRouter={selectedRouter} />;
-      case 'remote':
-          return <Remote />;
-      case 'mikrotik_files':
-          return <MikrotikFiles selectedRouter={selectedRouter} />;
-      case 'company':
-          return <Company settings={companySettings} onSave={updateCompanySettings} />;
-      case 'system':
-          return <SystemSettings />;
-      case 'updater':
-        return <Updater />;
-      case 'logs':
-        return <Logs selectedRouter={selectedRouter} />;
-      case 'panel_roles':
-        return <PanelRoles />;
-      case 'client_portal_users':
-        return <ClientPortalUsers />;
-      case 'license':
-          return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
-      case 'super_admin':
-          return <SuperAdmin />;
-      default:
-        return <Dashboard selectedRouter={selectedRouter} />;
-    }
+    return (
+        <Suspense
+            fallback={
+                <div className="flex flex-col items-center justify-center h-full">
+                    <Loader />
+                    <p className="mt-4 text-[--color-primary-400]">{t('app.loading_data')}</p>
+                </div>
+            }
+        >
+            {(() => {
+                switch (currentView) {
+                  case 'dashboard':
+                    return <Dashboard selectedRouter={selectedRouter} />;
+                  case 'notifications':
+                    return <NotificationsPage setCurrentView={setCurrentView} />;
+                  case 'scripting':
+                    return <Scripting />;
+                  case 'routers':
+                    return <Routers routers={routers} onAddRouter={addRouter} onUpdateRouter={updateRouter} onDeleteRouter={deleteRouter} />;
+                  case 'network':
+                      return <Network selectedRouter={selectedRouter} />;
+                  case 'terminal':
+                      return <Terminal selectedRouter={selectedRouter} />;
+                  case 'dhcp-portal':
+                      return <DhcpPortal selectedRouter={selectedRouter} addSale={addSale} />;
+                  case 'pppoe':
+                      return <Pppoe selectedRouter={selectedRouter} addSale={addSale} />;
+                  case 'billing':
+                      return <Billing selectedRouter={selectedRouter} />;
+                  case 'sales':
+                      return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} />;
+                  case 'inventory':
+                      return (
+                        <Inventory 
+                            items={items} 
+                            addItem={addItem} 
+                            updateItem={updateItem} 
+                            deleteItem={deleteItem}
+                            expenses={expenses}
+                            addExpense={addExpense}
+                            updateExpense={updateExpense}
+                            deleteExpense={deleteExpense}
+                        />
+                      );
+                  case 'payroll':
+                      return <Payroll {...payrollData} />;
+                  case 'hotspot':
+                      return <Hotspot selectedRouter={selectedRouter} />;
+                  case 'remote':
+                      return <Remote />;
+                  case 'mikrotik_files':
+                      return <MikrotikFiles selectedRouter={selectedRouter} />;
+                  case 'company':
+                      return <Company settings={companySettings} onSave={updateCompanySettings} />;
+                  case 'system':
+                      return <SystemSettings />;
+                  case 'updater':
+                    return <Updater />;
+                  case 'logs':
+                    return <Logs selectedRouter={selectedRouter} />;
+                  case 'panel_roles':
+                    return <PanelRoles />;
+                  case 'client_portal_users':
+                    return <ClientPortalUsers />;
+                  case 'license':
+                      return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
+                  case 'super_admin':
+                      return <SuperAdmin />;
+                  default:
+                    return <Dashboard selectedRouter={selectedRouter} />;
+                }
+            })()}
+        </Suspense>
+    );
   };
 
   return (
@@ -272,7 +295,9 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           </div>
         </div>
       </main>
-      <Help currentView={currentView} selectedRouter={selectedRouter} />
+      <Suspense fallback={null}>
+        <Help currentView={currentView} selectedRouter={selectedRouter} />
+      </Suspense>
     </div>
   );
 };
@@ -288,7 +313,9 @@ const AppRouter: React.FC = () => {
         return (
             <ThemeProvider>
                 <LocalizationProvider>
-                    <CaptivePortalPage />
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <CaptivePortalPage />
+                    </Suspense>
                 </LocalizationProvider>
             </ThemeProvider>
         );
@@ -298,7 +325,9 @@ const AppRouter: React.FC = () => {
         return (
             <ThemeProvider>
                 <LocalizationProvider>
-                    <ClientPortal selectedRouter={null} />
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <ClientPortal selectedRouter={null} />
+                    </Suspense>
                 </LocalizationProvider>
             </ThemeProvider>
         );
@@ -372,15 +401,17 @@ const AppRouter: React.FC = () => {
         return (
             <ThemeProvider>
                  <LocalizationProvider>
-                    <AuthLayout>
-                        {!hasUsers ? (
-                            <Register />
-                        ) : authView === 'login' ? (
-                            <Login onSwitchToForgotPassword={() => setAuthView('forgot')} />
-                        ) : (
-                            <ForgotPassword onSwitchToLogin={() => setAuthView('login')} />
-                        )}
-                    </AuthLayout>
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <AuthLayout>
+                            {!hasUsers ? (
+                                <Register />
+                            ) : authView === 'login' ? (
+                                <Login onSwitchToForgotPassword={() => setAuthView('forgot')} />
+                            ) : (
+                                <ForgotPassword onSwitchToLogin={() => setAuthView('login')} />
+                            )}
+                        </AuthLayout>
+                    </Suspense>
                  </LocalizationProvider>
             </ThemeProvider>
         );
