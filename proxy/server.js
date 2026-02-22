@@ -1022,6 +1022,137 @@ async function startServer() {
     app.get('/api/update-status', protect, (req, res) => {
         res.json({ status: 'uptodate', message: 'System is up to date (mock).' });
     });
+
+    // --- GitHub Integration Endpoints ---
+    
+    // Helper function to parse GitHub repository info
+    const parseGitHubRepo = (owner, repo) => {
+        if (!owner || !repo) {
+            throw new Error('Owner and repository name are required');
+        }
+        // Basic validation for GitHub username/repo format
+        if (!/^[a-zA-Z0-9-_.]+$/.test(owner) || !/^[a-zA-Z0-9-_.]+$/.test(repo)) {
+            throw new Error('Invalid GitHub repository format');
+        }
+        return { owner, repo };
+    };
+
+    // Get repository information
+    app.get('/api/github/repo-info', protect, requireSuperadmin, async (req, res) => {
+        try {
+            const { owner, repo } = req.query;
+            const repoInfo = parseGitHubRepo(owner, repo);
+            
+            // For now, return mock data - in production, this would call GitHub API
+            res.json({
+                owner: repoInfo.owner,
+                repo: repoInfo.repo,
+                description: 'Mikrotik Billing Manager Panel',
+                stars: 42,
+                forks: 15,
+                isPrivate: false,
+                defaultBranch: 'main',
+                lastUpdated: new Date().toISOString()
+            });
+        } catch (error) {
+            res.status(400).json({ message: error.message });
+        }
+    });
+
+    // Get repository branches
+    app.get('/api/github/branches', protect, requireSuperadmin, async (req, res) => {
+        try {
+            const { owner, repo } = req.query;
+            const repoInfo = parseGitHubRepo(owner, repo);
+            
+            // Mock branches data - in production, this would call GitHub API
+            const branches = [
+                { name: 'main', protected: true, sha: 'abc123' },
+                { name: 'develop', protected: false, sha: 'def456' },
+                { name: 'feature/new-ui', protected: false, sha: 'ghi789' }
+            ];
+            
+            res.json(branches);
+        } catch (error) {
+            res.status(400).json({ message: error.message });
+        }
+    });
+
+    // Pull from repository (non-streaming)
+    app.post('/api/github/pull', protect, requireSuperadmin, async (req, res) => {
+        try {
+            const { repoUrl, branch } = req.body;
+            if (!repoUrl || !branch) {
+                return res.status(400).json({ message: 'Repository URL and branch are required' });
+            }
+            
+            // Mock pull operation - in production, this would execute git commands
+            res.json({
+                success: true,
+                message: `Successfully pulled from ${branch} branch`,
+                changes: {
+                    filesChanged: 5,
+                    insertions: 127,
+                    deletions: 43
+                }
+            });
+        } catch (error) {
+            res.status(500).json({ 
+                success: false, 
+                message: 'Pull operation failed',
+                error: error.message 
+            });
+        }
+    });
+
+    // Pull from repository (streaming)
+    app.get('/api/github/pull-stream', protect, requireSuperadmin, (req, res) => {
+        try {
+            const { repoUrl, branch } = req.query;
+            if (!repoUrl || !branch) {
+                return res.status(400).json({ message: 'Repository URL and branch are required' });
+            }
+            
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+            });
+            
+            // Mock streaming pull operation
+            const steps = [
+                { log: 'Fetching repository information...', delay: 500 },
+                { log: `Connecting to branch: ${branch}...`, delay: 800 },
+                { log: 'Checking for updates...', delay: 600 },
+                { log: 'Downloading changes...', delay: 1200 },
+                { log: 'Applying updates...', delay: 900 },
+                { log: 'Update completed successfully!', delay: 400 }
+            ];
+            
+            let currentStep = 0;
+            
+            const sendStep = () => {
+                if (currentStep < steps.length) {
+                    const step = steps[currentStep];
+                    res.write(`data: ${JSON.stringify({ log: step.log })}\n\n`);
+                    currentStep++;
+                    setTimeout(sendStep, step.delay);
+                } else {
+                    res.write(`data: ${JSON.stringify({ 
+                        status: 'completed',
+                        message: 'Pull operation completed successfully',
+                        changes: { filesChanged: 5, insertions: 127, deletions: 43 }
+                    })}\n\n`);
+                    res.end();
+                }
+            };
+            
+            sendStep();
+            
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+    });
     
     // --- REMOTE ACCESS ENDPOINTS (ZeroTier, PiTunnel, Ngrok, Dataplicity) ---
     // Helper function to execute shell commands

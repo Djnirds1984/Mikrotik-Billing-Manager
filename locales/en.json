@@ -151,5 +151,24 @@
     "system": {
         "telegram_settings": "Telegram Settings",
         "xendit_settings": "Xendit Payment Gateway"
+    },
+    "updater": {
+        "check_latest_version": "Check for the latest version of the panel.",
+        "github_config": "GitHub Repository Configuration",
+        "repository_url": "Git Repository URL",
+        "repository_url_placeholder": "https://github.com/owner/repository",
+        "repository_url_help": "Enter the GitHub repository URL in HTTPS or SSH format. Example: https://github.com/owner/repo or git@github.com:owner/repo.git",
+        "target_branch": "Target Branch",
+        "target_branch_help": "Select the branch you want to pull updates from. Main is typically the stable branch.",
+        "pull_from_repo": "Pull from Repository",
+        "pulling": "Pulling...",
+        "invalid_repo_url": "Invalid GitHub repository URL format. Use: https://github.com/owner/repo",
+        "repo_connected": "✓ Connected to",
+        "loading_branches": "Loading branches...",
+        "enter_repo_first": "Enter repository URL first",
+        "protected": "(protected)",
+        "pull_success": "Successfully pulled latest changes from repository",
+        "pull_failed": "Pull operation failed",
+        "connection_lost": "Connection lost during pull operation"
     }
 }
