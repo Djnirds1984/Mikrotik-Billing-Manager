@@ -49,6 +49,7 @@ const ClientPortalUsers = React.lazy(() => import('./components/ClientPortalUser
 const CaptivePortalPage = React.lazy(() => import('./components/CaptivePortalPage.tsx').then(m => ({ default: m.CaptivePortalPage })));
 const NotificationsPage = React.lazy(() => import('./components/NotificationsPage.tsx').then(m => ({ default: m.NotificationsPage })));
 const Payroll = React.lazy(() => import('./components/Payroll.tsx').then(m => ({ default: m.Payroll })));
+const CaptiveChatAdmin = React.lazy(() => import('./components/CaptiveChatAdmin.tsx').then(m => ({ default: m.CaptiveChatAdmin })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -202,6 +203,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <Dashboard selectedRouter={selectedRouter} />;
                   case 'notifications':
                     return <NotificationsPage setCurrentView={setCurrentView} />;
+                  case 'captive_chat':
+                    return <CaptiveChatAdmin />;
                   case 'scripting':
                     return <Scripting />;
                   case 'routers':

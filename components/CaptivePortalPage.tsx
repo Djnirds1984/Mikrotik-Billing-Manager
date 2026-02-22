@@ -13,6 +13,7 @@ const CaptiveHelp: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const [messageStatus, setMessageStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+    const [ip, setIp] = useState<string | null>(null);
 
     useEffect(() => {
         if (isOpen) {
@@ -26,6 +27,31 @@ const CaptiveHelp: React.FC = () => {
     useEffect(() => {
         chatContainerRef.current?.scrollTo(0, chatContainerRef.current.scrollHeight);
     }, [history]);
+    
+    useEffect(() => {
+        let timer: number | null = null;
+        const loadThread = async () => {
+            try {
+                const resp = await fetch('/api/captive-thread');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const msgs: ChatMessage[] = data.map((n: any) => {
+                    try {
+                        const ctx = JSON.parse(n.context_json || '{}');
+                        if (ctx.ip && !ip) setIp(ctx.ip);
+                    } catch(_) {}
+                    const role = n.type === 'admin-reply' ? 'model' : 'user';
+                    return { role, content: n.message };
+                });
+                if (msgs.length > 0) setHistory(msgs);
+            } catch {}
+        };
+        if (isOpen) {
+            loadThread();
+            timer = window.setInterval(loadThread, 5000);
+        }
+        return () => { if (timer) window.clearInterval(timer); };
+    }, [isOpen, ip]);
     
     const handleSend = async () => {
         if (!input.trim() || isLoading) return;
@@ -172,6 +198,20 @@ export const CaptivePortalPage: React.FC = () => {
                         <p className="mt-4 text-center text-slate-600 dark:text-slate-300">
                             Makipag-ugnayan sa administrator para sa renewal at re-activation.
                         </p>
+                        <div className="mt-6 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-md p-4 text-sm">
+                            <h3 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Contact Information</h3>
+                            {companySettings.companyName && <p className="text-slate-700 dark:text-slate-300">{companySettings.companyName}</p>}
+                            {companySettings.address && <p className="text-slate-700 dark:text-slate-300">{companySettings.address}</p>}
+                            {companySettings.contactNumber && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">Contact:</span> {companySettings.contactNumber}</p>}
+                            {companySettings.email && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">Email:</span> {companySettings.email}</p>}
+                        </div>
+                        <div className="mt-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-md p-4 text-sm">
+                            <h3 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Payment Instructions</h3>
+                            <p className="text-slate-700 dark:text-slate-300">
+                                Mangyaring magbayad gamit ang paboritong paraan (hal. GCash o bank transfer) at ibigay ang iyong pangalan at MAC address bilang reference. 
+                                Pagkatapos magbayad, makipag-ugnayan sa amin para ma-activate muli ang iyong internet.
+                            </p>
+                        </div>
                     </>
                 ) : (
                     <>

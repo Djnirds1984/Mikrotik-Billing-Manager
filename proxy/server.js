@@ -659,6 +659,79 @@ async function startServer() {
 
     app.use('/api/db', dbRouter);
 
+    // --- Captive Chat Endpoints ---
+    app.post('/api/captive-message', async (req, res) => {
+        try {
+            const { message } = req.body;
+            let clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '').trim();
+            if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
+            clientIp = clientIp.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
+            if (!message || !message.trim()) {
+                return res.status(400).json({ message: 'Message content is required.' });
+            }
+            const notif = {
+                id: `notif_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+                type: 'client-chat',
+                message: message.trim(),
+                is_read: 0,
+                timestamp: new Date().toISOString(),
+                link_to: 'dhcp-portal',
+                context_json: JSON.stringify({ ip: clientIp })
+            };
+            await db.run(
+                'INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                notif.id, notif.type, notif.message, notif.is_read, notif.timestamp, notif.link_to, notif.context_json
+            );
+            res.status(201).json({ message: 'Message sent successfully.' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.get('/api/captive-thread', async (req, res) => {
+        try {
+            const ipParam = String(req.query.ip || '').trim();
+            let clientIp = ipParam || String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '').trim();
+            if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
+            clientIp = clientIp.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
+            const rows = await db.all('SELECT * FROM notifications WHERE type IN ("client-chat","admin-reply") ORDER BY timestamp ASC');
+            const thread = rows.filter(r => {
+                try {
+                    const ctx = JSON.parse(r.context_json || '{}');
+                    return ctx.ip === clientIp;
+                } catch (_) { return false; }
+            });
+            res.json(thread);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.post('/api/captive-reply', protect, async (req, res) => {
+        try {
+            const { ip, message } = req.body;
+            const targetIp = String(ip || '').trim();
+            if (!targetIp) return res.status(400).json({ message: 'ip is required' });
+            if (!message || !message.trim()) return res.status(400).json({ message: 'message is required' });
+            const notif = {
+                id: `notif_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+                type: 'admin-reply',
+                message: message.trim(),
+                is_read: 0,
+                timestamp: new Date().toISOString(),
+                link_to: 'dhcp-portal',
+                context_json: JSON.stringify({ ip: targetIp, by: req.user?.username || 'admin' })
+            };
+            await db.run(
+                'INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                notif.id, notif.type, notif.message, notif.is_read, notif.timestamp, notif.link_to, notif.context_json
+            );
+            res.status(201).json({ message: 'Reply sent.' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     // --- Xendit API ---
     const xenditRouter = express.Router();
     xenditRouter.use(protect);
