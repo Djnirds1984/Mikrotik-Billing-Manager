@@ -1535,6 +1535,45 @@ app.all('/api/*', async (req, res) => {
     }
 });
 
+app.post('/:routerId/file/get-content', getRouter, async (req, res) => {
+    const id = req.body?.['.id'] || req.body?.id;
+    if (!id) return res.status(400).json({ message: '.id is required' });
+    try {
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            await client.connect();
+            try {
+                const result = await writeLegacySafe(client, ['/file/get', `=.id=${id}`, '=value-name=contents']);
+                let contents = '';
+                if (Array.isArray(result) && result.length > 0) {
+                    const r = result.find(x => typeof x === 'object');
+                    contents = (r && (r.ret || r.value || r.contents || r.data)) || '';
+                } else if (result && typeof result === 'object') {
+                    contents = result.ret || result.value || result.contents || result.data || '';
+                }
+                res.json({ contents });
+            } finally {
+                await client.close();
+            }
+        } else {
+            const instance = req.routerInstance;
+            const response = await instance.post('/file/get', { '.id': id, '.proplist': 'contents' });
+            let contents = '';
+            const data = response.data;
+            if (Array.isArray(data) && data.length > 0) {
+                contents = data[0]?.contents || data[0]?.ret || '';
+            } else if (data && typeof data === 'object') {
+                contents = data.contents || data.ret || '';
+            }
+            res.json({ contents });
+        }
+    } catch (e) {
+        const s = e.response ? e.response.status : 500;
+        const m = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(s).json({ message: m });
+    }
+});
+
 // 3. Generic Proxy Handler for all other MikroTik calls
 app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
     const { endpoint } = req.params;
