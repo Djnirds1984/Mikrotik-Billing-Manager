@@ -7,8 +7,10 @@ const axios = require('axios');
 const https = require('https');
 const path = require('path');
 const crypto = require('crypto');
-const sqlite3 = require('@vscode/sqlite3');
-const { open } = require('sqlite');
+let sqlite3;
+let open;
+const { WebSocketServer } = require('ws');
+const { Client: SSHClient } = require('ssh2');
 
 const app = express();
 const PORT = 3002;
@@ -22,6 +24,15 @@ const DB_PATH = path.resolve(__dirname, '../proxy/panel.db');
 let db;
 async function getDb() {
     if (!db) {
+        if (!sqlite3 || !open) {
+            try {
+                sqlite3 = require('@vscode/sqlite3');
+                ({ open } = require('sqlite'));
+            } catch (e) {
+                console.warn('[Backend] SQLite modules unavailable:', e.message);
+                throw new Error('Database module unavailable');
+            }
+        }
         console.log(`[Backend] Connecting to DB at: ${DB_PATH}`);
         db = await open({
             filename: DB_PATH,
@@ -1731,6 +1742,119 @@ app.use((err, req, res, next) => {
     res.status(500).json({ message: 'Internal Server Error' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`MikroTik API Backend listening on port ${PORT}`);
+});
+
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+    try {
+        const url = new URL(request.url, `http://${request.headers.host}`);
+        if (url.pathname === '/ws/ssh') {
+            wss.handleUpgrade(request, socket, head, (ws) => {
+                wss.emit('connection', ws, request);
+            });
+        } else {
+            socket.destroy();
+        }
+    } catch (_) {
+        socket.destroy();
+    }
+});
+
+wss.on('connection', (ws) => {
+    let ssh;
+    let shellStream;
+    let cols = 80;
+    let rows = 24;
+
+    const cleanUp = () => {
+        try { if (shellStream) shellStream.close(); } catch (_) {}
+        try { if (ssh) ssh.end(); } catch (_) {}
+        shellStream = null;
+        ssh = null;
+    };
+
+    ws.on('message', (message) => {
+        let payload;
+        try {
+            payload = JSON.parse(message.toString());
+        } catch (_) {
+            return;
+        }
+
+        if (!payload || typeof payload !== 'object') return;
+
+        if (payload.type === 'auth') {
+            const data = payload.data || {};
+            const host = String(data.host || '');
+            const username = String(data.user || '');
+            const password = String(data.password || '');
+            cols = Number(data.term_cols || cols) || cols;
+            rows = Number(data.term_rows || rows) || rows;
+
+            if (!host || !username) {
+                ws.send('\r\nInvalid SSH credentials\r\n');
+                ws.close();
+                return;
+            }
+
+            ssh = new SSHClient();
+            ssh.on('ready', () => {
+                ssh.shell({ term: 'xterm-color', cols, rows }, (err, stream) => {
+                    if (err) {
+                        ws.send(`\r\nSSH shell error: ${err.message}\r\n`);
+                        ws.close();
+                        return;
+                    }
+                    shellStream = stream;
+                    stream.on('data', (data) => {
+                        try { ws.send(data.toString('utf8')); } catch (_) {}
+                    });
+                    stream.on('close', () => {
+                        cleanUp();
+                        try { ws.close(); } catch (_) {}
+                    });
+                    stream.stderr?.on('data', (data) => {
+                        try { ws.send(data.toString('utf8')); } catch (_) {}
+                    });
+                });
+            });
+            ssh.on('error', (err) => {
+                try { ws.send(`\r\nSSH connection error: ${err.message}\r\n`); } catch (_) {}
+                cleanUp();
+            });
+            ssh.on('end', () => {
+                cleanUp();
+                try { ws.close(); } catch (_) {}
+            });
+
+            ssh.connect({
+                host,
+                port: 22,
+                username,
+                password,
+                readyTimeout: 15000
+            });
+        } else if (payload.type === 'data') {
+            const data = String(payload.data || '');
+            if (shellStream && data) {
+                try { shellStream.write(data); } catch (_) {}
+            }
+        } else if (payload.type === 'resize') {
+            cols = Number(payload.cols || cols) || cols;
+            rows = Number(payload.rows || rows) || rows;
+            if (shellStream && shellStream.setWindow) {
+                try { shellStream.setWindow(rows, cols, 0, 0); } catch (_) {}
+            }
+        }
+    });
+
+    ws.on('close', () => {
+        cleanUp();
+    });
+    ws.on('error', () => {
+        cleanUp();
+    });
 });

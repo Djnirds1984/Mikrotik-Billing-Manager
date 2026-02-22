@@ -355,6 +355,11 @@ async function startServer() {
             '^/mt-api': ''
         }
     }));
+    app.use('/ws', createProxyMiddleware({
+        target: 'http://localhost:3002',
+        changeOrigin: true,
+        ws: true
+    }));
 
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
