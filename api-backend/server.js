@@ -109,7 +109,12 @@ const createRouterInstance = (config) => {
         baseURL, 
         auth,
         httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1.2' }),
-        timeout: 15000
+        timeout: 15000,
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        },
+        validateStatus: (status) => status >= 200 && status < 300
     });
 
     // Normalize ID fields
@@ -224,7 +229,13 @@ app.post('/test/test-connection', async (req, res) => {
         console.error("Test Connection Error:", e.message);
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ success: false, message: `Connection failed: ${msg}` });
+        const baseURL = (() => {
+            try {
+                const inst = createRouterInstance(req.body);
+                return inst?.defaults?.baseURL || null;
+            } catch (_) { return null; }
+        })();
+        res.status(status).json({ success: false, message: `Connection failed: ${msg}`, baseURL, status });
     }
 });
 
