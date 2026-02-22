@@ -1285,6 +1285,84 @@ app.put('/api/roles/:roleId/permissions', async (req, res) => {
     } catch (e) { try { const dbx = await getDb(); await dbx.exec('ROLLBACK'); } catch {} res.status(500).json({ message: e.message }); }
 });
 
+app.get('/captive/info', async (req, res) => {
+    try {
+        const dbx = await getDb();
+        const routers = await dbx.all('SELECT * FROM routers');
+        let ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '').trim();
+        if (ip.includes(',')) ip = ip.split(',')[0].trim();
+        ip = ip.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
+        const nowIso = new Date().toISOString();
+        let result = null;
+        for (const router of routers) {
+            try {
+                const instance = createRouterInstance(router);
+                if (router.api_type === 'legacy') {
+                    await instance.connect();
+                    try {
+                        const pend = await writeLegacySafe(instance, ['/ip/firewall/address-list/print', `?address=${ip}`, '?list=pending-dhcp-users']);
+                        if (Array.isArray(pend) && pend.length > 0) {
+                            const lease = await writeLegacySafe(instance, ['/ip/dhcp-server/lease/print', `?address=${ip}`]);
+                            const mac = Array.isArray(lease) && lease.length > 0 ? lease[0]['mac-address'] || null : null;
+                            const host = Array.isArray(lease) && lease.length > 0 ? lease[0]['host-name'] || null : null;
+                            result = { status: 'expired', ip, macAddress: mac, hostName: host, routerId: router.id };
+                        } else {
+                            const auth = await writeLegacySafe(instance, ['/ip/firewall/address-list/print', `?address=${ip}`, '?list=authorized-dhcp-users']);
+                            if (Array.isArray(auth) && auth.length > 0) {
+                                let due = null, plan = null;
+                                try {
+                                    const meta = JSON.parse(String(auth[0].comment || '{}'));
+                                    due = meta.dueDateTime || meta.dueDate || null;
+                                    plan = meta.planName || null;
+                                } catch (_) {}
+                                if (due && new Date(due).toISOString() <= nowIso) {
+                                    result = { status: 'expired', ip, dueDateTime: due, planName: plan, routerId: router.id };
+                                } else {
+                                    result = { status: 'authorized', ip, dueDateTime: due, planName: plan, routerId: router.id };
+                                }
+                            }
+                        }
+                    } finally { await instance.close(); }
+                } else {
+                    const pendRes = await instance.get(`/ip/firewall/address-list?address=${encodeURIComponent(ip)}&list=pending-dhcp-users`);
+                    if (Array.isArray(pendRes.data) && pendRes.data.length > 0) {
+                        const leaseRes = await instance.get(`/ip/dhcp-server/lease?address=${encodeURIComponent(ip)}`);
+                        const l = Array.isArray(leaseRes.data) && leaseRes.data.length > 0 ? leaseRes.data[0] : null;
+                        const mac = l ? l['mac-address'] || null : null;
+                        const host = l ? l['host-name'] || null : null;
+                        result = { status: 'expired', ip, macAddress: mac, hostName: host, routerId: router.id };
+                    } else {
+                        const authRes = await instance.get(`/ip/firewall/address-list?address=${encodeURIComponent(ip)}&list=authorized-dhcp-users`);
+                        if (Array.isArray(authRes.data) && authRes.data.length > 0) {
+                            let due = null, plan = null;
+                            try {
+                                const meta = JSON.parse(String(authRes.data[0].comment || '{}'));
+                                due = meta.dueDateTime || meta.dueDate || null;
+                                plan = meta.planName || null;
+                            } catch (_) {}
+                            if (due && new Date(due).toISOString() <= nowIso) {
+                                result = { status: 'expired', ip, dueDateTime: due, planName: plan, routerId: router.id };
+                            } else {
+                                result = { status: 'authorized', ip, dueDateTime: due, planName: plan, routerId: router.id };
+                            }
+                        }
+                    }
+                }
+                if (result) break;
+            } catch (_) {}
+        }
+        if (!result) {
+            res.json({ status: 'unknown', ip });
+        } else {
+            res.json(result);
+        }
+    } catch (e) {
+        const s = e.response ? e.response.status : 500;
+        const m = e.response?.data?.message || e.response?.data?.detail || e.message;
+        res.status(s).json({ message: m });
+    }
+});
+
 // DHCP Portal Setup
 app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) => {
     const { panelIp, lanInterface } = req.body;

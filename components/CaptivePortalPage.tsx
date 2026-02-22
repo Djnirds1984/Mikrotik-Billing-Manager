@@ -115,6 +115,34 @@ export const CaptivePortalPage: React.FC = () => {
     // This hook ensures theme classes are applied to the root <html> element
     useTheme(); 
     const { settings: companySettings, isLoading } = useCompanySettings();
+    const [status, setStatus] = useState<'unknown' | 'authorized' | 'expired'>('unknown');
+    const [info, setInfo] = useState<{ ip?: string; macAddress?: string | null; hostName?: string | null; dueDateTime?: string | null; planName?: string | null } | null>(null);
+    
+    useEffect(() => {
+        const fetchStatus = async () => {
+            try {
+                const resp = await fetch('/mt-api/captive/info', { method: 'GET' });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    setStatus((data.status as any) || 'unknown');
+                    setInfo({
+                        ip: data.ip,
+                        macAddress: data.macAddress ?? null,
+                        hostName: data.hostName ?? null,
+                        dueDateTime: data.dueDateTime ?? null,
+                        planName: data.planName ?? null
+                    });
+                } else {
+                    setStatus('unknown');
+                    setInfo(null);
+                }
+            } catch {
+                setStatus('unknown');
+                setInfo(null);
+            }
+        };
+        fetchStatus();
+    }, []);
 
     return (
         <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex flex-col justify-center items-center py-12 px-4">
@@ -126,15 +154,38 @@ export const CaptivePortalPage: React.FC = () => {
                 )}
             </div>
             <div className="mt-8 bg-white dark:bg-slate-800 py-8 px-4 shadow-lg sm:rounded-lg sm:px-10 border border-slate-200 dark:border-slate-700 w-full max-w-lg">
-                <h1 className="text-center text-3xl font-extrabold text-[--color-primary-600] dark:text-[--color-primary-400]">
-                    Activation Required
-                </h1>
-                <p className="mt-4 text-center text-slate-600 dark:text-slate-300">
-                    Your device is connected to the network, but you do not have internet access yet.
-                </p>
-                <p className="mt-2 text-center text-slate-600 dark:text-slate-300">
-                    Please contact the network administrator to activate your service.
-                </p>
+                {status === 'expired' ? (
+                    <>
+                        <h1 className="text-center text-3xl font-extrabold text-red-600 dark:text-red-400">
+                            Nag-expire na ang iyong account
+                        </h1>
+                        <p className="mt-4 text-center text-slate-600 dark:text-slate-300">
+                            Ang internet access ng iyong device ay pansamantalang hinto dahil nag-expire na ang subscription.
+                        </p>
+                        <div className="mt-6 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-md p-4 text-sm">
+                            {info?.planName && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">Plan:</span> {info.planName}</p>}
+                            {info?.dueDateTime && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">Due Date:</span> {new Date(info.dueDateTime).toLocaleString()}</p>}
+                            {info?.macAddress && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">MAC:</span> {info.macAddress}</p>}
+                            {info?.ip && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">IP:</span> {info.ip}</p>}
+                            {info?.hostName && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">Device:</span> {info.hostName}</p>}
+                        </div>
+                        <p className="mt-4 text-center text-slate-600 dark:text-slate-300">
+                            Makipag-ugnayan sa administrator para sa renewal at re-activation.
+                        </p>
+                    </>
+                ) : (
+                    <>
+                        <h1 className="text-center text-3xl font-extrabold text-[--color-primary-600] dark:text-[--color-primary-400]">
+                            Activation Required
+                        </h1>
+                        <p className="mt-4 text-center text-slate-600 dark:text-slate-300">
+                            Your device is connected to the network, but you do not have internet access yet.
+                        </p>
+                        <p className="mt-2 text-center text-slate-600 dark:text-slate-300">
+                            Please contact the network administrator to activate your service.
+                        </p>
+                    </>
+                )}
                  <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700 text-center">
                     <h2 className="font-semibold text-slate-800 dark:text-slate-200">Need help?</h2>
                     <p className="text-sm text-slate-500 dark:text-slate-400">Click the chat bubble in the corner to send a message to the administrator.</p>
