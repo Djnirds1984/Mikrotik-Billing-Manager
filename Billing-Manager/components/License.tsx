@@ -15,6 +15,7 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
     const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
 
     const deviceId = licenseStatus?.deviceId;
+    const isLifetime = licenseStatus?.plan?.toLowerCase() === 'lifetime';
 
     const handleActivate = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -76,7 +77,12 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
                         <CheckCircleIcon className="w-16 h-16 text-green-500 mx-auto mb-4" />
                         <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Application Licensed</h2>
                         <p className="mt-2 text-slate-500 dark:text-slate-400">
-                           This panel is activated. Expires on: {new Date(licenseStatus.expires || '').toLocaleDateString()}
+                           This panel is activated.
+                           {!isLifetime && (
+                               <>
+                                   {' '}Expires on: {new Date(licenseStatus.expires || '').toLocaleDateString()}
+                               </>
+                           )}
                         </p>
                     </div>
 
