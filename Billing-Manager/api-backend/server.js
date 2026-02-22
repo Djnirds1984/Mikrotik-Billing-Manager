@@ -1024,6 +1024,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                         chain: 'dstnat',
                         protocol: 'tcp',
                         'dst-port': '80',
+                        'in-interface': lanInterface,
                         'src-address-list': '!' + LIST_NAME,
                         action: 'dst-nat',
                         'to-addresses': panelIp,
@@ -1040,6 +1041,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                         chain: 'forward',
                         protocol: 'udp',
                         'dst-port': '53',
+                        'in-interface': lanInterface,
                         action: 'accept',
                         comment: COMMENT_TAG + '-DNS',
                         'place-before': 0
@@ -1050,6 +1052,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                 if (authRules.length === 0) {
                     await client.write('/ip/firewall/filter/add', {
                         chain: 'forward',
+                        'in-interface': lanInterface,
                         'src-address-list': LIST_NAME,
                         action: 'accept',
                         comment: COMMENT_TAG + '-AUTH'
@@ -1070,6 +1073,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                 if (dropRules.length === 0) {
                     await client.write('/ip/firewall/filter/add', {
                         chain: 'forward',
+                        'in-interface': lanInterface,
                         'src-address-list': '!' + LIST_NAME,
                         action: 'drop',
                         comment: COMMENT_TAG + '-DROP'
@@ -1105,6 +1109,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                     chain: 'dstnat',
                     protocol: 'tcp',
                     'dst-port': '80',
+                    'in-interface': lanInterface,
                     'src-address-list': '!' + LIST_NAME,
                     action: 'dst-nat',
                     'to-addresses': panelIp,
@@ -1120,6 +1125,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                     chain: 'forward',
                     protocol: 'udp',
                     'dst-port': '53',
+                    'in-interface': lanInterface,
                     action: 'accept',
                     comment: COMMENT_TAG + '-DNS',
                     'place-before': '*0'
@@ -1130,6 +1136,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
             if (!authRes.data || authRes.data.length === 0) {
                  await instance.put('/ip/firewall/filter', {
                     chain: 'forward',
+                    'in-interface': lanInterface,
                     'src-address-list': LIST_NAME,
                     action: 'accept',
                     comment: COMMENT_TAG + '-AUTH'
@@ -1150,6 +1157,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
             if (!dropRes.data || dropRes.data.length === 0) {
                  await instance.put('/ip/firewall/filter', {
                     chain: 'forward',
+                    'in-interface': lanInterface,
                     'src-address-list': '!' + LIST_NAME,
                     action: 'drop',
                     comment: COMMENT_TAG + '-DROP'
