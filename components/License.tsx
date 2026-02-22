@@ -77,6 +77,7 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
                         <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Application Licensed</h2>
                         <p className="mt-2 text-slate-500 dark:text-slate-400">
                            This panel is activated. Expires on: {new Date(licenseStatus.expires || '').toLocaleDateString()}
+                           {licenseStatus.plan && <span className="block mt-1 font-semibold text-slate-700 dark:text-slate-300">Plan: {licenseStatus.plan}</span>}
                         </p>
                     </div>
 
@@ -117,6 +118,11 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
                 <div className="text-center">
                     <ExclamationTriangleIcon className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
                     <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Application is Unlicensed</h2>
+                    {licenseStatus?.message && (
+                        <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 rounded-md text-sm">
+                            {licenseStatus.message}
+                        </div>
+                    )}
                     <p className="mt-2 text-slate-500 dark:text-slate-400">
                         Please provide your Device ID to the administrator to receive a license key.
                     </p>

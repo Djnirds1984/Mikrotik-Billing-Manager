@@ -44,6 +44,8 @@ export interface LicenseStatus {
   deviceId?: string;
   licenseKey?: string;
   error?: string;
+  message?: string;
+  plan?: string;
 }
 
 export interface RouterConfig {

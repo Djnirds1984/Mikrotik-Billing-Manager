@@ -13,6 +13,13 @@ const axios = require('axios');
 const https = require('https');
 const { Xendit } = require('xendit-node');
 const si = require('systeminformation');
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
 // const { RouterOSAPI } = require('node-routeros-v2'); // Not needed here anymore
 
 const PORT = 3001;
@@ -263,27 +270,51 @@ async function initDb() {
 }
 
 // --- Helpers ---
-const getDeviceId = () => {
-    const networkInterfaces = os.networkInterfaces();
-    let macs = [];
-    
-    const ignoredInterfacePattern = /^(zt|docker|veth|br-|tun|tap|lo)/i;
-
-    for (const [name, interfaces] of Object.entries(networkInterfaces)) {
-        if (ignoredInterfacePattern.test(name)) {
-            continue;
+const getDeviceId = async () => {
+    try {
+        const sys = await si.system();
+        const uuid = await si.uuid();
+        
+        // Prioritize System Serial (Host Board Serial) if valid
+        if (sys.serial && sys.serial !== '-' && sys.serial !== 'Default string' && sys.serial !== 'To be filled by O.E.M.') {
+             return crypto.createHash('sha256').update(sys.serial).digest('hex');
         }
 
-        for (const iface of interfaces) {
-            if (iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal) {
-                macs.push(iface.mac);
+        // Fallback to Hardware UUID
+        if (uuid.hardware && uuid.hardware !== '-') {
+            return crypto.createHash('sha256').update(uuid.hardware).digest('hex');
+        }
+
+        // Fallback to OS UUID (Windows MachineGuid / Linux machine-id)
+        if (uuid.os && uuid.os !== '-') {
+            return crypto.createHash('sha256').update(uuid.os).digest('hex');
+        }
+
+        // Final Fallback: MAC Addresses
+        const networkInterfaces = os.networkInterfaces();
+        let macs = [];
+        const ignoredInterfacePattern = /^(zt|docker|veth|br-|tun|tap|lo)/i;
+
+        for (const [name, interfaces] of Object.entries(networkInterfaces)) {
+            if (ignoredInterfacePattern.test(name)) {
+                continue;
+            }
+            for (const iface of interfaces) {
+                if (iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal) {
+                    macs.push(iface.mac);
+                }
             }
         }
+        
+        macs.sort();
+        const uniqueId = macs.join('') || (os.hostname() + os.arch() + os.platform());
+        return crypto.createHash('sha256').update(uniqueId).digest('hex');
+
+    } catch (e) {
+        console.error('Failed to get device ID:', e);
+        // Fallback to hostname if everything fails
+        return crypto.createHash('sha256').update(os.hostname()).digest('hex');
     }
-    
-    macs.sort();
-    const uniqueId = macs.join('') || (os.hostname() + os.arch() + os.platform());
-    return crypto.createHash('sha256').update(uniqueId).digest('hex');
 };
 
 // --- Middleware ---
@@ -733,43 +764,150 @@ async function startServer() {
     // --- License ---
     const licenseRouter = express.Router();
     licenseRouter.use(protect);
+    
     licenseRouter.get('/status', async (req, res) => {
         try {
-            const deviceId = getDeviceId();
+            const deviceId = await getDeviceId();
+            
+            // Check local cache first (optional, but good for offline resilience if implemented)
+            // For now, we check Supabase directly as requested
+            
             const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
-            const licenseKey = settings?.licenseKey;
+            const localLicenseKey = settings?.licenseKey;
 
-            if (!licenseKey) return res.json({ licensed: false, deviceId });
+            if (!localLicenseKey) {
+                return res.json({ licensed: false, deviceId, message: 'No license key found locally.' });
+            }
 
-            jwt.verify(licenseKey, LICENSE_SECRET_KEY, (err, decoded) => {
-                if (err || decoded.deviceId !== deviceId) {
-                    return res.json({ licensed: false, deviceId, error: err ? 'Invalid key' : 'Device mismatch' });
-                }
-                res.json({ licensed: true, expires: new Date(decoded.exp * 1000).toISOString(), deviceId, licenseKey });
+            // Verify with Supabase
+            const { data: license, error } = await supabase
+                .from('licenses')
+                .select('*')
+                .eq('license_key', localLicenseKey)
+                .maybeSingle();
+
+            if (error || !license) {
+                 return res.json({ licensed: false, deviceId, message: 'License key not found in server.' });
+            }
+
+            if (license.hardware_id && license.hardware_id !== deviceId) {
+                return res.json({ licensed: false, deviceId, message: 'License is bound to another device.' });
+            }
+
+            if (!license.is_active) {
+                return res.json({ licensed: false, deviceId, message: 'License has been deactivated.' });
+            }
+
+            if (license.expires_at && new Date(license.expires_at) < new Date()) {
+                return res.json({ licensed: false, deviceId, message: 'License has expired.' });
+            }
+
+            // If hardware_id is null, bind it now (first use)
+            if (!license.hardware_id) {
+                await supabase
+                    .from('licenses')
+                    .update({ hardware_id: deviceId, activated_at: new Date().toISOString() })
+                    .eq('id', license.id);
+            }
+
+            res.json({ 
+                licensed: true, 
+                expires: license.expires_at, 
+                deviceId, 
+                licenseKey: localLicenseKey,
+                plan: license.notes // Assuming 'notes' might store plan info or similar
             });
-        } catch (err) { res.status(500).json({ message: err.message }); }
+
+        } catch (err) { 
+            console.error(err);
+            res.status(500).json({ message: err.message }); 
+        }
     });
+
     licenseRouter.post('/activate', async (req, res) => {
         const { licenseKey } = req.body;
+        if (!licenseKey) return res.status(400).json({ message: 'License key is required' });
+
         try {
-            const deviceId = getDeviceId();
-            jwt.verify(licenseKey, LICENSE_SECRET_KEY, (err, decoded) => {
-                if (err) throw new Error('Invalid license key format.');
-                if (decoded.deviceId !== deviceId) throw new Error('This license key is for a different device.');
-                return decoded;
-            });
+            const deviceId = await getDeviceId();
+
+            // Check Supabase
+            const { data: license, error } = await supabase
+                .from('licenses')
+                .select('*')
+                .eq('license_key', licenseKey)
+                .maybeSingle();
+
+            if (error || !license) {
+                return res.status(404).json({ message: 'Invalid license key.' });
+            }
+
+            if (license.hardware_id && license.hardware_id !== deviceId) {
+                return res.status(403).json({ message: 'This license is already used on another device.' });
+            }
+
+            if (!license.is_active) {
+                 return res.status(403).json({ message: 'This license is inactive.' });
+            }
+
+             if (license.expires_at && new Date(license.expires_at) < new Date()) {
+                return res.status(403).json({ message: 'This license has expired.' });
+            }
+
+            // Bind device if not bound
+            if (!license.hardware_id) {
+                 const { error: updateError } = await supabase
+                    .from('licenses')
+                    .update({ hardware_id: deviceId, activated_at: new Date().toISOString() })
+                    .eq('id', license.id);
+                
+                if (updateError) throw updateError;
+            }
+
+            // Save locally
             await db.run('UPDATE settings SET licenseKey = ? WHERE id = 1', [licenseKey]);
-            res.json({ success: true });
-        } catch (err) { res.status(400).json({ message: err.message }); }
+            
+            res.json({ success: true, message: 'License activated successfully!' });
+        } catch (err) { 
+            console.error(err);
+            res.status(500).json({ message: err.message }); 
+        }
     });
+
     licenseRouter.post('/revoke', async (req, res) => {
+        // Just remove local key, we don't necessarily want to deactivate it on server unless specified
         await db.run('UPDATE settings SET licenseKey = NULL WHERE id = 1');
-        res.json({ success: true });
+        res.json({ success: true, message: 'License removed from this device.' });
     });
-    licenseRouter.post('/generate', requireSuperadmin, (req, res) => {
-         const { deviceId, days } = req.body;
-         const token = jwt.sign({ deviceId }, LICENSE_SECRET_KEY, { expiresIn: `${days}d` });
-         res.json({ licenseKey: token });
+
+    licenseRouter.post('/generate', requireSuperadmin, async (req, res) => {
+         const { deviceId, days, notes } = req.body; // deviceId is optional (pre-bind), days is validity
+         
+         try {
+             const key = `MKBM-${crypto.randomBytes(4).toString('hex').toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+             const expiresAt = days ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString() : null;
+
+             const { data, error } = await supabase
+                .from('licenses')
+                .insert({
+                    license_key: key,
+                    hardware_id: deviceId || null, // Optional pre-bind
+                    expires_at: expiresAt,
+                    is_active: true,
+                    status: 'active',
+                    notes: notes || 'Generated by SuperAdmin',
+                    // created_by: req.user.id // Removed to avoid FK violation with local user IDs
+                })
+                .select()
+                .single();
+
+             if (error) throw error;
+
+             res.json({ licenseKey: key, license: data });
+         } catch (e) {
+             console.error(e);
+             res.status(500).json({ message: e.message });
+         }
     });
     app.use('/api/license', licenseRouter);
 

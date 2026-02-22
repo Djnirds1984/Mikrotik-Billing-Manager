@@ -259,6 +259,7 @@ const FullBackupManager: React.FC = () => {
 export const SuperAdmin: React.FC = () => {
     const [deviceId, setDeviceId] = useState('');
     const [days, setDays] = useState(365);
+    const [notes, setNotes] = useState('');
     const [generatedKey, setGeneratedKey] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -279,7 +280,7 @@ export const SuperAdmin: React.FC = () => {
             const res = await fetch('/api/license/generate', {
                 method: 'POST',
                 headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId, days }),
+                body: JSON.stringify({ deviceId, days, notes }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -342,15 +343,14 @@ export const SuperAdmin: React.FC = () => {
 
                 <form onSubmit={handleGenerate} className="mt-6 space-y-4">
                     <div>
-                        <label htmlFor="deviceId" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Device ID</label>
+                        <label htmlFor="deviceId" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Device ID (Optional)</label>
                         <input
                             id="deviceId"
                             type="text"
                             value={deviceId}
                             onChange={e => setDeviceId(e.target.value)}
-                            required
                             className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white font-mono"
-                            placeholder="Paste the user's Device ID here"
+                            placeholder="Leave empty for un-bound key"
                         />
                     </div>
                      <div>
@@ -363,6 +363,17 @@ export const SuperAdmin: React.FC = () => {
                             required
                             min="1"
                             className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        />
+                    </div>
+                     <div>
+                        <label htmlFor="notes" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Notes / Plan Name</label>
+                        <input
+                            id="notes"
+                            type="text"
+                            value={notes}
+                            onChange={e => setNotes(e.target.value)}
+                            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                            placeholder="e.g. Premium Plan for Client X"
                         />
                     </div>
                      <div className="flex justify-end">
