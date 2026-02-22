@@ -46,6 +46,7 @@ export interface LicenseStatus {
   error?: string;
   message?: string;
   plan?: string;
+  maxRouters?: number;
 }
 
 export interface RouterConfig {

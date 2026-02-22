@@ -78,6 +78,7 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
                         <p className="mt-2 text-slate-500 dark:text-slate-400">
                            This panel is activated. Expires on: {new Date(licenseStatus.expires || '').toLocaleDateString()}
                            {licenseStatus.plan && <span className="block mt-1 font-semibold text-slate-700 dark:text-slate-300">Plan: {licenseStatus.plan}</span>}
+                           {licenseStatus.maxRouters && <span className="block mt-1 font-semibold text-slate-700 dark:text-slate-300">Max Routers: {licenseStatus.maxRouters}</span>}
                         </p>
                     </div>
 

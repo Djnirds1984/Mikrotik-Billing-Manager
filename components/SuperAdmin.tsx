@@ -260,6 +260,8 @@ export const SuperAdmin: React.FC = () => {
     const [deviceId, setDeviceId] = useState('');
     const [days, setDays] = useState(365);
     const [notes, setNotes] = useState('');
+    const [planType, setPlanType] = useState('monthly');
+    const [maxRouters, setMaxRouters] = useState(1);
     const [generatedKey, setGeneratedKey] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -280,7 +282,7 @@ export const SuperAdmin: React.FC = () => {
             const res = await fetch('/api/license/generate', {
                 method: 'POST',
                 headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId, days, notes }),
+                body: JSON.stringify({ deviceId, days, notes, planType, maxRouters }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -366,14 +368,39 @@ export const SuperAdmin: React.FC = () => {
                         />
                     </div>
                      <div>
-                        <label htmlFor="notes" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Notes / Plan Name</label>
+                        <label htmlFor="notes" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Notes</label>
                         <input
                             id="notes"
                             type="text"
                             value={notes}
                             onChange={e => setNotes(e.target.value)}
                             className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
-                            placeholder="e.g. Premium Plan for Client X"
+                            placeholder="e.g. For Client X"
+                        />
+                    </div>
+                     <div>
+                        <label htmlFor="planType" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Plan Type</label>
+                        <select
+                            id="planType"
+                            value={planType}
+                            onChange={e => setPlanType(e.target.value)}
+                            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        >
+                            <option value="monthly">Monthly</option>
+                            <option value="yearly">Yearly</option>
+                            <option value="lifetime">Lifetime</option>
+                            <option value="premium">Premium</option>
+                        </select>
+                    </div>
+                     <div>
+                        <label htmlFor="maxRouters" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Max Routers</label>
+                        <input
+                            id="maxRouters"
+                            type="number"
+                            value={maxRouters}
+                            onChange={e => setMaxRouters(parseInt(e.target.value, 10))}
+                            min="1"
+                            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
                         />
                     </div>
                      <div className="flex justify-end">
