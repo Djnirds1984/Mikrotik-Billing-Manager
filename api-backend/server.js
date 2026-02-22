@@ -1655,6 +1655,19 @@ const processExpiredGrace = async () => {
 setInterval(processExpiredGrace, 60000);
 
 
+// Global error handler to catch JSON/body parse errors (e.g. request aborted)
+app.use((err, req, res, next) => {
+    if (err && err.type === 'request.aborted') {
+        console.warn('[Request Aborted]', req.method, req.url);
+        return;
+    }
+    if (err && err.type === 'entity.too.large') {
+        return res.status(413).json({ message: 'Request body too large' });
+    }
+    console.error('[Express Error]', err);
+    res.status(500).json({ message: 'Internal Server Error' });
+});
+
 app.listen(PORT, () => {
     console.log(`MikroTik API Backend listening on port ${PORT}`);
 });
