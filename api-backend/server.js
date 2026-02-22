@@ -26,7 +26,7 @@ async function getDb() {
     if (!db) {
         if (!sqlite3 || !open) {
             try {
-                sqlite3 = require('@vscode/sqlite3');
+                sqlite3 = require('sqlite3');
                 ({ open } = require('sqlite'));
             } catch (e) {
                 console.warn('[Backend] SQLite modules unavailable:', e.message);

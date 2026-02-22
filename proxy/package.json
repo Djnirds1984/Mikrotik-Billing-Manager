@@ -10,7 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",
-    "@vscode/sqlite3": "^5.1.1",
+    "sqlite3": "^5.1.6",
     "archiver": "^7.0.1",
     "axios": "^1.7.2",
     "bcryptjs": "^2.4.3",
