@@ -313,42 +313,6 @@ const AppRouter: React.FC = () => {
     const [isLicenseLoading, setIsLicenseLoading] = useState(true);
     let licenseCheckInterval = React.useRef<number | null>(null);
 
-    if (window.location.pathname.startsWith('/captive')) {
-        return (
-            <ThemeProvider>
-                <LocalizationProvider>
-                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
-                        <CaptivePortalPage />
-                    </Suspense>
-                </LocalizationProvider>
-            </ThemeProvider>
-        );
-    }
-
-    if (window.location.pathname.startsWith('/client_portal')) {
-        return (
-            <ThemeProvider>
-                <LocalizationProvider>
-                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
-                        <ClientPortal selectedRouter={null} />
-                    </Suspense>
-                </LocalizationProvider>
-            </ThemeProvider>
-        );
-    }
-
-    if (!user && (window.location.pathname === '/' || window.location.pathname === '/home')) {
-        return (
-            <ThemeProvider>
-                <LocalizationProvider>
-                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
-                        <LandingPage />
-                    </Suspense>
-                </LocalizationProvider>
-            </ThemeProvider>
-        );
-    }
-
     const checkLicense = useCallback(async () => {
         try {
             const res = await fetch('/api/license/status', { headers: getAuthHeader() });
@@ -413,13 +377,49 @@ const AppRouter: React.FC = () => {
         return <div className="flex h-screen w-screen items-center justify-center"><Loader /></div>;
     }
 
+    const path = window.location.pathname;
+    if (path.startsWith('/captive')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <CaptivePortalPage />
+                    </Suspense>
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
+    if (path.startsWith('/client_portal')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <ClientPortal selectedRouter={null} />
+                    </Suspense>
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
     if (!user) {
+        if (path === '/' || path === '/home') {
+            return (
+                <ThemeProvider>
+                    <LocalizationProvider>
+                        <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                            <LandingPage />
+                        </Suspense>
+                    </LocalizationProvider>
+                </ThemeProvider>
+            );
+        }
         return (
             <ThemeProvider>
                  <LocalizationProvider>
                     <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
                         <AuthLayout>
-                            {window.location.pathname === '/register' ? (
+                            {path === '/register' ? (
                                 <Register />
                             ) : !hasUsers ? (
                                 <Register />
