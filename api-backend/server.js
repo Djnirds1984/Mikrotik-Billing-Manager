@@ -11,6 +11,7 @@ let sqlite3;
 let open;
 const { WebSocketServer } = require('ws');
 const { Client: SSHClient } = require('ssh2');
+const bcrypt = require('bcryptjs');
 
 const app = express();
 const PORT = 3002;
@@ -1262,6 +1263,44 @@ app.get('/api/panel-users', async (req, res) => {
         const rows = await dbx.all(`SELECT u.id, u.username, r.id AS role_id, r.name AS role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id`);
         const mapped = rows.map(r => ({ id: r.id, username: r.username, role: { id: r.role_id, name: r.role_name || '' } }));
         res.json(mapped);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// Create a new panel user
+app.post('/api/panel-users', async (req, res) => {
+    const { username, password, role_id } = req.body || {};
+    if (!username || !password || !role_id) {
+        return res.status(400).json({ message: 'Username, password, and role_id are required.' });
+    }
+    try {
+        const dbx = await getDb();
+        const role = await dbx.get('SELECT id FROM roles WHERE id = ?', [role_id]);
+        if (!role) {
+            return res.status(400).json({ message: 'Invalid role_id specified.' });
+        }
+        const hash = await bcrypt.hash(password, 10);
+        const id = `user_${Date.now()}`;
+        await dbx.run('INSERT INTO users (id, username, password, role_id) VALUES (?, ?, ?, ?)', [id, username, hash, role_id]);
+        const row = await dbx.get(`SELECT u.id, u.username, r.id AS role_id, r.name AS role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = ?`, [id]);
+        res.status(201).json({ id: row.id, username: row.username, role: { id: row.role_id, name: row.role_name || '' } });
+    } catch (e) {
+        if (String(e.message).includes('UNIQUE')) {
+            return res.status(409).json({ message: 'Username already exists.' });
+        }
+        res.status(500).json({ message: e.message });
+    }
+});
+
+// Delete a panel user by id
+app.delete('/api/panel-users/:id', async (req, res) => {
+    try {
+        const dbx = await getDb();
+        const id = req.params.id;
+        const result = await dbx.run('DELETE FROM users WHERE id = ?', [id]);
+        if (result.changes === 0) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+        res.status(204).send();
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
