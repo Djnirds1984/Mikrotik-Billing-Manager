@@ -775,6 +775,9 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         const isGrace = subscriptionData && Number(subscriptionData.graceDays) > 0;
         const due = subscriptionData?.dueDateTime || subscriptionData?.dueDate;
         let d = due ? new Date(due) : null;
+        if (d && isNaN(d.getTime())) {
+            d = null;
+        }
         if (!d && isGrace) {
             const now = new Date();
             d = new Date(now.getTime() + Number(subscriptionData.graceDays) * 86400000);
@@ -1235,7 +1238,8 @@ app.post('/:routerId/ppp/active/kick', getRouter, async (req, res) => {
 app.post('/:routerId/ppp/scheduler/refresh', getRouter, async (req, res) => {
     const { name, dueDateTime, nonPaymentProfile } = req.body; if (!name || !dueDateTime) return res.status(400).json({ message: 'name and dueDateTime are required' });
     try {
-        const d = new Date(dueDateTime); const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        let d = new Date(dueDateTime); if (isNaN(d.getTime())) return res.status(400).json({ message: 'Invalid dueDateTime' });
+        const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const rosDate = `${months[d.getMonth()]}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}`; const rosTime = d.toTimeString().split(' ')[0];
         const schedName = `ppp-auto-kick-${String(name)}`; const onEventProfile = nonPaymentProfile ? ` ; /ppp/secret/set [find name=\"${String(name)}\"] profile=${String(nonPaymentProfile)}` : ''; const onEvent = `/log info \"PPPoE auto-kick: ${String(name)}\"; :do { /ppp/active/remove [find name=\"${String(name)}\"]; }` + onEventProfile;
         if (req.router.api_type === 'legacy') {
