@@ -41,7 +41,6 @@ export const LandingPage: React.FC = () => {
             </p>
             <div className="mt-6 flex items-center gap-3">
               <button onClick={() => goto('#plans')} className="px-6 py-3 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">View Plans</button>
-              <button onClick={() => goto('/register')} className="px-6 py-3 rounded-md border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">Create Admin</button>
             </div>
             <p className="mt-3 text-xs text-slate-500">Have an account? <span className="underline cursor-pointer" onClick={() => goto('/login')}>Login</span></p>
           </div>
@@ -119,4 +118,3 @@ export const LandingPage: React.FC = () => {
     </div>
   );
 };
-
