@@ -12,7 +12,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      allowedHosts: ['verecund-millipede-5831.dataplicity.io', 'localhost', '127.0.0.1', 'billing.ajcvendosystem.com'],
+      allowedHosts: true,
       proxy: {
         '/mt-api': {
           target: 'http://localhost:3001',

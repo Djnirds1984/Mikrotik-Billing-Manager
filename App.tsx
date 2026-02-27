@@ -50,6 +50,7 @@ const CaptivePortalPage = React.lazy(() => import('./components/CaptivePortalPag
 const NotificationsPage = React.lazy(() => import('./components/NotificationsPage.tsx').then(m => ({ default: m.NotificationsPage })));
 const Payroll = React.lazy(() => import('./components/Payroll.tsx').then(m => ({ default: m.Payroll })));
 const CaptiveChatAdmin = React.lazy(() => import('./components/CaptiveChatAdmin.tsx').then(m => ({ default: m.CaptiveChatAdmin })));
+const LandingPage = React.lazy(() => import('./components/LandingPage.tsx').then(m => ({ default: m.LandingPage })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -336,6 +337,18 @@ const AppRouter: React.FC = () => {
         );
     }
 
+    if (!user && (window.location.pathname === '/' || window.location.pathname === '/home')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <LandingPage />
+                    </Suspense>
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
     const checkLicense = useCallback(async () => {
         try {
             const res = await fetch('/api/license/status', { headers: getAuthHeader() });
@@ -406,7 +419,9 @@ const AppRouter: React.FC = () => {
                  <LocalizationProvider>
                     <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
                         <AuthLayout>
-                            {!hasUsers ? (
+                            {window.location.pathname === '/register' ? (
+                                <Register />
+                            ) : !hasUsers ? (
                                 <Register />
                             ) : authView === 'login' ? (
                                 <Login onSwitchToForgotPassword={() => setAuthView('forgot')} />
