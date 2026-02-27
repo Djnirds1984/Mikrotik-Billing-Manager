@@ -96,6 +96,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const [isSidebarOpen, setIsSidebarOpen] = useState(isLargeScreen);
   const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
   
+  const { hasPermission } = useAuth();
   const { routers, addRouter, updateRouter, deleteRouter, isLoading: isLoadingRouters } = useRouters();
   const { sales, addSale, deleteSale, clearSales } = useSalesData(
     selectedRouterId,
@@ -186,6 +187,16 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
             <Suspense fallback={<div className="flex flex-col items-center justify-center h-full"><Loader /></div>}>
                 <UnlicensedComponent setCurrentView={setCurrentView} />
             </Suspense>
+        );
+    }
+
+    const permName = `view:sidebar:${currentView}`;
+    if (!hasPermission(permName)) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                <div className="text-3xl font-semibold text-slate-700 dark:text-slate-200 mb-2">Access Denied</div>
+                <p className="text-slate-500 dark:text-slate-400">Wala kang permission para buksan ang page na ito.</p>
+            </div>
         );
     }
 

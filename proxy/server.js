@@ -139,6 +139,37 @@ async function initDb() {
             await db.run("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_admin', 'perm_all');
         }
 
+        // Ensure sidebar/view permissions exist (idempotent)
+        const sidebarPerms = [
+            { id: 'perm_sidebar_dashboard', name: 'view:sidebar:dashboard', description: 'View Dashboard' },
+            { id: 'perm_sidebar_notifications', name: 'view:sidebar:notifications', description: 'View Notifications' },
+            { id: 'perm_sidebar_captive_chat', name: 'view:sidebar:captive_chat', description: 'View Captive Chat' },
+            { id: 'perm_sidebar_scripting', name: 'view:sidebar:scripting', description: 'View AI Scripting' },
+            { id: 'perm_sidebar_terminal', name: 'view:sidebar:terminal', description: 'View Terminal' },
+            { id: 'perm_sidebar_routers', name: 'view:sidebar:routers', description: 'View Routers' },
+            { id: 'perm_sidebar_network', name: 'view:sidebar:network', description: 'View Network' },
+            { id: 'perm_sidebar_dhcp_portal', name: 'view:sidebar:dhcp-portal', description: 'View DHCP Portal' },
+            { id: 'perm_sidebar_pppoe', name: 'view:sidebar:pppoe', description: 'View PPPoE Management' },
+            { id: 'perm_sidebar_billing', name: 'view:sidebar:billing', description: 'View Billing Plans' },
+            { id: 'perm_sidebar_sales', name: 'view:sidebar:sales', description: 'View Sales Report' },
+            { id: 'perm_sidebar_inventory', name: 'view:sidebar:inventory', description: 'View Inventory' },
+            { id: 'perm_sidebar_payroll', name: 'view:sidebar:payroll', description: 'View Payroll' },
+            { id: 'perm_sidebar_hotspot', name: 'view:sidebar:hotspot', description: 'View Hotspot' },
+            { id: 'perm_sidebar_remote', name: 'view:sidebar:remote', description: 'View Remote Access' },
+            { id: 'perm_sidebar_mikrotik_files', name: 'view:sidebar:mikrotik_files', description: 'View Mikrotik Files' },
+            { id: 'perm_sidebar_company', name: 'view:sidebar:company', description: 'View Company Settings' },
+            { id: 'perm_sidebar_system', name: 'view:sidebar:system', description: 'View System Settings' },
+            { id: 'perm_sidebar_panel_roles', name: 'view:sidebar:panel_roles', description: 'View Panel Roles' },
+            { id: 'perm_sidebar_client_portal_users', name: 'view:sidebar:client_portal_users', description: 'View Client Users' },
+            { id: 'perm_sidebar_updater', name: 'view:sidebar:updater', description: 'View Updater' },
+            { id: 'perm_sidebar_logs', name: 'view:sidebar:logs', description: 'View System Logs' },
+            { id: 'perm_sidebar_license', name: 'view:sidebar:license', description: 'View License Page' },
+            { id: 'perm_sidebar_super_admin', name: 'view:sidebar:super_admin', description: 'View Super Admin' }
+        ];
+        for (const p of sidebarPerms) {
+            await db.run("INSERT OR IGNORE INTO permissions (id, name, description) VALUES (?, ?, ?)", p.id, p.name, p.description);
+        }
+
         // Business Data Tables
         await db.exec(`
             CREATE TABLE IF NOT EXISTS routers (

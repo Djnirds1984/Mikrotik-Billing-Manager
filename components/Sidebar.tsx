@@ -62,7 +62,7 @@ const TerminalIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, companySettings, isOpen, setIsOpen, licenseStatus }) => {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { t } = useLocalization();
   const { unreadCount } = useNotifications();
   
@@ -99,15 +99,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     const isSuperadmin = user.role.name.toLowerCase() === 'superadmin';
 
     return navItems.filter(item => {
-      if (item.id === 'super_admin' && !isSuperadmin) {
-        return false;
-      }
-      if (item.id === 'panel_roles' && !isAdmin && !isSuperadmin) {
-        return false;
-      }
-      return true;
+      if (item.id === 'super_admin' && !isSuperadmin) return false;
+      if (item.id === 'panel_roles' && !isAdmin && !isSuperadmin) return false;
+      const permName = `view:sidebar:${item.id}`;
+      return hasPermission(permName);
     });
-  }, [navItems, user]);
+  }, [navItems, user, hasPermission]);
 
   const licensedViews: View[] = [
       'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
