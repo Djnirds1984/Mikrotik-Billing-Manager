@@ -1384,6 +1384,49 @@ async function startServer() {
     });
     
     app.use('/api/superadmin', superRouter);
+    
+    const API_BACKEND_URL = 'http://127.0.0.1:3002';
+    const forward = async (method, url, req, res, data) => {
+        try {
+            const r = await axios({
+                method,
+                url: API_BACKEND_URL + url,
+                data,
+                headers: {
+                    authorization: req.headers.authorization || '',
+                    'content-type': req.headers['content-type'] || 'application/json'
+                },
+                timeout: 15000
+            });
+            res.status(r.status).send(r.data);
+        } catch (e) {
+            const s = e.response ? e.response.status : 500;
+            const m = e.response?.data || { message: e.message };
+            res.status(s).send(m);
+        }
+    };
+    
+    app.get('/api/roles', protect, async (req, res) => {
+        await forward('GET', '/api/roles', req, res);
+    });
+    app.get('/api/permissions', protect, async (req, res) => {
+        await forward('GET', '/api/permissions', req, res);
+    });
+    app.get('/api/panel-users', protect, async (req, res) => {
+        await forward('GET', '/api/panel-users', req, res);
+    });
+    app.post('/api/panel-users', protect, async (req, res) => {
+        await forward('POST', '/api/panel-users', req, res, req.body);
+    });
+    app.delete('/api/panel-users/:id', protect, async (req, res) => {
+        await forward('DELETE', `/api/panel-users/${req.params.id}`, req, res);
+    });
+    app.get('/api/roles/:roleId/permissions', protect, async (req, res) => {
+        await forward('GET', `/api/roles/${req.params.roleId}/permissions`, req, res);
+    });
+    app.put('/api/roles/:roleId/permissions', protect, async (req, res) => {
+        await forward('PUT', `/api/roles/${req.params.roleId}/permissions`, req, res, req.body);
+    });
 
     // --- VITE MIDDLEWARE ---
     app.use(vite.middlewares);
