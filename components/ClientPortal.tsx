@@ -14,6 +14,10 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [invoiceToView, setInvoiceToView] = useState<any | null>(null);
   const [invoiceToPrint, setInvoiceToPrint] = useState<any | null>(null);
   const [panelSettings, setPanelSettings] = useState<any | null>(null);
+  useEffect(() => {
+    try { localStorage.setItem('suppressReload', '1'); } catch {}
+    return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
+  }, []);
 
   // We don't need to fetch routers for login anymore as username is unique
   

@@ -13,8 +13,11 @@ const fetchData = async <T>(path: string, options: RequestInit = {}): Promise<T>
     });
     
     if (response.status === 401) {
-        localStorage.removeItem('authToken');
-        window.location.reload();
+        const suppress = localStorage.getItem('suppressReload');
+        if (!suppress) {
+            localStorage.removeItem('authToken');
+            window.location.reload();
+        }
         throw new Error('Session expired. Please log in again.');
     }
   
