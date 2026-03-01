@@ -704,8 +704,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 </div>
                 <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>
             </div>
-            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
-                 <table className="w-full text-sm">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-x-auto">
+                 <table className="w-full text-sm min-w-[900px]">
                     <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                         <tr>
                             <th 
