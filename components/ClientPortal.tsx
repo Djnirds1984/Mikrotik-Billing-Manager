@@ -9,6 +9,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<any | null>(null);
   const [payments, setPayments] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
   const [clientInfo, setClientInfo] = useState<any>(null);
 
   // We don't need to fetch routers for login anymore as username is unique
@@ -64,6 +65,10 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
         const payRes = await fetch(`/api/public/client/payments?routerId=${encodeURIComponent(user.routerId)}&routerName=${encodeURIComponent(rName || '')}&username=${encodeURIComponent(user.pppoeUsername)}`);
         const payData = await payRes.json();
         setPayments(Array.isArray(payData) ? payData : []);
+        
+        const invRes = await fetch(`/api/public/client/invoices?routerId=${encodeURIComponent(user.routerId)}&username=${encodeURIComponent(user.pppoeUsername)}`);
+        const invData = await invRes.json();
+        setInvoices(Array.isArray(invData) ? invData : []);
     } catch (e) {
         console.error("Failed to load status", e);
     }
@@ -99,6 +104,40 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Subscription Expires:</span> {expires || 'Unknown'}</div>
                 <div className="pt-4">
                     <button className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium transition-colors">Pay Now / Renew Subscription</button>
+                </div>
+                </div>
+            </div>
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-sm">
+                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 font-semibold text-slate-800 dark:text-white">Invoices (Auto)</div>
+                <div className="p-4">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left text-slate-600 dark:text-slate-300">
+                    <thead className="text-xs text-slate-700 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-700/50">
+                        <tr>
+                        <th className="px-4 py-2">Issued</th>
+                        <th className="px-4 py-2">Due</th>
+                        <th className="px-4 py-2">Plan</th>
+                        <th className="px-4 py-2">Amount</th>
+                        <th className="px-4 py-2">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {invoices.map((inv, i) => (
+                        <tr key={i} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                            <td className="px-4 py-2">{inv.issueDate ? new Date(inv.issueDate).toLocaleString() : '—'}</td>
+                            <td className="px-4 py-2">{inv.dueDateTime ? new Date(inv.dueDateTime).toLocaleString() : '—'}</td>
+                            <td className="px-4 py-2">{inv.planName || '—'}</td>
+                            <td className="px-4 py-2">₱{Number(inv.amount || 0).toFixed(2)}</td>
+                            <td className="px-4 py-2">{inv.status || 'PENDING'}</td>
+                        </tr>
+                        ))}
+                        {invoices.length === 0 && (
+                        <tr>
+                            <td colSpan={5} className="px-4 py-6 text-center text-slate-500">No invoices.</td>
+                        </tr>
+                        )}
+                    </tbody>
+                    </table>
                 </div>
                 </div>
             </div>

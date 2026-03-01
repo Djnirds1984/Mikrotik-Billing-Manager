@@ -223,6 +223,20 @@ async function initDb() {
                 clientContact TEXT,
                 clientEmail TEXT
             );
+            CREATE TABLE IF NOT EXISTS client_invoices (
+                id TEXT PRIMARY KEY,
+                routerId TEXT,
+                username TEXT,
+                accountNumber TEXT,
+                source TEXT, -- 'pppoe' | 'dhcp'
+                planName TEXT,
+                planId TEXT,
+                amount REAL,
+                currency TEXT,
+                dueDateTime TEXT,
+                issueDate TEXT,
+                status TEXT DEFAULT 'PENDING' -- PENDING | PAID | EXPIRED | CANCELED
+            );
             CREATE TABLE IF NOT EXISTS inventory (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -852,6 +866,15 @@ async function startServer() {
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
     
+    app.get('/api/public/client/invoices', async (req, res) => {
+        try {
+            const { routerId, username } = req.query;
+            if (!routerId || !username) return res.status(400).json({ message: 'routerId and username are required' });
+            const rows = await db.all('SELECT id, planName, amount, currency, dueDateTime, issueDate, status FROM client_invoices WHERE routerId = ? AND username = ? ORDER BY issueDate DESC', [routerId, username]);
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+    
     app.post('/api/public/inquiry', express.json(), async (req, res) => {
         try {
             const { name, email, phone, message, planName } = req.body || {};
@@ -904,6 +927,74 @@ async function startServer() {
         }
     });
 
+    const parseDue = (comment) => {
+        try {
+            const c = JSON.parse(String(comment || '{}'));
+            if (c.dueDateTime) return new Date(c.dueDateTime);
+            if (c.dueDate) return new Date(`${c.dueDate}T23:59:59`);
+        } catch (_) {}
+        return null;
+    };
+    const getPlanPricing = async (routerId, planName, planId) => {
+        let row = null;
+        if (planId) row = await db.get('SELECT price, currency, name FROM billing_plans WHERE id = ? AND routerId = ?', [planId, routerId]);
+        if (!row && planName) row = await db.get('SELECT price, currency, name FROM billing_plans WHERE name = ? AND routerId = ?', [planName, routerId]);
+        return row ? { amount: row.price, currency: row.currency || 'PHP', planName: row.name } : { amount: 0, currency: 'PHP', planName: planName || '' };
+    };
+    const ensureInvoice = async ({ routerId, username, accountNumber, source, planName, planId, dueDate }) => {
+        if (!dueDate) return;
+        const genTime = new Date(dueDate.getTime() - 3 * 24 * 60 * 60 * 1000);
+        if (Date.now() < genTime.getTime()) return;
+        const existing = await db.get('SELECT id FROM client_invoices WHERE routerId = ? AND username = ? AND dueDateTime = ?', [routerId, username, dueDate.toISOString()]);
+        if (existing) return;
+        const { amount, currency, planName: resolvedName } = await getPlanPricing(routerId, planName, planId);
+        const id = `inv_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+        await db.run(
+            'INSERT INTO client_invoices (id, routerId, username, accountNumber, source, planName, planId, amount, currency, dueDateTime, issueDate, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+            [id, routerId, username, accountNumber || null, source, resolvedName || planName || '', planId || null, amount, currency, dueDate.toISOString(), new Date().toISOString(), 'PENDING']
+        );
+    };
+    const runAutoInvoiceJob = async () => {
+        try {
+            const routers = await db.all('SELECT id, name FROM routers');
+            for (const r of routers) {
+                // PPPoE users via client_users
+                const users = await db.all('SELECT username, pppoe_username, router_id, account_number FROM client_users WHERE router_id = ?', [r.id]);
+                for (const u of users) {
+                    const pppuser = u.pppoe_username || u.username;
+                    try {
+                        const encName = encodeURIComponent(pppuser);
+                        const sec = await axios.get(`http://localhost:3002/${r.id}/ppp/secret?name=${encName}`);
+                        const s = Array.isArray(sec.data) && sec.data.length > 0 ? sec.data[0] : null;
+                        if (s) {
+                            let planName = '';
+                            let planId = '';
+                            let due = parseDue(s.comment);
+                            try {
+                                const c = JSON.parse(String(s.comment || '{}'));
+                                planName = c.planName || c.plan || '';
+                                planId = c.planId || '';
+                            } catch (_) {}
+                            await ensureInvoice({ routerId: r.id, username: pppuser, accountNumber: u.account_number, source: 'pppoe', planName, planId, dueDate: due });
+                        }
+                    } catch (_) {}
+                }
+                // DHCP clients (best-effort)
+                try {
+                    const leases = await axios.get(`http://localhost:3002/${r.id}/ip/dhcp-server/lease/print`);
+                    const list = Array.isArray(leases.data) ? leases.data : [];
+                    for (const l of list) {
+                        const due = parseDue(l.comment) || (l.timeout ? new Date(Date.now() + 0) : null); // timeout not exact date
+                        const cname = l.hostName || l.customerInfo || l.macAddress;
+                        await ensureInvoice({ routerId: r.id, username: String(cname || '').toLowerCase(), accountNumber: null, source: 'dhcp', planName: '', planId: '', dueDate: due });
+                    }
+                } catch (_) {}
+            }
+        } catch (e) {
+            console.warn('Auto-invoice job failed:', e.message);
+        }
+    };
+    setInterval(runAutoInvoiceJob, 60 * 60 * 1000); // hourly
     // --- Captive Chat Endpoints ---
     app.post('/api/captive-message', async (req, res) => {
         try {
