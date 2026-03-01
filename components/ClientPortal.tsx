@@ -90,6 +90,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 font-semibold text-slate-800 dark:text-white">Account Status</div>
                 <div className="p-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">PPPoE Account:</span> {clientInfo?.pppoeUsername}</div>
+                <div><span className="font-medium text-slate-800 dark:text-slate-200">Account Number:</span> {clientInfo?.accountNumber || '—'}</div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Current Plan:</span> {planName}{planPrice ? ` (₱${Number(planPrice).toFixed(2)}/mo)` : ''}</div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Overall Status:</span> <span className={`px-2 py-1 rounded text-xs font-bold ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{overallStatus}</span></div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Subscription Expires:</span> {expires || 'Unknown'}</div>

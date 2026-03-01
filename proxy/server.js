@@ -1140,7 +1140,8 @@ async function startServer() {
                 id: user.id,
                 username: user.username,
                 routerId: user.router_id,
-                pppoeUsername: user.pppoe_username
+                pppoeUsername: user.pppoe_username,
+                accountNumber: user.account_number
             });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
