@@ -18,14 +18,6 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     try { localStorage.setItem('suppressReload', '1'); } catch {}
     return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
   }, []);
-  useEffect(() => {
-    const origReload = window.location.reload;
-    // Disable any forced reloads while in Client Portal
-    (window.location as any).reload = () => {};
-    return () => {
-      (window.location as any).reload = origReload;
-    };
-  }, []);
 
   // We don't need to fetch routers for login anymore as username is unique
   
