@@ -317,26 +317,26 @@ export const LandingPage: React.FC = () => {
             </div>
             {chatStep === 'prefill' ? (
               <div className="p-4 space-y-3">
-                <div className="text-sm text-slate-600 dark:text-slate-300">Punan muna ang detalye bago mag‑chat.</div>
-                <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Pangalan" value={chatName} onChange={e => setChatName(e.target.value)} />
+                <div className="text-sm text-slate-600 dark:text-slate-300">Please enter your details before starting the chat.</div>
+                <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Name" value={chatName} onChange={e => setChatName(e.target.value)} />
                 <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Address" value={chatAddress} onChange={e => setChatAddress(e.target.value)} />
-                <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Account Name o Number" value={chatAccount} onChange={e => setChatAccount(e.target.value)} />
+                <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Account Name or Number" value={chatAccount} onChange={e => setChatAccount(e.target.value)} />
                 {chatError && <div className="text-sm text-red-600 dark:text-red-300">{chatError}</div>}
                 <div className="flex items-center justify-end">
-                  <button onClick={startChat} className="px-4 py-2 rounded-md bg-[--color-primary-600] text-white hover:bg-[--color-primary-700]">Simulan ang Chat</button>
+                  <button onClick={startChat} className="px-4 py-2 rounded-md bg-[--color-primary-600] text-white hover:bg-[--color-primary-700]">Start Chat</button>
                 </div>
               </div>
             ) : (
               <div className="flex-1 flex flex-col">
-                <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+                <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-3">
                   {chatHistory.map((msg, i) => (
-                    <div key={`msg-${i}`} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[75%] p-3 rounded-lg ${msg.role === 'user' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>
+                    <div key={`msg-${i}`} className={`w-full flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} items-start`}>
+                      <div className={`inline-block max-w-[80%] px-3 py-2 rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>
                         <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
                       </div>
                     </div>
                   ))}
-                  {chatLoading && <div className="flex justify-start"><div className="p-3 rounded-lg bg-slate-100 dark:bg-slate-700">...</div></div>}
+                  {chatLoading && <div className="w-full flex justify-start"><div className="px-3 py-2 rounded-2xl bg-slate-100 dark:bg-slate-700">...</div></div>}
                 </div>
                 <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
                   <input
