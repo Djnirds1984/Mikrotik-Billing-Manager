@@ -27,7 +27,7 @@ export const LandingPage: React.FC = () => {
   const [inqMessage, setInqMessage] = useState<string>('');
   const [inqStatus, setInqStatus] = useState<string>('');
   const goto = (path: string) => { window.location.href = path; };
-  useEffect(() => { (async () => { try { const res = await fetch(`/api/public/landing-page?v=${Date.now()}`, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' }); if (res.ok) { const data = await res.json(); localStorage.setItem('lp_config', JSON.stringify(data.config)); setCompanySettings(data.company as CompanySettings); setPanelSettings({ landingPageConfig: data.config } as PanelSettings); } finally { setIsReady(true); } } catch { setIsReady(true); } })(); }, []);
+  useEffect(() => { (async () => { try { const res = await fetch(`/api/public/landing-page?v=${Date.now()}`, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' }); if (res.ok) { const data = await res.json(); localStorage.setItem('lp_config', JSON.stringify(data.config)); setCompanySettings(data.company as CompanySettings); setPanelSettings({ landingPageConfig: data.config } as PanelSettings); } } catch { /* ignore */ } finally { setIsReady(true); } })(); }, []);
   useEffect(() => { const title = cfg.webTitle || companySettings.companyName || 'ISP Panel'; if (title) document.title = title; }, [cfg.webTitle, companySettings.companyName]);
   const scrollTo = (id: string) => { const el = document.querySelector(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); };
   const [chatOpen, setChatOpen] = useState<boolean>(false);
