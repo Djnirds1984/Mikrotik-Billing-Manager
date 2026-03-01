@@ -4,6 +4,7 @@ import { CurrencyDollarIcon, TrashIcon, PrinterIcon } from '../constants.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { dbApi } from '../services/databaseService.ts';
 
 interface SalesReportProps {
     salesData: SaleRecord[];
@@ -28,6 +29,8 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
+    const [invoices, setInvoices] = useState<any[]>([]);
+    const [invLoading, setInvLoading] = useState<boolean>(false);
 
     const filteredSales = useMemo(() => {
         return salesData.filter(sale => {
@@ -53,6 +56,24 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
             return acc;
         }, { totalSales: 0, totalDiscounts: 0, netRevenue: 0, transactions: 0 });
     }, [filteredSales]);
+
+    const loadInvoices = async () => {
+        setInvLoading(true);
+        try {
+            const rows = await dbApi.get('/client-invoices');
+            setInvoices(Array.isArray(rows) ? rows : []);
+        } catch (e) {
+            setInvoices([]);
+        } finally {
+            setInvLoading(false);
+        }
+    };
+    const markInvoice = async (id: string, status: 'PAID' | 'PENDING') => {
+        try {
+            await dbApi.patch(`/client-invoices/${id}`, { status });
+            await loadInvoices();
+        } catch (e) {}
+    };
 
     const handleClear = () => {
         if (window.confirm("Are you sure you want to delete ALL sales records? This action cannot be undone.")) {
@@ -82,6 +103,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         window.addEventListener('afterprint', handleAfterPrint);
         return () => window.removeEventListener('afterprint', handleAfterPrint);
     }, []);
+    useEffect(() => { loadInvoices(); }, []);
 
     return (
         <>
@@ -114,6 +136,53 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                         <StatCard title="Total Sales" value={formatCurrency(summary.totalSales)} icon={<CurrencyDollarIcon className="w-6 h-6 text-sky-500 dark:text-sky-400" />} />
                         <StatCard title="Total Discounts" value={formatCurrency(summary.totalDiscounts)} icon={<CurrencyDollarIcon className="w-6 h-6 text-yellow-500 dark:text-yellow-400" />} />
                         <StatCard title="Transactions" value={summary.transactions} icon={<span className="text-2xl text-slate-500 dark:text-slate-400">#</span>} />
+                    </div>
+                    
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
+                        <div className="p-4 flex justify-between items-center border-b border-slate-200 dark:border-slate-700 no-print">
+                            <div>
+                                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Invoices</h3>
+                                <p className="text-slate-500 dark:text-slate-400 mt-1">Mark as Paid or Pending. Paid invoices are added to Sales.</p>
+                            </div>
+                            <button onClick={loadInvoices} className="px-4 py-2 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-lg font-semibold">Refresh</button>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-900/50">
+                                    <tr>
+                                        <th className="px-4 py-3">Issued</th>
+                                        <th className="px-4 py-3">Due</th>
+                                        <th className="px-4 py-3">Client</th>
+                                        <th className="px-4 py-3">Plan</th>
+                                        <th className="px-4 py-3 text-right">Amount</th>
+                                        <th className="px-4 py-3">Status</th>
+                                        <th className="px-4 py-3 text-center no-print">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {invLoading ? (
+                                        <tr><td colSpan={7} className="text-center py-6 text-slate-500">Loading...</td></tr>
+                                    ) : invoices.length > 0 ? invoices.map(inv => (
+                                        <tr key={inv.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                            <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">{inv.issueDate ? new Date(inv.issueDate).toLocaleString() : '—'}</td>
+                                            <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">{inv.dueDateTime ? new Date(inv.dueDateTime).toLocaleString() : '—'}</td>
+                                            <td className="px-4 py-3">{inv.username}</td>
+                                            <td className="px-4 py-3">{inv.planName || '—'}</td>
+                                            <td className="px-4 py-3 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(inv.amount || 0)}</td>
+                                            <td className="px-4 py-3">
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${String(inv.status).toUpperCase() === 'PAID' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{String(inv.status || 'PENDING').toUpperCase()}</span>
+                                            </td>
+                                            <td className="px-4 py-3 text-center no-print space-x-2">
+                                                <button onClick={() => markInvoice(inv.id, 'PAID')} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700">Mark Paid</button>
+                                                <button onClick={() => markInvoice(inv.id, 'PENDING')} className="px-3 py-1 text-sm bg-yellow-500 text-white rounded-md font-semibold hover:bg-yellow-600">Mark Pending</button>
+                                            </td>
+                                        </tr>
+                                    )) : (
+                                        <tr><td colSpan={7} className="text-center py-8 text-slate-500">No invoices found.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                     
                      {/* Filters and Table */}

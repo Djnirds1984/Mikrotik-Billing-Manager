@@ -221,7 +221,8 @@ async function initDb() {
                 currency TEXT,
                 clientAddress TEXT,
                 clientContact TEXT,
-                clientEmail TEXT
+                clientEmail TEXT,
+                invoiceId TEXT
             );
             CREATE TABLE IF NOT EXISTS client_invoices (
                 id TEXT PRIMARY KEY,
@@ -354,6 +355,13 @@ async function initDb() {
             const dhcpClientColNames = dhcpClientCols.map(c => c.name);
             if (!dhcpClientColNames.includes('accountNumber')) {
                 await db.exec("ALTER TABLE dhcp_clients ADD COLUMN accountNumber TEXT");
+            }
+        } catch (_) {}
+        try {
+            const salesCols = await db.all("PRAGMA table_info(sales_records)");
+            const salesColNames = salesCols.map(c => c.name);
+            if (!salesColNames.includes('invoiceId')) {
+                await db.exec("ALTER TABLE sales_records ADD COLUMN invoiceId TEXT");
             }
         } catch (_) {}
         console.log('Database initialized successfully');
@@ -611,6 +619,35 @@ async function startServer() {
                         }
                     }
                 }
+                if (table === 'client_invoices') {
+                    const existing = await db.get('SELECT * FROM client_invoices WHERE id = ?', [id]);
+                    const newStatus = req.body.status ? String(req.body.status) : existing?.status;
+                    if (existing && existing.status !== 'PAID' && newStatus === 'PAID') {
+                        const already = await db.get('SELECT id FROM sales_records WHERE invoiceId = ?', [id]);
+                        if (!already) {
+                            const router = await db.get('SELECT name FROM routers WHERE id = ?', [existing.routerId]);
+                            const saleId = `sale_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+                            await db.run(
+                                `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, routerName, currency, clientAddress, clientContact, clientEmail, invoiceId)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                [
+                                    saleId,
+                                    existing.routerId,
+                                    new Date().toISOString(),
+                                    existing.username,
+                                    existing.planName || '',
+                                    existing.amount || 0,
+                                    0,
+                                    existing.amount || 0,
+                                    router?.name || '',
+                                    existing.currency || 'PHP',
+                                    null, null, null,
+                                    existing.id
+                                ]
+                            );
+                        }
+                    }
+                }
                 const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
                 const values = [...Object.values(req.body), id];
                 await db.run(`UPDATE ${table} SET ${updates} WHERE id = ?`, values);
@@ -640,6 +677,7 @@ async function startServer() {
     createCrud('/time-records', 'time_records');
     createCrud('/dhcp-billing-plans', 'dhcp_billing_plans');
     createCrud('/dhcp_clients', 'dhcp_clients');
+    createCrud('/client-invoices', 'client_invoices');
     createCrud('/sales', 'sales_records');
     createCrud('/applications', 'applications');
 
