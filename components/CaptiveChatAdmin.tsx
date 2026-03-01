@@ -162,6 +162,7 @@ export const CaptiveChatAdmin: React.FC = () => {
               placeholder={selectedIp ? `Reply to ${selectedIp}...` : 'Select a thread to reply'}
               className="flex-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-md border border-slate-200 dark:border-slate-600"
               disabled={!selectedIp || isSending}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply(); } }}
             />
             <button
               onClick={handleReply}

@@ -35,7 +35,9 @@ export const LandingPage: React.FC = () => {
         const resp = await fetch('/api/captive-thread');
         if (!resp.ok) return;
         const data = await resp.json();
-        const msgs = (data as any[]).map(n => ({ role: n.type === 'admin-reply' ? 'model' : 'user', content: String(n.message || '') }));
+        const msgs = (data as any[])
+          .filter(n => String(n.message || '').toLowerCase().indexOf('chat started') !== 0)
+          .map(n => ({ role: n.type === 'admin-reply' ? 'model' : 'user', content: String(n.message || '') }));
         if (msgs.length > 0) setChatHistory(msgs);
       } catch {}
     };
@@ -297,8 +299,8 @@ export const LandingPage: React.FC = () => {
                 <div className="flex-1 p-4 space-y-4 overflow-y-auto">
                   {chatHistory.map((msg, i) => (
                     <div key={`msg-${i}`} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>
-                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      <div className={`max-w-[75%] p-3 rounded-lg ${msg.role === 'user' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>
+                        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
                       </div>
                     </div>
                   ))}
@@ -311,6 +313,7 @@ export const LandingPage: React.FC = () => {
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Type your message..."
                     className="flex-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-md border border-slate-200 dark:border-slate-600"
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
                   />
                   <button
                     onClick={sendChat}
