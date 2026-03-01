@@ -328,7 +328,7 @@ export const LandingPage: React.FC = () => {
               </div>
             ) : (
               <div className="flex-1 flex flex-col">
-                <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-3">
+                <div className="flex-1 p-4 overflow-y-auto flex flex-col space-y-3">
                   {chatHistory.map((msg, i) => (
                     <div key={`msg-${i}`} className={`w-full flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} items-start`}>
                       <div className={`inline-block max-w-[80%] px-3 py-2 rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>
