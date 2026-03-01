@@ -88,7 +88,8 @@ async function initDb() {
                 dbUser TEXT,
                 dbPassword TEXT,
                 dbName TEXT,
-                notificationSettings TEXT
+                notificationSettings TEXT,
+                landingPageConfig TEXT
             );
             INSERT OR IGNORE INTO settings (id) VALUES (1);
         `);
@@ -100,6 +101,7 @@ async function initDb() {
         if (!columnNames.includes('xenditSettings')) await db.exec("ALTER TABLE settings ADD COLUMN xenditSettings TEXT");
         if (!columnNames.includes('databaseEngine')) await db.exec("ALTER TABLE settings ADD COLUMN databaseEngine TEXT DEFAULT 'sqlite'");
         if (!columnNames.includes('notificationSettings')) await db.exec("ALTER TABLE settings ADD COLUMN notificationSettings TEXT");
+        if (!columnNames.includes('landingPageConfig')) await db.exec("ALTER TABLE settings ADD COLUMN landingPageConfig TEXT");
 
         // Users & Roles
         await db.exec(`
@@ -613,6 +615,7 @@ async function startServer() {
                 try { s.telegramSettings = JSON.parse(s.telegramSettings); } catch(e) {}
                 try { s.xenditSettings = JSON.parse(s.xenditSettings); } catch(e) {}
                 try { s.notificationSettings = JSON.parse(s.notificationSettings); } catch(e) {}
+                try { s.landingPageConfig = JSON.parse(s.landingPageConfig); } catch(e) {}
             }
             res.json(s || {});
         } catch (e) {
@@ -647,6 +650,7 @@ async function startServer() {
             if (data.telegramSettings) data.telegramSettings = JSON.stringify(data.telegramSettings);
             if (data.xenditSettings) data.xenditSettings = JSON.stringify(data.xenditSettings);
             if (data.notificationSettings) data.notificationSettings = JSON.stringify(data.notificationSettings);
+            if (data.landingPageConfig) data.landingPageConfig = JSON.stringify(data.landingPageConfig);
             
             const keys = Object.keys(data);
             const values = Object.values(data);

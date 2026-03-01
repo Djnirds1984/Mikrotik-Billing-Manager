@@ -432,6 +432,33 @@ export interface XenditSettings {
     webhookToken: string;
 }
 
+export interface LandingPagePage {
+    id: string;
+    label: string;
+}
+
+export interface LandingPagePlan {
+    name: string;
+    speedText?: string;
+    priceText: string;
+    ctaLabel?: string;
+}
+
+export interface LandingPageFeature {
+    title: string;
+    description: string;
+}
+
+export interface LandingPageConfig {
+    webTitle?: string;
+    heroBadge?: string;
+    heroTitle?: string;
+    heroSubtitle?: string;
+    pages?: LandingPagePage[];
+    features?: LandingPageFeature[];
+    plans?: LandingPagePlan[];
+}
+
 export interface PanelSettings {
     language: 'en' | 'fil' | 'es' | 'pt';
     currency: 'USD' | 'PHP' | 'EUR' | 'BRL';
@@ -448,6 +475,7 @@ export interface PanelSettings {
     };
     telegramSettings?: TelegramSettings;
     xenditSettings?: XenditSettings;
+    landingPageConfig?: LandingPageConfig;
 }
 
 export interface PanelNtpStatus {

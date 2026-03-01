@@ -176,7 +176,93 @@ const XenditTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch
     );
 };
 
-type Tab = 'panel' | 'ai' | 'telegram' | 'xendit';
+const GlobeIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 2c2.21 0 4.21.896 5.656 2.344A8 8 0 0112 20a8 8 0 01-5.656-13.656A7.976 7.976 0 0112 4zm0 2c-1.657 0-3 3.134-3 6s1.343 6 3 6 3-3.134 3-6-1.343-6-3-6zm-8 6c0-.69.111-1.353.316-1.972A9.964 9.964 0 004 12c0 .69.111 1.353.316 1.972A9.964 9.964 0 004 12zm16 0c0-.69-.111-1.353-.316-1.972.205.619.316 1.282.316 1.972 0 .69-.111 1.353-.316 1.972.205-.619.316-1.282.316-1.972z"/>
+    </svg>
+);
+
+const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
+    const cfg = settings.landingPageConfig || {};
+    const updateCfg = (key: keyof NonNullable<PanelSettings['landingPageConfig']>, value: any) => {
+        setSettings(s => ({ ...s, landingPageConfig: { ...(s.landingPageConfig || {}), [key]: value } }));
+    };
+    const updateArrayItem = <T extends any[]>(key: keyof NonNullable<PanelSettings['landingPageConfig']>, index: number, field: string, value: any) => {
+        const arr = ((cfg as any)[key] as T) || ([] as unknown as T);
+        const next = arr.map((it: any, i: number) => i === index ? { ...it, [field]: value } : it);
+        updateCfg(key, next);
+    };
+    const addArrayItem = (key: keyof NonNullable<PanelSettings['landingPageConfig']>, item: any) => {
+        const arr = ((cfg as any)[key] as any[]) || [];
+        updateCfg(key, [...arr, item]);
+    };
+    const removeArrayItem = (key: keyof NonNullable<PanelSettings['landingPageConfig']>, index: number) => {
+        const arr = ((cfg as any)[key] as any[]) || [];
+        updateCfg(key, arr.filter((_, i) => i !== index));
+    };
+
+    return (
+        <div className="space-y-8">
+            <SettingsSection title="Landing Page Basics">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <TextInput label="Web Title" name="webTitle" value={cfg.webTitle || ''} onChange={e => updateCfg('webTitle', e.target.value)} />
+                    <TextInput label="Hero Badge" name="heroBadge" value={cfg.heroBadge || ''} onChange={e => updateCfg('heroBadge', e.target.value)} />
+                    <TextInput label="Hero Title" name="heroTitle" value={cfg.heroTitle || ''} onChange={e => updateCfg('heroTitle', e.target.value)} />
+                    <TextInput label="Hero Subtitle" name="heroSubtitle" value={cfg.heroSubtitle || ''} onChange={e => updateCfg('heroSubtitle', e.target.value)} />
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="Navigation Pages">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {(cfg.pages || []).map((p: any, idx: number) => (
+                            <div key={`page-${idx}`} className="space-y-2 border border-slate-200 dark:border-slate-700 rounded-md p-3">
+                                <TextInput label="Label" name={`page_label_${idx}`} value={p.label || ''} onChange={e => updateArrayItem('pages', idx, 'label', e.target.value)} />
+                                <TextInput label="Section ID" name={`page_id_${idx}`} value={p.id || ''} onChange={e => updateArrayItem('pages', idx, 'id', e.target.value)} />
+                                <button onClick={() => removeArrayItem('pages', idx)} className="px-3 py-2 bg-red-600 text-white rounded-md">Remove</button>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={() => addArrayItem('pages', { id: 'custom', label: 'Custom' })} className="px-4 py-2 bg-slate-700 text-white rounded-md">Add Page</button>
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="Features">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {(cfg.features || []).map((f: any, idx: number) => (
+                            <div key={`feat-${idx}`} className="space-y-2 border border-slate-200 dark:border-slate-700 rounded-md p-3">
+                                <TextInput label="Title" name={`feat_title_${idx}`} value={f.title || ''} onChange={e => updateArrayItem('features', idx, 'title', e.target.value)} />
+                                <TextInput label="Description" name={`feat_desc_${idx}`} value={f.description || ''} onChange={e => updateArrayItem('features', idx, 'description', e.target.value)} />
+                                <button onClick={() => removeArrayItem('features', idx)} className="px-3 py-2 bg-red-600 text-white rounded-md">Remove</button>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={() => addArrayItem('features', { title: 'New Feature', description: '' })} className="px-4 py-2 bg-slate-700 text-white rounded-md">Add Feature</button>
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="Plans">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {(cfg.plans || []).map((p: any, idx: number) => (
+                            <div key={`plan-${idx}`} className="space-y-2 border border-slate-200 dark:border-slate-700 rounded-md p-3">
+                                <TextInput label="Name" name={`plan_name_${idx}`} value={p.name || ''} onChange={e => updateArrayItem('plans', idx, 'name', e.target.value)} />
+                                <TextInput label="Speed Text" name={`plan_speed_${idx}`} value={p.speedText || ''} onChange={e => updateArrayItem('plans', idx, 'speedText', e.target.value)} />
+                                <TextInput label="Price Text" name={`plan_price_${idx}`} value={p.priceText || ''} onChange={e => updateArrayItem('plans', idx, 'priceText', e.target.value)} />
+                                <TextInput label="CTA Label" name={`plan_cta_${idx}`} value={p.ctaLabel || ''} onChange={e => updateArrayItem('plans', idx, 'ctaLabel', e.target.value)} />
+                                <button onClick={() => removeArrayItem('plans', idx)} className="px-3 py-2 bg-red-600 text-white rounded-md">Remove</button>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={() => addArrayItem('plans', { name: 'New Plan', speedText: '', priceText: '', ctaLabel: 'Inquire' })} className="px-4 py-2 bg-slate-700 text-white rounded-md">Add Plan</button>
+                </div>
+            </SettingsSection>
+        </div>
+    );
+};
+
+type Tab = 'panel' | 'ai' | 'telegram' | 'xendit' | 'landing-page';
 
 export const SystemSettings: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('panel');
@@ -242,6 +328,7 @@ export const SystemSettings: React.FC = () => {
         { id: 'ai', label: 'AI', icon: <KeyIcon className="w-5 h-5" /> },
         { id: 'telegram', label: 'Telegram', icon: <MessageIcon className="w-5 h-5" /> },
         { id: 'xendit', label: 'Xendit', icon: <XenditIcon className="w-5 h-5" /> },
+        { id: 'landing-page', label: 'Landing Page', icon: <GlobeIcon className="w-5 h-5" /> },
     ];
     
     const renderContent = () => {
@@ -253,6 +340,7 @@ export const SystemSettings: React.FC = () => {
             case 'ai': return <AiTab settings={settings} setSettings={setSettings} />;
             case 'telegram': return <TelegramTab settings={settings} setSettings={setSettings} onTest={handleTestTelegram} isTesting={isTesting} />;
             case 'xendit': return <XenditTab settings={settings} setSettings={setSettings} />;
+            case 'landing-page': return <LandingPageTab settings={settings} setSettings={setSettings} />;
             default: return null;
         }
     };
