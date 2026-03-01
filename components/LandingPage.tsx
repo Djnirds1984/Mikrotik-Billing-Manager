@@ -97,24 +97,21 @@ export const LandingPage: React.FC = () => {
           </div>
         </section>
 
-        <section id="plans" className="mx-auto max-w-7xl px-6 py-16">
-          <h2 className="text-2xl font-bold">Sample Plans</h2>
-          <p className="text-slate-600 dark:text-slate-300 text-sm mt-1">Customize these in the admin panel.</p>
-          <div className="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {(cfg.plans && cfg.plans.length > 0 ? cfg.plans : [
-              { name: 'Starter', speedText: '5 Mbps', priceText: '₱499 / mo', ctaLabel: 'Inquire' },
-              { name: 'Home 10', speedText: '10 Mbps', priceText: '₱799 / mo', ctaLabel: 'Inquire' },
-              { name: 'Home 20', speedText: '20 Mbps', priceText: '₱1,099 / mo', ctaLabel: 'Inquire' },
-            ]).map(p => (
-              <div key={p.name} className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-                <div className="font-semibold">{p.name}</div>
-                {p.speedText && <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{p.speedText}</div>}
-                <div className="mt-2 text-[--color-primary-500] font-bold">{p.priceText}</div>
-                <button className="mt-4 w-full px-4 py-2 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">{p.ctaLabel || 'Inquire'}</button>
-              </div>
-            ))}
-          </div>
-        </section>
+        {(Array.isArray(cfg.plans) && cfg.plans.length > 0) && (
+          <section id="plans" className="mx-auto max-w-7xl px-6 py-16">
+            <h2 className="text-2xl font-bold">Plans</h2>
+            <div className="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {cfg.plans.map(p => (
+                <div key={p.name} className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                  <div className="font-semibold">{p.name}</div>
+                  {p.speedText && <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{p.speedText}</div>}
+                  <div className="mt-2 text-[--color-primary-500] font-bold">{p.priceText}</div>
+                  <button className="mt-4 w-full px-4 py-2 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">{p.ctaLabel || 'Inquire'}</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         {(cfg.pages || []).filter(p => !['features','plans','contact'].includes(p.id)).map(p => (
           <section key={`sec-${p.id}`} id={p.id} className="mx-auto max-w-7xl px-6 py-16">
             <h2 className="text-2xl font-bold">{p.label}</h2>
