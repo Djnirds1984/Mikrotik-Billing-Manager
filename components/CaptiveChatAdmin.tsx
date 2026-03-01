@@ -41,15 +41,30 @@ export const CaptiveChatAdmin: React.FC = () => {
     const map = new Map<string, CaptiveNotif[]>();
     for (const m of messages) {
       let ip = '';
+      let meta: { name?: string; account?: string; channel?: string } = {};
       try {
         const ctx = JSON.parse(m.context_json || '{}');
         ip = ctx.ip || '';
+        meta = { name: ctx.name, account: ctx.account, channel: ctx.channel };
       } catch (_) {}
       if (!ip) continue;
       if (!map.has(ip)) map.set(ip, []);
       map.get(ip)!.push(m);
     }
-    return Array.from(map.entries()).map(([ip, msgs]) => ({ ip, msgs }));
+    return Array.from(map.entries()).map(([ip, msgs]) => {
+      let name: string | undefined;
+      let account: string | undefined;
+      let channel: string | undefined;
+      for (const m of msgs) {
+        try {
+          const ctx = JSON.parse(m.context_json || '{}');
+          name = name || ctx.name;
+          account = account || ctx.account;
+          channel = channel || ctx.channel;
+        } catch {}
+      }
+      return { ip, msgs, name, account, channel };
+    });
   }, [messages]);
 
   const selectedThread = threads.find(t => t.ip === selectedIp) || null;
@@ -97,6 +112,11 @@ export const CaptiveChatAdmin: React.FC = () => {
                       className={`w-full text-left px-4 py-3 border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 ${selectedIp === t.ip ? 'bg-slate-100 dark:bg-slate-700/60' : ''}`}
                     >
                       <div className="font-mono">{t.ip}</div>
+                      {(t.name || t.account || t.channel) && (
+                        <div className="text-xs text-slate-500">
+                          {(t.name || '').toString()} {(t.account ? `• ${t.account}` : '')} {(t.channel ? `• ${t.channel}` : '')}
+                        </div>
+                      )}
                       <div className="text-xs text-slate-500">{t.msgs.length} message(s)</div>
                     </button>
                   </li>

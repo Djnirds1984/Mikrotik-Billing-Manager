@@ -17,6 +17,76 @@ export const LandingPage: React.FC = () => {
   useEffect(() => { (async () => { try { const res = await fetch(`/api/public/landing-page?v=${Date.now()}`, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' }); if (res.ok) { const data = await res.json(); setCompanySettings(data.company as CompanySettings); setPanelSettings({ landingPageConfig: data.config } as PanelSettings); } } catch {} })(); }, []);
   useEffect(() => { const title = cfg.webTitle || companySettings.companyName || 'ISP Panel'; if (title) document.title = title; }, [cfg.webTitle, companySettings.companyName]);
   const scrollTo = (id: string) => { const el = document.querySelector(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); };
+  const [chatOpen, setChatOpen] = useState<boolean>(false);
+  const [chatStep, setChatStep] = useState<'prefill'|'chat'>('prefill');
+  const [chatChannel, setChatChannel] = useState<'inquiry'|'complaint'>('inquiry');
+  const [chatName, setChatName] = useState<string>('');
+  const [chatAddress, setChatAddress] = useState<string>('');
+  const [chatAccount, setChatAccount] = useState<string>('');
+  const [chatHistory, setChatHistory] = useState<{ role: 'user'|'model'; content: string }[]>([]);
+  const [chatInput, setChatInput] = useState<string>('');
+  const [chatLoading, setChatLoading] = useState<boolean>(false);
+  const [chatError, setChatError] = useState<string>('');
+  useEffect(() => { if (chatOpen) { setChatStep('prefill'); setChatHistory([]); setChatInput(''); setChatError(''); } }, [chatOpen]);
+  useEffect(() => {
+    let timer: number | null = null;
+    const loadThread = async () => {
+      try {
+        const resp = await fetch('/api/captive-thread');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const msgs = (data as any[]).map(n => ({ role: n.type === 'admin-reply' ? 'model' : 'user', content: String(n.message || '') }));
+        if (msgs.length > 0) setChatHistory(msgs);
+      } catch {}
+    };
+    if (chatOpen && chatStep === 'chat') {
+      loadThread();
+      timer = window.setInterval(loadThread, 5000);
+    }
+    return () => { if (timer) window.clearInterval(timer); };
+  }, [chatOpen, chatStep]);
+  const startChat = async () => {
+    setChatError('');
+    if (!chatName.trim() || !chatAddress.trim() || !chatAccount.trim()) { setChatError('Punan ang Pangalan, Address, at Account bago mag‑chat.'); return; }
+    try {
+      const resp = await fetch('/api/public/chat-start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: chatName.trim(), address: chatAddress.trim(), account: chatAccount.trim(), channel: chatChannel })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ message: 'Hindi ma‑initialize ang chat.' }));
+        setChatError(err.message || 'Hindi ma‑initialize ang chat.');
+        return;
+      }
+      setChatStep('chat');
+      setChatHistory([{ role: 'model', content: chatChannel === 'complaint' ? 'Magsumite ng reklamo dito. Sasagutin ng admin.' : 'Mag‑inquire dito. Sasagutin ng admin.' }]);
+    } catch {
+      setChatError('Nagka‑error sa pag‑start ng chat.');
+    }
+  };
+  const sendChat = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const msg = chatInput.trim();
+    const newHistory = [...chatHistory, { role: 'user', content: msg }];
+    setChatHistory(newHistory);
+    setChatInput('');
+    setChatLoading(true);
+    try {
+      const resp = await fetch('/api/captive-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, name: chatName, address: chatAddress, account: chatAccount, channel: chatChannel })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.message || 'Hindi naipadala ang mensahe.');
+      setChatHistory([...newHistory, { role: 'model', content: 'Naipadala ang iyong mensahe sa admin.' }]);
+    } catch (e) {
+      setChatHistory([...newHistory, { role: 'model', content: `Nagka‑error sa pagpapadala: ${(e as Error).message}` }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
   const submitInquiry = async () => {
     setInqStatus('Submitting...');
     try {
@@ -194,6 +264,67 @@ export const LandingPage: React.FC = () => {
           </div>
         </div>
       </footer>
+      
+      <button
+        onClick={() => setChatOpen(true)}
+        className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white rounded-full p-3 sm:p-4 shadow-lg z-40 transition-transform hover:scale-110"
+      >
+        Chat
+      </button>
+      {chatOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg h-[70vh] border border-slate-200 dark:border-slate-700 flex flex-col">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setChatChannel('inquiry')} className={`px-3 py-1 rounded-md text-sm ${chatChannel === 'inquiry' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>Inquiry</button>
+                <button onClick={() => setChatChannel('complaint')} className={`px-3 py-1 rounded-md text-sm ${chatChannel === 'complaint' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>Complaints</button>
+              </div>
+              <button onClick={() => setChatOpen(false)} className="p-1 text-slate-400 hover:text-slate-800 dark:hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            {chatStep === 'prefill' ? (
+              <div className="p-4 space-y-3">
+                <div className="text-sm text-slate-600 dark:text-slate-300">Punan muna ang detalye bago mag‑chat.</div>
+                <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Pangalan" value={chatName} onChange={e => setChatName(e.target.value)} />
+                <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Address" value={chatAddress} onChange={e => setChatAddress(e.target.value)} />
+                <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Account Name o Number" value={chatAccount} onChange={e => setChatAccount(e.target.value)} />
+                {chatError && <div className="text-sm text-red-600 dark:text-red-300">{chatError}</div>}
+                <div className="flex items-center justify-end">
+                  <button onClick={startChat} className="px-4 py-2 rounded-md bg-[--color-primary-600] text-white hover:bg-[--color-primary-700]">Simulan ang Chat</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col">
+                <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+                  {chatHistory.map((msg, i) => (
+                    <div key={`msg-${i}`} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>
+                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {chatLoading && <div className="flex justify-start"><div className="p-3 rounded-lg bg-slate-100 dark:bg-slate-700">...</div></div>}
+                </div>
+                <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Itype ang mensahe..."
+                    className="flex-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-md border border-slate-200 dark:border-slate-600"
+                  />
+                  <button
+                    onClick={sendChat}
+                    disabled={!chatInput.trim() || chatLoading}
+                    className="px-4 py-2 bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white rounded-md disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

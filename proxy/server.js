@@ -786,7 +786,7 @@ async function startServer() {
     // --- Captive Chat Endpoints ---
     app.post('/api/captive-message', async (req, res) => {
         try {
-            const { message } = req.body;
+            const { message, name, address, account, channel } = req.body || {};
             let clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '').trim();
             if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
             clientIp = clientIp.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
@@ -800,13 +800,51 @@ async function startServer() {
                 is_read: 0,
                 timestamp: new Date().toISOString(),
                 link_to: 'dhcp-portal',
-                context_json: JSON.stringify({ ip: clientIp })
+                context_json: JSON.stringify({
+                    ip: clientIp,
+                    name: name || undefined,
+                    address: address || undefined,
+                    account: account || undefined,
+                    channel: channel === 'complaint' ? 'complaint' : 'inquiry'
+                })
             };
             await db.run(
                 'INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
                 notif.id, notif.type, notif.message, notif.is_read, notif.timestamp, notif.link_to, notif.context_json
             );
             res.status(201).json({ message: 'Message sent successfully.' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.post('/api/public/chat-start', async (req, res) => {
+        try {
+            const { name, address, account, channel } = req.body || {};
+            let clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '').trim();
+            if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
+            clientIp = clientIp.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
+            const label = channel === 'complaint' ? 'complaint' : 'inquiry';
+            const notif = {
+                id: `notif_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+                type: 'client-chat',
+                message: `Chat started (${label})`,
+                is_read: 0,
+                timestamp: new Date().toISOString(),
+                link_to: 'dhcp-portal',
+                context_json: JSON.stringify({
+                    ip: clientIp,
+                    name: String(name || '').trim() || undefined,
+                    address: String(address || '').trim() || undefined,
+                    account: String(account || '').trim() || undefined,
+                    channel: label
+                })
+            };
+            await db.run(
+                'INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                notif.id, notif.type, notif.message, notif.is_read, notif.timestamp, notif.link_to, notif.context_json
+            );
+            res.status(201).json({ message: 'Chat session initialized.' });
         } catch (e) {
             res.status(500).json({ message: e.message });
         }
