@@ -81,7 +81,10 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-6">
         <div className="max-w-5xl mx-auto space-y-6">
             <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded shadow">
-            <h1 className="text-2xl font-semibold text-slate-800 dark:text-white">Welcome, {clientInfo?.username}!</h1>
+            <h1 className="text-2xl font-semibold text-slate-800 dark:text-white">
+                Welcome, {clientInfo?.username}!
+                <span className="ml-3 text-sm font-normal text-slate-600 dark:text-slate-300">Account Number: {clientInfo?.accountNumber || '—'}</span>
+            </h1>
             <button onClick={() => { setView('login'); setClientInfo(null); setUsername(''); setPassword(''); }} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
             </div>
             
@@ -107,6 +110,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                     <thead className="text-xs text-slate-700 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-700/50">
                         <tr>
                         <th className="px-4 py-2">Date</th>
+                        <th className="px-4 py-2">Account Number</th>
                         <th className="px-4 py-2">Amount</th>
                         <th className="px-4 py-2">Cycle</th>
                         <th className="px-4 py-2">Expiry</th>
@@ -116,6 +120,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                         {payments.map((p, i) => (
                         <tr key={i} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30">
                             <td className="px-4 py-2">{p.date ? new Date(p.date).toLocaleDateString() : '—'}</td>
+                            <td className="px-4 py-2">{clientInfo?.accountNumber || '—'}</td>
                             <td className="px-4 py-2">₱{Number(p.finalAmount ?? p.planPrice ?? 0).toFixed(2)}</td>
                             <td className="px-4 py-2">{p.months ?? p.cycle ?? '1'} mo</td>
                             <td className="px-4 py-2">{p.newExpiry || '—'}</td>
@@ -123,7 +128,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                         ))}
                         {payments.length === 0 && (
                         <tr>
-                            <td colSpan={4} className="px-4 py-6 text-center text-slate-500">No payments found.</td>
+                            <td colSpan={5} className="px-4 py-6 text-center text-slate-500">No payments found.</td>
                         </tr>
                         )}
                     </tbody>

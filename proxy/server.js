@@ -1136,12 +1136,24 @@ async function startServer() {
             const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
             if (hash !== user.password_hash) return res.status(401).json({ message: 'Invalid credentials' });
             
+            let acc = user.account_number;
+            if (!acc || String(acc).trim() === '') {
+                const cust = await db.get('SELECT accountNumber FROM customers WHERE routerId = ? AND username = ?', [user.router_id, user.pppoe_username || user.username]);
+                acc = cust?.accountNumber || '';
+                if (!acc) {
+                    acc = await generateAccountNumber();
+                }
+                await db.run('UPDATE client_users SET account_number = ? WHERE id = ?', [acc, user.id]);
+                if (cust && (!cust.accountNumber || String(cust.accountNumber).trim() === '')) {
+                    await db.run('UPDATE customers SET accountNumber = ? WHERE routerId = ? AND username = ?', [acc, user.router_id, user.pppoe_username || user.username]);
+                }
+            }
             res.json({
                 id: user.id,
                 username: user.username,
                 routerId: user.router_id,
                 pppoeUsername: user.pppoe_username,
-                accountNumber: user.account_number
+                accountNumber: acc
             });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
