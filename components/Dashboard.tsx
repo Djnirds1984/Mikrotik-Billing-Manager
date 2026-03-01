@@ -68,7 +68,7 @@ const TrafficCard: React.FC<{
     return (
         <div className={`bg-white dark:bg-slate-800 rounded-xl border ${isDisabled ? 'border-red-200 dark:border-red-900/50' : 'border-slate-200 dark:border-slate-700'} shadow-sm overflow-hidden flex flex-col h-full relative group transition-colors duration-300`}>
             {/* Header */}
-            <div className={`relative p-4 border-b ${isDisabled ? 'border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50'} flex flex-col sm:flex-row justify-between items-center gap-4 transition-colors duration-300`}>
+            <div className={`relative p-4 border-b ${isDisabled ? 'border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50'} flex flex-col sm:flex-row justify-between items-center gap-4 transition-colors duration-300 min-h-[72px]`}>
                 <div className="flex items-center gap-3 z-10">
                     <div className={`p-2 rounded-lg ${isDisabled ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'}`}>
                         <SignalIcon className="w-5 h-5" />
@@ -91,7 +91,7 @@ const TrafficCard: React.FC<{
                     </div>
                 </div>
 
-                <div className={`flex gap-4 sm:absolute sm:right-10 sm:top-1/2 sm:-translate-y-1/2 text-center pointer-events-none transition-opacity duration-300 ${isDisabled ? 'opacity-50 grayscale' : 'opacity-100'}`}>
+                <div className={`flex gap-4 ml-auto flex-wrap text-center pointer-events-none transition-opacity duration-300 ${isDisabled ? 'opacity-50 grayscale' : 'opacity-100'}`}>
                     <div className="flex flex-col items-center">
                         <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-0.5">Download</p>
                         <p className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">{formatBits(currentRx)}</p>
