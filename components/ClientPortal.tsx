@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import type { RouterConfigWithId } from '../types.ts';
+import type { RouterConfigWithId, PanelSettings } from '../types.ts';
+import { getPanelSettings } from '../services/databaseService.ts';
 
 export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
   const [username, setUsername] = useState('');
@@ -11,6 +12,9 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [payments, setPayments] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [clientInfo, setClientInfo] = useState<any>(null);
+  const [invoiceToView, setInvoiceToView] = useState<any | null>(null);
+  const [invoiceToPrint, setInvoiceToPrint] = useState<any | null>(null);
+  const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
 
   // We don't need to fetch routers for login anymore as username is unique
   
@@ -73,6 +77,19 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
         console.error("Failed to load status", e);
     }
   }
+  
+  useEffect(() => {
+    getPanelSettings().then(setPanelSettings).catch(() => setPanelSettings(null));
+  }, []);
+  
+  const handlePrintInvoice = () => {
+    if (!invoiceToView) return;
+    setInvoiceToPrint(invoiceToView);
+    setTimeout(() => {
+      window.print();
+      setInvoiceToPrint(null);
+    }, 150);
+  };
 
   if (view === 'dashboard') {
     const planName = status?.profile || 'Unknown';
@@ -119,6 +136,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                         <th className="px-4 py-2">Plan</th>
                         <th className="px-4 py-2">Amount</th>
                         <th className="px-4 py-2">Status</th>
+                        <th className="px-4 py-2">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -129,11 +147,14 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                             <td className="px-4 py-2">{inv.planName || '—'}</td>
                             <td className="px-4 py-2">₱{Number(inv.amount || 0).toFixed(2)}</td>
                             <td className="px-4 py-2">{inv.status || 'PENDING'}</td>
+                            <td className="px-4 py-2">
+                              <button onClick={() => setInvoiceToView(inv)} className="px-3 py-1 bg-slate-600 hover:bg-slate-700 text-white rounded-md">View</button>
+                            </td>
                         </tr>
                         ))}
                         {invoices.length === 0 && (
                         <tr>
-                            <td colSpan={5} className="px-4 py-6 text-center text-slate-500">No invoices.</td>
+                            <td colSpan={6} className="px-4 py-6 text-center text-slate-500">No invoices.</td>
                         </tr>
                         )}
                     </tbody>
@@ -175,6 +196,123 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 </div>
                 </div>
             </div>
+            </div>
+            
+            {invoiceToView && (
+              <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 no-print">
+                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg w-full max-w-2xl">
+                  <div className="px-6 py-4 border-b dark:border-slate-700 flex justify-between items-center">
+                    <h3 className="text-lg font-semibold">Invoice</h3>
+                    <div className="flex items-center gap-2">
+                      {String(invoiceToView.status).toUpperCase() === 'PAID' && (
+                        <button onClick={handlePrintInvoice} className="px-3 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-md">Print Invoice</button>
+                      )}
+                      <button onClick={() => setInvoiceToView(null)} className="px-3 py-1 bg-slate-200 dark:bg-slate-700 rounded-md">Close</button>
+                    </div>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div className="w-2/3">
+                        <div className="text-2xl font-bold">{panelSettings?.companyName || 'Your Company'}</div>
+                        {panelSettings?.address && <div className="text-sm">{panelSettings.address}</div>}
+                        {panelSettings?.contactNumber && <div className="text-sm">{panelSettings.contactNumber}</div>}
+                        {panelSettings?.email && <div className="text-sm">{panelSettings.email}</div>}
+                      </div>
+                      {panelSettings?.logoBase64 && (
+                        <div className="w-1/3 flex justify-end">
+                          <img src={panelSettings.logoBase64} alt="" className="h-12 w-auto object-contain" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="font-semibold">Billed To</div>
+                        <div>{invoiceToView.username}</div>
+                        {clientInfo?.accountNumber && <div className="text-sm">Account: {clientInfo.accountNumber}</div>}
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold">INVOICE</div>
+                        <div>Issued: {invoiceToView.issueDate ? new Date(invoiceToView.issueDate).toLocaleString() : '—'}</div>
+                        <div>Due: {invoiceToView.dueDateTime ? new Date(invoiceToView.dueDateTime).toLocaleString() : '—'}</div>
+                        <div className={`inline-block mt-1 px-2 py-1 rounded text-xs font-bold ${String(invoiceToView.status).toUpperCase() === 'PAID' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{String(invoiceToView.status || 'PENDING').toUpperCase()}</div>
+                      </div>
+                    </div>
+                    <div className="border rounded">
+                      <div className="grid grid-cols-2 text-sm">
+                        <div className="p-3 border-r">Plan</div>
+                        <div className="p-3">{invoiceToView.planName || '—'}</div>
+                        <div className="p-3 border-r">Amount</div>
+                        <div className="p-3">₱{Number(invoiceToView.amount || 0).toFixed(2)}</div>
+                        <div className="p-3 border-r">Currency</div>
+                        <div className="p-3">{invoiceToView.currency || 'PHP'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className={invoiceToPrint ? 'printable-area' : 'hidden'}>
+              {invoiceToPrint && panelSettings && (
+                <div className="p-8 font-sans text-black bg-white">
+                  <header className="flex justify-between items-start pb-4 border-b-2 border-black">
+                    <div className="w-2/3">
+                      <div className="text-3xl font-bold">{panelSettings.companyName || 'Your Company'}</div>
+                      {panelSettings.address && <div className="text-sm">{panelSettings.address}</div>}
+                      {panelSettings.contactNumber && <div className="text-sm">{panelSettings.contactNumber}</div>}
+                      {panelSettings.email && <div className="text-sm">{panelSettings.email}</div>}
+                    </div>
+                    {panelSettings.logoBase64 && (
+                      <div className="w-1/3 flex justify-end">
+                        <img src={panelSettings.logoBase64} alt="" className="h-16 w-auto object-contain" />
+                      </div>
+                    )}
+                  </header>
+                  <section className="my-6">
+                    <div className="flex justify-between">
+                      <div>
+                        <div className="font-bold">BILLED TO:</div>
+                        <div>{invoiceToPrint.username}</div>
+                        {clientInfo?.accountNumber && <div className="text-sm">Account: {clientInfo.accountNumber}</div>}
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold">INVOICE</div>
+                        <div>Issued: {invoiceToPrint.issueDate ? new Date(invoiceToPrint.issueDate).toLocaleDateString() : '—'}</div>
+                        <div>Due: {invoiceToPrint.dueDateTime ? new Date(invoiceToPrint.dueDateTime).toLocaleDateString() : '—'}</div>
+                        <div>Status: {String(invoiceToPrint.status || 'PENDING').toUpperCase()}</div>
+                      </div>
+                    </div>
+                  </section>
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-gray-200">
+                      <tr>
+                        <th className="p-2 border border-black">DESCRIPTION</th>
+                        <th className="p-2 border border-black text-right">AMOUNT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="p-2 border border-black">
+                          <div className="font-semibold">{invoiceToPrint.planName || 'Subscription'}</div>
+                          <div className="text-xs text-gray-600">Internet Plan Subscription</div>
+                        </td>
+                        <td className="p-2 border border-black text-right">₱{Number(invoiceToPrint.amount || 0).toFixed(2)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <section className="my-6 flex justify-end">
+                    <div className="w-1/2">
+                      <div className="flex justify-between font-bold text-xl mt-2 pt-2 border-t-2 border-black">
+                        <span>TOTAL:</span>
+                        <span>₱{Number(invoiceToPrint.amount || 0).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </section>
+                  <footer className="mt-8 pt-4 border-t-2 border-dashed border-black text-center">
+                    <div className="font-bold">Thank you!</div>
+                    <div className="text-xs mt-2">This is an invoice document.</div>
+                  </footer>
+                </div>
+              )}
             </div>
         </div>
       </div>
