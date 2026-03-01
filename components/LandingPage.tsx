@@ -47,7 +47,7 @@ export const LandingPage: React.FC = () => {
   }, [chatOpen, chatStep]);
   const startChat = async () => {
     setChatError('');
-    if (!chatName.trim() || !chatAddress.trim() || !chatAccount.trim()) { setChatError('Punan ang Pangalan, Address, at Account bago mag‑chat.'); return; }
+    if (!chatName.trim() || !chatAddress.trim() || !chatAccount.trim()) { setChatError('Please fill Name, Address, and Account before chatting.'); return; }
     try {
       const resp = await fetch('/api/public/chat-start', {
         method: 'POST',
@@ -55,14 +55,14 @@ export const LandingPage: React.FC = () => {
         body: JSON.stringify({ name: chatName.trim(), address: chatAddress.trim(), account: chatAccount.trim(), channel: chatChannel })
       });
       if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ message: 'Hindi ma‑initialize ang chat.' }));
-        setChatError(err.message || 'Hindi ma‑initialize ang chat.');
+        const err = await resp.json().catch(() => ({ message: 'Unable to initialize chat.' }));
+        setChatError(err.message || 'Unable to initialize chat.');
         return;
       }
       setChatStep('chat');
-      setChatHistory([{ role: 'model', content: chatChannel === 'complaint' ? 'Magsumite ng reklamo dito. Sasagutin ng admin.' : 'Mag‑inquire dito. Sasagutin ng admin.' }]);
+      setChatHistory([{ role: 'model', content: chatChannel === 'complaint' ? 'Submit your complaint here. The admin will respond.' : 'Send your inquiry here. The admin will respond.' }]);
     } catch {
-      setChatError('Nagka‑error sa pag‑start ng chat.');
+      setChatError('An error occurred while starting chat.');
     }
   };
   const sendChat = async () => {
@@ -79,10 +79,10 @@ export const LandingPage: React.FC = () => {
         body: JSON.stringify({ message: msg, name: chatName, address: chatAddress, account: chatAccount, channel: chatChannel })
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.message || 'Hindi naipadala ang mensahe.');
-      setChatHistory([...newHistory, { role: 'model', content: 'Naipadala ang iyong mensahe sa admin.' }]);
+      if (!resp.ok) throw new Error(data.message || 'Failed to send message.');
+      setChatHistory([...newHistory, { role: 'model', content: 'Your message has been sent to the admin.' }]);
     } catch (e) {
-      setChatHistory([...newHistory, { role: 'model', content: `Nagka‑error sa pagpapadala: ${(e as Error).message}` }]);
+      setChatHistory([...newHistory, { role: 'model', content: `Error sending message: ${(e as Error).message}` }]);
     } finally {
       setChatLoading(false);
     }
@@ -101,10 +101,10 @@ export const LandingPage: React.FC = () => {
         return;
       }
       const data = await res.json();
-      setInqStatus('Nai-submit na ang inquiry. Salamat!');
+      setInqStatus('Inquiry submitted. Thank you!');
       setInqName(''); setInqEmail(''); setInqPhone(''); setInqMessage('');
     } catch {
-      setInqStatus('Nagka-error sa pag-submit.');
+      setInqStatus('An error occurred while submitting.');
     }
   };
   return (
@@ -206,18 +206,18 @@ export const LandingPage: React.FC = () => {
           <h2 className="text-2xl font-bold">Inquiry Form</h2>
           <div className="mt-4 grid md:grid-cols-2 gap-6">
             <div className="space-y-3">
-              <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Pangalan" value={inqName} onChange={e => setInqName(e.target.value)} />
+              <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Name" value={inqName} onChange={e => setInqName(e.target.value)} />
               <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Email" value={inqEmail} onChange={e => setInqEmail(e.target.value)} />
-              <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Telepono" value={inqPhone} onChange={e => setInqPhone(e.target.value)} />
+              <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Phone" value={inqPhone} onChange={e => setInqPhone(e.target.value)} />
               <select className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" value={selectedPlan} onChange={e => setSelectedPlan(e.target.value)}>
                 <option value="">Plan</option>
                 {(cfg.plans || []).map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
               </select>
             </div>
             <div className="space-y-3">
-              <textarea className="w-full h-[180px] px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Mensahe" value={inqMessage} onChange={e => setInqMessage(e.target.value)} />
+              <textarea className="w-full h-[180px] px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Message" value={inqMessage} onChange={e => setInqMessage(e.target.value)} />
               <div className="flex items-center gap-3">
-                <button onClick={submitInquiry} className="px-4 py-2 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">I-submit</button>
+                <button onClick={submitInquiry} className="px-4 py-2 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">Submit</button>
                 <span className="text-sm text-slate-600 dark:text-slate-300">{inqStatus}</span>
               </div>
             </div>
@@ -309,7 +309,7 @@ export const LandingPage: React.FC = () => {
                     type="text"
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Itype ang mensahe..."
+                    placeholder="Type your message..."
                     className="flex-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-md border border-slate-200 dark:border-slate-600"
                   />
                   <button

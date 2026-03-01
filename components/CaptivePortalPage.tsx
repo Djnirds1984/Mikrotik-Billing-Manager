@@ -183,10 +183,10 @@ export const CaptivePortalPage: React.FC = () => {
                 {status === 'expired' ? (
                     <>
                         <h1 className="text-center text-3xl font-extrabold text-red-600 dark:text-red-400">
-                            Nag-expire na ang iyong account
+                            Your account has expired
                         </h1>
                         <p className="mt-4 text-center text-slate-600 dark:text-slate-300">
-                            Ang internet access ng iyong device ay pansamantalang hinto dahil nag-expire na ang subscription.
+                            Your device’s internet access is temporarily disabled because your subscription has expired.
                         </p>
                         <div className="mt-6 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-md p-4 text-sm">
                             {info?.planName && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">Plan:</span> {info.planName}</p>}
@@ -196,7 +196,7 @@ export const CaptivePortalPage: React.FC = () => {
                             {info?.hostName && <p className="text-slate-700 dark:text-slate-300"><span className="font-semibold">Device:</span> {info.hostName}</p>}
                         </div>
                         <p className="mt-4 text-center text-slate-600 dark:text-slate-300">
-                            Makipag-ugnayan sa administrator para sa renewal at re-activation.
+                            Contact the administrator for renewal and re-activation.
                         </p>
                         <div className="mt-6 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-md p-4 text-sm">
                             <h3 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Contact Information</h3>
@@ -208,8 +208,8 @@ export const CaptivePortalPage: React.FC = () => {
                         <div className="mt-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-md p-4 text-sm">
                             <h3 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Payment Instructions</h3>
                             <p className="text-slate-700 dark:text-slate-300">
-                                Mangyaring magbayad gamit ang paboritong paraan (hal. GCash o bank transfer) at ibigay ang iyong pangalan at MAC address bilang reference. 
-                                Pagkatapos magbayad, makipag-ugnayan sa amin para ma-activate muli ang iyong internet.
+                                Please pay using your preferred method (e.g., e-wallet or bank transfer) and provide your name and MAC address as reference.
+                                After payment, contact us to re-activate your internet access.
                             </p>
                         </div>
                     </>
