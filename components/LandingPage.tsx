@@ -44,7 +44,11 @@ export const LandingPage: React.FC = () => {
   useEffect(() => { if (chatOpen) { setChatStep('prefill'); setChatHistory([]); setChatInput(''); setChatError(''); } }, [chatOpen]);
   useEffect(() => { 
     if (chatOpen && chatStep === 'chat' && messagesRef.current) { 
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight; 
+      requestAnimationFrame(() => {
+        if (messagesRef.current) {
+          messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+        }
+      });
     } 
   }, [chatHistory, chatLoading, chatOpen, chatStep]);
   useEffect(() => {
@@ -313,7 +317,7 @@ export const LandingPage: React.FC = () => {
       </button>
       {chatOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg h-[70vh] border border-slate-200 dark:border-slate-700 flex flex-col">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg h-[70vh] overflow-hidden border border-slate-200 dark:border-slate-700 flex flex-col">
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <button onClick={() => setChatChannel('inquiry')} className={`px-3 py-1 rounded-md text-sm ${chatChannel === 'inquiry' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>Inquiry</button>
@@ -334,7 +338,11 @@ export const LandingPage: React.FC = () => {
               </div>
             ) : (
               <div className="flex-1 flex flex-col">
-                <div ref={messagesRef} className="flex-1 p-4 overflow-y-auto flex flex-col space-y-3" style={{ scrollBehavior: 'smooth' }}>
+                <div
+                  ref={messagesRef}
+                  className="flex-1 p-4 overflow-y-auto flex flex-col space-y-3 pb-24 pr-2"
+                  style={{ scrollBehavior: 'smooth', overscrollBehavior: 'contain' }}
+                >
                   {chatHistory.map((msg, i) => (
                     <div key={`msg-${i}`} className={`w-full flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} items-start`}>
                       <div className={`inline-block max-w-[80%] px-3 py-2 rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>
