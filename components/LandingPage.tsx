@@ -161,9 +161,17 @@ export const LandingPage: React.FC = () => {
             <p className="mt-3 text-xs text-slate-500">{cfg.heroLoginPrompt || 'Have an account?'} <span className="underline cursor-pointer" onClick={() => goto('/login')}>{cfg.heroLoginLabel || 'Login'}</span></p>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-white dark:bg-slate-900">
-            <div className="aspect-[16/10] rounded-lg bg-gradient-to-br from-[--color-primary-300] to-[--color-primary-600] opacity-90 grid place-content-center text-white text-lg font-semibold">
-              {cfg.webTitle || companySettings.companyName || 'ISP Products'}
-            </div>
+            {cfg.adImageBase64 ? (
+              <img
+                src={cfg.adImageBase64}
+                alt={cfg.adImageAlt || (cfg.webTitle || companySettings.companyName || 'Advertising')}
+                className="aspect-[16/10] w-full object-cover rounded-lg"
+              />
+            ) : (
+              <div className="aspect-[16/10] rounded-lg bg-gradient-to-br from-[--color-primary-300] to-[--color-primary-600] opacity-90 grid place-content-center text-white text-lg font-semibold">
+                {cfg.webTitle || companySettings.companyName || 'ISP Products'}
+              </div>
+            )}
             {(cfg.productCards && cfg.productCards.length > 0) && (
               <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                 {cfg.productCards.map((c, i) => (

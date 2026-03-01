@@ -491,6 +491,9 @@ export interface LandingPageConfig {
         accent?: string;
         background?: string;
     };
+    adImageBase64?: string;
+    adImageAlt?: string;
+    adImageLink?: string;
     pages?: LandingPagePage[];
     features?: LandingPageFeature[];
     plans?: LandingPagePlan[];

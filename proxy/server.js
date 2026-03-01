@@ -946,6 +946,29 @@ async function startServer() {
 
     app.use('/api/xendit', xenditRouter);
 
+    // Landing Page Advertising Image Downloader
+    app.post('/api/landing/ad-image-download', protect, async (req, res) => {
+        try {
+            const { url } = req.body || {};
+            if (!url || typeof url !== 'string') return res.status(400).json({ message: 'Image URL is required.' });
+            const resp = await axios.get(url, { responseType: 'arraybuffer' }).catch(e => {
+                throw new Error(`Failed to download image: ${e.message}`);
+            });
+            const ct = resp.headers['content-type'] || '';
+            if (!ct.startsWith('image/')) return res.status(400).json({ message: 'URL must return an image.' });
+            const base64 = Buffer.from(resp.data, 'binary').toString('base64');
+            const dataUrl = `data:${ct};base64,${base64}`;
+            const s = await db.get('SELECT landingPageConfig FROM settings WHERE id = 1');
+            let cfg = {};
+            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            cfg.adImageBase64 = dataUrl;
+            await db.run('UPDATE settings SET landingPageConfig = ? WHERE id = 1', JSON.stringify(cfg));
+            res.json({ message: 'Image saved', adImageBase64: dataUrl });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
 
     // --- Client Portal Endpoints ---
     const clientPortalRouter = express.Router();
