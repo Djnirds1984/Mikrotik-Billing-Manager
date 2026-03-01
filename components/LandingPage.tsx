@@ -8,8 +8,7 @@ export const LandingPage: React.FC = () => {
   const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
   const cfg: LandingPageConfig = panelSettings?.landingPageConfig || {};
   const goto = (path: string) => { window.location.href = path; };
-  useEffect(() => { (async () => { try { const res = await fetch('/api/db/panel-settings', { headers: { 'Content-Type': 'application/json' } }); if (res.ok) { const s = await res.json(); setPanelSettings(s as PanelSettings); } } catch {} })(); }, []);
-  useEffect(() => { (async () => { try { const res = await fetch('/api/db/company-settings', { headers: { 'Content-Type': 'application/json' } }); if (res.ok) { const s = await res.json(); setCompanySettings(s as CompanySettings); } } catch {} })(); }, []);
+  useEffect(() => { (async () => { try { const res = await fetch(`/api/public/landing-page?v=${Date.now()}`, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' }); if (res.ok) { const data = await res.json(); setCompanySettings(data.company as CompanySettings); setPanelSettings({ landingPageConfig: data.config } as PanelSettings); } } catch {} })(); }, []);
   useEffect(() => { const title = cfg.webTitle || companySettings.companyName || 'ISP Panel'; if (title) document.title = title; }, [cfg.webTitle, companySettings.companyName]);
   return (
     <div className="min-h-screen bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">

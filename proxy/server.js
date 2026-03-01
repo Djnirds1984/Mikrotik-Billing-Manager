@@ -694,6 +694,20 @@ async function startServer() {
 
     app.use('/api/db', dbRouter);
 
+    app.get('/api/public/landing-page', async (req, res) => {
+        try {
+            const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
+            let cfg = {};
+            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            res.json({
+                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
+                config: cfg
+            });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     // --- Captive Chat Endpoints ---
     app.post('/api/captive-message', async (req, res) => {
         try {
