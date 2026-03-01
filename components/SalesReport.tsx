@@ -5,6 +5,7 @@ import { PrintableReceipt } from './PrintableReceipt.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { dbApi } from '../services/databaseService.ts';
+import { getAuthHeader } from '../services/databaseService.ts';
 
 interface SalesReportProps {
     salesData: SaleRecord[];
@@ -31,6 +32,12 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
     const [invoices, setInvoices] = useState<any[]>([]);
     const [invLoading, setInvLoading] = useState<boolean>(false);
+    const [isAddOpen, setIsAddOpen] = useState<boolean>(false);
+    const [routers, setRouters] = useState<any[]>([]);
+    const [addSource, setAddSource] = useState<'pppoe' | 'dhcp'>('pppoe');
+    const [addRouterId, setAddRouterId] = useState<string>('');
+    const [clients, setClients] = useState<any[]>([]);
+    const [selectedClientId, setSelectedClientId] = useState<string>('');
 
     const filteredSales = useMemo(() => {
         return salesData.filter(sale => {
@@ -68,6 +75,82 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
             setInvLoading(false);
         }
     };
+    const loadRouters = async () => {
+        try { const rows = await dbApi.get('/routers'); setRouters(Array.isArray(rows) ? rows : []); }
+        catch { setRouters([]); }
+    };
+    const loadClientsForRouter = async (routerId: string, source: 'pppoe' | 'dhcp') => {
+        try {
+            if (source === 'pppoe') {
+                const res = await fetch('/api/client-portal/users', { headers: getAuthHeader() });
+                const data = await res.json();
+                const list = Array.isArray(data) ? data.filter((u: any) => u.router_id === routerId) : [];
+                setClients(list.map((u: any) => ({ id: u.id, label: `${u.username} (${u.pppoe_username})`, username: u.username, pppoe_username: u.pppoe_username, account_number: u.account_number })));
+            } else {
+                const rows = await dbApi.get(`/dhcp_clients?routerId=${routerId}`);
+                const list = Array.isArray(rows) ? rows : [];
+                setClients(list.map((c: any) => ({ id: c.id || c.macAddress, label: `${c.customerInfo || c.hostName || c.macAddress}`, macAddress: c.macAddress, hostName: c.hostName, customerInfo: c.customerInfo })));
+            }
+        } catch { setClients([]); }
+    };
+    const issueInvoice = async () => {
+        if (!addRouterId || !selectedClientId) return;
+        try {
+            let payload: any = { routerId: addRouterId, source: addSource, status: 'PENDING', issueDate: new Date().toISOString() };
+            if (addSource === 'pppoe') {
+                const client = clients.find(c => c.id === selectedClientId);
+                const uname = client?.pppoe_username || client?.username;
+                payload.username = uname;
+                payload.accountNumber = client?.account_number || null;
+                // Fetch secret to get plan/due
+                const encName = encodeURIComponent(String(uname));
+                const res = await fetch(`/mt-api/${addRouterId}/ppp/secret?name=${encName}`, { headers: getAuthHeader() });
+                const data = await res.json();
+                const secret = Array.isArray(data) && data.length > 0 ? data[0] : null;
+                let planName = ''; let planId = ''; let dueDateTime = null as string | null;
+                if (secret) {
+                    try {
+                        const c = JSON.parse(String(secret.comment || '{}'));
+                        planName = c.planName || c.plan || '';
+                        planId = c.planId || '';
+                        if (c.dueDateTime) dueDateTime = new Date(c.dueDateTime).toISOString();
+                        else if (c.dueDate) dueDateTime = new Date(`${c.dueDate}T23:59:59`).toISOString();
+                    } catch {}
+                }
+                // Lookup plan price
+                let amount = 0; let currency = 'PHP';
+                if (planId) {
+                    const p = await dbApi.get<any[]>(`/billing-plans?routerId=${addRouterId}`);
+                    const found = Array.isArray(p) ? p.find(pl => pl.id === planId) : null;
+                    if (found) { amount = found.price || 0; currency = found.currency || 'PHP'; planName = found.name || planName; }
+                } else if (planName) {
+                    const p = await dbApi.get<any[]>(`/billing-plans?routerId=${addRouterId}`);
+                    const found = Array.isArray(p) ? p.find(pl => String(pl.name).toLowerCase() === String(planName).toLowerCase()) : null;
+                    if (found) { amount = found.price || 0; currency = found.currency || 'PHP'; planName = found.name || planName; }
+                }
+                payload.planName = planName;
+                payload.planId = planId || null;
+                payload.amount = amount;
+                payload.currency = currency;
+                payload.dueDateTime = dueDateTime;
+            } else {
+                const client = clients.find(c => c.id === selectedClientId);
+                const label = client?.customerInfo || client?.hostName || client?.macAddress;
+                payload.username = String(label || '').toLowerCase();
+                payload.planName = '';
+                payload.amount = 0;
+                payload.currency = 'PHP';
+                payload.dueDateTime = null;
+            }
+            await dbApi.post('/client-invoices', payload);
+            setIsAddOpen(false);
+            setSelectedClientId('');
+            await loadInvoices();
+            alert('Invoice created.');
+        } catch (e) {
+            alert((e as Error).message);
+        }
+    };
     const markInvoice = async (id: string, status: 'PAID' | 'PENDING') => {
         try {
             await dbApi.patch(`/client-invoices/${id}`, { status });
@@ -103,7 +186,10 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         window.addEventListener('afterprint', handleAfterPrint);
         return () => window.removeEventListener('afterprint', handleAfterPrint);
     }, []);
-    useEffect(() => { loadInvoices(); }, []);
+    useEffect(() => { loadInvoices(); loadRouters(); }, []);
+    useEffect(() => {
+        if (addRouterId) loadClientsForRouter(addRouterId, addSource);
+    }, [addRouterId, addSource]);
 
     return (
         <>
@@ -122,6 +208,9 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                             <button onClick={handlePrintReport} className="px-4 py-2 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-lg font-semibold flex items-center gap-2">
                                 <PrinterIcon className="w-5 h-5" /> Print Report
                             </button>
+                            <button onClick={() => setIsAddOpen(true)} className="px-4 py-2 text-sm text-white bg-green-600 hover:bg-green-500 rounded-lg font-semibold">
+                                Add Invoice
+                            </button>
                              {hasPermission('sales_report:delete') && (
                                 <button onClick={handleClear} className="px-4 py-2 text-sm text-white bg-red-700 hover:bg-red-800 dark:bg-red-800 dark:hover:bg-red-700 rounded-lg font-semibold flex items-center gap-2">
                                     <TrashIcon className="w-5 h-5" /> Clear All
@@ -129,6 +218,43 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                              )}
                         </div>
                     </div>
+                    
+                    {isAddOpen && (
+                        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg w-full max-w-lg">
+                                <div className="px-4 py-3 border-b dark:border-slate-700">
+                                    <h3 className="text-lg font-semibold">Add Invoice</h3>
+                                </div>
+                                <div className="p-4 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium">Source</label>
+                                        <select value={addSource} onChange={e => setAddSource(e.target.value as 'pppoe'|'dhcp')} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                            <option value="pppoe">PPPoE</option>
+                                            <option value="dhcp">DHCP Portal</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium">Router</label>
+                                        <select value={addRouterId} onChange={e => setAddRouterId(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                            <option value="">Select Router</option>
+                                            {routers.map(r => <option key={r.id} value={r.id}>{r.name || r.id}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium">Client</label>
+                                        <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                            <option value="">Select Client</option>
+                                            {clients.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="px-4 py-3 border-t dark:border-slate-700 flex justify-end gap-2">
+                                    <button onClick={() => setIsAddOpen(false)} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-md">Cancel</button>
+                                    <button onClick={issueInvoice} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md">Create</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Summary Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
