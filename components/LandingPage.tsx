@@ -1,16 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
-import { useCompanySettings } from '../hooks/useCompanySettings.ts';
-import { getPanelSettings } from '../services/databaseService.ts';
-import type { PanelSettings, LandingPageConfig } from '../types.ts';
+import type { PanelSettings, LandingPageConfig, CompanySettings } from '../types.ts';
 
 export const LandingPage: React.FC = () => {
   const { t } = useLocalization();
-  const { settings: companySettings } = useCompanySettings();
+  const [companySettings, setCompanySettings] = useState<CompanySettings>({ companyName: '', address: '', contactNumber: '', email: '', logoBase64: '' });
   const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
   const cfg: LandingPageConfig = panelSettings?.landingPageConfig || {};
   const goto = (path: string) => { window.location.href = path; };
-  useEffect(() => { (async () => { try { const s = await getPanelSettings(); setPanelSettings(s); } catch {} })(); }, []);
+  useEffect(() => { (async () => { try { const res = await fetch('/api/db/panel-settings', { headers: { 'Content-Type': 'application/json' } }); if (res.ok) { const s = await res.json(); setPanelSettings(s as PanelSettings); } } catch {} })(); }, []);
+  useEffect(() => { (async () => { try { const res = await fetch('/api/db/company-settings', { headers: { 'Content-Type': 'application/json' } }); if (res.ok) { const s = await res.json(); setCompanySettings(s as CompanySettings); } } catch {} })(); }, []);
   useEffect(() => { const title = cfg.webTitle || companySettings.companyName || 'ISP Panel'; if (title) document.title = title; }, [cfg.webTitle, companySettings.companyName]);
   return (
     <div className="min-h-screen bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
