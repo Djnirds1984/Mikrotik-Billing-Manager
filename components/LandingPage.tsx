@@ -7,6 +7,7 @@ export const LandingPage: React.FC = () => {
   const [companySettings, setCompanySettings] = useState<CompanySettings>({ companyName: '', address: '', contactNumber: '', email: '', logoBase64: '' });
   const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
   const cfg: LandingPageConfig = panelSettings?.landingPageConfig || {};
+  const [isReady, setIsReady] = useState<boolean>(false);
   useEffect(() => {
     const theme = cfg.theme || {};
     const root = document.documentElement;
@@ -14,6 +15,9 @@ export const LandingPage: React.FC = () => {
     if (theme.primary600) root.style.setProperty('--color-primary-600', theme.primary600);
     if (theme.primary700) root.style.setProperty('--color-primary-700', theme.primary700);
     if (theme.background) root.style.setProperty('--lp-background', theme.background);
+    if (panelSettings && (cfg.templateId || Object.keys(cfg).length > 0)) {
+      setIsReady(true);
+    }
   }, [cfg.theme]);
   const [selectedPlan, setSelectedPlan] = useState<string>('');
   const [inqName, setInqName] = useState<string>('');
@@ -22,7 +26,7 @@ export const LandingPage: React.FC = () => {
   const [inqMessage, setInqMessage] = useState<string>('');
   const [inqStatus, setInqStatus] = useState<string>('');
   const goto = (path: string) => { window.location.href = path; };
-  useEffect(() => { (async () => { try { const res = await fetch(`/api/public/landing-page?v=${Date.now()}`, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' }); if (res.ok) { const data = await res.json(); setCompanySettings(data.company as CompanySettings); setPanelSettings({ landingPageConfig: data.config } as PanelSettings); } } catch {} })(); }, []);
+  useEffect(() => { (async () => { try { const res = await fetch(`/api/public/landing-page?v=${Date.now()}`, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' }); if (res.ok) { const data = await res.json(); setCompanySettings(data.company as CompanySettings); setPanelSettings({ landingPageConfig: data.config } as PanelSettings); } finally { /* prevent flashing default */ setIsReady(true); } } catch { setIsReady(true); } })(); }, []);
   useEffect(() => { const title = cfg.webTitle || companySettings.companyName || 'ISP Panel'; if (title) document.title = title; }, [cfg.webTitle, companySettings.companyName]);
   const scrollTo = (id: string) => { const el = document.querySelector(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); };
   const [chatOpen, setChatOpen] = useState<boolean>(false);
@@ -117,6 +121,17 @@ export const LandingPage: React.FC = () => {
       setInqStatus('An error occurred while submitting.');
     }
   };
+  if (!isReady) {
+    return (
+      <div className="min-h-screen bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+        <div className="mx-auto max-w-7xl px-6 py-24">
+          <div className="h-6 w-40 bg-slate-200 dark:bg-slate-800 rounded-md animate-pulse"></div>
+          <div className="mt-6 h-8 w-3/4 bg-slate-200 dark:bg-slate-800 rounded-md animate-pulse"></div>
+          <div className="mt-3 h-4 w-1/2 bg-slate-200 dark:bg-slate-800 rounded-md animate-pulse"></div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen text-slate-900 dark:text-slate-100" style={{ background: (cfg.theme?.background || 'white') }}>
       <header className="sticky top-0 z-30 border-b border-slate-200/60 dark:border-slate-800/60 bg-white/70 dark:bg-slate-900/70 backdrop-blur">
