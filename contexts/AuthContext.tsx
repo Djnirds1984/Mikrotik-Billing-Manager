@@ -164,19 +164,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const logout = async () => {
         setError(null);
-        if (token) {
-            try {
-                await fetch('/api/auth/logout', {
+        try {
+            if (token) {
+                // Fire-and-forget server logout to avoid blocking UI
+                fetch('/api/auth/logout', {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` },
-                });
-            } catch (e) {
-                console.error("Logout failed on server, clearing client-side anyway.", e);
+                }).catch(() => {});
             }
+        } finally {
+            // Immediate client-side logout and redirect
+            setUser(null);
+            setToken(null);
+            localStorage.removeItem('authToken');
+            // Use replace to prevent going back to protected routes
+            window.location.replace('/');
         }
-        setUser(null);
-        setToken(null);
-        localStorage.removeItem('authToken');
     };
 
     const hasPermission = (permission: string) => {
