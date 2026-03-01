@@ -803,6 +803,55 @@ async function startServer() {
     
     app.use('/uploads', express.static(UPLOADS_DIR));
     
+    app.get('/api/public/routers', async (req, res) => {
+        try {
+            const rows = await db.all('SELECT id, name FROM routers ORDER BY name ASC');
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+    
+    app.get('/api/public/ppp/status', async (req, res) => {
+        try {
+            const { routerId, username } = req.query;
+            if (!routerId || !username) return res.status(400).json({ message: 'routerId and username are required' });
+            const encUser = encodeURIComponent(String(username));
+            const secretResp = await axios.get(`http://localhost:3002/${routerId}/ppp/secret?name=${encUser}`);
+            const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
+            const secret = secrets[0] || null;
+            let active = false;
+            try {
+                const activeResp = await axios.get(`http://localhost:3002/${routerId}/ppp/active/print`);
+                const allActive = Array.isArray(activeResp.data) ? activeResp.data : [];
+                active = !!allActive.find(a => a.name === username);
+            } catch (_) {}
+            let profile = secret?.profile || '';
+            let due = '';
+            let comment = secret?.comment || '';
+            try {
+                const c = JSON.parse(comment || '{}');
+                profile = c.plan || profile || '';
+                due = c.dueDateTime || c.dueDate || '';
+            } catch (_) {}
+            res.json({ profile, active, comment: due || comment || '' });
+        } catch (e) {
+            const status = e.response ? e.response.status : 500;
+            const msg = e.response?.data?.message || e.message;
+            res.status(status).json({ message: msg });
+        }
+    });
+    
+    app.get('/api/public/client/payments', async (req, res) => {
+        try {
+            const { routerId, username } = req.query;
+            if (!routerId || !username) return res.status(400).json({ message: 'routerId and username are required' });
+            const sales = await db.all('SELECT date, clientName, planName, planPrice, discountAmount, finalAmount, currency FROM sales_records WHERE routerId = ? ORDER BY date DESC LIMIT 50', [routerId]);
+            const cust = await db.get('SELECT fullName FROM customers WHERE routerId = ? AND username = ?', [routerId, username]);
+            const fullName = cust?.fullName || '';
+            const filtered = sales.filter(s => (String(s.clientName || '').toLowerCase() === String(username).toLowerCase()) || (fullName && String(s.clientName || '').toLowerCase() === String(fullName).toLowerCase()));
+            res.json(filtered);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+    
     app.post('/api/public/inquiry', express.json(), async (req, res) => {
         try {
             const { name, email, phone, message, planName } = req.body || {};
