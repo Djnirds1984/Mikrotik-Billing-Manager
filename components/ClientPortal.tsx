@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { RouterConfigWithId, PanelSettings } from '../types.ts';
-import { getPanelSettings } from '../services/databaseService.ts';
+import type { RouterConfigWithId } from '../types.ts';
 
 export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
   const [username, setUsername] = useState('');
@@ -14,7 +13,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [clientInfo, setClientInfo] = useState<any>(null);
   const [invoiceToView, setInvoiceToView] = useState<any | null>(null);
   const [invoiceToPrint, setInvoiceToPrint] = useState<any | null>(null);
-  const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
+  const [panelSettings, setPanelSettings] = useState<any | null>(null);
 
   // We don't need to fetch routers for login anymore as username is unique
   
@@ -79,7 +78,16 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   }
   
   useEffect(() => {
-    getPanelSettings().then(setPanelSettings).catch(() => setPanelSettings(null));
+    (async () => {
+      try {
+        const res = await fetch('/api/public/landing-page');
+        const data = await res.json();
+        const company = data?.company || {};
+        setPanelSettings({ companyName: company.companyName || '', logoBase64: company.logoBase64 || '' });
+      } catch {
+        setPanelSettings(null);
+      }
+    })();
   }, []);
   
   const handlePrintInvoice = () => {
