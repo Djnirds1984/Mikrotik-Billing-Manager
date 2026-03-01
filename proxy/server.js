@@ -397,6 +397,29 @@ const getDeviceId = async () => {
     }
 };
 
+const generateAccountNumber = async () => {
+    try {
+        const rows = await db.all(`
+            SELECT accountNumber AS n FROM customers WHERE accountNumber IS NOT NULL AND accountNumber <> ''
+            UNION ALL
+            SELECT account_number AS n FROM client_users WHERE account_number IS NOT NULL AND account_number <> ''
+            UNION ALL
+            SELECT accountNumber AS n FROM dhcp_clients WHERE accountNumber IS NOT NULL AND accountNumber <> ''
+        `);
+        const extractNum = (s) => {
+            const m = String(s || '').match(/(\d+)\s*$/);
+            return m ? parseInt(m[1], 10) : 0;
+        };
+        const maxNum = rows.reduce((max, r) => Math.max(max, extractNum(r.n)), 0);
+        const next = maxNum + 1;
+        const padded = String(next).padStart(6, '0');
+        return `ACC-${padded}`;
+    } catch (e) {
+        const fallback = String(Date.now()).slice(-6);
+        return `ACC-${fallback}`;
+    }
+};
+
 // --- Middleware ---
 const protect = (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -549,6 +572,11 @@ async function startServer() {
         });
         dbRouter.post(route, async (req, res) => {
             try {
+                if (table === 'dhcp_clients') {
+                    if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
+                        req.body.accountNumber = await generateAccountNumber();
+                    }
+                }
                 const keys = Object.keys(req.body);
                 const values = Object.values(req.body);
                 const placeholders = keys.map(() => '?').join(',');
@@ -561,6 +589,14 @@ async function startServer() {
         dbRouter.patch(`${route}/:id`, async (req, res) => {
             try {
                 const { id } = req.params;
+                if (table === 'dhcp_clients') {
+                    if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
+                        const current = await db.get('SELECT accountNumber FROM dhcp_clients WHERE id = ?', [id]);
+                        if (!current?.accountNumber) {
+                            req.body.accountNumber = await generateAccountNumber();
+                        }
+                    }
+                }
                 const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
                 const values = [...Object.values(req.body), id];
                 await db.run(`UPDATE ${table} SET ${updates} WHERE id = ?`, values);
@@ -627,6 +663,9 @@ async function startServer() {
                 res.json({ message: 'Updated existing customer', id: existing.id });
             } else {
                 // Insert new
+                if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
+                    req.body.accountNumber = await generateAccountNumber();
+                }
                 const keys = Object.keys(req.body);
                 const values = Object.values(req.body);
                 const placeholders = keys.map(() => '?').join(',');
@@ -641,6 +680,12 @@ async function startServer() {
     dbRouter.patch('/customers/:id', async (req, res) => {
         try {
             const { id } = req.params;
+            if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
+                const current = await db.get('SELECT accountNumber FROM customers WHERE id = ?', [id]);
+                if (!current?.accountNumber) {
+                    req.body.accountNumber = await generateAccountNumber();
+                }
+            }
             const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
             const values = [...Object.values(req.body), id];
             await db.run(`UPDATE customers SET ${updates} WHERE id = ?`, values);
@@ -1003,8 +1048,9 @@ async function startServer() {
             const salt = crypto.randomBytes(16).toString('hex');
             const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
             const id = `u_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const acc = accountNumber && String(accountNumber).trim() !== '' ? accountNumber : await generateAccountNumber();
             await db.run('INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, account_number, created_at) VALUES (?,?,?,?,?,?,?,?)',
-                [id, username, hash, salt, routerId, pppoeUsername, accountNumber || null, new Date().toISOString()]);
+                [id, username, hash, salt, routerId, pppoeUsername, acc, new Date().toISOString()]);
             res.json({ message: 'User created', id });
         } catch (e) {
             if (e.message.includes('UNIQUE constraint failed')) return res.status(409).json({ message: 'Username already exists' });
