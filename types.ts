@@ -27,7 +27,8 @@ export type View =
   | 'dhcp-portal'
   | 'client_portal_users'
   | 'notifications'
-  | 'captive_chat';
+  | 'captive_chat'
+  | 'application_form';
 
 export interface Notification {
   id: string;
@@ -350,6 +351,17 @@ export interface CompanySettings {
     contactNumber?: string;
     email?: string;
     logoBase64?: string;
+}
+
+export interface Application {
+    id: string;
+    name: string;
+    email: string;
+    phone: string;
+    message: string;
+    planName: string;
+    pdfPath: string;
+    createdAt: string;
 }
 
 export interface ChatMessage {

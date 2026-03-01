@@ -70,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'dashboard', label: t('sidebar.dashboard'), icon: <EthernetIcon className="w-6 h-6" /> },
     { id: 'notifications', label: t('sidebar.notifications'), icon: <BellIcon className="w-6 h-6" />, badge: unreadCount },
     { id: 'captive_chat', label: 'Captive Chat', icon: <ChatBubbleLeftRightIcon className="w-6 h-6" /> },
+    { id: 'application_form', label: t('sidebar.application_form') || 'Application Form', icon: <ArchiveBoxIcon className="w-6 h-6" /> },
     { id: 'scripting', label: t('sidebar.ai_scripting'), icon: <EditIcon className="w-6 h-6" /> },
     { id: 'terminal', label: t('sidebar.terminal'), icon: <TerminalIcon className="w-6 h-6" /> },
     { id: 'routers', label: t('sidebar.routers'), icon: <RouterIcon className="w-6 h-6" /> },

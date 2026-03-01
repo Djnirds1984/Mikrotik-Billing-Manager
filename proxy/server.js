@@ -15,6 +15,7 @@ const { Xendit } = require('xendit-node');
 const si = require('systeminformation');
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
+const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -26,12 +27,20 @@ const PORT = 3001;
 const DB_PATH = path.join(__dirname, 'panel.db');
 const SUPERADMIN_DB_PATH = path.join(__dirname, 'superadmin.db');
 const BACKUP_DIR = path.join(__dirname, 'backups');
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const APPLICATIONS_UPLOADS_DIR = path.join(UPLOADS_DIR, 'applications');
 const SECRET_KEY = process.env.JWT_SECRET || 'a-very-weak-secret-key-for-dev-only';
 const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret-string-for-licenses-!@#$%^&*()';
 
 // Ensure backup dir exists
 if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+if (!fs.existsSync(APPLICATIONS_UPLOADS_DIR)) {
+    fs.mkdirSync(APPLICATIONS_UPLOADS_DIR, { recursive: true });
 }
 
 let db;
@@ -146,6 +155,7 @@ async function initDb() {
             { id: 'perm_sidebar_dashboard', name: 'view:sidebar:dashboard', description: 'View Dashboard' },
             { id: 'perm_sidebar_notifications', name: 'view:sidebar:notifications', description: 'View Notifications' },
             { id: 'perm_sidebar_captive_chat', name: 'view:sidebar:captive_chat', description: 'View Captive Chat' },
+            { id: 'perm_sidebar_application_form', name: 'view:sidebar:application_form', description: 'View Application Form' },
             { id: 'perm_sidebar_scripting', name: 'view:sidebar:scripting', description: 'View AI Scripting' },
             { id: 'perm_sidebar_terminal', name: 'view:sidebar:terminal', description: 'View Terminal' },
             { id: 'perm_sidebar_routers', name: 'view:sidebar:routers', description: 'View Routers' },
@@ -293,6 +303,16 @@ async function initDb() {
                 router_id TEXT,
                 pppoe_username TEXT,
                 created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS applications (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT,
+                phone TEXT,
+                message TEXT,
+                planName TEXT,
+                pdfPath TEXT,
+                createdAt TEXT NOT NULL
             );
         `);
         console.log('Database initialized successfully');
@@ -544,6 +564,7 @@ async function startServer() {
     createCrud('/dhcp-billing-plans', 'dhcp_billing_plans');
     createCrud('/dhcp_clients', 'dhcp_clients');
     createCrud('/sales', 'sales_records');
+    createCrud('/applications', 'applications');
 
     // Customers API (Manual Upsert)
     dbRouter.get('/customers', async (req, res) => {
@@ -703,6 +724,60 @@ async function startServer() {
                 company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
                 config: cfg
             });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+    
+    app.use('/uploads', express.static(UPLOADS_DIR));
+    
+    app.post('/api/public/inquiry', express.json(), async (req, res) => {
+        try {
+            const { name, email, phone, message, planName } = req.body || {};
+            if (!name || !String(name).trim()) return res.status(400).json({ message: 'Name is required.' });
+            const id = `app_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+            const createdAt = new Date().toISOString();
+            const pdfFile = `${id}.pdf`;
+            const pdfPath = path.join(APPLICATIONS_UPLOADS_DIR, pdfFile);
+            
+            const doc = await PDFDocument.create();
+            const font = await doc.embedFont(StandardFonts.Helvetica);
+            const page = doc.addPage([595.28, 841.89]);
+            const drawText = (text, x, y, size = 12) => {
+                page.drawText(String(text || ''), { x, y, size, font, color: rgb(0, 0, 0) });
+            };
+            drawText('Inquiry Application', 50, 800, 20);
+            drawText(`Date: ${new Date(createdAt).toLocaleString()}`, 50, 780, 12);
+            drawText(`Name: ${name}`, 50, 750);
+            drawText(`Email: ${email || ''}`, 50, 730);
+            drawText(`Phone: ${phone || ''}`, 50, 710);
+            drawText(`Plan: ${planName || ''}`, 50, 690);
+            drawText('Message:', 50, 670);
+            const msg = String(message || '');
+            const maxWidth = 480;
+            let y = 650;
+            const words = msg.split(/\s+/);
+            let line = '';
+            for (const w of words) {
+                const test = line ? `${line} ${w}` : w;
+                const width = font.widthOfTextAtSize(test, 12);
+                if (width > maxWidth) {
+                    drawText(line, 50, y);
+                    y -= 18;
+                    line = w;
+                } else {
+                    line = test;
+                }
+            }
+            if (line) drawText(line, 50, y);
+            const pdfBytes = await doc.save();
+            await fs.promises.writeFile(pdfPath, pdfBytes);
+            
+            await db.run(
+                `INSERT INTO applications (id, name, email, phone, message, planName, pdfPath, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [id, String(name).trim(), email || '', phone || '', msg, planName || '', `/uploads/applications/${pdfFile}`, createdAt]
+            );
+            res.status(201).json({ message: 'Inquiry received.', id, pdfUrl: `/uploads/applications/${pdfFile}` });
         } catch (e) {
             res.status(500).json({ message: e.message });
         }

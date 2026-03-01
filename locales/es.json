@@ -25,7 +25,8 @@
         "mikrotik_files": "Archivos Mikrotik",
         "license": "Licencia",
         "super_admin": "Super Admin",
-        "notifications": "Notificaciones"
+        "notifications": "Notificaciones",
+        "application_form": "Formulario de Aplicación"
     },
     "titles": {
         "dashboard": "Dashboard",
@@ -49,7 +50,8 @@
         "mikrotik_files": "Editor de Archivos Mikrotik",
         "license": "Licencia de Aplicación",
         "super_admin": "Super Admin: Generador de Licencias",
-        "notifications": "Notificaciones del Sistema"
+        "notifications": "Notificaciones del Sistema",
+        "application_form": "Formulario de Aplicación"
     },
     "topbar": {
         "add_router_title": "Vaya a la página de Routers para agregar un nuevo router",

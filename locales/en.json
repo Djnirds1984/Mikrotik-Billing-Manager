@@ -26,7 +26,8 @@
         "mikrotik_files": "Mikrotik Files",
         "license": "License",
         "super_admin": "Super Admin",
-        "notifications": "Notifications"
+        "notifications": "Notifications",
+        "application_form": "Application Form"
     },
     "titles": {
         "dashboard": "Dashboard",
@@ -51,7 +52,8 @@
         "mikrotik_files": "Mikrotik File Editor",
         "license": "Application Licensing",
         "super_admin": "Super Admin: License Generator",
-        "notifications": "System Notifications"
+        "notifications": "System Notifications",
+        "application_form": "Application Form"
     },
     "topbar": {
         "add_router_title": "Go to Routers page to add a new router",

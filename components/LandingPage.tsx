@@ -7,9 +7,36 @@ export const LandingPage: React.FC = () => {
   const [companySettings, setCompanySettings] = useState<CompanySettings>({ companyName: '', address: '', contactNumber: '', email: '', logoBase64: '' });
   const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
   const cfg: LandingPageConfig = panelSettings?.landingPageConfig || {};
+  const [selectedPlan, setSelectedPlan] = useState<string>('');
+  const [inqName, setInqName] = useState<string>('');
+  const [inqEmail, setInqEmail] = useState<string>('');
+  const [inqPhone, setInqPhone] = useState<string>('');
+  const [inqMessage, setInqMessage] = useState<string>('');
+  const [inqStatus, setInqStatus] = useState<string>('');
   const goto = (path: string) => { window.location.href = path; };
   useEffect(() => { (async () => { try { const res = await fetch(`/api/public/landing-page?v=${Date.now()}`, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' }); if (res.ok) { const data = await res.json(); setCompanySettings(data.company as CompanySettings); setPanelSettings({ landingPageConfig: data.config } as PanelSettings); } } catch {} })(); }, []);
   useEffect(() => { const title = cfg.webTitle || companySettings.companyName || 'ISP Panel'; if (title) document.title = title; }, [cfg.webTitle, companySettings.companyName]);
+  const scrollTo = (id: string) => { const el = document.querySelector(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); };
+  const submitInquiry = async () => {
+    setInqStatus('Submitting...');
+    try {
+      const res = await fetch('/api/public/inquiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: inqName, email: inqEmail, phone: inqPhone, message: inqMessage, planName: selectedPlan }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Failed' }));
+        setInqStatus(err.message || 'Failed to submit.');
+        return;
+      }
+      const data = await res.json();
+      setInqStatus('Nai-submit na ang inquiry. Salamat!');
+      setInqName(''); setInqEmail(''); setInqPhone(''); setInqMessage('');
+    } catch {
+      setInqStatus('Nagka-error sa pag-submit.');
+    }
+  };
   return (
     <div className="min-h-screen bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
       <header className="sticky top-0 z-30 border-b border-slate-200/60 dark:border-slate-800/60 bg-white/70 dark:bg-slate-900/70 backdrop-blur">
@@ -93,7 +120,7 @@ export const LandingPage: React.FC = () => {
                   <div className="font-semibold">{p.name}</div>
                   {p.speedText && <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{p.speedText}</div>}
                   <div className="mt-2 text-[--color-primary-500] font-bold">{p.priceText}</div>
-                  <button className="mt-4 w-full px-4 py-2 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">{p.ctaLabel || 'Inquire'}</button>
+                  <button className="mt-4 w-full px-4 py-2 rounded-md bg-[--color-primary-500] text-white hover:opacity-90" onClick={() => { setSelectedPlan(p.name); scrollTo('#inquire'); }}>{p.ctaLabel || 'Inquire'}</button>
                 </div>
               ))}
             </div>
@@ -105,6 +132,27 @@ export const LandingPage: React.FC = () => {
             <p className="text-slate-600 dark:text-slate-300 text-sm mt-1">Customize this section content.</p>
           </section>
         ))}
+        <section id="inquire" className="mx-auto max-w-7xl px-6 py-16">
+          <h2 className="text-2xl font-bold">Inquiry Form</h2>
+          <div className="mt-4 grid md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Pangalan" value={inqName} onChange={e => setInqName(e.target.value)} />
+              <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Email" value={inqEmail} onChange={e => setInqEmail(e.target.value)} />
+              <input className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Telepono" value={inqPhone} onChange={e => setInqPhone(e.target.value)} />
+              <select className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" value={selectedPlan} onChange={e => setSelectedPlan(e.target.value)}>
+                <option value="">Plan</option>
+                {(cfg.plans || []).map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-3">
+              <textarea className="w-full h-[180px] px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900" placeholder="Mensahe" value={inqMessage} onChange={e => setInqMessage(e.target.value)} />
+              <div className="flex items-center gap-3">
+                <button onClick={submitInquiry} className="px-4 py-2 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">I-submit</button>
+                <span className="text-sm text-slate-600 dark:text-slate-300">{inqStatus}</span>
+              </div>
+            </div>
+          </div>
+        </section>
         <section id="contact" className="mx-auto max-w-7xl px-6 py-16">
           <h2 className="text-2xl font-bold">{cfg.contactTitle || 'Contact'}</h2>
           <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-6 text-sm">
