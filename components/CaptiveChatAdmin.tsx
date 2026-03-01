@@ -35,6 +35,16 @@ export const CaptiveChatAdmin: React.FC = () => {
 
   useEffect(() => {
     fetchMessages();
+    const poll = async () => {
+      try {
+        const resp = await fetch('/api/db/notifications', { headers: getAuthHeader() });
+        const data: CaptiveNotif[] = await resp.json();
+        const filtered = data.filter(n => n.type === 'client-chat' || n.type === 'admin-reply');
+        setMessages(filtered.reverse());
+      } catch {}
+    };
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const threads = useMemo(() => {

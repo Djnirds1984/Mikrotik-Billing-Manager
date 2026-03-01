@@ -112,6 +112,11 @@ async function initDb() {
         if (!columnNames.includes('notificationSettings')) await db.exec("ALTER TABLE settings ADD COLUMN notificationSettings TEXT");
         if (!columnNames.includes('landingPageConfig')) await db.exec("ALTER TABLE settings ADD COLUMN landingPageConfig TEXT");
 
+        // Hotfix: ensure chat notifications route to Captive Chat in Admin
+        try {
+            await db.exec("UPDATE notifications SET link_to='captive_chat' WHERE type IN ('client-chat','admin-reply') AND (link_to IS NULL OR link_to <> 'captive_chat')");
+        } catch (_) {}
+
         // Users & Roles
         await db.exec(`
             CREATE TABLE IF NOT EXISTS roles (
@@ -799,7 +804,7 @@ async function startServer() {
                 message: message.trim(),
                 is_read: 0,
                 timestamp: new Date().toISOString(),
-                link_to: 'dhcp-portal',
+                link_to: 'captive_chat',
                 context_json: JSON.stringify({
                     ip: clientIp,
                     name: name || undefined,
@@ -831,7 +836,7 @@ async function startServer() {
                 message: `Chat started (${label})`,
                 is_read: 0,
                 timestamp: new Date().toISOString(),
-                link_to: 'dhcp-portal',
+                link_to: 'captive_chat',
                 context_json: JSON.stringify({
                     ip: clientIp,
                     name: String(name || '').trim() || undefined,
@@ -881,7 +886,7 @@ async function startServer() {
                 message: message.trim(),
                 is_read: 0,
                 timestamp: new Date().toISOString(),
-                link_to: 'dhcp-portal',
+                link_to: 'captive_chat',
                 context_json: JSON.stringify({ ip: targetIp, by: req.user?.username || 'admin' })
             };
             await db.run(
