@@ -42,6 +42,15 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const loadInitialSettings = async () => {
             setIsLoading(true);
 
+            // Hard-stop any protected fetches on public Client Portal route
+            const isClientPortal = typeof window !== 'undefined' && window.location.pathname.startsWith('/client_portal');
+            if (isClientPortal) {
+                setSettings({ language: 'en', currency: 'USD' });
+                await fetchTranslations('en');
+                setIsLoading(false);
+                return;
+            }
+
             // Wait until authentication is resolved
             if (isAuthLoading) {
                 // If auth is still loading, do nothing yet. This effect will re-run when it's done.
