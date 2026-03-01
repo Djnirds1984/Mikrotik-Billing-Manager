@@ -7,6 +7,7 @@ interface ClientUser {
     username: string;
     router_id: string;
     pppoe_username: string;
+    account_number?: string;
     created_at: string;
 }
 
@@ -21,6 +22,7 @@ export const ClientPortalUsers: React.FC = () => {
     const [password, setPassword] = useState('');
     const [routerId, setRouterId] = useState('');
     const [pppoeUsername, setPppoeUsername] = useState('');
+    const [accountNumber, setAccountNumber] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const fetchData = async () => {
@@ -57,7 +59,7 @@ export const ClientPortalUsers: React.FC = () => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${localStorage.getItem('authToken')}`
                 },
-                body: JSON.stringify({ username, password, routerId, pppoeUsername })
+                body: JSON.stringify({ username, password, routerId, pppoeUsername, accountNumber })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.message);
@@ -65,6 +67,7 @@ export const ClientPortalUsers: React.FC = () => {
             setUsername('');
             setPassword('');
             setPppoeUsername('');
+            setAccountNumber('');
             // routerId kept as is for convenience
             fetchData();
             alert('User created successfully');
@@ -138,6 +141,16 @@ export const ClientPortalUsers: React.FC = () => {
                         />
                         <p className="text-xs text-slate-500 mt-1">This links the portal login to the actual PPPoE account for billing/status.</p>
                     </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Account Number</label>
+                        <input 
+                            value={accountNumber} 
+                            onChange={e => setAccountNumber(e.target.value)} 
+                            className="mt-1 w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600" 
+                            placeholder="e.g. ACC-000123"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">Unique identifier for this client.</p>
+                    </div>
                     <div className="md:col-span-2">
                         <button 
                             type="submit" 
@@ -157,6 +170,7 @@ export const ClientPortalUsers: React.FC = () => {
                             <th className="px-6 py-3">Username</th>
                             <th className="px-6 py-3">Linked Router</th>
                             <th className="px-6 py-3">PPPoE Account</th>
+                            <th className="px-6 py-3">Account Number</th>
                             <th className="px-6 py-3">Created At</th>
                             <th className="px-6 py-3">Actions</th>
                         </tr>
@@ -169,6 +183,7 @@ export const ClientPortalUsers: React.FC = () => {
                                     <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{u.username}</td>
                                     <td className="px-6 py-4">{rName}</td>
                                     <td className="px-6 py-4">{u.pppoe_username}</td>
+                                    <td className="px-6 py-4">{u.account_number || '-'}</td>
                                     <td className="px-6 py-4">{new Date(u.created_at).toLocaleDateString()}</td>
                                     <td className="px-6 py-4">
                                         <button 
@@ -183,7 +198,7 @@ export const ClientPortalUsers: React.FC = () => {
                         })}
                         {users.length === 0 && (
                             <tr>
-                                <td colSpan={5} className="px-6 py-8 text-center text-slate-500">No client users created yet.</td>
+                                <td colSpan={6} className="px-6 py-8 text-center text-slate-500">No client users created yet.</td>
                             </tr>
                         )}
                     </tbody>

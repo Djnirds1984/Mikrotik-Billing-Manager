@@ -215,7 +215,7 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
 // --- User Form Modal ---
 const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, profiles, isSubmitting }) => {
     const [secret, setSecret] = useState({ name: '', password: '', profile: '' }); // profile is plan ID
-    const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '' });
+    const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '' });
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
     const [nonPaymentProfile, setNonPaymentProfile] = useState('');
@@ -248,7 +248,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 fullName: linkedCustomer?.fullName || '', 
                 address: linkedCustomer?.address || '', 
                 contactNumber: linkedCustomer?.contactNumber || '', 
-                email: linkedCustomer?.email || '' 
+                email: linkedCustomer?.email || '',
+                accountNumber: (linkedCustomer as any)?.accountNumber || ''
             });
             try {
                 const commentData = JSON.parse(initialData.comment);
@@ -269,7 +270,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
 
         } else {
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
-            setCustomer({ fullName: '', address: '', contactNumber: '', email: '' });
+            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '' });
             setDueDate('');
             setPlanType('prepaid');
         }
@@ -353,6 +354,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             <div><label>Contact Number</label><input type="text" value={customer.contactNumber} onChange={e => setCustomer(c => ({...c, contactNumber: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                             <div><label>Email</label><input type="email" value={customer.email} onChange={e => setCustomer(c => ({...c, email: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                         </div>
+                        <div><label>Account Number</label><input type="text" value={customer.accountNumber} onChange={e => setCustomer(c => ({...c, accountNumber: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                      </div>
                 </div>
                  <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-3 flex-shrink-0"><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={isSubmitting}>Save</button></div>

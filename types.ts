@@ -538,6 +538,7 @@ export interface Customer {
     address?: string;
     contactNumber?: string;
     email?: string;
+    accountNumber?: string;
 }
 
 export interface WanRoute {
@@ -815,6 +816,7 @@ export interface DhcpClientDbRecord {
     email?: string;
     speedLimit?: string;
     lastSeen: string;
+    accountNumber?: string;
 }
 
 
@@ -829,4 +831,5 @@ export interface DhcpClientActionParams {
     graceTime?: string;
     expiresAt?: string;
     speedLimit?: string;
+    accountNumber?: string;
 }

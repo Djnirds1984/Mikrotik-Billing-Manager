@@ -46,6 +46,7 @@ const EditClientModal: React.FC<{
                 email: initialData.email || '',
                 speedLimit: initialData.speedLimit || '',
                 expiresAt: currentExpiresAt,
+                accountNumber: (dbClient as any)?.accountNumber || ''
             });
         }
     }, [isOpen, client, dbClient]);
@@ -73,6 +74,7 @@ const EditClientModal: React.FC<{
                                 <div><label>Contact Number</label><input name="contactNumber" value={formData.contactNumber} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
                                 <div><label>Email</label><input type="email" name="email" value={formData.email} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
                             </div>
+                            <div><label>Account Number</label><input name="accountNumber" value={formData.accountNumber} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="e.g. ACC-000123" /></div>
                              <div className="grid grid-cols-2 gap-4">
                                 <div><label>Speed Limit (Mbps)</label><input type="number" name="speedLimit" value={formData.speedLimit} onChange={handleChange} placeholder="Leave blank for no limit" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
                                 <div>
@@ -198,6 +200,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 email: params.email,
                 speedLimit: params.plan.speedLimit,
                 lastSeen: new Date().toISOString(),
+                accountNumber: params.accountNumber
             });
 
             setPaymentModalOpen(false);
@@ -222,6 +225,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 email: params.email,
                 speedLimit: params.speedLimit,
                 lastSeen: new Date().toISOString(),
+                accountNumber: params.accountNumber
             });
             setEditModalOpen(false);
             await fetchData();

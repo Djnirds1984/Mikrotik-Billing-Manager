@@ -320,6 +320,28 @@ async function initDb() {
                 createdAt TEXT NOT NULL
             );
         `);
+        // Ensure new columns exist (idempotent migrations)
+        try {
+            const customerCols = await db.all("PRAGMA table_info(customers)");
+            const customerColNames = customerCols.map(c => c.name);
+            if (!customerColNames.includes('accountNumber')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN accountNumber TEXT");
+            }
+        } catch (_) {}
+        try {
+            const clientUserCols = await db.all("PRAGMA table_info(client_users)");
+            const clientUserColNames = clientUserCols.map(c => c.name);
+            if (!clientUserColNames.includes('account_number')) {
+                await db.exec("ALTER TABLE client_users ADD COLUMN account_number TEXT");
+            }
+        } catch (_) {}
+        try {
+            const dhcpClientCols = await db.all("PRAGMA table_info(dhcp_clients)");
+            const dhcpClientColNames = dhcpClientCols.map(c => c.name);
+            if (!dhcpClientColNames.includes('accountNumber')) {
+                await db.exec("ALTER TABLE dhcp_clients ADD COLUMN accountNumber TEXT");
+            }
+        } catch (_) {}
         console.log('Database initialized successfully');
     } catch (err) {
         console.error('Failed to initialize database:', err);
@@ -975,14 +997,14 @@ async function startServer() {
     
     // Admin: Create Client User (Protected)
     clientPortalRouter.post('/users', protect, async (req, res) => {
-        const { username, password, routerId, pppoeUsername } = req.body;
+        const { username, password, routerId, pppoeUsername, accountNumber } = req.body;
         if (!username || !password) return res.status(400).json({ message: 'Username and password required' });
         try {
             const salt = crypto.randomBytes(16).toString('hex');
             const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
             const id = `u_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            await db.run('INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, created_at) VALUES (?,?,?,?,?,?,?)',
-                [id, username, hash, salt, routerId, pppoeUsername, new Date().toISOString()]);
+            await db.run('INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, account_number, created_at) VALUES (?,?,?,?,?,?,?,?)',
+                [id, username, hash, salt, routerId, pppoeUsername, accountNumber || null, new Date().toISOString()]);
             res.json({ message: 'User created', id });
         } catch (e) {
             if (e.message.includes('UNIQUE constraint failed')) return res.status(409).json({ message: 'Username already exists' });
@@ -993,7 +1015,7 @@ async function startServer() {
     // Admin: List Client Users (Protected)
     clientPortalRouter.get('/users', protect, async (req, res) => {
         try {
-            const users = await db.all('SELECT id, username, router_id, pppoe_username, created_at FROM client_users ORDER BY created_at DESC');
+            const users = await db.all('SELECT id, username, router_id, pppoe_username, account_number, created_at FROM client_users ORDER BY created_at DESC');
             res.json(users);
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
