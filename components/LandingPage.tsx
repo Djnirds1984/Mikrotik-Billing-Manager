@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { PanelSettings, LandingPageConfig, CompanySettings } from '../types.ts';
 
@@ -40,7 +40,13 @@ export const LandingPage: React.FC = () => {
   const [chatInput, setChatInput] = useState<string>('');
   const [chatLoading, setChatLoading] = useState<boolean>(false);
   const [chatError, setChatError] = useState<string>('');
+  const messagesRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (chatOpen) { setChatStep('prefill'); setChatHistory([]); setChatInput(''); setChatError(''); } }, [chatOpen]);
+  useEffect(() => { 
+    if (chatOpen && chatStep === 'chat' && messagesRef.current) { 
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight; 
+    } 
+  }, [chatHistory, chatLoading, chatOpen, chatStep]);
   useEffect(() => {
     let timer: number | null = null;
     const loadThread = async () => {
@@ -328,7 +334,7 @@ export const LandingPage: React.FC = () => {
               </div>
             ) : (
               <div className="flex-1 flex flex-col">
-                <div className="flex-1 p-4 overflow-y-auto flex flex-col space-y-3">
+                <div ref={messagesRef} className="flex-1 p-4 overflow-y-auto flex flex-col space-y-3" style={{ scrollBehavior: 'smooth' }}>
                   {chatHistory.map((msg, i) => (
                     <div key={`msg-${i}`} className={`w-full flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} items-start`}>
                       <div className={`inline-block max-w-[80%] px-3 py-2 rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'}`}>
