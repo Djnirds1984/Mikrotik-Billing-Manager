@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import type { PanelSettings, TelegramSettings, XenditSettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { initializeAiClient } from '../services/geminiService.ts';
 import { getPanelSettings, savePanelSettings, getAuthHeader } from '../services/databaseService.ts';
@@ -92,31 +93,101 @@ const SettingsSection: React.FC<{ title: string; children: React.ReactNode; }> =
     </div>
 );
 
-const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => (
-    <SettingsSection title="Panel Appearance">
-        <ThemeSwitcher />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <label htmlFor="language" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Language</label>
-                <select id="language" value={settings.language} onChange={e => setSettings(s => ({...s, language: e.target.value as PanelSettings['language']}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
-                    <option value="en">English</option>
-                    <option value="fil">Filipino</option>
-                    <option value="es">Español (Spanish)</option>
-                    <option value="pt">Português (Portuguese)</option>
-                </select>
-            </div>
-            <div>
-                <label htmlFor="currency" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Currency</label>
-                <select id="currency" value={settings.currency} onChange={e => setSettings(s => ({...s, currency: e.target.value as PanelSettings['currency']}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
-                    <option value="USD">USD ($)</option>
-                    <option value="PHP">PHP (₱)</option>
-                    <option value="EUR">EUR (€)</option>
-                    <option value="BRL">BRL (R$)</option>
-                </select>
-            </div>
-        </div>
-    </SettingsSection>
-);
+const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
+    const [currentPassword, setCurrentPassword] = React.useState('');
+    const [newPassword, setNewPassword] = React.useState('');
+    const [confirmPassword, setConfirmPassword] = React.useState('');
+    const [isSavingPassword, setIsSavingPassword] = React.useState(false);
+    const [passwordError, setPasswordError] = React.useState<string | null>(null);
+    const [passwordSuccess, setPasswordSuccess] = React.useState<string | null>(null);
+    const { logout } = useAuth();
+
+    const handlePasswordChange = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setPasswordError(null);
+        setPasswordSuccess(null);
+        if (newPassword !== confirmPassword) {
+            setPasswordError('Passwords do not match.');
+            return;
+        }
+        if (newPassword.length < 6) {
+            setPasswordError('Password must be at least 6 characters long.');
+            return;
+        }
+        setIsSavingPassword(true);
+        try {
+            const res = await fetch('/api/auth/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+                body: JSON.stringify({ currentPassword, newPassword })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.message || 'Failed to update password.');
+            }
+            setPasswordSuccess('Password updated. Logging out...');
+            setTimeout(() => {
+                logout();
+            }, 1500);
+        } catch (err) {
+            setPasswordError((err as Error).message);
+        } finally {
+            setIsSavingPassword(false);
+        }
+    };
+
+    return (
+        <>
+            <SettingsSection title="Panel Appearance">
+                <ThemeSwitcher />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="language" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Language</label>
+                        <select id="language" value={settings.language} onChange={e => setSettings(s => ({...s, language: e.target.value as PanelSettings['language']}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
+                            <option value="en">English</option>
+                            <option value="fil">Filipino</option>
+                            <option value="es">Español (Spanish)</option>
+                            <option value="pt">Português (Portuguese)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label htmlFor="currency" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Currency</label>
+                        <select id="currency" value={settings.currency} onChange={e => setSettings(s => ({...s, currency: e.target.value as PanelSettings['currency']}))} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
+                            <option value="USD">USD ($)</option>
+                            <option value="PHP">PHP (₱)</option>
+                            <option value="EUR">EUR (€)</option>
+                            <option value="BRL">BRL (R$)</option>
+                        </select>
+                    </div>
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="Admin Password">
+                {passwordError && <div className="p-3 mb-4 rounded-md bg-red-100 text-red-800">{passwordError}</div>}
+                {passwordSuccess && <div className="p-3 mb-4 rounded-md bg-green-100 text-green-800">{passwordSuccess}</div>}
+                <form onSubmit={handlePasswordChange} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Current Password</label>
+                        <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" required />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">New Password</label>
+                        <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" required />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Confirm New Password</label>
+                        <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" required />
+                    </div>
+                    <div className="flex justify-end">
+                        <button type="submit" disabled={isSavingPassword} className="px-6 py-2 bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-semibold rounded-lg disabled:opacity-50">
+                            {isSavingPassword ? 'Saving...' : 'Save Password'}
+                        </button>
+                    </div>
+                </form>
+            </SettingsSection>
+        </>
+    );
+};
 
 const AiTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => (
     <SettingsSection title="AI Settings">
