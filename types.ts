@@ -449,14 +449,38 @@ export interface LandingPageFeature {
     description: string;
 }
 
+export interface LandingPageProductCard {
+    title: string;
+    subtitle?: string;
+    priceText?: string;
+}
+
+export interface LandingPageLink {
+    label: string;
+    href: string;
+}
+
 export interface LandingPageConfig {
     webTitle?: string;
     heroBadge?: string;
     heroTitle?: string;
     heroSubtitle?: string;
+    heroCtaLabel?: string;
+    heroLoginPrompt?: string;
+    heroLoginLabel?: string;
+    navAdminLabel?: string;
+    navClientPortalLabel?: string;
     pages?: LandingPagePage[];
     features?: LandingPageFeature[];
     plans?: LandingPagePlan[];
+    plansTitle?: string;
+    productCards?: LandingPageProductCard[];
+    footerLinks?: LandingPageLink[];
+    contactTitle?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    contactAddress?: string;
+    contactFacebookUrl?: string;
 }
 
 export interface PanelSettings {

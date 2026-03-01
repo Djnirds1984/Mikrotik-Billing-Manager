@@ -23,20 +23,16 @@ export const LandingPage: React.FC = () => {
             <span className="font-semibold">{cfg.webTitle || companySettings.companyName || 'ISP Panel'}</span>
           </div>
           <nav className="hidden md:flex items-center gap-6 text-sm">
-            {(cfg.pages && cfg.pages.length > 0 ? cfg.pages : [
-              { id: 'features', label: 'Features' },
-              { id: 'plans', label: 'Plans' },
-              { id: 'contact', label: 'Contact' },
-            ]).map(p => (
+            {(cfg.pages || []).map(p => (
               <button key={p.id} onClick={() => goto(`#${p.id}`)} className="hover:text-[--color-primary-500]">{p.label}</button>
             ))}
           </nav>
           <div className="flex items-center gap-3">
             <button onClick={() => goto('/login')} className="px-4 py-2 rounded-md border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800">
-              Admin Login
+              {cfg.navAdminLabel || 'Admin Login'}
             </button>
             <button onClick={() => goto('/client_portal')} className="px-4 py-2 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">
-              Client Portal
+              {cfg.navClientPortalLabel || 'Client Portal'}
             </button>
           </div>
         </div>
@@ -53,52 +49,44 @@ export const LandingPage: React.FC = () => {
               {cfg.heroSubtitle || 'Automate PPPoE, DHCP captive portal, billing, receipts, and client notifications. Built for small to mid‑size ISPs using MikroTik.'}
             </p>
             <div className="mt-6 flex items-center gap-3">
-              <button onClick={() => goto('#plans')} className="px-6 py-3 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">View Plans</button>
+              <button onClick={() => goto('#plans')} className="px-6 py-3 rounded-md bg-[--color-primary-500] text-white hover:opacity-90">{cfg.heroCtaLabel || 'View Plans'}</button>
             </div>
-            <p className="mt-3 text-xs text-slate-500">Have an account? <span className="underline cursor-pointer" onClick={() => goto('/login')}>Login</span></p>
+            <p className="mt-3 text-xs text-slate-500">{cfg.heroLoginPrompt || 'Have an account?'} <span className="underline cursor-pointer" onClick={() => goto('/login')}>{cfg.heroLoginLabel || 'Login'}</span></p>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-white dark:bg-slate-900">
             <div className="aspect-[16/10] rounded-lg bg-gradient-to-br from-[--color-primary-300] to-[--color-primary-600] opacity-90 grid place-content-center text-white text-lg font-semibold">
               {cfg.webTitle || companySettings.companyName || 'ISP Products'}
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
-              <div className="rounded-md border border-slate-200 dark:border-slate-800 p-3">
-                <div className="font-semibold">Prepaid</div>
-                <div className="text-slate-500 text-xs">Voucher‑based internet</div>
-                <div className="mt-2 text-[--color-primary-500] font-bold">₱50 / day</div>
+            {(cfg.productCards && cfg.productCards.length > 0) && (
+              <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                {cfg.productCards.map((c, i) => (
+                  <div key={`card-${i}`} className="rounded-md border border-slate-200 dark:border-slate-800 p-3">
+                    <div className="font-semibold">{c.title}</div>
+                    {c.subtitle && <div className="text-slate-500 text-xs">{c.subtitle}</div>}
+                    {c.priceText && <div className="mt-2 text-[--color-primary-500] font-bold">{c.priceText}</div>}
+                  </div>
+                ))}
               </div>
-              <div className="rounded-md border border-slate-200 dark:border-slate-800 p-3">
-                <div className="font-semibold">Basic</div>
-                <div className="text-slate-500 text-xs">10 Mbps Home</div>
-                <div className="mt-2 text-[--color-primary-500] font-bold">₱799 / mo</div>
-              </div>
-              <div className="rounded-md border border-slate-200 dark:border-slate-800 p-3">
-                <div className="font-semibold">Pro</div>
-                <div className="text-slate-500 text-xs">30 Mbps Business</div>
-                <div className="mt-2 text-[--color-primary-500] font-bold">₱1,999 / mo</div>
-              </div>
-            </div>
+            )}
           </div>
         </section>
 
-        <section id="features" className="bg-slate-50 dark:bg-slate-950/40 border-y border-slate-200 dark:border-slate-800">
-          <div className="mx-auto max-w-7xl px-6 py-14 grid md:grid-cols-3 gap-6">
-            {(cfg.features && cfg.features.length > 0 ? cfg.features : [
-              { title: 'Billing & Receipts', description: 'Auto‑invoice, printable receipts, and payment tracking.' },
-              { title: 'Network Automation', description: 'PPPoE, DHCP portal, queues, and firewall templates.' },
-              { title: 'Client Portal', description: 'Clients can check status, invoices, and chat.' },
-            ]).map((f, i) => (
-              <div key={`feat-${i}`} className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-                <div className="text-[--color-primary-500] font-semibold">{f.title}</div>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{f.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+        {(cfg.features && cfg.features.length > 0) && (
+          <section id="features" className="bg-slate-50 dark:bg-slate-950/40 border-y border-slate-200 dark:border-slate-800">
+            <div className="mx-auto max-w-7xl px-6 py-14 grid md:grid-cols-3 gap-6">
+              {cfg.features.map((f, i) => (
+                <div key={`feat-${i}`} className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                  <div className="text-[--color-primary-500] font-semibold">{f.title}</div>
+                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{f.description}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {(Array.isArray(cfg.plans) && cfg.plans.length > 0) && (
           <section id="plans" className="mx-auto max-w-7xl px-6 py-16">
-            <h2 className="text-2xl font-bold">Plans</h2>
+            <h2 className="text-2xl font-bold">{cfg.plansTitle || 'Plans'}</h2>
             <div className="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {cfg.plans.map(p => (
                 <div key={p.name} className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -117,15 +105,44 @@ export const LandingPage: React.FC = () => {
             <p className="text-slate-600 dark:text-slate-300 text-sm mt-1">Customize this section content.</p>
           </section>
         ))}
+        <section id="contact" className="mx-auto max-w-7xl px-6 py-16">
+          <h2 className="text-2xl font-bold">{cfg.contactTitle || 'Contact'}</h2>
+          <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-6 text-sm">
+            {(cfg.contactEmail || companySettings.email) && (
+              <div className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <div className="font-semibold">Email</div>
+                <a className="mt-1 block text-[--color-primary-500]" href={`mailto:${cfg.contactEmail || companySettings.email}`}>{cfg.contactEmail || companySettings.email}</a>
+              </div>
+            )}
+            {cfg.contactPhone && (
+              <div className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <div className="font-semibold">Phone</div>
+                <a className="mt-1 block text-[--color-primary-500]" href={`tel:${cfg.contactPhone}`}>{cfg.contactPhone}</a>
+              </div>
+            )}
+            {(cfg.contactAddress) && (
+              <div className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <div className="font-semibold">Address</div>
+                <div className="mt-1 text-slate-600 dark:text-slate-300">{cfg.contactAddress}</div>
+              </div>
+            )}
+            {cfg.contactFacebookUrl && (
+              <div className="p-6 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <div className="font-semibold">Facebook</div>
+                <a className="mt-1 block text-[--color-primary-500]" href={cfg.contactFacebookUrl} target="_blank" rel="noreferrer">{cfg.contactFacebookUrl}</a>
+              </div>
+            )}
+          </div>
+        </section>
       </main>
 
-      <footer id="contact" className="border-t border-slate-200 dark:border-slate-800">
+      <footer className="border-t border-slate-200 dark:border-slate-800">
         <div className="mx-auto max-w-7xl px-6 py-10 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="text-sm text-slate-600 dark:text-slate-400">© {new Date().getFullYear()} {cfg.webTitle || companySettings.companyName || 'ISP Panel'}</div>
           <div className="flex items-center gap-4 text-sm">
-            <a href="mailto:support@ajcvendosystem.com" className="hover:text-[--color-primary-500]">Email</a>
-            <a href="#" className="hover:text-[--color-primary-500]">Facebook</a>
-            <a href="#" className="hover:text-[--color-primary-500]">Terms</a>
+            {(cfg.footerLinks || []).map((l, i) => (
+              <a key={`fl-${i}`} href={l.href} className="hover:text-[--color-primary-500]">{l.label}</a>
+            ))}
           </div>
         </div>
       </footer>

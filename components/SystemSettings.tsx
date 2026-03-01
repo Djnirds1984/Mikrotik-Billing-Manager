@@ -212,6 +212,16 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
                 </div>
             </SettingsSection>
 
+            <SettingsSection title="Buttons & Labels">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <TextInput label="Hero Primary Button" name="heroCtaLabel" value={cfg.heroCtaLabel || ''} onChange={e => updateCfg('heroCtaLabel', e.target.value)} />
+                    <TextInput label="Login Prompt Text" name="heroLoginPrompt" value={cfg.heroLoginPrompt || ''} onChange={e => updateCfg('heroLoginPrompt', e.target.value)} />
+                    <TextInput label="Login Link Label" name="heroLoginLabel" value={cfg.heroLoginLabel || ''} onChange={e => updateCfg('heroLoginLabel', e.target.value)} />
+                    <TextInput label="Admin Login Button" name="navAdminLabel" value={cfg.navAdminLabel || ''} onChange={e => updateCfg('navAdminLabel', e.target.value)} />
+                    <TextInput label="Client Portal Button" name="navClientPortalLabel" value={cfg.navClientPortalLabel || ''} onChange={e => updateCfg('navClientPortalLabel', e.target.value)} />
+                </div>
+            </SettingsSection>
+
             <SettingsSection title="Navigation Pages">
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -224,6 +234,22 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
                         ))}
                     </div>
                     <button onClick={() => addArrayItem('pages', { id: 'custom', label: 'Custom' })} className="px-4 py-2 bg-slate-700 text-white rounded-md">Add Page</button>
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="Product Cards">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {(cfg.productCards || []).map((c: any, idx: number) => (
+                            <div key={`card-${idx}`} className="space-y-2 border border-slate-200 dark:border-slate-700 rounded-md p-3">
+                                <TextInput label="Title" name={`card_title_${idx}`} value={c.title || ''} onChange={e => updateArrayItem('productCards', idx, 'title', e.target.value)} />
+                                <TextInput label="Subtitle" name={`card_sub_${idx}`} value={c.subtitle || ''} onChange={e => updateArrayItem('productCards', idx, 'subtitle', e.target.value)} />
+                                <TextInput label="Price Text" name={`card_price_${idx}`} value={c.priceText || ''} onChange={e => updateArrayItem('productCards', idx, 'priceText', e.target.value)} />
+                                <button onClick={() => removeArrayItem('productCards', idx)} className="px-3 py-2 bg-red-600 text-white rounded-md">Remove</button>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={() => addArrayItem('productCards', { title: 'New', subtitle: '', priceText: '' })} className="px-4 py-2 bg-slate-700 text-white rounded-md">Add Card</button>
                 </div>
             </SettingsSection>
 
@@ -244,6 +270,7 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
 
             <SettingsSection title="Plans">
                 <div className="space-y-4">
+                    <TextInput label="Section Title" name="plansTitle" value={cfg.plansTitle || ''} onChange={e => updateCfg('plansTitle', e.target.value)} />
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         {(cfg.plans || []).map((p: any, idx: number) => (
                             <div key={`plan-${idx}`} className="space-y-2 border border-slate-200 dark:border-slate-700 rounded-md p-3">
@@ -256,6 +283,31 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
                         ))}
                     </div>
                     <button onClick={() => addArrayItem('plans', { name: 'New Plan', speedText: '', priceText: '', ctaLabel: 'Inquire' })} className="px-4 py-2 bg-slate-700 text-white rounded-md">Add Plan</button>
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="Contact">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <TextInput label="Section Title" name="contactTitle" value={cfg.contactTitle || ''} onChange={e => updateCfg('contactTitle', e.target.value)} />
+                    <TextInput label="Email" name="contactEmail" value={cfg.contactEmail || ''} onChange={e => updateCfg('contactEmail', e.target.value)} />
+                    <TextInput label="Phone" name="contactPhone" value={cfg.contactPhone || ''} onChange={e => updateCfg('contactPhone', e.target.value)} />
+                    <TextInput label="Address" name="contactAddress" value={cfg.contactAddress || ''} onChange={e => updateCfg('contactAddress', e.target.value)} />
+                    <TextInput label="Facebook URL" name="contactFacebookUrl" value={cfg.contactFacebookUrl || ''} onChange={e => updateCfg('contactFacebookUrl', e.target.value)} />
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="Footer Links">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {(cfg.footerLinks || []).map((l: any, idx: number) => (
+                            <div key={`link-${idx}`} className="space-y-2 border border-slate-200 dark:border-slate-700 rounded-md p-3">
+                                <TextInput label="Label" name={`link_label_${idx}`} value={l.label || ''} onChange={e => updateArrayItem('footerLinks', idx, 'label', e.target.value)} />
+                                <TextInput label="Href" name={`link_href_${idx}`} value={l.href || ''} onChange={e => updateArrayItem('footerLinks', idx, 'href', e.target.value)} />
+                                <button onClick={() => removeArrayItem('footerLinks', idx)} className="px-3 py-2 bg-red-600 text-white rounded-md">Remove</button>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={() => addArrayItem('footerLinks', { label: 'Email', href: 'mailto:' })} className="px-4 py-2 bg-slate-700 text-white rounded-md">Add Link</button>
                 </div>
             </SettingsSection>
         </div>
