@@ -482,6 +482,15 @@ export interface LandingPageConfig {
     heroLoginLabel?: string;
     navAdminLabel?: string;
     navClientPortalLabel?: string;
+    templateId?: string;
+    templateName?: string;
+    theme?: {
+        primary500?: string;
+        primary600?: string;
+        primary700?: string;
+        accent?: string;
+        background?: string;
+    };
     pages?: LandingPagePage[];
     features?: LandingPageFeature[];
     plans?: LandingPagePlan[];

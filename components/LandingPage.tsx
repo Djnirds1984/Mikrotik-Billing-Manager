@@ -7,6 +7,14 @@ export const LandingPage: React.FC = () => {
   const [companySettings, setCompanySettings] = useState<CompanySettings>({ companyName: '', address: '', contactNumber: '', email: '', logoBase64: '' });
   const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
   const cfg: LandingPageConfig = panelSettings?.landingPageConfig || {};
+  useEffect(() => {
+    const theme = cfg.theme || {};
+    const root = document.documentElement;
+    if (theme.primary500) root.style.setProperty('--color-primary-500', theme.primary500);
+    if (theme.primary600) root.style.setProperty('--color-primary-600', theme.primary600);
+    if (theme.primary700) root.style.setProperty('--color-primary-700', theme.primary700);
+    if (theme.background) root.style.setProperty('--lp-background', theme.background);
+  }, [cfg.theme]);
   const [selectedPlan, setSelectedPlan] = useState<string>('');
   const [inqName, setInqName] = useState<string>('');
   const [inqEmail, setInqEmail] = useState<string>('');
@@ -110,7 +118,7 @@ export const LandingPage: React.FC = () => {
     }
   };
   return (
-    <div className="min-h-screen bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+    <div className="min-h-screen text-slate-900 dark:text-slate-100" style={{ background: (cfg.theme?.background || 'white') }}>
       <header className="sticky top-0 z-30 border-b border-slate-200/60 dark:border-slate-800/60 bg-white/70 dark:bg-slate-900/70 backdrop-blur">
         <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">

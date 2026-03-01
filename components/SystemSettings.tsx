@@ -184,25 +184,226 @@ const GlobeIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
     const cfg = settings.landingPageConfig || {};
+    const templates = [
+        {
+            id: 'classic',
+            name: 'Classic',
+            theme: { primary500: '#f97316', primary600: '#ea580c', primary700: '#c2410c', accent: '#0ea5e9', background: '#ffffff' },
+            config: {
+                webTitle: 'ISP Panel',
+                heroBadge: 'Reliable Internet',
+                heroTitle: 'Fast and Affordable Plans',
+                heroSubtitle: 'Connect your home or business today',
+                heroCtaLabel: 'Get Started',
+                heroLoginPrompt: 'Already a customer?',
+                heroLoginLabel: 'Client Portal',
+                navAdminLabel: 'Admin Login',
+                navClientPortalLabel: 'Client Portal',
+                pages: [{ id: 'features', label: 'Features' }, { id: 'plans', label: 'Plans' }, { id: 'contact', label: 'Contact' }],
+                features: [{ title: 'Stable Connection', description: 'Consistent speeds with low latency.' }, { title: '24/7 Support', description: 'We are here when you need us.' }],
+                plansTitle: 'Popular Plans',
+                plans: [{ name: 'Basic', speedText: '50 Mbps', priceText: '₱999', ctaLabel: 'Inquire' }, { name: 'Premium', speedText: '150 Mbps', priceText: '₱1,499', ctaLabel: 'Inquire' }],
+                productCards: [],
+                footerLinks: [{ label: 'Email', href: 'mailto:' }],
+                contactTitle: 'Contact Us',
+                contactEmail: '',
+                contactPhone: '',
+                contactAddress: '',
+                contactFacebookUrl: ''
+            }
+        },
+        {
+            id: 'modern',
+            name: 'Modern',
+            theme: { primary500: '#6366f1', primary600: '#4f46e5', primary700: '#4338ca', accent: '#22d3ee', background: '#ffffff' },
+            config: {
+                webTitle: 'Modern ISP',
+                heroBadge: 'Fiber Ready',
+                heroTitle: 'Experience Next-Gen Internet',
+                heroSubtitle: 'Ultra-fast fiber plans',
+                heroCtaLabel: 'View Plans',
+                heroLoginPrompt: 'Manage your account',
+                heroLoginLabel: 'Login',
+                navAdminLabel: 'Admin Login',
+                navClientPortalLabel: 'Client Portal',
+                pages: [{ id: 'plans', label: 'Plans' }, { id: 'contact', label: 'Contact' }],
+                features: [{ title: 'Unlimited Data', description: 'No data caps.' }, { title: 'Fiber Backbone', description: 'High reliability.' }],
+                plansTitle: 'Fiber Plans',
+                plans: [{ name: 'Fiber 100', speedText: '100 Mbps', priceText: '₱1,299', ctaLabel: 'Inquire' }, { name: 'Fiber 300', speedText: '300 Mbps', priceText: '₱2,499', ctaLabel: 'Inquire' }],
+                productCards: [],
+                footerLinks: [{ label: 'Support', href: '#' }],
+                contactTitle: 'Get Support',
+                contactEmail: '',
+                contactPhone: '',
+                contactAddress: '',
+                contactFacebookUrl: ''
+            }
+        },
+        {
+            id: 'business',
+            name: 'Business',
+            theme: { primary500: '#10b981', primary600: '#059669', primary700: '#047857', accent: '#f59e0b', background: '#ffffff' },
+            config: {
+                webTitle: 'Business Connectivity',
+                heroBadge: 'SME Solutions',
+                heroTitle: 'Scale With Reliable Internet',
+                heroSubtitle: 'Flexible plans for growing teams',
+                heroCtaLabel: 'Contact Sales',
+                heroLoginPrompt: 'Existing clients',
+                heroLoginLabel: 'Portal',
+                navAdminLabel: 'Admin Login',
+                navClientPortalLabel: 'Client Portal',
+                pages: [{ id: 'features', label: 'Features' }, { id: 'plans', label: 'Plans' }],
+                features: [{ title: 'SLA', description: 'Uptime guarantees.' }, { title: 'Priority Support', description: 'Dedicated support line.' }],
+                plansTitle: 'Business Plans',
+                plans: [{ name: 'SME 50', speedText: '50 Mbps', priceText: '₱2,999', ctaLabel: 'Inquire' }, { name: 'Enterprise 200', speedText: '200 Mbps', priceText: '₱9,999', ctaLabel: 'Inquire' }],
+                productCards: [],
+                footerLinks: [{ label: 'Facebook', href: '#' }],
+                contactTitle: 'Talk To Us',
+                contactEmail: '',
+                contactPhone: '',
+                contactAddress: '',
+                contactFacebookUrl: ''
+            }
+        },
+        {
+            id: 'minimal',
+            name: 'Minimal',
+            theme: { primary500: '#0ea5e9', primary600: '#0284c7', primary700: '#0369a1', accent: '#14b8a6', background: '#ffffff' },
+            config: {
+                webTitle: 'Simple ISP',
+                heroBadge: 'Simple & Fast',
+                heroTitle: 'Internet Made Easy',
+                heroSubtitle: 'No-frills plans',
+                heroCtaLabel: 'Inquire',
+                heroLoginPrompt: 'Account',
+                heroLoginLabel: 'Login',
+                navAdminLabel: 'Admin',
+                navClientPortalLabel: 'Portal',
+                pages: [{ id: 'plans', label: 'Plans' }],
+                features: [{ title: 'Straightforward', description: 'Clear pricing.' }],
+                plansTitle: 'Plans',
+                plans: [{ name: 'Home 30', speedText: '30 Mbps', priceText: '₱799', ctaLabel: 'Inquire' }],
+                productCards: [],
+                footerLinks: [{ label: 'Email', href: 'mailto:' }],
+                contactTitle: 'Contact',
+                contactEmail: '',
+                contactPhone: '',
+                contactAddress: '',
+                contactFacebookUrl: ''
+            }
+        },
+        {
+            id: 'dark',
+            name: 'Dark',
+            theme: { primary500: '#f59e0b', primary600: '#d97706', primary700: '#b45309', accent: '#22c55e', background: '#0f172a' },
+            config: {
+                webTitle: 'Dark ISP',
+                heroBadge: 'Performance',
+                heroTitle: 'Powerful Connectivity',
+                heroSubtitle: 'Built for performance users',
+                heroCtaLabel: 'Start',
+                heroLoginPrompt: 'Have an account?',
+                heroLoginLabel: 'Login',
+                navAdminLabel: 'Admin',
+                navClientPortalLabel: 'Portal',
+                pages: [{ id: 'features', label: 'Features' }, { id: 'plans', label: 'Plans' }, { id: 'contact', label: 'Contact' }],
+                features: [{ title: 'Low Latency', description: 'Optimized routes.' }],
+                plansTitle: 'Performance Plans',
+                plans: [{ name: 'Pro 200', speedText: '200 Mbps', priceText: '₱3,499', ctaLabel: 'Inquire' }],
+                productCards: [],
+                footerLinks: [{ label: 'Email', href: 'mailto:' }],
+                contactTitle: 'Reach Us',
+                contactEmail: '',
+                contactPhone: '',
+                contactAddress: '',
+                contactFacebookUrl: ''
+            }
+        }
+    ];
+    const markCustom = () => {
+        if (cfg.templateId && cfg.templateId !== 'custom') {
+            setSettings(s => ({
+                ...s,
+                landingPageConfig: {
+                    ...(s.landingPageConfig || {}),
+                    templateId: 'custom',
+                    templateName: (cfg.templateName ? cfg.templateName : '') || `Custom`
+                }
+            }));
+        }
+    };
     const updateCfg = (key: keyof NonNullable<PanelSettings['landingPageConfig']>, value: any) => {
+        markCustom();
         setSettings(s => ({ ...s, landingPageConfig: { ...(s.landingPageConfig || {}), [key]: value } }));
     };
     const updateArrayItem = <T extends any[]>(key: keyof NonNullable<PanelSettings['landingPageConfig']>, index: number, field: string, value: any) => {
         const arr = ((cfg as any)[key] as T) || ([] as unknown as T);
         const next = arr.map((it: any, i: number) => i === index ? { ...it, [field]: value } : it);
+        markCustom();
         updateCfg(key, next);
     };
     const addArrayItem = (key: keyof NonNullable<PanelSettings['landingPageConfig']>, item: any) => {
         const arr = ((cfg as any)[key] as any[]) || [];
+        markCustom();
         updateCfg(key, [...arr, item]);
     };
     const removeArrayItem = (key: keyof NonNullable<PanelSettings['landingPageConfig']>, index: number) => {
         const arr = ((cfg as any)[key] as any[]) || [];
+        markCustom();
         updateCfg(key, arr.filter((_, i) => i !== index));
     };
 
     return (
         <div className="space-y-8">
+            <SettingsSection title="Template & Theme">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Template</label>
+                        <select
+                            value={cfg.templateId || ''}
+                            onChange={(e) => {
+                                const selected = templates.find(t => t.id === e.target.value);
+                                if (selected) {
+                                    setSettings(s => ({
+                                        ...s,
+                                        landingPageConfig: {
+                                            ...selected.config,
+                                            templateId: selected.id,
+                                            templateName: selected.name,
+                                            theme: selected.theme
+                                        }
+                                    }));
+                                }
+                            }}
+                            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        >
+                            <option value="">Select</option>
+                            {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Template Name</label>
+                        <input
+                            type="text"
+                            value={cfg.templateName || ''}
+                            onChange={(e) => setSettings(s => ({ ...s, landingPageConfig: { ...(s.landingPageConfig || {}), templateName: e.target.value, templateId: 'custom' } }))}
+                            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                            placeholder="Custom Template Name"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Primary Color</label>
+                        <input
+                            type="color"
+                            value={cfg.theme?.primary600 || '#ea580c'}
+                            onChange={(e) => updateCfg('theme', { ...(cfg.theme || {}), primary600: e.target.value })}
+                            className="mt-1 h-10 w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md"
+                        />
+                    </div>
+                </div>
+            </SettingsSection>
             <SettingsSection title="Landing Page Basics">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <TextInput label="Web Title" name="webTitle" value={cfg.webTitle || ''} onChange={e => updateCfg('webTitle', e.target.value)} />
