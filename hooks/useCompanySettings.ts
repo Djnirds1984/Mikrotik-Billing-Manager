@@ -47,7 +47,10 @@ export const useCompanySettings = () => {
             }
         } catch (err) {
             setError((err as Error).message);
-            console.error("Failed to fetch company settings from DB", err);
+            const path = typeof window !== 'undefined' ? window.location.pathname : '';
+            if (!path.startsWith('/captive')) {
+                console.error("Failed to fetch company settings from DB", err);
+            }
         } finally {
             setIsLoading(false);
         }
