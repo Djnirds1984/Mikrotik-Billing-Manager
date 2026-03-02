@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { SaleRecord, CompanySettings } from '../types.ts';
 import { CurrencyDollarIcon, TrashIcon, PrinterIcon } from '../constants.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
+import { PrintableThermalReceipt } from './PrintableThermalReceipt.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { dbApi } from '../services/databaseService.ts';
@@ -31,6 +32,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
+    const [receiptPrintMode, setReceiptPrintMode] = useState<'normal' | 'thermal'>('normal');
     const [invoices, setInvoices] = useState<any[]>([]);
     const [invLoading, setInvLoading] = useState<boolean>(false);
     const [isAddOpen, setIsAddOpen] = useState<boolean>(false);
@@ -180,7 +182,8 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         window.print();
     };
 
-    const handlePrintReceipt = (sale: SaleRecord) => {
+    const handlePrintReceipt = (sale: SaleRecord, mode: 'normal' | 'thermal') => {
+        setReceiptPrintMode(mode);
         setReceiptToPrint(sale);
     };
 
@@ -209,7 +212,11 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     return (
         <>
             <div className={receiptToPrint ? 'printable-area' : 'hidden'}>
-                <PrintableReceipt sale={receiptToPrint} companySettings={companySettings} />
+                {receiptPrintMode === 'thermal' ? (
+                    <PrintableThermalReceipt sale={receiptToPrint} companySettings={companySettings} />
+                ) : (
+                    <PrintableReceipt sale={receiptToPrint} companySettings={companySettings} />
+                )}
             </div>
             
             <div className={!receiptToPrint ? 'printable-area' : 'hidden'}>
@@ -365,7 +372,10 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                             <td className="px-4 py-3 text-right font-mono text-yellow-600 dark:text-yellow-400">{formatCurrency(sale.discountAmount)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-green-600 dark:text-green-400 font-bold">{formatCurrency(sale.finalAmount)}</td>
                                             <td className="px-4 py-3 text-center no-print">
-                                                <button onClick={() => handlePrintReceipt(sale)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 dark:hover:text-sky-400 rounded-md" title="Print Acknowledgement Receipt">
+                                                <button onClick={() => handlePrintReceipt(sale, 'normal')} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 dark:hover:text-sky-400 rounded-md" title="Print Acknowledgement Receipt (Normal)">
+                                                    <PrinterIcon className="h-5 w-5" />
+                                                </button>
+                                                <button onClick={() => handlePrintReceipt(sale, 'thermal')} className="p-2 text-slate-500 dark:text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 rounded-md" title="Print Acknowledgement Receipt (Thermal)">
                                                     <PrinterIcon className="h-5 w-5" />
                                                 </button>
                                                 {hasPermission('sales_report:delete') && (

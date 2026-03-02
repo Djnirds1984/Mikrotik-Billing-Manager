@@ -33,7 +33,7 @@
   /* Thermal receipt specific styles */
   .thermal-receipt {
     visibility: visible !important;
-    width: 280px !important;
+    width: 80mm !important;
     margin: 0 auto !important;
     font-family: monospace !important;
     font-size: 12px !important;
@@ -46,7 +46,7 @@
   /* Ensure thermal receipt fits thermal paper */
   @page {
     margin: 0;
-    size: 80mm 297mm; /* Thermal paper size */
+    size: 80mm auto; /* Thermal paper width, height adjusts to content */
   }
   
   /* Override any conflicting styles */
