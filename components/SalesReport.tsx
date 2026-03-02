@@ -491,9 +491,13 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                     <h3 className="text-lg font-semibold">Invoice</h3>
                                     <div className="flex items-center gap-2">
                                         {String(invoiceToView.status).toUpperCase() === 'PAID' && (
-                                            <button onClick={handlePrintInvoice} className="px-3 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-md">Print Invoice</button>
+                                            <button type="button" onClick={handlePrintInvoice} className="px-3 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-md">Print</button>
                                         )}
-                                        <button onClick={() => setInvoiceToView(null)} className="px-3 py-1 bg-slate-200 dark:bg-slate-700 rounded-md">Close</button>
+                                        <button type="button" onClick={() => openEditInvoice(invoiceToView)} className="px-3 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-md">Edit</button>
+                                        <button type="button" onClick={() => markInvoice(invoiceToView.id, 'PAID')} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-md">Mark Paid</button>
+                                        <button type="button" onClick={() => markInvoice(invoiceToView.id, 'PENDING')} className="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded-md">Mark Pending</button>
+                                        <button type="button" onClick={() => deleteInvoice(invoiceToView.id)} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-md">Delete</button>
+                                        <button type="button" onClick={() => setInvoiceToView(null)} className="px-3 py-1 bg-slate-200 dark:bg-slate-700 rounded-md">Close</button>
                                     </div>
                                 </div>
                                 <div className="p-6 space-y-4">
