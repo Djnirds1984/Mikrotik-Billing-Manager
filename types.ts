@@ -832,4 +832,6 @@ export interface DhcpClientActionParams {
     expiresAt?: string;
     speedLimit?: string;
     accountNumber?: string;
+    latitude?: string;
+    longitude?: string;
 }

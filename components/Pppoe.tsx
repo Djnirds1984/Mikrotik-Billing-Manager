@@ -215,7 +215,7 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
 // --- User Form Modal ---
 const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, profiles, isSubmitting }) => {
     const [secret, setSecret] = useState({ name: '', password: '', profile: '' }); // profile is plan ID
-    const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '' });
+    const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', latitude: '', longitude: '' });
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
     const [nonPaymentProfile, setNonPaymentProfile] = useState('');
@@ -263,6 +263,11 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 }
                 const pt = String(commentData.planType || '').toLowerCase().trim();
                 setPlanType(pt === 'postpaid' ? 'postpaid' : 'prepaid');
+                const lat = commentData.customer?.latitude || '';
+                const lng = commentData.customer?.longitude || '';
+                if (lat || lng) {
+                    setCustomer(c => ({ ...c, latitude: lat || '', longitude: lng || '' }));
+                }
             } catch (e) {
                 setDueDate('');
                 setPlanType('prepaid');
@@ -270,7 +275,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
 
         } else {
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
-            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '' });
+            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', latitude: '', longitude: '' });
             setDueDate('');
             setPlanType('prepaid');
         }
@@ -349,7 +354,11 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                         <hr className="my-4 border-slate-200 dark:border-slate-700" />
                         <h4 className="font-semibold">Customer Information (Optional)</h4>
                         <div><label>Full Name</label><input type="text" value={customer.fullName} onChange={e => setCustomer(c => ({...c, fullName: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
-                        <div><label>Full Address</label><input type="text" value={customer.address} onChange={e => setCustomer(c => ({...c, address: e.target.value}))} placeholder="Halimbawa: 14.5995, 120.9842 — GPS (lat, lng)" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                        <div><label>Full Address</label><input type="text" value={customer.address} onChange={e => setCustomer(c => ({...c, address: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label>Latitude</label><input type="text" value={customer.latitude} onChange={e => setCustomer(c => ({...c, latitude: e.target.value}))} placeholder="Halimbawa: 14.5995" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                            <div><label>Longitude</label><input type="text" value={customer.longitude} onChange={e => setCustomer(c => ({...c, longitude: e.target.value}))} placeholder="Halimbawa: 120.9842" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><label>Contact Number</label><input type="text" value={customer.contactNumber} onChange={e => setCustomer(c => ({...c, contactNumber: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                             <div><label>Email</label><input type="email" value={customer.email} onChange={e => setCustomer(c => ({...c, email: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
@@ -563,7 +572,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         fullName: customerData.fullName || '',
                         address: customerData.address || '',
                         contactNumber: customerData.contactNumber || '',
-                        email: customerData.email || ''
+                        email: customerData.email || '',
+                        latitude: (customer as any).latitude || '',
+                        longitude: (customer as any).longitude || ''
                     };
                 }
             }

@@ -134,6 +134,8 @@ export const updateDhcpClientDetails = (router: RouterConfigWithId, client: Dhcp
         email: params.email,
         speedLimit: params.speedLimit,
         accountNumber: params.accountNumber,
+        latitude: params.latitude,
+        longitude: params.longitude,
     });
 };
 

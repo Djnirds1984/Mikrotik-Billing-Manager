@@ -37,6 +37,9 @@ const EditClientModal: React.FC<{
                     } else if (parsed.dueDate) {
                         currentExpiresAt = `${parsed.dueDate}T23:59`;
                     }
+                    const lat = parsed?.customer?.latitude || '';
+                    const lng = parsed?.customer?.longitude || '';
+                    setFormData(prev => ({ ...prev, latitude: lat || '', longitude: lng || '' }));
                 } catch(e) {}
             }
 
@@ -46,7 +49,9 @@ const EditClientModal: React.FC<{
                 email: initialData.email || '',
                 speedLimit: initialData.speedLimit || '',
                 expiresAt: currentExpiresAt,
-                accountNumber: (dbClient as any)?.accountNumber || ''
+                accountNumber: (dbClient as any)?.accountNumber || '',
+                latitude: (formData as any)?.latitude || '',
+                longitude: (formData as any)?.longitude || ''
             });
         }
     }, [isOpen, client, dbClient]);
@@ -69,7 +74,11 @@ const EditClientModal: React.FC<{
                     <div className="p-6">
                         <h3 className="text-xl font-bold mb-4">Edit Client</h3>
                         <div className="space-y-4">
-                            <div><label>Customer Name</label><input name="customerInfo" value={formData.customerInfo} onChange={handleChange} required placeholder="Halimbawa: 14.5995, 120.9842 — GPS (lat, lng)" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                            <div><label>Customer Name</label><input name="customerInfo" value={formData.customerInfo} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label>Latitude</label><input name="latitude" value={(formData as any).latitude || ''} onChange={handleChange} placeholder="Halimbawa: 14.5995" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                                <div><label>Longitude</label><input name="longitude" value={(formData as any).longitude || ''} onChange={handleChange} placeholder="Halimbawa: 120.9842" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
+                            </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div><label>Contact Number</label><input name="contactNumber" value={formData.contactNumber} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
                                 <div><label>Email</label><input type="email" name="email" value={formData.email} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
