@@ -1408,8 +1408,9 @@ app.get('/captive/info', async (req, res) => {
 
 // DHCP Portal Setup
 app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) => {
-    const { panelIp, lanInterface } = req.body;
+    const { panelIp, lanInterface, portalPort } = req.body;
     if (!panelIp || !lanInterface) return res.status(400).json({ message: 'Missing panelIp or lanInterface' });
+    const portToUse = Number(portalPort) > 0 ? Number(portalPort) : 80;
 
     try {
         const SCRIPT_NAME = 'dhcp-lease-add-to-pending';
@@ -1452,7 +1453,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                         'src-address-list': '!' + LIST_NAME,
                         action: 'dst-nat',
                         'to-addresses': panelIp,
-                        'to-ports': '80',
+                        'to-ports': String(portToUse),
                         comment: COMMENT_TAG + '-REDIRECT',
                         'place-before': 0
                     });
@@ -1539,7 +1540,7 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                     'src-address-list': '!' + LIST_NAME,
                     action: 'dst-nat',
                     'to-addresses': panelIp,
-                    'to-ports': '80',
+                    'to-ports': String(portToUse),
                     comment: COMMENT_TAG + '-REDIRECT',
                     'place-before': '*0'
                 });

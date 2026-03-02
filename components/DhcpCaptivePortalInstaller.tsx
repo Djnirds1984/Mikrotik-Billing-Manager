@@ -7,6 +7,7 @@ import { ServerIcon, CogIcon, ExclamationTriangleIcon, CheckCircleIcon, TrashIco
 export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ selectedRouter }) => {
     const [panelIp, setPanelIp] = useState('');
     const [lanInterface, setLanInterface] = useState('');
+    const [portalPort, setPortalPort] = useState<number>(8080);
     const [availableInterfaces, setAvailableInterfaces] = useState<Interface[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isInstalling, setIsInstalling] = useState(false);
@@ -59,7 +60,7 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
                 setIsInstalling(false);
                 return;
             }
-            const result = await runDhcpCaptivePortalSetup(selectedRouter, { panelIp, lanInterface });
+            const result = await runDhcpCaptivePortalSetup(selectedRouter, { panelIp, lanInterface, portalPort });
             setSuccessMessage(result.message);
         } catch (err) {
             setError((err as Error).message);
@@ -138,6 +139,18 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
                             {!isIpv4(panelIp) && panelIp && <span className="text-xs text-red-600 dark:text-red-400">Enter a valid IPv4 address</span>}
                         </div>
                         <p className="mt-1 text-xs text-slate-500">Set exact IPv4 of your panel server for NAT redirect.</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Captive Port</label>
+                        <input
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={portalPort}
+                            onChange={(e) => setPortalPort(Number(e.target.value))}
+                            className="mt-1 block w-full p-3 bg-slate-100 dark:bg-slate-700 rounded-md font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-[--color-primary-500] focus:outline-none"
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Dedicated port for captive portal (default 8080). Iwas conflict sa login.</p>
                     </div>
                      <div>
                         <label htmlFor="lanInterface" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Primary LAN Interface</label>

@@ -24,6 +24,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // const { RouterOSAPI } = require('node-routeros-v2'); // Not needed here anymore
 
 const PORT = 3001;
+const CAPTIVE_PORT = Number(process.env.CAPTIVE_PORT || 8080);
 const DB_PATH = path.join(__dirname, 'panel.db');
 const SUPERADMIN_DB_PATH = path.join(__dirname, 'superadmin.db');
 const BACKUP_DIR = path.join(__dirname, 'backups');
@@ -1931,6 +1932,21 @@ async function startServer() {
     app.listen(PORT, () => {
         console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
         console.log(`   Mode: Development (Vite Middleware Active)`);
+    });
+
+    const captiveApp = express();
+    captiveApp.use(express.json({ limit: '10mb' }));
+    captiveApp.use(express.text({ limit: '10mb' }));
+    captiveApp.use((req, res, next) => {
+        const ignore = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/') || req.path.startsWith('/env.js') || /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
+        if (!ignore && !req.path.startsWith('/captive')) {
+            return res.redirect('/captive');
+        }
+        next();
+    });
+    captiveApp.use(vite.middlewares);
+    captiveApp.listen(CAPTIVE_PORT, () => {
+        console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
     });
 }
 

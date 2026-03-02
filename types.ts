@@ -791,6 +791,7 @@ export interface DhcpServerSetupParams {
 export interface DhcpCaptivePortalSetupParams {
     panelIp: string;
     lanInterface: string;
+    portalPort: number;
 }
 
 export interface DhcpClient {
