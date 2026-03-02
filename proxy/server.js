@@ -469,12 +469,9 @@ async function startServer() {
     const app = express();
 
     const isAdminHostname = (hostname) => {
-        if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+        if (hostname === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
         const adminDomains = ['.pitunnel.net', '.ngrok.io', '.ngrok-free.app', '.dataplicity.io'];
-        if (adminDomains.some(d => hostname.endsWith(d))) return true;
-        const allowEnv = (process.env.ADMIN_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean);
-        if (allowEnv.includes(hostname)) return true;
-        return false;
+        return adminDomains.some(d => hostname.endsWith(d));
     };
     const shouldIgnorePath = (p) => {
         const ignored = ['/api/', '/mt-api/', '/ws/', '/captive', '/env.js'];
