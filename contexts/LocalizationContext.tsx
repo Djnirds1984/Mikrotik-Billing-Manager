@@ -42,9 +42,10 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const loadInitialSettings = async () => {
             setIsLoading(true);
 
-            // Hard-stop any protected fetches on public Client Portal route
-            const isClientPortal = typeof window !== 'undefined' && window.location.pathname.startsWith('/client_portal');
-            if (isClientPortal) {
+            const path = typeof window !== 'undefined' ? window.location.pathname : '';
+            const isClientPortal = path.startsWith('/client_portal');
+            const isCaptive = path.startsWith('/captive');
+            if (isClientPortal || isCaptive) {
                 setSettings({ language: 'en', currency: 'USD' });
                 await fetchTranslations('en');
                 setIsLoading(false);

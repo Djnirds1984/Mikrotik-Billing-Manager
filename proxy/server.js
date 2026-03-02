@@ -1949,7 +1949,9 @@ async function startServer() {
     }));
     // Serve built assets on captive port to avoid dev middleware MIME issues
     const distPath = path.resolve(__dirname, '..', 'dist');
+    const localesPath = path.resolve(__dirname, '..', 'locales');
     captiveApp.use(express.static(distPath));
+    captiveApp.use('/locales', express.static(localesPath));
     captiveApp.get('*', (req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
     });

@@ -82,6 +82,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     useEffect(() => {
         const initializeAuth = async () => {
             setIsLoading(true);
+            const path = typeof window !== 'undefined' ? window.location.pathname : '';
+            if (path.startsWith('/captive')) {
+                setHasUsers(true);
+                setUser(null);
+                setToken(null);
+                setIsLoading(false);
+                return;
+            }
             await checkHasUsers();
             const storedToken = localStorage.getItem('authToken');
             if (storedToken) {

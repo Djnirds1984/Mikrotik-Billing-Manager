@@ -19,8 +19,16 @@ export const useCompanySettings = () => {
         setIsLoading(true);
         setError(null);
         try {
-            const data = await dbApi.get<CompanySettings>('/company-settings');
-            setSettings(s => ({...s, ...data}));
+            const path = typeof window !== 'undefined' ? window.location.pathname : '';
+            if (path.startsWith('/captive')) {
+                const resp = await fetch('/api/public/landing-page');
+                const json = await resp.json();
+                const company = json?.company || {};
+                setSettings(s => ({ ...s, companyName: company.companyName || '', address: '', contactNumber: '', email: '', logoBase64: company.logoBase64 || '' }));
+            } else {
+                const data = await dbApi.get<CompanySettings>('/company-settings');
+                setSettings(s => ({...s, ...data}));
+            }
         } catch (err) {
             setError((err as Error).message);
             console.error("Failed to fetch company settings from DB", err);
