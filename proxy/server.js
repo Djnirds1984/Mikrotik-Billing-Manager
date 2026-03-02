@@ -1933,7 +1933,6 @@ async function startServer() {
         next();
     });
     // Proxy API calls so captive port can fetch data
-    const { createProxyMiddleware } = await import('http-proxy-middleware');
     captiveApp.use('/mt-api', createProxyMiddleware({
         target: 'http://localhost:3002',
         changeOrigin: true,
