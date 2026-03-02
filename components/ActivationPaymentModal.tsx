@@ -30,8 +30,7 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
     const [email, setEmail] = useState('');
     const [downtimeDays, setDowntimeDays] = useState<number>(0);
     const [manualExpiresAt, setManualExpiresAt] = useState('');
-    const [latitude, setLatitude] = useState('');
-    const [longitude, setLongitude] = useState('');
+    const [gpsCoordinates, setGpsCoordinates] = useState('');
 
     useEffect(() => {
         if (isOpen && client) {
@@ -43,17 +42,18 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             try {
                 if (client.comment) {
                     const parsed = JSON.parse(client.comment);
-                    const lat = parsed?.customer?.latitude || '';
-                    const lng = parsed?.customer?.longitude || '';
-                    setLatitude(lat || '');
-                    setLongitude(lng || '');
+                    const gps = parsed?.customer?.gps || '';
+                    if (gps) setGpsCoordinates(gps);
+                    else {
+                        const lat = parsed?.customer?.latitude || '';
+                        const lng = parsed?.customer?.longitude || '';
+                        setGpsCoordinates([lat, lng].filter(Boolean).join(', '));
+                    }
                 } else {
-                    setLatitude('');
-                    setLongitude('');
+                    setGpsCoordinates('');
                 }
             } catch (_) {
-                setLatitude('');
-                setLongitude('');
+                setGpsCoordinates('');
             }
             
             if (plans.length > 0) {
@@ -90,8 +90,7 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             downtimeDays,
             expiresAt: manualExpiresAt || undefined,
             speedLimit: selectedPlan.speedLimit,
-            latitude,
-            longitude
+            gpsCoordinates
         });
     };
 
@@ -118,27 +117,15 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
                             />
                         </div>
                         
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Latitude</label>
-                                <input 
-                                    type="text" 
-                                    value={latitude} 
-                                    onChange={e => setLatitude(e.target.value)}
-                                    placeholder="Halimbawa: 14.5995"
-                                    className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-slate-900 dark:text-white"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Longitude</label>
-                                <input 
-                                    type="text" 
-                                    value={longitude} 
-                                    onChange={e => setLongitude(e.target.value)}
-                                    placeholder="Halimbawa: 120.9842"
-                                    className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-slate-900 dark:text-white"
-                                />
-                            </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">GPS Coordinates</label>
+                            <input 
+                                type="text" 
+                                value={gpsCoordinates} 
+                                onChange={e => setGpsCoordinates(e.target.value)}
+                                placeholder="Halimbawa: 9.124384458488505, 125.5344096926807"
+                                className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-slate-900 dark:text-white"
+                            />
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4">

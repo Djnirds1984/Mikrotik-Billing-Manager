@@ -215,7 +215,7 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
 // --- User Form Modal ---
 const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, profiles, isSubmitting }) => {
     const [secret, setSecret] = useState({ name: '', password: '', profile: '' }); // profile is plan ID
-    const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', latitude: '', longitude: '' });
+    const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', gps: '' });
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
     const [nonPaymentProfile, setNonPaymentProfile] = useState('');
@@ -263,10 +263,15 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 }
                 const pt = String(commentData.planType || '').toLowerCase().trim();
                 setPlanType(pt === 'postpaid' ? 'postpaid' : 'prepaid');
-                const lat = commentData.customer?.latitude || '';
-                const lng = commentData.customer?.longitude || '';
-                if (lat || lng) {
-                    setCustomer(c => ({ ...c, latitude: lat || '', longitude: lng || '' }));
+                const gps = commentData.customer?.gps || '';
+                if (gps) {
+                    setCustomer(c => ({ ...c, gps }));
+                } else {
+                    const lat = commentData.customer?.latitude || '';
+                    const lng = commentData.customer?.longitude || '';
+                    if (lat || lng) {
+                        setCustomer(c => ({ ...c, gps: [lat, lng].filter(Boolean).join(', ') }));
+                    }
                 }
             } catch (e) {
                 setDueDate('');
@@ -275,7 +280,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
 
         } else {
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
-            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', latitude: '', longitude: '' });
+            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', gps: '' });
             setDueDate('');
             setPlanType('prepaid');
         }
@@ -355,10 +360,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                         <h4 className="font-semibold">Customer Information (Optional)</h4>
                         <div><label>Full Name</label><input type="text" value={customer.fullName} onChange={e => setCustomer(c => ({...c, fullName: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                         <div><label>Full Address</label><input type="text" value={customer.address} onChange={e => setCustomer(c => ({...c, address: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div><label>Latitude</label><input type="text" value={customer.latitude} onChange={e => setCustomer(c => ({...c, latitude: e.target.value}))} placeholder="Halimbawa: 14.5995" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
-                            <div><label>Longitude</label><input type="text" value={customer.longitude} onChange={e => setCustomer(c => ({...c, longitude: e.target.value}))} placeholder="Halimbawa: 120.9842" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
-                        </div>
+                        <div><label>GPS Coordinates</label><input type="text" value={(customer as any).gps} onChange={e => setCustomer(c => ({...c, gps: e.target.value}))} placeholder="Halimbawa: 9.124384458488505, 125.5344096926807" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><label>Contact Number</label><input type="text" value={customer.contactNumber} onChange={e => setCustomer(c => ({...c, contactNumber: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                             <div><label>Email</label><input type="email" value={customer.email} onChange={e => setCustomer(c => ({...c, email: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
@@ -573,8 +575,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         address: customerData.address || '',
                         contactNumber: customerData.contactNumber || '',
                         email: customerData.email || '',
-                        latitude: (customer as any).latitude || '',
-                        longitude: (customer as any).longitude || ''
+                        gps: (customer as any).gps || ''
                     };
                 }
             }

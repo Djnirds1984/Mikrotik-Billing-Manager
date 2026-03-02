@@ -37,9 +37,13 @@ const EditClientModal: React.FC<{
                     } else if (parsed.dueDate) {
                         currentExpiresAt = `${parsed.dueDate}T23:59`;
                     }
-                    const lat = parsed?.customer?.latitude || '';
-                    const lng = parsed?.customer?.longitude || '';
-                    setFormData(prev => ({ ...prev, latitude: lat || '', longitude: lng || '' }));
+                    const gps = parsed?.customer?.gps || '';
+                    if (gps) setFormData(prev => ({ ...prev, gpsCoordinates: gps }));
+                    else {
+                        const lat = parsed?.customer?.latitude || '';
+                        const lng = parsed?.customer?.longitude || '';
+                        if (lat || lng) setFormData(prev => ({ ...prev, gpsCoordinates: [lat, lng].filter(Boolean).join(', ') }));
+                    }
                 } catch(e) {}
             }
 
@@ -50,8 +54,7 @@ const EditClientModal: React.FC<{
                 speedLimit: initialData.speedLimit || '',
                 expiresAt: currentExpiresAt,
                 accountNumber: (dbClient as any)?.accountNumber || '',
-                latitude: (formData as any)?.latitude || '',
-                longitude: (formData as any)?.longitude || ''
+                gpsCoordinates: (formData as any)?.gpsCoordinates || ''
             });
         }
     }, [isOpen, client, dbClient]);
@@ -75,10 +78,7 @@ const EditClientModal: React.FC<{
                         <h3 className="text-xl font-bold mb-4">Edit Client</h3>
                         <div className="space-y-4">
                             <div><label>Customer Name</label><input name="customerInfo" value={formData.customerInfo} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><label>Latitude</label><input name="latitude" value={(formData as any).latitude || ''} onChange={handleChange} placeholder="Halimbawa: 14.5995" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                                <div><label>Longitude</label><input name="longitude" value={(formData as any).longitude || ''} onChange={handleChange} placeholder="Halimbawa: 120.9842" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
-                            </div>
+                            <div><label>GPS Coordinates</label><input name="gpsCoordinates" value={(formData as any).gpsCoordinates || ''} onChange={handleChange} placeholder="Halimbawa: 9.124384458488505, 125.5344096926807" className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div><label>Contact Number</label><input name="contactNumber" value={formData.contactNumber} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
                                 <div><label>Email</label><input type="email" name="email" value={formData.email} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" /></div>
