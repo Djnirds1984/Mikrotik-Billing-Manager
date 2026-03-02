@@ -658,7 +658,8 @@ async function startServer() {
         });
         dbRouter.delete(`${route}/:id`, async (req, res) => {
             try {
-                await db.run(`DELETE FROM ${table} WHERE id = ?`, req.params.id);
+                const { id } = req.params;
+                await db.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
                 res.json({ message: 'Deleted' });
             } catch (e) {
                 res.status(500).json({ message: e.message });

@@ -200,6 +200,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         try {
             await dbApi.delete(`/client-invoices/${id}`);
             await loadInvoices();
+            alert('Invoice deleted.');
         } catch (e) {
             alert((e as Error).message);
         }
