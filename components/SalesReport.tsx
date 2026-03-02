@@ -163,6 +163,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         try {
             await dbApi.patch(`/client-invoices/${id}`, { status });
             await loadInvoices();
+            alert(`Invoice marked as ${status}.`);
         } catch (e) {
             alert((e as Error).message);
         }
@@ -330,8 +331,8 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                     </div>
                                     <div className="grid grid-cols-2 gap-3">
                                         <div>
-                                            <label className="block text-sm font-medium">Amount</label>
-                                            <input type="number" value={invoiceToEdit.amount || 0} onChange={e => setInvoiceToEdit({ ...invoiceToEdit, amount: e.target.value })} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                        <label className="block text-sm font-medium">Amount</label>
+                                            <input type="number" value={invoiceToEdit.amount ?? ''} onChange={e => setInvoiceToEdit({ ...invoiceToEdit, amount: e.target.value === '' ? null : Number(e.target.value) })} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium">Currency</label>
@@ -404,11 +405,11 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                                 <span className={`px-2 py-1 rounded text-xs font-bold ${String(inv.status).toUpperCase() === 'PAID' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{String(inv.status || 'PENDING').toUpperCase()}</span>
                                             </td>
                                             <td className="px-4 py-3 text-center no-print space-x-2">
-                                                <button onClick={() => setInvoiceToView(inv)} className="px-3 py-1 text-sm bg-slate-600 text-white rounded-md font-semibold hover:bg-slate-700">View</button>
-                                                <button onClick={() => openEditInvoice(inv)} className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700">Edit</button>
-                                                <button onClick={() => markInvoice(inv.id, 'PAID')} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700">Mark Paid</button>
-                                                <button onClick={() => markInvoice(inv.id, 'PENDING')} className="px-3 py-1 text-sm bg-yellow-500 text-white rounded-md font-semibold hover:bg-yellow-600">Mark Pending</button>
-                                                <button onClick={() => deleteInvoice(inv.id)} className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700">Delete</button>
+                                                <button type="button" onClick={() => setInvoiceToView(inv)} className="px-3 py-1 text-sm bg-slate-600 text-white rounded-md font-semibold hover:bg-slate-700">View</button>
+                                                <button type="button" onClick={() => openEditInvoice(inv)} className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700">Edit</button>
+                                                <button type="button" onClick={() => markInvoice(inv.id, 'PAID')} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700">Mark Paid</button>
+                                                <button type="button" onClick={() => markInvoice(inv.id, 'PENDING')} className="px-3 py-1 text-sm bg-yellow-500 text-white rounded-md font-semibold hover:bg-yellow-600">Mark Pending</button>
+                                                <button type="button" onClick={() => deleteInvoice(inv.id)} className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700">Delete</button>
                                             </td>
                                         </tr>
                                     )) : (
