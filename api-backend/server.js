@@ -1479,7 +1479,8 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                         'in-interface': lanInterface,
                         'src-address-list': LIST_NAME,
                         action: 'accept',
-                        comment: COMMENT_TAG + '-AUTH'
+                        comment: COMMENT_TAG + '-AUTH',
+                        'place-before': 0
                     });
                 }
 
@@ -1489,7 +1490,8 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                         chain: 'forward',
                         'dst-address': panelIp,
                         action: 'accept',
-                        comment: COMMENT_TAG + '-PANEL'
+                        comment: COMMENT_TAG + '-PANEL',
+                        'place-before': 0
                      });
                 }
 
@@ -1563,7 +1565,8 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                     'in-interface': lanInterface,
                     'src-address-list': LIST_NAME,
                     action: 'accept',
-                    comment: COMMENT_TAG + '-AUTH'
+                    comment: COMMENT_TAG + '-AUTH',
+                    'place-before': '*0'
                 });
             }
 
@@ -1573,7 +1576,8 @@ app.post('/:routerId/script/run-dhcp-portal-setup', getRouter, async (req, res) 
                     chain: 'forward',
                     'dst-address': panelIp,
                     action: 'accept',
-                    comment: COMMENT_TAG + '-PANEL'
+                    comment: COMMENT_TAG + '-PANEL',
+                    'place-before': '*0'
                 });
             }
 

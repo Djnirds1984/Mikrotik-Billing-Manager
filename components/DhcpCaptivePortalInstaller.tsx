@@ -13,6 +13,7 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
     const [isUninstalling, setIsUninstalling] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const isIpv4 = (s: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
 
     useEffect(() => {
         const fetchRequiredData = async () => {
@@ -53,6 +54,11 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
         setError(null);
         setSuccessMessage(null);
         try {
+            if (!isIpv4(panelIp)) {
+                setError('Invalid Portal Server IP. Enter a valid IPv4 address.');
+                setIsInstalling(false);
+                return;
+            }
             const result = await runDhcpCaptivePortalSetup(selectedRouter, { panelIp, lanInterface });
             setSuccessMessage(result.message);
         } catch (err) {
@@ -114,10 +120,24 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
                 <div className="p-6 space-y-6">
                     <div>
                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Portal Server IP Address</label>
-                        <div className="mt-1 p-3 bg-slate-100 dark:bg-slate-700 rounded-md font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600">
-                            {panelIp || 'Detecting...'}
+                        <input
+                            type="text"
+                            value={panelIp}
+                            onChange={(e) => setPanelIp(e.target.value)}
+                            placeholder="e.g., 192.168.77.249"
+                            className={`mt-1 block w-full p-3 bg-slate-100 dark:bg-slate-700 rounded-md font-mono text-slate-800 dark:text-slate-200 border ${isIpv4(panelIp) ? 'border-slate-200 dark:border-slate-600' : 'border-red-400 dark:border-red-500'} focus:ring-2 focus:ring-[--color-primary-500] focus:outline-none`}
+                        />
+                        <div className="mt-2 flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPanelIp(window.location.hostname)}
+                                className="px-3 py-1 text-sm bg-slate-200 dark:bg-slate-700 rounded-md"
+                            >
+                                Use current host
+                            </button>
+                            {!isIpv4(panelIp) && panelIp && <span className="text-xs text-red-600 dark:text-red-400">Enter a valid IPv4 address</span>}
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">The IP address of the server hosting this panel (e.g., your Orange Pi). This is auto-detected.</p>
+                        <p className="mt-1 text-xs text-slate-500">Set exact IPv4 of your panel server for NAT redirect.</p>
                     </div>
                      <div>
                         <label htmlFor="lanInterface" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Primary LAN Interface</label>
