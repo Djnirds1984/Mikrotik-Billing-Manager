@@ -33,16 +33,29 @@ const fetchData = async <T>(path: string, options: RequestInit = {}): Promise<T>
         throw new Error('Session expired. Please log in again.');
     }
 
+    const contentType = response.headers.get('content-type') || '';
+
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: `Request failed with status ${response.status}` }));
-        throw new Error(errorData.message);
+        if (contentType.includes('application/json')) {
+            const errorData = await response.json().catch(() => ({ message: `Request failed with status ${response.status}` }));
+            throw new Error(errorData.message || `Request failed with status ${response.status}`);
+        } else {
+            const text = await response.text().catch(() => '');
+            const msg = text || `Request failed with status ${response.status}`;
+            throw new Error(msg);
+        }
     }
     
     if (response.status === 204) { // No Content
         return {} as T;
     }
 
-    return response.json() as Promise<T>;
+    if (contentType.includes('application/json')) {
+        return response.json() as Promise<T>;
+    }
+    
+    const text = await response.text().catch(() => '');
+    throw new Error(text || 'Invalid response format: expected JSON');
 };
 
 export const dbApi = {
