@@ -500,7 +500,7 @@ async function startServer() {
         const isStaticAsset = /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
         const isApi = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/');
         if (isIpHost && !isApi && !isStaticAsset && req.path === '/login') {
-            return res.redirect('/captive');
+            return res.redirect(`http://${host}:${CAPTIVE_PORT}/captive`);
         }
         next();
     });
