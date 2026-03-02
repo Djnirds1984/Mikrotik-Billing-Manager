@@ -41,6 +41,12 @@ export const PrintableThermalReceipt: React.FC<PrintableThermalReceiptProps> = (
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
                     <span>Date:</span><span>{dateStr}</span>
                 </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                    <span>Plan Type:</span><span style={{ textTransform: 'uppercase' }}>{(sale.planType || 'prepaid')}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                    <span>Month Covered:</span><span>{sale.coveredMonth || new Date(sale.date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
+                </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Full Name:</span><span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sale.clientName || ''}</span>
                 </div>

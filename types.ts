@@ -325,6 +325,8 @@ export interface SaleRecord {
     clientAddress?: string;
     clientContact?: string;
     clientEmail?: string;
+    planType?: 'prepaid' | 'postpaid';
+    coveredMonth?: string;
 }
 
 export interface InventoryItem {

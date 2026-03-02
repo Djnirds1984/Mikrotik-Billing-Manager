@@ -85,6 +85,21 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
         
         setIsSubmitting(true);
         
+        // Derive plan type from secret comment
+        let planType: 'prepaid' | 'postpaid' = 'prepaid';
+        try {
+            const c = JSON.parse(String(secret.comment || '{}'));
+            const pt = String(c.planType || '').toLowerCase();
+            if (pt === 'postpaid') planType = 'postpaid';
+        } catch {}
+        // Derive covered month based on payment date and plan type
+        const paymentDT = new Date(paymentDate);
+        const coveredBase = new Date(paymentDT);
+        if (planType === 'postpaid') {
+            coveredBase.setMonth(coveredBase.getMonth() - 1);
+        }
+        const coveredMonth = coveredBase.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
         const saleData = {
             clientName: secret.customer?.fullName || secret.name,
             planName: selectedPlan.name,
@@ -95,6 +110,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             clientAddress: secret.customer?.address,
             clientContact: secret.customer?.contactNumber,
             clientEmail: secret.customer?.email,
+            planType,
+            coveredMonth,
         };
         
         const paymentData = {

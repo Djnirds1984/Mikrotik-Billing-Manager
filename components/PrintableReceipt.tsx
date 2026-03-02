@@ -36,6 +36,10 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
                         <p>{sale.clientName}</p>
                         {sale.clientAddress && <p className="text-sm text-gray-700">{sale.clientAddress}</p>}
                         {sale.clientContact && <p className="text-sm text-gray-700">{sale.clientContact}</p>}
+                        <div className="mt-2 text-sm text-gray-700">
+                            <div>Plan Type: {(sale.planType || 'prepaid').toUpperCase()}</div>
+                            <div>Month Covered: {sale.coveredMonth || new Date(sale.date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
+                        </div>
                     </div>
                     <div className="text-right">
                         <h2 className="font-bold">ACKNOWLEDGEMENT RECEIPT #: {sale.id.slice(-6).toUpperCase()}</h2>
