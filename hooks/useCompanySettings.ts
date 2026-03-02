@@ -22,9 +22,25 @@ export const useCompanySettings = () => {
             const path = typeof window !== 'undefined' ? window.location.pathname : '';
             if (path.startsWith('/captive')) {
                 const resp = await fetch('/api/public/landing-page');
-                const json = await resp.json();
-                const company = json?.company || {};
-                setSettings(s => ({ ...s, companyName: company.companyName || '', address: '', contactNumber: '', email: '', logoBase64: company.logoBase64 || '' }));
+                if (!resp.ok) {
+                    setSettings(s => ({ ...s, companyName: '', logoBase64: '' }));
+                } else {
+                    const contentType = resp.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                        const json = await resp.json();
+                        const company = json?.company || {};
+                        setSettings(s => ({ ...s, companyName: company.companyName || '', address: '', contactNumber: '', email: '', logoBase64: company.logoBase64 || '' }));
+                    } else {
+                        const txt = await resp.text();
+                        try {
+                            const json = JSON.parse(txt);
+                            const company = json?.company || {};
+                            setSettings(s => ({ ...s, companyName: company.companyName || '', address: '', contactNumber: '', email: '', logoBase64: company.logoBase64 || '' }));
+                        } catch {
+                            setSettings(s => ({ ...s, companyName: '', logoBase64: '' }));
+                        }
+                    }
+                }
             } else {
                 const data = await dbApi.get<CompanySettings>('/company-settings');
                 setSettings(s => ({...s, ...data}));
