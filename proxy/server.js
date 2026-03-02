@@ -1932,7 +1932,28 @@ async function startServer() {
         }
         next();
     });
-    captiveApp.use(vite.middlewares);
+    // Proxy API calls so captive port can fetch data
+    const { createProxyMiddleware } = await import('http-proxy-middleware');
+    captiveApp.use('/mt-api', createProxyMiddleware({
+        target: 'http://localhost:3002',
+        changeOrigin: true,
+        pathRewrite: { '^/mt-api': '' }
+    }));
+    captiveApp.use('/ws', createProxyMiddleware({
+        target: 'http://localhost:3002',
+        changeOrigin: true,
+        ws: true
+    }));
+    captiveApp.use('/api', createProxyMiddleware({
+        target: `http://127.0.0.1:${PORT}`,
+        changeOrigin: true
+    }));
+    // Serve built assets on captive port to avoid dev middleware MIME issues
+    const distPath = path.resolve(__dirname, '..', 'dist');
+    captiveApp.use(express.static(distPath));
+    captiveApp.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+    });
     captiveApp.listen(CAPTIVE_PORT, () => {
         console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
     });
