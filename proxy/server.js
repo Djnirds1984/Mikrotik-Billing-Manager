@@ -1924,7 +1924,10 @@ async function startServer() {
     captiveApp.use(express.text({ limit: '10mb' }));
     captiveApp.use((req, res, next) => {
         const ignore = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/') || req.path.startsWith('/env.js') || /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
-        if (!ignore && !req.path.startsWith('/captive')) {
+        const host = (req.headers.host || '').split(':')[0];
+        const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === 'localhost';
+        const isPublicDomain = !isIpHost && host.includes('.');
+        if (!ignore && !req.path.startsWith('/captive') && !isPublicDomain) {
             return res.redirect('/captive');
         }
         next();
