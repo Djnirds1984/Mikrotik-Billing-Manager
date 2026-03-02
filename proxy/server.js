@@ -468,6 +468,27 @@ async function startServer() {
     await Promise.all([initDb(), initSuperadminDb()]);
     const app = express();
 
+    const isAdminHostname = (hostname) => {
+        if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+        const adminDomains = ['.pitunnel.net', '.ngrok.io', '.ngrok-free.app', '.dataplicity.io'];
+        if (adminDomains.some(d => hostname.endsWith(d))) return true;
+        const allowEnv = (process.env.ADMIN_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (allowEnv.includes(hostname)) return true;
+        return false;
+    };
+    const shouldIgnorePath = (p) => {
+        const ignored = ['/api/', '/mt-api/', '/ws/', '/captive', '/env.js'];
+        if (ignored.some(i => p.startsWith(i))) return true;
+        return /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(p);
+    };
+    app.use((req, res, next) => {
+        const direct = isAdminHostname(req.hostname);
+        if (!direct && !shouldIgnorePath(req.path)) {
+            return res.redirect('/captive');
+        }
+        next();
+    });
+
     // --- DEV PROXY MIDDLEWARE FOR API BACKEND ---
     // This allows npm start (without Nginx) to still reach the backend API
     // If Nginx is used, Nginx handles this routing.
