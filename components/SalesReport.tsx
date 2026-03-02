@@ -43,6 +43,8 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [selectedClientId, setSelectedClientId] = useState<string>('');
     const [invoiceToView, setInvoiceToView] = useState<any | null>(null);
     const [invoiceToPrint, setInvoiceToPrint] = useState<any | null>(null);
+    const [invoiceToEdit, setInvoiceToEdit] = useState<any | null>(null);
+    const [isEditOpen, setIsEditOpen] = useState<boolean>(false);
     const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
 
     const filteredSales = useMemo(() => {
@@ -161,7 +163,45 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         try {
             await dbApi.patch(`/client-invoices/${id}`, { status });
             await loadInvoices();
-        } catch (e) {}
+        } catch (e) {
+            alert((e as Error).message);
+        }
+    };
+    const openEditInvoice = (inv: any) => {
+        setInvoiceToEdit({ ...inv });
+        setIsEditOpen(true);
+    };
+    const saveEditInvoice = async () => {
+        if (!invoiceToEdit?.id) return;
+        try {
+            const payload: any = {
+                planName: invoiceToEdit.planName || '',
+                amount: Number(invoiceToEdit.amount || 0),
+                currency: invoiceToEdit.currency || 'PHP',
+                status: String(invoiceToEdit.status || 'PENDING').toUpperCase() === 'PAID' ? 'PAID' : 'PENDING',
+            };
+            if (invoiceToEdit.dueDateTime) {
+                const dt = new Date(invoiceToEdit.dueDateTime);
+                payload.dueDateTime = dt.toISOString();
+            }
+            await dbApi.patch(`/client-invoices/${invoiceToEdit.id}`, payload);
+            setIsEditOpen(false);
+            setInvoiceToEdit(null);
+            await loadInvoices();
+            alert('Invoice updated.');
+        } catch (e) {
+            alert((e as Error).message);
+        }
+    };
+    const deleteInvoice = async (id: string) => {
+        if (!id) return;
+        if (!window.confirm('Delete this invoice?')) return;
+        try {
+            await dbApi.delete(`/client-invoices/${id}`);
+            await loadInvoices();
+        } catch (e) {
+            alert((e as Error).message);
+        }
     };
 
     const handleClear = () => {
@@ -277,6 +317,49 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                             </div>
                         </div>
                     )}
+                    {isEditOpen && invoiceToEdit && (
+                        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg w-full max-w-lg">
+                                <div className="px-4 py-3 border-b dark:border-slate-700">
+                                    <h3 className="text-lg font-semibold">Edit Invoice</h3>
+                                </div>
+                                <div className="p-4 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium">Plan Name</label>
+                                        <input value={invoiceToEdit.planName || ''} onChange={e => setInvoiceToEdit({ ...invoiceToEdit, planName: e.target.value })} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-sm font-medium">Amount</label>
+                                            <input type="number" value={invoiceToEdit.amount || 0} onChange={e => setInvoiceToEdit({ ...invoiceToEdit, amount: e.target.value })} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium">Currency</label>
+                                            <input value={invoiceToEdit.currency || 'PHP'} onChange={e => setInvoiceToEdit({ ...invoiceToEdit, currency: e.target.value })} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium">Due Date</label>
+                                        <input type="datetime-local" value={invoiceToEdit.dueDateTime ? new Date(invoiceToEdit.dueDateTime).toISOString().slice(0,16) : ''} onChange={e => {
+                                            const v = e.target.value;
+                                            setInvoiceToEdit({ ...invoiceToEdit, dueDateTime: v ? new Date(v).toISOString() : null });
+                                        }} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium">Status</label>
+                                        <select value={String(invoiceToEdit.status || 'PENDING').toUpperCase()} onChange={e => setInvoiceToEdit({ ...invoiceToEdit, status: e.target.value })} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                            <option value="PENDING">PENDING</option>
+                                            <option value="PAID">PAID</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="px-4 py-3 border-t dark:border-slate-700 flex justify-end gap-2">
+                                    <button onClick={() => { setIsEditOpen(false); setInvoiceToEdit(null); }} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-md">Cancel</button>
+                                    <button onClick={saveEditInvoice} className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-md">Save</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Summary Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -322,8 +405,10 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                             </td>
                                             <td className="px-4 py-3 text-center no-print space-x-2">
                                                 <button onClick={() => setInvoiceToView(inv)} className="px-3 py-1 text-sm bg-slate-600 text-white rounded-md font-semibold hover:bg-slate-700">View</button>
+                                                <button onClick={() => openEditInvoice(inv)} className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700">Edit</button>
                                                 <button onClick={() => markInvoice(inv.id, 'PAID')} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700">Mark Paid</button>
                                                 <button onClick={() => markInvoice(inv.id, 'PENDING')} className="px-3 py-1 text-sm bg-yellow-500 text-white rounded-md font-semibold hover:bg-yellow-600">Mark Pending</button>
+                                                <button onClick={() => deleteInvoice(inv.id)} className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700">Delete</button>
                                             </td>
                                         </tr>
                                     )) : (
