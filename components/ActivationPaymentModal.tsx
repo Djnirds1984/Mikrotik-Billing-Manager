@@ -94,6 +94,7 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
                                 required 
                                 value={customerInfo} 
                                 onChange={e => setCustomerInfo(e.target.value)}
+                                placeholder="Halimbawa: 14.5995, 120.9842 — GPS (lat, lng)"
                                 className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-[--color-primary-500] focus:outline-none text-slate-900 dark:text-white"
                             />
                         </div>
