@@ -52,6 +52,7 @@ const Payroll = React.lazy(() => import('./components/Payroll.tsx').then(m => ({
 const CaptiveChatAdmin = React.lazy(() => import('./components/CaptiveChatAdmin.tsx').then(m => ({ default: m.CaptiveChatAdmin })));
 const LandingPage = React.lazy(() => import('./components/LandingPage.tsx').then(m => ({ default: m.LandingPage })));
 const ApplicationForm = React.lazy(() => import('./components/ApplicationForm.tsx').then(m => ({ default: m.ApplicationForm })));
+const PaymentRequests = React.lazy(() => import('./components/PaymentRequests.tsx').then(m => ({ default: m.PaymentRequests })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -236,6 +237,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                       return <Billing selectedRouter={selectedRouter} />;
                   case 'sales':
                       return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} />;
+                  case 'payment_requests':
+                      return <PaymentRequests />;
                   case 'inventory':
                       return (
                         <Inventory 

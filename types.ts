@@ -28,7 +28,8 @@ export type View =
   | 'client_portal_users'
   | 'notifications'
   | 'captive_chat'
-  | 'application_form';
+  | 'application_form'
+  | 'payment_requests';
 
 export interface Notification {
   id: string;

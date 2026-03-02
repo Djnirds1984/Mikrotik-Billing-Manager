@@ -30,6 +30,7 @@ const SUPERADMIN_DB_PATH = path.join(__dirname, 'superadmin.db');
 const BACKUP_DIR = path.join(__dirname, 'backups');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const APPLICATIONS_UPLOADS_DIR = path.join(UPLOADS_DIR, 'applications');
+const RECEIPTS_UPLOADS_DIR = path.join(UPLOADS_DIR, 'receipts');
 const SECRET_KEY = process.env.JWT_SECRET || 'a-very-weak-secret-key-for-dev-only';
 const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret-string-for-licenses-!@#$%^&*()';
 
@@ -42,6 +43,9 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 if (!fs.existsSync(APPLICATIONS_UPLOADS_DIR)) {
     fs.mkdirSync(APPLICATIONS_UPLOADS_DIR, { recursive: true });
+}
+if (!fs.existsSync(RECEIPTS_UPLOADS_DIR)) {
+    fs.mkdirSync(RECEIPTS_UPLOADS_DIR, { recursive: true });
 }
 
 let db;
@@ -182,6 +186,7 @@ async function initDb() {
             { id: 'perm_sidebar_updater', name: 'view:sidebar:updater', description: 'View Updater' },
             { id: 'perm_sidebar_logs', name: 'view:sidebar:logs', description: 'View System Logs' },
             { id: 'perm_sidebar_license', name: 'view:sidebar:license', description: 'View License Page' },
+            { id: 'perm_sidebar_payment_requests', name: 'view:sidebar:payment_requests', description: 'View Payment Requests' },
             { id: 'perm_sidebar_super_admin', name: 'view:sidebar:super_admin', description: 'View Super Admin' }
         ];
         for (const p of sidebarPerms) {
@@ -198,6 +203,21 @@ async function initDb() {
                 password TEXT,
                 port INTEGER,
                 api_type TEXT
+            );
+            CREATE TABLE IF NOT EXISTS payment_requests (
+                id TEXT PRIMARY KEY,
+                routerId TEXT,
+                usernameLabel TEXT,
+                accountNumber TEXT,
+                planName TEXT,
+                planId TEXT,
+                amount REAL,
+                currency TEXT,
+                ip TEXT,
+                macAddress TEXT,
+                imagePath TEXT,
+                status TEXT DEFAULT 'PENDING',
+                createdAt TEXT
             );
             CREATE TABLE IF NOT EXISTS billing_plans (
                 id TEXT PRIMARY KEY,
@@ -714,6 +734,7 @@ async function startServer() {
     createCrud('/client-invoices', 'client_invoices');
     createCrud('/sales', 'sales_records');
     createCrud('/applications', 'applications');
+    createCrud('/payment-requests', 'payment_requests');
 
     // Customers API (Manual Upsert)
     dbRouter.get('/customers', async (req, res) => {
@@ -896,6 +917,25 @@ async function startServer() {
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
     
+    // Public: Lookup DHCP client by MAC for captive portal
+    app.get('/api/public/dhcp-client/by-mac', async (req, res) => {
+        try {
+            const { routerId, mac } = req.query;
+            if (!routerId || !mac) return res.status(400).json({ message: 'routerId and mac are required' });
+            const row = await db.get('SELECT id, routerId, macAddress, customerInfo, hostName, accountNumber, contactNumber, email FROM dhcp_clients WHERE routerId = ? AND macAddress = ?', [routerId, mac]);
+            res.json(row || {});
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+    // Public: List DHCP billing plans
+    app.get('/api/public/dhcp/plans', async (req, res) => {
+        try {
+            const { routerId } = req.query;
+            if (!routerId) return res.status(400).json({ message: 'routerId is required' });
+            const rows = await db.all('SELECT id, name, price, cycle_days, currency FROM dhcp_billing_plans WHERE routerId = ? ORDER BY name ASC', [routerId]);
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+    
     app.get('/api/public/ppp/status', async (req, res) => {
         try {
             const { routerId, username } = req.query;
@@ -945,6 +985,28 @@ async function startServer() {
             const rows = await db.all('SELECT id, planName, amount, currency, dueDateTime, issueDate, status FROM client_invoices WHERE routerId = ? AND username = ? ORDER BY issueDate DESC', [routerId, username]);
             res.json(rows);
         } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+    
+    // Public: Submit payment request with receipt image
+    app.post('/api/public/payment-request', express.json({ limit: '10mb' }), async (req, res) => {
+        try {
+            const { routerId, usernameLabel, accountNumber, planName, planId, amount, currency, ip, macAddress, imageBase64 } = req.body || {};
+            if (!routerId || !usernameLabel || !planName || !imageBase64) return res.status(400).json({ message: 'routerId, usernameLabel, planName, imageBase64 are required' });
+            const id = `payreq_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+            const createdAt = new Date().toISOString();
+            const fileName = `${id}.png`;
+            const filePath = path.join(RECEIPTS_UPLOADS_DIR, fileName);
+            const base64Data = String(imageBase64).replace(/^data:image\/\w+;base64,/, '');
+            await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'));
+            await db.run(
+                `INSERT INTO payment_requests (id, routerId, usernameLabel, accountNumber, planName, planId, amount, currency, ip, macAddress, imagePath, status, createdAt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
+                [id, routerId, usernameLabel || '', accountNumber || '', planName, planId || '', amount || 0, currency || 'PHP', ip || '', macAddress || '', `/uploads/receipts/${fileName}`, createdAt]
+            );
+            res.status(201).json({ message: 'Payment request submitted.', id, imageUrl: `/uploads/receipts/${fileName}` });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
     });
     
     app.post('/api/public/inquiry', express.json(), async (req, res) => {
@@ -997,6 +1059,51 @@ async function startServer() {
         } catch (e) {
             res.status(500).json({ message: e.message });
         }
+    });
+    
+    // Admin: Accept/Decline payment requests
+    app.post('/api/admin/payment-requests/:id/accept', protect, async (req, res) => {
+        try {
+            const { id } = req.params;
+            const pr = await db.get('SELECT * FROM payment_requests WHERE id = ?', [id]);
+            if (!pr) return res.status(404).json({ message: 'Payment request not found' });
+            const plans = await db.all('SELECT id, name, price, cycle_days, currency FROM dhcp_billing_plans WHERE routerId = ?', [pr.routerId]);
+            const plan = plans.find(p => String(p.id) === String(pr.planId)) || plans.find(p => String(p.name).toLowerCase() === String(pr.planName).toLowerCase());
+            if (!plan) return res.status(400).json({ message: 'Plan not found for router' });
+            // Renew DHCP client immediately
+            try {
+                await axios.post(`http://localhost:3002/${pr.routerId}/dhcp-client/update`, {
+                    macAddress: pr.macAddress,
+                    address: pr.ip,
+                    customerInfo: pr.usernameLabel,
+                    plan: { name: plan.name, cycle_days: plan.cycle_days },
+                    planType: 'prepaid'
+                }, { timeout: 15000 });
+            } catch (e) {
+                console.warn('Renewal failed, continuing to mark as paid:', e.message);
+            }
+            // Create invoice then mark as PAID to record sale
+            const invId = `inv_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+            await db.run(
+                `INSERT INTO client_invoices (id, routerId, username, accountNumber, source, planName, planId, amount, currency, dueDateTime, issueDate, status)
+                 VALUES (?, ?, ?, ?, 'dhcp', ?, ?, ?, ?, NULL, ?, 'PENDING')`,
+                [invId, pr.routerId, String(pr.usernameLabel || '').toLowerCase(), pr.accountNumber || null, plan.name, plan.id || null, plan.price || 0, plan.currency || 'PHP', new Date().toISOString()]
+            );
+            await db.run(`UPDATE client_invoices SET status = 'PAID' WHERE id = ?`, [invId]);
+            await db.run(`UPDATE payment_requests SET status = 'ACCEPTED' WHERE id = ?`, [id]);
+            res.json({ message: 'Payment accepted and account renewed', invoiceId: invId });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+    app.post('/api/admin/payment-requests/:id/decline', protect, async (req, res) => {
+        try {
+            const { id } = req.params;
+            const pr = await db.get('SELECT * FROM payment_requests WHERE id = ?', [id]);
+            if (!pr) return res.status(404).json({ message: 'Payment request not found' });
+            await db.run(`UPDATE payment_requests SET status = 'DECLINED' WHERE id = ?`, [id]);
+            res.json({ message: 'Payment request declined' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
     const parseDue = (comment) => {
