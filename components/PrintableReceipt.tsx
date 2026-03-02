@@ -38,7 +38,7 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
                         {sale.clientContact && <p className="text-sm text-gray-700">{sale.clientContact}</p>}
                     </div>
                     <div className="text-right">
-                        <h2 className="font-bold">RECEIPT #: {sale.id.slice(-6).toUpperCase()}</h2>
+                        <h2 className="font-bold">ACKNOWLEDGEMENT RECEIPT #: {sale.id.slice(-6).toUpperCase()}</h2>
                         <p>Date: {new Date(sale.date).toLocaleDateString()}</p>
                     </div>
                 </div>
@@ -82,7 +82,7 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
             
             <footer className="mt-8 pt-4 border-t-2 border-dashed border-black text-center">
                 <p className="font-bold">Thank you for your payment!</p>
-                <p className="text-xs mt-2">This is an official receipt.</p>
+                <p className="text-xs mt-2">This is an acknowledgement receipt only.</p>
             </footer>
         </div>
     );
