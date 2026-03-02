@@ -2057,8 +2057,16 @@ async function startServer() {
     // Serve built assets on captive port to avoid dev middleware MIME issues
     const distPath = path.resolve(__dirname, '..', 'dist');
     const localesPath = path.resolve(__dirname, '..', 'locales');
+    const envPath = path.resolve(__dirname, '..', 'env.js');
     captiveApp.use(express.static(distPath));
     captiveApp.use('/locales', express.static(localesPath));
+    captiveApp.get('/env.js', (req, res) => {
+        if (fs.existsSync(envPath)) {
+            res.type('application/javascript').send(fs.readFileSync(envPath, 'utf8'));
+        } else {
+            res.type('application/javascript').send('window.process={env:{API_KEY:""}};');
+        }
+    });
     captiveApp.get('*', (req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
     });
