@@ -105,18 +105,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
         };
 
         const success = await onSave({ sale: saleData, payment: paymentData });
-        
         if (success) {
-            const fullSaleRecord: SaleRecord = {
-                ...saleData,
-                id: `temp_${Date.now()}`,
-                date: new Date().toISOString(),
-                routerName: '',
-            };
-            setReceiptData(fullSaleRecord);
-        } else {
-            setIsSubmitting(false); // Only stop loading if it failed, otherwise printing handles it
+            setIsSubmitting(false);
+            onClose();
+            return;
         }
+        setIsSubmitting(false);
     };
 
     return (

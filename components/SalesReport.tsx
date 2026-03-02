@@ -365,7 +365,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                             <td className="px-4 py-3 text-right font-mono text-yellow-600 dark:text-yellow-400">{formatCurrency(sale.discountAmount)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-green-600 dark:text-green-400 font-bold">{formatCurrency(sale.finalAmount)}</td>
                                             <td className="px-4 py-3 text-center no-print">
-                                                <button onClick={() => handlePrintReceipt(sale)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 dark:hover:text-sky-400 rounded-md" title="Print Receipt">
+                                                <button onClick={() => handlePrintReceipt(sale)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 dark:hover:text-sky-400 rounded-md" title="Print Acknowledgement Receipt">
                                                     <PrinterIcon className="h-5 w-5" />
                                                 </button>
                                                 {hasPermission('sales_report:delete') && (

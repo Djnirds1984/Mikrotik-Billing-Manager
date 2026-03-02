@@ -33,13 +33,13 @@ export const PrintableThermalReceipt: React.FC<PrintableThermalReceiptProps> = (
                 {companySettings.contactNumber && <div style={{ fontSize: '10px', marginBottom: '2px' }}>{companySettings.contactNumber}</div>}
                 {companySettings.email && <div style={{ fontSize: '10px' }}>{companySettings.email}</div>}
             </div>
-            <div style={{ textAlign: 'center', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '6px' }}>ACKNOWLEDGMENT RECEIPT ONLY</div>
+            <div style={{ textAlign: 'center', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '6px' }}>ACKNOWLEDGEMENT RECEIPT ONLY</div>
             
             <div style={{ borderTop: '1px solid black', margin: '8px 0' }} />
             
             <div style={{ marginBottom: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                    <span>Receipt:</span><span>{receiptId}</span>
+                    <span>Acknowledgement Receipt:</span><span>{receiptId}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
                     <span>Date:</span><span>{dateStr}</span>
