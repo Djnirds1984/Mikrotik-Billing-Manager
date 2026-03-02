@@ -908,15 +908,18 @@ async function startServer() {
     app.use('/api/db', dbRouter);
 
     app.get('/api/public/landing-page', async (req, res) => {
+        console.log('API /api/public/landing-page called from:', req.get('host'), 'original URL:', req.originalUrl);
         try {
             const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
             let cfg = {};
             try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            console.log('Sending JSON response for landing page');
             res.json({
                 company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
                 config: cfg
             });
         } catch (e) {
+            console.error('Error in /api/public/landing-page:', e);
             res.status(500).json({ message: e.message });
         }
     });
@@ -2042,12 +2045,35 @@ async function startServer() {
     const captiveApp = express();
     captiveApp.use(express.json({ limit: '10mb' }));
     captiveApp.use(express.text({ limit: '10mb' }));
+    
+    // API route for captive portal landing page settings - MUST be first
+    captiveApp.get('/api/public/landing-page', async (req, res) => {
+        console.log('Captive API /api/public/landing-page called from:', req.get('host'), 'original URL:', req.originalUrl);
+        try {
+            const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
+            let cfg = {};
+            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            console.log('Sending JSON response for landing page from captive port');
+            res.json({
+                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
+                config: cfg
+            });
+        } catch (e) {
+            console.error('Error in captive /api/public/landing-page:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+    
     captiveApp.use((req, res, next) => {
         const ignore = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/') || req.path.startsWith('/env.js') || /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
         const host = (req.headers.host || '').split(':')[0];
         const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === 'localhost';
         const isPublicDomain = !isIpHost && host.includes('.');
+        if (req.path === '/api/public/landing-page') {
+            console.log('Captive app: Allowing API request for landing page');
+        }
         if (!ignore && !req.path.startsWith('/captive') && !isPublicDomain) {
+            console.log('Captive app: Redirecting', req.path, 'to /captive');
             return res.redirect('/captive');
         }
         next();
@@ -2065,12 +2091,20 @@ async function startServer() {
     }));
     captiveApp.use('/api', createProxyMiddleware({
         target: `http://127.0.0.1:${PORT}`,
-        changeOrigin: true
+        changeOrigin: true,
+        onError: (err, req, res) => {
+            console.error('API Proxy Error:', err.message, 'for', req.url);
+            res.status(500).json({ message: 'API proxy error' });
+        },
+        onProxyReq: (proxyReq, req, res) => {
+            console.log('Proxying API request:', req.method, req.url, 'to', `http://127.0.0.1:${PORT}${req.url}`);
+        }
     }));
     // Serve built assets on captive port to avoid dev middleware MIME issues
     const distPath = path.resolve(__dirname, '..', 'dist');
     const localesPath = path.resolve(__dirname, '..', 'locales');
     const envPath = path.resolve(__dirname, '..', 'env.js');
+    
     captiveApp.use(express.static(distPath));
     captiveApp.use('/locales', express.static(localesPath));
     captiveApp.get('/env.js', (req, res) => {
