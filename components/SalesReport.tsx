@@ -104,7 +104,8 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const issueInvoice = async () => {
         if (!addRouterId || !selectedClientId) return;
         try {
-            let payload: any = { routerId: addRouterId, source: addSource, status: 'PENDING', issueDate: new Date().toISOString() };
+            const genId = `inv_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+            let payload: any = { id: genId, routerId: addRouterId, source: addSource, status: 'PENDING', issueDate: new Date().toISOString() };
             if (addSource === 'pppoe') {
                 const client = clients.find(c => c.id === selectedClientId);
                 const uname = client?.pppoe_username || client?.username;
@@ -198,7 +199,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         if (!id) return;
         if (!window.confirm('Delete this invoice?')) return;
         try {
-            await dbApi.post(`/client-invoices/${id}/delete`, {});
+            await dbApi.delete(`/client-invoices/${id}`);
             await loadInvoices();
             alert('Invoice deleted.');
         } catch (e) {

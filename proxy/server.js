@@ -580,6 +580,15 @@ async function startServer() {
         dbRouter.get(route, async (req, res) => {
             try {
                 const { routerId } = req.query;
+                if (table === 'client_invoices') {
+                    const empties = await db.all(`SELECT rowid FROM client_invoices WHERE id IS NULL OR id = ''`);
+                    if (Array.isArray(empties) && empties.length > 0) {
+                        for (const r of empties) {
+                            const newId = `inv_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+                            await db.run(`UPDATE client_invoices SET id = ? WHERE rowid = ?`, [newId, r.rowid]);
+                        }
+                    }
+                }
                 let query = `SELECT * FROM ${table}`;
                 let params = [];
                 if (routerId) {
@@ -597,6 +606,17 @@ async function startServer() {
                 if (table === 'dhcp_clients') {
                     if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
                         req.body.accountNumber = await generateAccountNumber();
+                    }
+                }
+                if (table === 'client_invoices') {
+                    if (!req.body.id || String(req.body.id).trim() === '') {
+                        req.body.id = `inv_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+                    }
+                    if (!req.body.issueDate) {
+                        req.body.issueDate = new Date().toISOString();
+                    }
+                    if (!req.body.status) {
+                        req.body.status = 'PENDING';
                     }
                 }
                 const keys = Object.keys(req.body);
