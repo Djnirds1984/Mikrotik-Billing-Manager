@@ -492,6 +492,19 @@ async function startServer() {
     // Captive redirect is handled on dedicated captive port server below.
     // Main app should NOT force /captive to avoid breaking public domains.
 
+    // Minimal safeguard: if Mikrotik redirects DHCP clients to /login on IP,
+    // route them to the captive portal instead.
+    app.use((req, res, next) => {
+        const host = (req.headers.host || '').split(':')[0];
+        const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === 'localhost';
+        const isStaticAsset = /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
+        const isApi = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/');
+        if (isIpHost && !isApi && !isStaticAsset && req.path === '/login') {
+            return res.redirect('/captive');
+        }
+        next();
+    });
+
     // --- DEV PROXY MIDDLEWARE FOR API BACKEND ---
     // This allows npm start (without Nginx) to still reach the backend API
     // If Nginx is used, Nginx handles this routing.
