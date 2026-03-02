@@ -33,20 +33,20 @@
   /* Thermal receipt specific styles */
   .thermal-receipt {
     visibility: visible !important;
-    width: 80mm !important;
+    width: 58mm !important;
     margin: 0 auto !important;
     font-family: monospace !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
     line-height: 1.2 !important;
     background: white !important;
     color: black !important;
-    padding: 8px !important;
+    padding: 6px !important;
   }
   
   /* Ensure thermal receipt fits thermal paper */
   @page {
     margin: 0;
-    size: 80mm auto; /* Thermal paper width, height adjusts to content */
+    size: 58mm auto; /* Thermal paper width */
   }
   
   /* Override any conflicting styles */

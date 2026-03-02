@@ -16,10 +16,7 @@ export const PrintableThermalReceipt: React.FC<PrintableThermalReceiptProps> = (
 
     return (
         <div className="thermal-receipt" style={{ 
-            width: '280px', 
-            padding: '8px', 
-            fontFamily: 'monospace', 
-            fontSize: '12px', 
+            fontFamily: 'monospace',
             lineHeight: '1.2',
             margin: '0 auto',
             backgroundColor: 'white',
