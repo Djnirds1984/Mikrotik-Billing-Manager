@@ -665,6 +665,15 @@ async function startServer() {
                 res.status(500).json({ message: e.message });
             }
         });
+        dbRouter.post(`${route}/:id/delete`, async (req, res) => {
+            try {
+                const { id } = req.params;
+                await db.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+                res.json({ message: 'Deleted' });
+            } catch (e) {
+                res.status(500).json({ message: e.message });
+            }
+        });
     };
 
     createCrud('/billing-plans', 'billing_plans');

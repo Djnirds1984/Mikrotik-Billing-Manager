@@ -198,7 +198,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         if (!id) return;
         if (!window.confirm('Delete this invoice?')) return;
         try {
-            await dbApi.delete(`/client-invoices/${id}`);
+            await dbApi.post(`/client-invoices/${id}/delete`, {});
             await loadInvoices();
             alert('Invoice deleted.');
         } catch (e) {
