@@ -469,23 +469,8 @@ async function startServer() {
     await Promise.all([initDb(), initSuperadminDb()]);
     const app = express();
 
-    const isAdminHostname = (hostname) => {
-        if (hostname === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
-        const adminDomains = ['.pitunnel.net', '.ngrok.io', '.ngrok-free.app', '.dataplicity.io'];
-        return adminDomains.some(d => hostname.endsWith(d));
-    };
-    const shouldIgnorePath = (p) => {
-        const ignored = ['/api/', '/mt-api/', '/ws/', '/captive', '/env.js'];
-        if (ignored.some(i => p.startsWith(i))) return true;
-        return /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(p);
-    };
-    app.use((req, res, next) => {
-        const direct = isAdminHostname(req.hostname);
-        if (!direct && !shouldIgnorePath(req.path)) {
-            return res.redirect('/captive');
-        }
-        next();
-    });
+    // Captive redirect is handled on dedicated captive port server below.
+    // Main app should NOT force /captive to avoid breaking public domains.
 
     // --- DEV PROXY MIDDLEWARE FOR API BACKEND ---
     // This allows npm start (without Nginx) to still reach the backend API
