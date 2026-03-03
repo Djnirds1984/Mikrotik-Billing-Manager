@@ -534,6 +534,19 @@ async function startServer() {
         next();
     });
 
+    app.get('/captive', (req, res, next) => {
+        const forceDisable = true;
+        if (forceDisable) {
+            return res.redirect('/login');
+        }
+        const envEnabled = String(process.env.CAPTIVE_ENABLED || '').trim().toLowerCase();
+        const captiveEnabled = envEnabled === '1' || envEnabled === 'true' || envEnabled === 'yes';
+        if (!captiveEnabled) {
+            return res.redirect('/login');
+        }
+        next();
+    });
+
     // --- API ROUTES ---
     
     // Authentication
