@@ -508,22 +508,22 @@ async function startServer() {
         const extra = (process.env.ADMIN_HOST_WHITELIST || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
         const adminDomains = ['.pitunnel.net', '.ngrok.io', '.ngrok-free.app', '.dataplicity.io', ...extra];
         const isWhitelistedDomain = adminDomains.some(domain => h.endsWith(domain) || h === domain);
-        const captivePort = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
-        // Treat direct IP or localhost as admin access regardless of port (including captive port)
         if (isIpV4 || isLocal) return true;
-        // Allow whitelisted admin domains
         if (isWhitelistedDomain) return true;
-        // If behind a proxy, also check req.hostname as fallback
         if (req.hostname && (/^\d{1,3}(\.\d{1,3}){3}$/.test(req.hostname) || req.hostname === 'localhost')) return true;
-        // As a final guard, if explicitly hitting captive port but from an IP, allow (handled above).
-        // Otherwise non-admin.
         return false;
     };
     app.use((req, res, next) => {
         const isDirectAccess = isAdminAccess(req);
+        const hostHeader = String(req.headers.host || '').trim();
+        const xfPort = String(req.headers['x-forwarded-port'] || '').trim();
+        const inferredPort = hostHeader.includes(':') ? parseInt(hostHeader.split(':')[1], 10) : (req.protocol === 'https' ? 443 : 80);
+        const reqPort = parseInt(xfPort || inferredPort, 10) || inferredPort;
+        const captivePort = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
+        const onCaptivePort = reqPort === captivePort;
         const ignoredPaths = ['/api/', '/mt-api/', '/ws/', '/captive', '/env.js'];
         const isStaticAsset = req.path.match(/\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/);
-        if (!isDirectAccess && !isStaticAsset && !ignoredPaths.some(p => req.path.startsWith(p))) {
+        if (onCaptivePort && !isDirectAccess && !isStaticAsset && !ignoredPaths.some(p => req.path.startsWith(p))) {
             return res.redirect('/captive');
         }
         next();
