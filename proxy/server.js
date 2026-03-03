@@ -496,6 +496,23 @@ async function startServer() {
     app.use(express.json({ limit: '10mb' }));
     app.use(express.text({ limit: '10mb' }));
 
+    const isAdminHostname = (hostname) => {
+        if (!hostname) return false;
+        if (hostname === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
+        const extra = (process.env.ADMIN_HOST_WHITELIST || '').split(',').map(s => s.trim()).filter(Boolean);
+        const adminDomains = ['.pitunnel.net', '.ngrok.io', '.ngrok-free.app', '.dataplicity.io', ...extra];
+        return adminDomains.some(domain => hostname.endsWith(domain) || hostname === domain);
+    };
+    app.use((req, res, next) => {
+        const isDirectAccess = isAdminHostname(req.hostname);
+        const ignoredPaths = ['/api/', '/mt-api/', '/ws/', '/captive', '/env.js'];
+        const isStaticAsset = req.path.match(/\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/);
+        if (!isDirectAccess && !isStaticAsset && !ignoredPaths.some(p => req.path.startsWith(p))) {
+            return res.redirect('/captive');
+        }
+        next();
+    });
+
     // --- API ROUTES ---
     
     // Authentication
