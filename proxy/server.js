@@ -521,7 +521,7 @@ async function startServer() {
         const reqPort = parseInt(xfPort || inferredPort, 10) || inferredPort;
         const captivePort = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
         const onCaptivePort = reqPort === captivePort;
-        const ignoredPaths = ['/api/', '/mt-api/', '/ws/', '/captive', '/env.js'];
+        const ignoredPaths = ['/api/', '/mt-api/', '/ws/', '/captive', '/env.js', '/login', '/client-portal'];
         const isStaticAsset = req.path.match(/\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/);
         if (onCaptivePort && !isDirectAccess && !isStaticAsset && !ignoredPaths.some(p => req.path.startsWith(p))) {
             return res.redirect('/captive');
