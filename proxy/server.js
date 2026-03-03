@@ -514,11 +514,11 @@ async function startServer() {
         return false;
     };
     app.use((req, res, next) => {
+        const forceDisable = true;
+        if (forceDisable) return next();
         const envEnabled = String(process.env.CAPTIVE_ENABLED || '').trim().toLowerCase();
         const captiveEnabled = envEnabled === '1' || envEnabled === 'true' || envEnabled === 'yes';
-        if (!captiveEnabled) {
-            return next();
-        }
+        if (!captiveEnabled) return next();
         const isDirectAccess = isAdminAccess(req);
         const hostHeader = String(req.headers.host || '').trim();
         const xfPort = String(req.headers['x-forwarded-port'] || '').trim();
