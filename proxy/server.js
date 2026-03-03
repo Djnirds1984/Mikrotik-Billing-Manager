@@ -496,15 +496,31 @@ async function startServer() {
     app.use(express.json({ limit: '10mb' }));
     app.use(express.text({ limit: '10mb' }));
 
-    const isAdminHostname = (hostname) => {
-        if (!hostname) return false;
-        if (hostname === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
-        const extra = (process.env.ADMIN_HOST_WHITELIST || '').split(',').map(s => s.trim()).filter(Boolean);
+    const isAdminAccess = (req) => {
+        const hostHeader = String(req.headers.host || '').trim().toLowerCase();
+        const xfh = String(req.headers['x-forwarded-host'] || '').trim().toLowerCase();
+        const header = hostHeader || xfh || '';
+        const parts = header.replace(/^\[|\]$/g, '').split(':');
+        const h = (parts[0] || '').trim();
+        const p = parseInt(parts[1] || '', 10);
+        const isIpV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(h);
+        const isLocal = h === 'localhost' || h === '127.0.0.1';
+        const extra = (process.env.ADMIN_HOST_WHITELIST || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
         const adminDomains = ['.pitunnel.net', '.ngrok.io', '.ngrok-free.app', '.dataplicity.io', ...extra];
-        return adminDomains.some(domain => hostname.endsWith(domain) || hostname === domain);
+        const isWhitelistedDomain = adminDomains.some(domain => h.endsWith(domain) || h === domain);
+        const captivePort = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
+        // Treat direct IP or localhost as admin access regardless of port (including captive port)
+        if (isIpV4 || isLocal) return true;
+        // Allow whitelisted admin domains
+        if (isWhitelistedDomain) return true;
+        // If behind a proxy, also check req.hostname as fallback
+        if (req.hostname && (/^\d{1,3}(\.\d{1,3}){3}$/.test(req.hostname) || req.hostname === 'localhost')) return true;
+        // As a final guard, if explicitly hitting captive port but from an IP, allow (handled above).
+        // Otherwise non-admin.
+        return false;
     };
     app.use((req, res, next) => {
-        const isDirectAccess = isAdminHostname(req.hostname);
+        const isDirectAccess = isAdminAccess(req);
         const ignoredPaths = ['/api/', '/mt-api/', '/ws/', '/captive', '/env.js'];
         const isStaticAsset = req.path.match(/\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/);
         if (!isDirectAccess && !isStaticAsset && !ignoredPaths.some(p => req.path.startsWith(p))) {
