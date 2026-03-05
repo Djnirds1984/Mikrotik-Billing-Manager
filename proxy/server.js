@@ -562,6 +562,97 @@ async function startServer() {
         res.json(req.user);
     });
 
+    // Password change endpoint for regular users
+    authRouter.post('/change-password', protect, async (req, res) => {
+        const { currentPassword, newPassword } = req.body;
+        
+        try {
+            // Validate input
+            if (!currentPassword || !newPassword) {
+                return res.status(400).json({ message: 'Current password and new password are required' });
+            }
+            
+            if (newPassword.length < 6) {
+                return res.status(400).json({ message: 'New password must be at least 6 characters long' });
+            }
+            
+            // Check if user is superadmin
+            if (req.user.id === 'superadmin') {
+                const superadmin = await superadminDb.get('SELECT * FROM superadmin WHERE username = ?', ['superadmin']);
+                if (!superadmin) {
+                    return res.status(404).json({ message: 'Superadmin not found' });
+                }
+                
+                const isValid = await bcrypt.compare(currentPassword, superadmin.password);
+                if (!isValid) {
+                    return res.status(401).json({ message: 'Current password is incorrect' });
+                }
+                
+                const hashedPassword = await bcrypt.hash(newPassword, 10);
+                await superadminDb.run('UPDATE superadmin SET password = ? WHERE username = ?', [hashedPassword, 'superadmin']);
+                return res.json({ message: 'Password updated successfully' });
+            }
+            
+            // Regular user password change
+            const user = await db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+            if (!user) {
+                return res.status(404).json({ message: 'User not found' });
+            }
+            
+            const isValid = await bcrypt.compare(currentPassword, user.password);
+            if (!isValid) {
+                return res.status(401).json({ message: 'Current password is incorrect' });
+            }
+            
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            await db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, req.user.id]);
+            
+            res.json({ message: 'Password updated successfully' });
+        } catch (err) {
+            console.error('Password change error:', err);
+            res.status(500).json({ message: 'Failed to update password' });
+        }
+    });
+
+    // Password change endpoint for superadmin (alternative route)
+    authRouter.post('/change-superadmin-password', protect, async (req, res) => {
+        const { currentPassword, newPassword } = req.body;
+        
+        try {
+            // Validate input
+            if (!currentPassword || !newPassword) {
+                return res.status(400).json({ message: 'Current password and new password are required' });
+            }
+            
+            if (newPassword.length < 6) {
+                return res.status(400).json({ message: 'New password must be at least 6 characters long' });
+            }
+            
+            // Only superadmin can use this endpoint
+            if (req.user.id !== 'superadmin') {
+                return res.status(403).json({ message: 'Access denied. Superadmin privileges required.' });
+            }
+            
+            const superadmin = await superadminDb.get('SELECT * FROM superadmin WHERE username = ?', ['superadmin']);
+            if (!superadmin) {
+                return res.status(404).json({ message: 'Superadmin not found' });
+            }
+            
+            const isValid = await bcrypt.compare(currentPassword, superadmin.password);
+            if (!isValid) {
+                return res.status(401).json({ message: 'Current password is incorrect' });
+            }
+            
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            await superadminDb.run('UPDATE superadmin SET password = ? WHERE username = ?', [hashedPassword, 'superadmin']);
+            
+            res.json({ message: 'Password updated successfully' });
+        } catch (err) {
+            console.error('Superadmin password change error:', err);
+            res.status(500).json({ message: 'Failed to update password' });
+        }
+    });
+
     app.use('/api/auth', authRouter);
 
     // Database General API (Protected)
