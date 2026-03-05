@@ -374,10 +374,18 @@ async function initDb() {
 // --- Helpers ---
 const getDeviceId = async () => {
     try {
+        // Prioritize CPU Hardware ID for licensing system
+        const cpu = await si.cpu();
         const sys = await si.system();
         const uuid = await si.uuid();
         
-        // Prioritize System Serial (Host Board Serial) if valid
+        // Use CPU Hardware ID first - combination of brand, model, speed, and cores
+        if (cpu && cpu.brand && cpu.speed && cpu.cores) {
+            const cpuHardwareId = `${cpu.brand}-${cpu.speed}-${cpu.cores}-${cpu.physicalCores || cpu.cores}`;
+            return crypto.createHash('sha256').update(cpuHardwareId).digest('hex');
+        }
+
+        // Fallback to System Serial (Host Board Serial) if valid
         if (sys.serial && sys.serial !== '-' && sys.serial !== 'Default string' && sys.serial !== 'To be filled by O.E.M.') {
              return crypto.createHash('sha256').update(sys.serial).digest('hex');
         }
@@ -1380,13 +1388,40 @@ async function startServer() {
         try {
             const deviceId = await getDeviceId();
             
-            // Check local cache first (optional, but good for offline resilience if implemented)
-            // For now, we check Supabase directly as requested
-            
+            // Check local cache first
             const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
             const localLicenseKey = settings?.licenseKey;
 
+            // If no local license key, check Supabase for existing license bound to this CPU hardware ID
             if (!localLicenseKey) {
+                const { data: existingLicense, error: existingError } = await supabase
+                    .from('mikrotik_licenses')
+                    .select('*')
+                    .eq('hardware_id', deviceId)
+                    .eq('is_active', true)
+                    .maybeSingle();
+
+                if (!existingError && existingLicense) {
+                    // Found existing license for this hardware ID, restore it locally
+                    await db.run('UPDATE settings SET licenseKey = ? WHERE id = 1', [existingLicense.license_key]);
+                    
+                    // Update last check-in
+                    await supabase
+                        .from('mikrotik_licenses')
+                        .update({ last_check_in: new Date().toISOString() })
+                        .eq('id', existingLicense.id);
+
+                    return res.json({ 
+                        licensed: true, 
+                        expires: existingLicense.expires_at, 
+                        deviceId, 
+                        licenseKey: existingLicense.license_key,
+                        plan: existingLicense.plan_type,
+                        maxRouters: existingLicense.max_routers,
+                        message: 'License restored from server after system reset.'
+                    });
+                }
+
                 return res.json({ licensed: false, deviceId, message: 'No license key found locally.' });
             }
 

@@ -90,7 +90,7 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
 
                     <div className="my-6 space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Your Device ID</label>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Your CPU Hardware ID</label>
                             <input type="text" readOnly value={licenseStatus.deviceId} className="w-full p-3 font-mono text-sm bg-slate-100 dark:bg-slate-700 border rounded-md" />
                         </div>
                          <div>
@@ -131,7 +131,7 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
                         </div>
                     )}
                     <p className="mt-2 text-slate-500 dark:text-slate-400">
-                        Please provide your Device ID to the administrator to receive a license key.
+                        Please provide your CPU Hardware ID to the administrator to receive a license key.
                     </p>
                 </div>
                 
@@ -146,7 +146,7 @@ export const License: React.FC<LicenseProps> = ({ onLicenseChange, licenseStatus
 
                 {deviceId && (
                     <div className="my-8">
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Your Device ID</label>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Your CPU Hardware ID</label>
                         <div className="flex items-center gap-2">
                             <input type="text" readOnly value={deviceId} className="flex-grow p-3 font-mono text-sm bg-slate-100 dark:bg-slate-700 border rounded-md" />
                             <button onClick={() => copyToClipboard(deviceId)} className="px-4 py-2 bg-slate-200 dark:bg-slate-600 rounded-md hover:bg-slate-300 dark:hover:bg-slate-500">Copy</button>
