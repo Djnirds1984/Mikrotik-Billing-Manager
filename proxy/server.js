@@ -1870,6 +1870,22 @@ async function startServer() {
         await forward('PUT', `/api/roles/${req.params.roleId}/permissions`, req, res, req.body);
     });
 
+    // --- LOCALE FILES ROUTE (must come before static files) ---
+    app.get('/locales/:file', (req, res) => {
+        const file = req.params.file;
+        // Validate filename to prevent directory traversal
+        if (!/^[a-zA-Z]{2,3}\.json$/.test(file)) {
+            return res.status(400).json({ error: 'Invalid locale file' });
+        }
+        const localePath = path.join(__dirname, '..', 'locales', file);
+        res.sendFile(localePath, (err) => {
+            if (err) {
+                console.error(`Error serving locale file ${file}:`, err);
+                res.status(404).json({ error: 'Locale file not found' });
+            }
+        });
+    });
+
     // --- PRODUCTION STATIC FILES ---
     // Serve static files with proper caching
     app.use(express.static(path.join(__dirname, '..', 'dist'), {
