@@ -1884,6 +1884,64 @@ async function startServer() {
         console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
         console.log(`   Mode: Development (Vite Middleware Active)`);
     });
+
+    // --- CAPTIVE PORTAL SERVER ---
+    const CAPTIVE_PORT = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
+    const captiveApp = express();
+    
+    // Add redirect middleware for unauthorized clients
+    captiveApp.use((req, res, next) => {
+        const host = (req.headers.host || '').split(':')[0];
+        const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === 'localhost';
+        const isStaticAsset = /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
+        const isApi = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/');
+        
+        console.log(`[CAPTIVE DEBUG] Host: ${host}, Path: ${req.path}, isIpHost: ${isIpHost}, isStaticAsset: ${isStaticAsset}, isApi: ${isApi}`);
+        
+        // Allow direct access to login page for admin IPs (including WAN IP)
+        if (isIpHost && req.path === '/login') {
+            console.log(`[CAPTIVE DEBUG] Allowing direct access to /login for IP host: ${host}`);
+            return next(); // Allow direct access to login on IP addresses
+        }
+        
+        // Redirect unauthorized clients to captive portal (only for non-login paths)
+        if (isIpHost && !isApi && !isStaticAsset && req.path !== '/login' && req.path !== '/') {
+            console.log(`[CAPTIVE DEBUG] Redirecting IP host ${host} from ${req.path} to captive portal`);
+            return res.redirect(`http://${host}:${CAPTIVE_PORT}/captive`);
+        }
+        console.log(`[CAPTIVE DEBUG] Proceeding normally for ${host}${req.path}`);
+        next();
+    });
+
+    // API route for captive portal landing page settings - MUST be first
+    captiveApp.get('/api/public/landing-page', async (req, res) => {
+        console.log('Captive API /api/public/landing-page called from:', req.get('host'), 'original URL:', req.originalUrl);
+        try {
+            const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
+            let cfg = {};
+            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            console.log('Sending JSON response for landing page from captive port');
+            res.json({
+                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
+                config: cfg
+            });
+        } catch (e) {
+            console.error('Error in captive /api/public/landing-page:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Serve captive portal static files
+    captiveApp.use(express.static(path.join(__dirname, '..', 'dist')));
+    
+    // Fallback to index.html for SPA routing
+    captiveApp.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    });
+
+    captiveApp.listen(CAPTIVE_PORT, () => {
+        console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
+    });
 }
 
 startServer();
