@@ -1116,7 +1116,7 @@ async function startServer() {
             // User information
             drawText('APPLICANT INFORMATION', 50, y, 12, true);
             y -= 20;
-            drawText(`Full Name: ${userData.name}`, 50, y);
+            drawText(`Full Name: ${customerData?.fullName || userData.name}`, 50, y);
             y -= 18;
             drawText(`Account Number: ${customerData?.accountNumber || 'N/A'}`, 50, y);
             y -= 18;
@@ -1183,7 +1183,7 @@ async function startServer() {
 
             await db.run(
                 `INSERT INTO applications (id, name, email, phone, message, planName, pdfPath, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [id, userData.name, customerData?.email || userData.email || '', customerData?.contactNumber || userData.phone || '', `Application for ${planData?.name || 'internet service'}`, planData?.name || '', `/uploads/applications/${pdfFile}`, createdAt]
+                [id, customerData?.fullName || userData.name, customerData?.email || userData.email || '', customerData?.contactNumber || userData.phone || '', `Application for ${planData?.name || 'internet service'}`, planData?.name || '', `/uploads/applications/${pdfFile}`, createdAt]
             );
 
             res.status(201).json({ message: 'Application form generated successfully.', id, pdfUrl: `/uploads/applications/${pdfFile}` });
