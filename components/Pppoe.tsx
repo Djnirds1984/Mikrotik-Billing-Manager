@@ -360,7 +360,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                         <h4 className="font-semibold">Customer Information (Optional)</h4>
                         <div><label>Full Name</label><input type="text" value={customer.fullName} onChange={e => setCustomer(c => ({...c, fullName: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                         <div><label>Full Address</label><input type="text" value={customer.address} onChange={e => setCustomer(c => ({...c, address: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
-                        <div><label>GPS Coordinates</label><input type="text" value={(customer as any).gps} onChange={e => setCustomer(c => ({...c, gps: e.target.value}))} placeholder="Halimbawa: 9.124384458488505, 125.5344096926807" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                        <div><label>GPS Coordinates</label><input type="text" value={customer.gps} onChange={e => setCustomer(c => ({...c, gps: e.target.value}))} placeholder="Halimbawa: 9.124384458488505, 125.5344096926807" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><label>Contact Number</label><input type="text" value={customer.contactNumber} onChange={e => setCustomer(c => ({...c, contactNumber: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                             <div><label>Email</label><input type="email" value={customer.email} onChange={e => setCustomer(c => ({...c, email: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
@@ -575,7 +575,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         address: customerData.address || '',
                         contactNumber: customerData.contactNumber || '',
                         email: customerData.email || '',
-                        gps: (customer as any).gps || ''
+                        gps: customerData.gps || ''
                     };
                 }
             }
