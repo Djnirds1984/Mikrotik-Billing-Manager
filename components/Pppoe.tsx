@@ -736,6 +736,17 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             </th>
                             <th 
                                 className="px-6 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('accountNumber')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Account Number
+                                    {sortConfig?.key === 'accountNumber' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
                                 onClick={() => requestSort('profile')}
                             >
                                 <div className="flex items-center justify-center gap-1">
@@ -773,7 +784,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     <tbody>
                         {sortedUsers.length === 0 ? (
                             <tr>
-                                <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                <td colSpan={6} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
                                     {searchTerm ? (
                                         <div className="flex flex-col items-center gap-2">
                                             <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -796,6 +807,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                         <p className="text-xs text-slate-500">
                                             <HighlightText text={user.customer?.fullName || ''} highlight={searchTerm} />
                                         </p>
+                                    </td>
+                                    <td className="text-center">
+                                        <HighlightText text={user.customer?.accountNumber || ''} highlight={searchTerm} />
                                     </td>
                                     <td className="text-center">
                                         <HighlightText text={user.profile || ''} highlight={searchTerm} />

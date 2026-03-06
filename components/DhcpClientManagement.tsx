@@ -159,7 +159,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
             const dbData = dbClientMap.get(client.macAddress);
             if (dbData) {
                 const typedDbData = dbData as any;
-                return { ...client, customerInfo: typedDbData.customerInfo, contactNumber: typedDbData.contactNumber, email: typedDbData.email, speedLimit: typedDbData.speedLimit };
+                return { ...client, customerInfo: typedDbData.customerInfo, contactNumber: typedDbData.contactNumber, email: typedDbData.email, speedLimit: typedDbData.speedLimit, accountNumber: typedDbData.accountNumber };
             }
             return client;
         });
@@ -343,6 +343,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                                 <th className="px-6 py-3">IP Address</th>
                                 <th className="px-6 py-3">MAC Address</th>
                                 <th className="px-6 py-3">Customer Info</th>
+                                <th className="px-6 py-3">Account Number</th>
                                 <th className="px-6 py-3">Expires In</th>
                                 <th className="px-6 py-3 text-right">Action</th>
                             </tr>
@@ -361,6 +362,9 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                                     <td className="px-6 py-4">
                                         <p className="font-semibold text-slate-800 dark:text-slate-200">{client.customerInfo || client.hostName}</p>
                                         <p className="text-xs text-slate-500">{client.contactNumber}</p>
+                                    </td>
+                                    <td className="px-6 py-4 font-mono text-sm text-slate-500 dark:text-slate-400">
+                                        {client.accountNumber || ''}
                                     </td>
                                     <td className="px-6 py-4 font-mono text-sm text-slate-500 dark:text-slate-400">
                                         {getExpirationDisplay(client)}
