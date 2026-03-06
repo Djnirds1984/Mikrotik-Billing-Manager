@@ -1563,7 +1563,7 @@ async function startServer() {
                 return res.json({ licensed: false, deviceId, message: 'No license key found locally.' });
             }
 
-            // Verify with Supabase
+            // Verify with Supabase (server-based licensing)
             const { data: license, error } = await supabase
                 .from('mikrotik_licenses')
                 .select('*')
