@@ -541,6 +541,7 @@ export interface Customer {
     contactNumber?: string;
     email?: string;
     accountNumber?: string;
+    gps?: string;
 }
 
 export interface WanRoute {

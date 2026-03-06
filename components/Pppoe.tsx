@@ -249,7 +249,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 address: linkedCustomer?.address || '', 
                 contactNumber: linkedCustomer?.contactNumber || '', 
                 email: linkedCustomer?.email || '',
-                accountNumber: (linkedCustomer as any)?.accountNumber || ''
+                accountNumber: linkedCustomer?.accountNumber || '',
+                gps: linkedCustomer?.gps || ''
             });
             try {
                 const commentData = JSON.parse(initialData.comment);
