@@ -284,7 +284,8 @@ async function initDb() {
                 fullName TEXT,
                 address TEXT,
                 contactNumber TEXT,
-                email TEXT
+                email TEXT,
+                gps TEXT
             );
             CREATE TABLE IF NOT EXISTS notifications (
                 id TEXT PRIMARY KEY,
@@ -341,6 +342,9 @@ async function initDb() {
             const customerColNames = customerCols.map(c => c.name);
             if (!customerColNames.includes('accountNumber')) {
                 await db.exec("ALTER TABLE customers ADD COLUMN accountNumber TEXT");
+            }
+            if (!customerColNames.includes('gps')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN gps TEXT");
             }
         } catch (_) {}
         try {
