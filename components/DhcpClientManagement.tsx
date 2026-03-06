@@ -3,10 +3,12 @@ import { dbApi } from '../services/databaseService.ts';
 import { getDhcpClients, getDhcpServers, updateDhcpClientDetails, deleteDhcpClient } from '../services/mikrotikService.ts';
 import type { DhcpClient, DhcpClientDbRecord, DhcpClientActionParams, RouterConfigWithId, SaleRecord, DhcpBillingPlanWithId } from '../types.ts';
 import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
+import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, ExclamationTriangleIcon } from '../constants.tsx';
 import { ActivationPaymentModal } from './ActivationPaymentModal.tsx';
 import { GracePeriodModalDhcp } from './GracePeriodModalDhcp.tsx';
+import { generateApplicationForm, deleteApplication } from '../services/applicationService.ts';
 
 // New modal for manual editing
 const EditClientModal: React.FC<{
@@ -113,6 +115,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     const [clients, setClients] = useState<DhcpClient[]>([]);
     const [dbClients, setDbClients] = useState<DhcpClientDbRecord[]>([]);
     const { plans, isLoading: isLoadingPlans } = useDhcpBillingPlans(selectedRouter.id);
+    const { settings: companySettings } = useCompanySettings();
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -168,11 +171,63 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     const upsertDbClient = async (clientData: Omit<DhcpClientDbRecord, 'id'>) => {
         try {
             const existing = dbClients.find(c => c.macAddress === clientData.macAddress);
+            let savedClient;
+            
             if (existing) {
                 await dbApi.patch(`/dhcp_clients/${existing.id}`, clientData);
+                savedClient = { ...existing, ...clientData };
             } else {
                 const newRecord = { ...clientData, id: `dhcp_client_${Date.now()}` };
                 await dbApi.post('/dhcp_clients', newRecord);
+                savedClient = newRecord;
+            }
+
+            // Generate PDF application form for DHCP client
+            try {
+                // Delete existing application if this is an edit
+                if (existing?.applicationId) {
+                    await deleteApplication(existing.applicationId);
+                }
+
+                // Find the plan for this client
+                const plan = plans.find(p => p.speedLimit === clientData.speedLimit);
+                const planData = plan ? {
+                    name: plan.name,
+                    price: plan.price,
+                    currency: plan.currency,
+                    cycleDays: plan.cycle_days || 30,
+                    speedLimit: plan.speedLimit || '',
+                    planType: 'postpaid' // DHCP is typically postpaid
+                } : null;
+
+                // Generate new application form
+                const applicationResult = await generateApplicationForm({
+                    userData: {
+                        name: clientData.customerInfo || 'DHCP Client',
+                        macAddress: clientData.macAddress,
+                        service: 'DHCP',
+                        profile: clientData.speedLimit || 'Standard'
+                    },
+                    customerData: {
+                        fullName: clientData.customerInfo || '',
+                        address: '', // DHCP doesn't have address field in current form
+                        contactNumber: clientData.contactNumber || '',
+                        email: clientData.email || '',
+                        accountNumber: clientData.accountNumber || '',
+                        gps: '' // DHCP doesn't have GPS field in current form
+                    },
+                    planData,
+                    companySettings,
+                    source: 'dhcp'
+                });
+
+                // Update client with application ID
+                if (savedClient) {
+                    await dbApi.patch(`/dhcp_clients/${savedClient.id}`, { applicationId: applicationResult.id });
+                }
+            } catch (pdfError) {
+                console.error('Failed to generate PDF application form for DHCP client:', pdfError);
+                // Continue with the save process even if PDF generation fails
             }
         } catch (e) { console.error("Failed to save DHCP client to local DB:", e); }
     };

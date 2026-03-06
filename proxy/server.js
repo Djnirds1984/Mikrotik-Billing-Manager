@@ -285,7 +285,9 @@ async function initDb() {
                 address TEXT,
                 contactNumber TEXT,
                 email TEXT,
-                gps TEXT
+                accountNumber TEXT,
+                gps TEXT,
+                applicationId TEXT
             );
             CREATE TABLE IF NOT EXISTS notifications (
                 id TEXT PRIMARY KEY,
@@ -345,6 +347,9 @@ async function initDb() {
             }
             if (!customerColNames.includes('gps')) {
                 await db.exec("ALTER TABLE customers ADD COLUMN gps TEXT");
+            }
+            if (!customerColNames.includes('applicationId')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN applicationId TEXT");
             }
         } catch (_) {}
         try {
@@ -1056,6 +1061,132 @@ async function startServer() {
                 [id, String(name).trim(), email || '', phone || '', msg, planName || '', `/uploads/applications/${pdfFile}`, createdAt]
             );
             res.status(201).json({ message: 'Inquiry received.', id, pdfUrl: `/uploads/applications/${pdfFile}` });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // New endpoint for generating application forms from PPPoE/DHCP user data
+    app.post('/api/public/generate-application', express.json(), async (req, res) => {
+        try {
+            const { userData, customerData, planData, companySettings, source } = req.body || {};
+            
+            if (!userData || !userData.name || !String(userData.name).trim()) {
+                return res.status(400).json({ message: 'User name is required.' });
+            }
+
+            const id = `app_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+            const createdAt = new Date().toISOString();
+            const pdfFile = `${id}.pdf`;
+            const pdfPath = path.join(APPLICATIONS_UPLOADS_DIR, pdfFile);
+
+            const doc = await PDFDocument.create();
+            const font = await doc.embedFont(StandardFonts.Helvetica);
+            const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
+            const page = doc.addPage([595.28, 841.89]);
+            const drawText = (text, x, y, size = 12, isBold = false) => {
+                page.drawText(String(text || ''), { x, y, size, font: isBold ? boldFont : font, color: rgb(0, 0, 0) });
+            };
+
+            // Header with company info
+            let y = 800;
+            if (companySettings?.companyName) {
+                drawText(companySettings.companyName, 50, y, 18, true);
+                y -= 25;
+            }
+            if (companySettings?.address) {
+                drawText(companySettings.address, 50, y, 10);
+                y -= 15;
+            }
+            if (companySettings?.contactNumber || companySettings?.email) {
+                const contactInfo = `${companySettings.contactNumber || ''} ${companySettings.contactNumber && companySettings.email ? '|' : ''} ${companySettings.email || ''}`.trim();
+                drawText(contactInfo, 50, y, 10);
+                y -= 25;
+            }
+
+            // Application title
+            drawText('INTERNET SERVICE APPLICATION FORM', 50, y, 16, true);
+            y -= 30;
+
+            // Application details
+            drawText(`Application ID: ${id}`, 50, y, 11, true);
+            drawText(`Date: ${new Date(createdAt).toLocaleString()}`, 300, y, 11);
+            y -= 25;
+
+            // User information
+            drawText('APPLICANT INFORMATION', 50, y, 12, true);
+            y -= 20;
+            drawText(`Full Name: ${userData.name}`, 50, y);
+            y -= 18;
+            drawText(`Account Number: ${customerData?.accountNumber || 'N/A'}`, 50, y);
+            y -= 18;
+            drawText(`Contact Number: ${customerData?.contactNumber || userData.phone || 'N/A'}`, 50, y);
+            y -= 18;
+            drawText(`Email Address: ${customerData?.email || userData.email || 'N/A'}`, 50, y);
+            y -= 18;
+            drawText(`Address: ${customerData?.address || 'N/A'}`, 50, y);
+            y -= 18;
+            if (customerData?.gps) {
+                drawText(`GPS Location: ${customerData.gps}`, 50, y);
+                y -= 18;
+            }
+
+            // Service details
+            y -= 10;
+            drawText('SERVICE DETAILS', 50, y, 12, true);
+            y -= 20;
+            drawText(`Service Type: ${source === 'pppoe' ? 'PPPoE' : 'DHCP'}`, 50, y);
+            y -= 18;
+            drawText(`Plan: ${planData?.name || 'N/A'}`, 50, y);
+            y -= 18;
+            if (planData?.price) {
+                drawText(`Monthly Rate: ${planData.currency || 'PHP'} ${planData.price}`, 50, y);
+                y -= 18;
+            }
+            if (planData?.speedLimit) {
+                drawText(`Speed Limit: ${planData.speedLimit}`, 50, y);
+                y -= 18;
+            }
+            if (planData?.planType) {
+                drawText(`Plan Type: ${planData.planType}`, 50, y);
+                y -= 18;
+            }
+
+            // Terms and conditions
+            y -= 20;
+            drawText('TERMS AND CONDITIONS', 50, y, 12, true);
+            y -= 20;
+            const terms = [
+                '1. Payment is due on the specified due date.',
+                '2. Service interruption may occur for non-payment.',
+                '3. Customer agrees to abide by the acceptable use policy.',
+                '4. Installation fees may apply.',
+                '5. 24-hour notice required for service cancellation.'
+            ];
+            for (const term of terms) {
+                drawText(term, 50, y, 9);
+                y -= 14;
+            }
+
+            // Signature section
+            y -= 30;
+            drawText('_________________________', 50, y);
+            drawText('Applicant Signature', 50, y - 15, 10);
+            drawText('Date', 50, y - 30, 10);
+
+            drawText('_________________________', 300, y);
+            drawText('Company Representative', 300, y - 15, 10);
+            drawText('Date', 300, y - 30, 10);
+
+            const pdfBytes = await doc.save();
+            await fs.promises.writeFile(pdfPath, pdfBytes);
+
+            await db.run(
+                `INSERT INTO applications (id, name, email, phone, message, planName, pdfPath, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [id, userData.name, customerData?.email || userData.email || '', customerData?.contactNumber || userData.phone || '', `Application for ${planData?.name || 'internet service'}`, planData?.name || '', `/uploads/applications/${pdfFile}`, createdAt]
+            );
+
+            res.status(201).json({ message: 'Application form generated successfully.', id, pdfUrl: `/uploads/applications/${pdfFile}` });
         } catch (e) {
             res.status(500).json({ message: e.message });
         }

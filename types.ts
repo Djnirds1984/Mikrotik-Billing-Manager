@@ -542,6 +542,7 @@ export interface Customer {
     email?: string;
     accountNumber?: string;
     gps?: string;
+    applicationId?: string;
 }
 
 export interface WanRoute {
@@ -820,6 +821,7 @@ export interface DhcpClientDbRecord {
     speedLimit?: string;
     lastSeen: string;
     accountNumber?: string;
+    applicationId?: string;
 }
 
 

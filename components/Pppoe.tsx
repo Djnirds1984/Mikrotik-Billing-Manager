@@ -17,6 +17,7 @@ import { GracePeriodModal } from './GracePeriodModal.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { generateApplicationForm, deleteApplication } from '../services/applicationService.ts';
 
 // --- Reusable Components ---
 
@@ -608,6 +609,59 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         await updateCustomer({ ...alreadyExists, ...customerData });
                     }
                 }
+            }
+
+            // Generate PDF application form
+            try {
+                const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
+                const planData = selectedPlan ? {
+                    name: selectedPlan.name,
+                    price: selectedPlan.price,
+                    currency: selectedPlan.currency,
+                    cycleDays: selectedPlan.cycle_days || 30,
+                    speedLimit: selectedPlan.speedLimit || '',
+                    planType: subscriptionData.planType || 'prepaid'
+                } : null;
+
+                // Delete existing application if this is an edit
+                if (selectedSecret && existingCustomer?.applicationId) {
+                    await deleteApplication(existingCustomer.applicationId);
+                }
+
+                // Generate new application form
+                const applicationResult = await generateApplicationForm({
+                    userData: {
+                        name: secretData.name,
+                        password: secretData.password,
+                        service: secretData.service,
+                        profile: secretData.profile,
+                        comment: secretData.comment
+                    },
+                    customerData: {
+                        fullName: customerData.fullName || '',
+                        address: customerData.address || '',
+                        contactNumber: customerData.contactNumber || '',
+                        email: customerData.email || '',
+                        accountNumber: customerData.accountNumber || '',
+                        gps: customerData.gps || ''
+                    },
+                    planData,
+                    companySettings,
+                    source: 'pppoe'
+                });
+
+                // Update customer with application ID
+                if (existingCustomer) {
+                    await updateCustomer({ ...existingCustomer, applicationId: applicationResult.id });
+                } else {
+                    const customer = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
+                    if (customer) {
+                        await updateCustomer({ ...customer, applicationId: applicationResult.id });
+                    }
+                }
+            } catch (pdfError) {
+                console.error('Failed to generate PDF application form:', pdfError);
+                // Continue with the save process even if PDF generation fails
             }
             
             setUserModalOpen(false);
