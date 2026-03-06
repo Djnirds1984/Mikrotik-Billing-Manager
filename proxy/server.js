@@ -372,6 +372,9 @@ async function initDb() {
             if (!salesColNames.includes('invoiceId')) {
                 await db.exec("ALTER TABLE sales_records ADD COLUMN invoiceId TEXT");
             }
+            if (!salesColNames.includes('planType')) {
+                await db.exec("ALTER TABLE sales_records ADD COLUMN planType TEXT DEFAULT 'prepaid'");
+            }
         } catch (_) {}
         console.log('Database initialized successfully');
     } catch (err) {
