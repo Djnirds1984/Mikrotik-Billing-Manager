@@ -16,6 +16,8 @@ const si = require('systeminformation');
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+const archiver = require('archiver');
+const tar = require('tar');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -2182,6 +2184,138 @@ WantedBy=multi-user.target`;
         } catch (e) {
             res.status(500).json({ message: e.message });
         }
+    });
+
+    superRouter.get('/create-full-backup', (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+        const createBackup = async () => {
+            try {
+                const backupFile = `full-panel-backup-${new Date().toISOString().replace(/:/g, '-')}.mk`;
+                send({ log: `Creating full panel backup: ${backupFile}...` });
+
+                const projectRoot = path.join(__dirname, '..');
+                const archivePath = path.join(BACKUP_DIR, backupFile);
+                
+                await new Promise((resolve, reject) => {
+                    const output = fs.createWriteStream(archivePath);
+                    const archive = archiver('tar', { gzip: true });
+
+                    output.on('close', () => {
+                        send({ log: `Backup complete. Size: ${(archive.pointer() / 1024 / 1024).toFixed(2)} MB` });
+                        resolve();
+                    });
+                    archive.on('warning', (err) => send({ log: `Archive warning: ${err.message}`, isError: true }));
+                    archive.on('error', (err) => reject(new Error(`Failed to create backup archive: ${err.message}`)));
+
+                    archive.pipe(output);
+                    archive.glob('**/*', {
+                        cwd: projectRoot,
+                        ignore: ['proxy/backups/**', '.git/**', '**/node_modules/**'],
+                        dot: true
+                    });
+                    archive.finalize();
+                });
+
+                send({ status: 'success', message: 'Backup created successfully.' });
+            } catch (e) {
+                send({ status: 'error', message: e.message });
+            } finally {
+                send({ status: 'finished' });
+                res.end();
+            }
+        };
+        createBackup();
+    });
+
+    // Middleware for handling raw file uploads
+    const rawBodySaver = express.raw({ type: 'application/octet-stream', limit: '100mb' });
+
+    superRouter.post('/upload-backup', rawBodySaver, async (req, res) => {
+        try {
+            if (!req.body || req.body.length === 0) {
+                return res.status(400).json({ message: 'No file uploaded.' });
+            }
+            
+            const backupFile = `uploaded-restore-${Date.now()}.mk`;
+            const backupPath = path.join(BACKUP_DIR, backupFile);
+            
+            await fs.promises.writeFile(backupPath, req.body);
+            
+            res.json({ message: 'Backup uploaded successfully.', filename: backupFile });
+        } catch (e) {
+            res.status(500).json({ message: `File upload failed: ${e.message}` });
+        }
+    });
+
+    superRouter.get('/restore-from-backup', (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+        const { file } = req.query;
+
+        if (!file || file.includes('..') || !file.endsWith('.mk')) {
+            send({ status: 'error', message: 'Invalid backup file specified for restore.' });
+            return res.end();
+        }
+        
+        const restore = async () => {
+            try {
+                send({ log: `Starting full panel restore from ${file}...`});
+                const backupPath = path.join(BACKUP_DIR, file);
+                if (!fs.existsSync(backupPath)) throw new Error('Backup file not found on server.');
+
+                send({ log: 'Stopping all panel services via pm2...'});
+                await runCommand('pm2 stop all').catch(e => send({ log: `Could not stop pm2 (this is okay if it's not running): ${e.message}`, isError: true }));
+                
+                send({ log: 'Extracting backup over current application files...'});
+                const projectRoot = path.join(__dirname, '..');
+                await tar.x({
+                    file: backupPath,
+                    cwd: projectRoot,
+                    onentry: (entry) => send({ log: `Restoring: ${entry.path}` })
+                });
+                send({ log: 'Extraction complete.' });
+
+                send({ log: 'Re-installing dependencies for UI server...'});
+                await runCommand('npm install --prefix proxy');
+
+                send({ log: 'Re-installing dependencies for API backend...'});
+                await runCommand('npm install --prefix api-backend');
+
+                send({ log: 'Restarting panel services...'});
+                exec('pm2 restart all', (err, stdout) => {
+                     if (err) {
+                         send({ log: `PM2 restart failed: ${err.message}`, isError: true });
+                         send({ status: 'error', message: err.message });
+                    } else {
+                        send({ log: stdout });
+                        send({ status: 'restarting' });
+                    }
+                    res.end();
+                });
+
+            } catch (e) {
+                send({ log: e.message, isError: true });
+                send({ status: 'error', message: e.message });
+                res.end();
+            }
+        };
+        restore();
+    });
+
+    app.get('/download-backup/:filename', protect, (req, res) => {
+        const { filename } = req.params;
+        if (filename.includes('..') || !filename.endsWith('.mk')) {
+            return res.status(400).json({ message: 'Invalid filename' });
+        }
+        const filePath = path.join(BACKUP_DIR, filename);
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ message: 'Backup file not found' });
+        }
+        res.download(filePath);
     });
     
     app.use('/api/superadmin', superRouter);
