@@ -715,6 +715,12 @@ export interface PiTunnelStatus {
     url?: string;
 }
 
+export interface CloudflareTunnelStatus {
+    installed: boolean;
+    active: boolean;
+    url?: string;
+}
+
 export interface HostInterface {
     name: string;
     ip4: string;
