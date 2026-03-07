@@ -2002,11 +2002,11 @@ async function startServer() {
             'Connection': 'keep-alive',
         });
 
-        const sendLog = (message: string, isError = false) => {
+        const sendLog = (message, isError = false) => {
             res.write(`data: ${JSON.stringify({ log: message, isError })}\n\n`);
         };
 
-        const sendError = (message: string) => {
+        const sendError = (message) => {
             res.write(`data: ${JSON.stringify({ status: 'error', message })}\n\n`);
             res.end();
         };
@@ -2071,11 +2071,11 @@ WantedBy=multi-user.target`;
             'Connection': 'keep-alive',
         });
 
-        const sendLog = (message: string, isError = false) => {
+        const sendLog = (message, isError = false) => {
             res.write(`data: ${JSON.stringify({ log: message, isError })}\n\n`);
         };
 
-        const sendError = (message: string) => {
+        const sendError = (message) => {
             res.write(`data: ${JSON.stringify({ status: 'error', message })}\n\n`);
             res.end();
         };
