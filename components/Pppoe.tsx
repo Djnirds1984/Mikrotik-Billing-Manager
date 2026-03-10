@@ -18,6 +18,7 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { generateApplicationForm, deleteApplication } from '../services/applicationService.ts';
+import { dbApi } from '../services/databaseService.ts';
 
 // --- Reusable Components ---
 
@@ -777,9 +778,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             if (!confirm('This will sync all PPPoE users between Local Database and Cloud. Missing users will be restored/backed up. Continue?')) return;
                             setIsLoading(true);
                             try {
-                                const res = await fetch('/api/db/customers/sync', { method: 'POST' });
-                                const data = await res.json();
-                                if (!res.ok) throw new Error(data.message);
+                                const data = await dbApi.post<{ message: string, stats: { toCloud: number, toLocal: number } }>('/customers/sync', {});
                                 alert(`Sync Complete!\nTo Cloud: ${data.stats.toCloud}\nTo Local: ${data.stats.toLocal}`);
                                 fetchData();
                             } catch (e) {
