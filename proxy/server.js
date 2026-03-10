@@ -938,23 +938,50 @@ async function startServer() {
     // Mikrotik Sales Logs API - Sync with Supabase
     dbRouter.get('/mikrotik-sales-logs', async (req, res) => {
         try {
-            const { routerId, licenseId } = req.query;
+            const { routerId } = req.query;
             
             if (!supabase) {
                 return res.status(500).json({ message: 'Supabase not configured' });
             }
 
+            // Get the current license key from local settings
+            const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
+            if (!settings?.licenseKey) {
+                return res.status(400).json({ message: 'No license configured' });
+            }
+
+            // Find the license in Supabase
+            const { data: licenseData, error: licenseError } = await supabase
+                .from('mikrotik_licenses')
+                .select('id')
+                .eq('license_key', settings.licenseKey)
+                .single();
+
+            if (licenseError || !licenseData) {
+                return res.status(404).json({ message: 'License not found in Supabase' });
+            }
+
             let query = supabase
                 .from('mikrotik_sales_logs')
                 .select('*')
+                .eq('license_id', licenseData.id)
                 .order('created_at', { ascending: false });
 
             if (routerId) {
-                query = query.eq('router_id', routerId);
-            }
-            
-            if (licenseId) {
-                query = query.eq('license_id', licenseId);
+                // Find router in Supabase by IP from local database
+                const router = await db.get('SELECT host FROM routers WHERE id = ?', [routerId]);
+                if (router?.host) {
+                    const { data: routerData } = await supabase
+                        .from('mikrotik_routers')
+                        .select('id')
+                        .eq('license_id', licenseData.id)
+                        .eq('router_ip', router.host)
+                        .single();
+                    
+                    if (routerData?.id) {
+                        query = query.eq('router_id', routerData.id);
+                    }
+                }
             }
 
             const { data, error } = await query;
@@ -964,7 +991,7 @@ async function startServer() {
                 return res.status(500).json({ message: error.message });
             }
 
-            res.json(data);
+            res.json(data || []);
         } catch (e) {
             console.error('Failed to fetch mikrotik sales logs:', e);
             res.status(500).json({ message: e.message });
@@ -973,20 +1000,37 @@ async function startServer() {
 
     dbRouter.post('/mikrotik-sales-logs', async (req, res) => {
         try {
-            const { license_id, router_id, amount, currency, transaction_type } = req.body;
+            const { router_id, amount, currency, transaction_type } = req.body;
             
             if (!supabase) {
                 return res.status(500).json({ message: 'Supabase not configured' });
             }
 
-            if (!license_id || !router_id || !amount || !transaction_type) {
-                return res.status(400).json({ message: 'Missing required fields: license_id, router_id, amount, transaction_type' });
+            if (!router_id || !amount || !transaction_type) {
+                return res.status(400).json({ message: 'Missing required fields: router_id, amount, transaction_type' });
+            }
+
+            // Get the current license key from local settings
+            const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
+            if (!settings?.licenseKey) {
+                return res.status(400).json({ message: 'No license configured' });
+            }
+
+            // Find the license in Supabase
+            const { data: licenseData, error: licenseError } = await supabase
+                .from('mikrotik_licenses')
+                .select('id')
+                .eq('license_key', settings.licenseKey)
+                .single();
+
+            if (licenseError || !licenseData) {
+                return res.status(404).json({ message: 'License not found in Supabase' });
             }
 
             const { data, error } = await supabase
                 .from('mikrotik_sales_logs')
                 .insert([{
-                    license_id,
+                    license_id: licenseData.id,
                     router_id,
                     amount: parseFloat(amount),
                     currency: currency || 'PHP',

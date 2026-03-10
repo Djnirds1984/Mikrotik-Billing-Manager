@@ -34,7 +34,7 @@ export const mikrotikSalesService = {
     },
 
     // Create a new mikrotik sales log
-    async createSalesLog(logData: Omit<MikrotikSalesLog, 'id' | 'created_at'>): Promise<MikrotikSalesLog> {
+    async createSalesLog(logData: Omit<MikrotikSalesLog, 'id' | 'created_at' | 'license_id'>): Promise<MikrotikSalesLog> {
         const response = await fetch(`${API_BASE_URL}/mikrotik-sales-logs`, {
             method: 'POST',
             headers: {
