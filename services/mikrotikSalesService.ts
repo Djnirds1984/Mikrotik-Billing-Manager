@@ -67,5 +67,32 @@ export const mikrotikSalesService = {
         }
 
         return response.json();
+    },
+
+    // Bulk sync all sales to mikrotik sales logs
+    async bulkSyncSalesToMikrotik(routerId?: string): Promise<{
+        success: boolean;
+        message: string;
+        data: {
+            synced: number;
+            skipped: number;
+            errors: number;
+            errorDetails: Array<{ saleId: string; error: string }>;
+        };
+    }> {
+        const response = await fetch(`${API_BASE_URL}/sales/bulk-sync-to-mikrotik`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeader()
+            },
+            body: JSON.stringify({ routerId })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to bulk sync sales to mikrotik: ${response.statusText}`);
+        }
+
+        return response.json();
     }
 };

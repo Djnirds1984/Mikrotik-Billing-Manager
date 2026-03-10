@@ -881,13 +881,16 @@ async function startServer() {
 
                                             // Create sales log if router exists
                                             if (routerId) {
+                                                // Convert currency symbol to currency code
+                                                const currencyCode = convertCurrencyToCode(existing.currency);
+
                                                 await supabase
                                                     .from('mikrotik_sales_logs')
                                                     .insert([{
                                                         license_id: licenseData.id,
                                                         router_id: routerId,
                                                         amount: existing.amount || 0,
-                                                        currency: existing.currency || 'PHP',
+                                                        currency: currencyCode,
                                                         transaction_type: 'sale',
                                                         created_at: new Date().toISOString()
                                                     }]);
@@ -934,6 +937,25 @@ async function startServer() {
     createCrud('/client-invoices', 'client_invoices');
     createCrud('/sales', 'sales_records');
     createCrud('/applications', 'applications');
+
+    // Helper function to convert currency symbols to currency codes
+    const convertCurrencyToCode = (currency) => {
+        if (!currency) return 'PHP';
+        
+        // Check for symbols (order matters - check longer symbols first)
+        if (currency === '₱' || currency.includes('₱')) return 'PHP';
+        if (currency === 'R$' || currency.includes('R$')) return 'BRL';
+        if (currency === '€' || currency.includes('€')) return 'EUR';
+        if (currency === '$' || currency.includes('$')) return 'USD';
+        
+        // If it's already a valid currency code, return it
+        if (['PHP', 'USD', 'EUR', 'BRL'].includes(currency.toUpperCase())) {
+            return currency.toUpperCase();
+        }
+        
+        // Default to PHP
+        return 'PHP';
+    };
 
     // Mikrotik Sales Logs API - Sync with Supabase
     dbRouter.get('/mikrotik-sales-logs', async (req, res) => {
@@ -1027,13 +1049,16 @@ async function startServer() {
                 return res.status(404).json({ message: 'License not found in Supabase' });
             }
 
+            // Convert currency symbol to currency code
+            const currencyCode = convertCurrencyToCode(currency);
+
             const { data, error } = await supabase
                 .from('mikrotik_sales_logs')
                 .insert([{
                     license_id: licenseData.id,
                     router_id,
                     amount: parseFloat(amount),
-                    currency: currency || 'PHP',
+                    currency: currencyCode,
                     transaction_type,
                     created_at: new Date().toISOString()
                 }])
@@ -1127,13 +1152,15 @@ async function startServer() {
             }
 
             // Create sales log
+            const currencyCode = convertCurrencyToCode(sale.currency);
+
             const { data: salesLog, error: salesLogError } = await supabase
                 .from('mikrotik_sales_logs')
                 .insert([{
                     license_id: licenseData.id,
                     router_id: routerId,
                     amount: sale.finalAmount,
-                    currency: sale.currency || 'PHP',
+                    currency: currencyCode,
                     transaction_type: 'sale',
                     created_at: sale.date || new Date().toISOString()
                 }])
@@ -1153,6 +1180,129 @@ async function startServer() {
 
         } catch (e) {
             console.error('Failed to sync sale to mikrotik:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Bulk sync all sales to mikrotik sales logs
+    dbRouter.post('/sales/bulk-sync-to-mikrotik', async (req, res) => {
+        try {
+            const { routerId } = req.body;
+            
+            if (!supabase) {
+                return res.status(500).json({ message: 'Supabase not configured' });
+            }
+
+            // Get the current license key from local settings
+            const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
+            if (!settings?.licenseKey) {
+                return res.status(400).json({ message: 'No license configured' });
+            }
+
+            // Find the license in Supabase
+            const { data: licenseData, error: licenseError } = await supabase
+                .from('mikrotik_licenses')
+                .select('id')
+                .eq('license_key', settings.licenseKey)
+                .single();
+
+            if (licenseError || !licenseData) {
+                return res.status(404).json({ message: 'License not found in Supabase' });
+            }
+
+            // Get all sales records that haven't been synced yet
+            let salesQuery = 'SELECT * FROM sales_records';
+            let salesParams = [];
+            
+            if (routerId) {
+                salesQuery += ' WHERE routerId = ?';
+                salesParams.push(routerId);
+            }
+            
+            salesQuery += ' ORDER BY date DESC';
+            
+            const sales = await db.all(salesQuery, salesParams);
+            
+            let syncedCount = 0;
+            let skippedCount = 0;
+            let errorCount = 0;
+            const errors = [];
+
+            // Process each sale
+            for (const sale of sales) {
+                try {
+                    // Check if this sale is already synced by looking for existing mikrotik sales log
+                    // We'll use a combination of router_id, amount, and date to identify duplicates
+                    const router = await db.get('SELECT host FROM routers WHERE id = ?', [sale.routerId]);
+                    if (!router?.host) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // Find router in Supabase
+                    const { data: routerData } = await supabase
+                        .from('mikrotik_routers')
+                        .select('id')
+                        .eq('license_id', licenseData.id)
+                        .eq('router_ip', router.host)
+                        .single();
+
+                    if (!routerData?.id) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // Check if this sale already exists in mikrotik sales logs
+                    const { data: existingLog } = await supabase
+                        .from('mikrotik_sales_logs')
+                        .select('id')
+                        .eq('license_id', licenseData.id)
+                        .eq('router_id', routerData.id)
+                        .eq('amount', sale.finalAmount)
+                        .eq('created_at', sale.date)
+                        .single();
+
+                    if (existingLog) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // Convert currency symbol to currency code
+                    const currencyCode = convertCurrencyToCode(sale.currency);
+
+                    // Create mikrotik sales log
+                    await supabase
+                        .from('mikrotik_sales_logs')
+                        .insert([{
+                            license_id: licenseData.id,
+                            router_id: routerData.id,
+                            amount: sale.finalAmount,
+                            currency: currencyCode,
+                            transaction_type: 'sale',
+                            created_at: sale.date || new Date().toISOString()
+                        }]);
+
+                    syncedCount++;
+                } catch (error) {
+                    errorCount++;
+                    errors.push({ saleId: sale.id, error: error.message });
+                    console.error('Error syncing sale', sale.id, ':', error);
+                }
+            }
+
+            res.json({
+                success: true,
+                message: `Bulk sync completed. Synced: ${syncedCount}, Skipped: ${skippedCount}, Errors: ${errorCount}`,
+                data: {
+                    synced: syncedCount,
+                    skipped: skippedCount,
+                    errors: errorCount,
+                    errorDetails: errors
+                }
+            });
+
+        } catch (e) {
+            console.error('Failed to bulk sync sales to mikrotik:', e);
             res.status(500).json({ message: e.message });
         }
     });

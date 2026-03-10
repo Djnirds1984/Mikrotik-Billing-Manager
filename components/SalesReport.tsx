@@ -50,6 +50,13 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [isEditOpen, setIsEditOpen] = useState<boolean>(false);
     const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
     const [isSyncing, setIsSyncing] = useState<string | null>(null);
+    const [isBulkSyncing, setIsBulkSyncing] = useState<boolean>(false);
+    const [bulkSyncResult, setBulkSyncResult] = useState<{
+        synced: number;
+        skipped: number;
+        errors: number;
+        errorDetails: Array<{ saleId: string; error: string }>;
+    } | null>(null);
 
     const filteredSales = useMemo(() => {
         return salesData.filter(sale => {
@@ -271,6 +278,31 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         }
     };
 
+    const handleBulkSyncToMikrotik = async () => {
+        if (!window.confirm(`This will sync all ${filteredSales.length} sales to Mikrotik cloud. Continue?`)) {
+            return;
+        }
+
+        setIsBulkSyncing(true);
+        setBulkSyncResult(null);
+
+        try {
+            const result = await mikrotikSalesService.bulkSyncSalesToMikrotik(selectedRouter?.id);
+            setBulkSyncResult(result.data);
+            
+            if (result.success) {
+                alert(`Bulk sync completed!\nSynced: ${result.data.synced}\nSkipped: ${result.data.skipped}\nErrors: ${result.data.errors}`);
+            } else {
+                alert('Bulk sync failed: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Error bulk syncing sales to mikrotik:', error);
+            alert('Error bulk syncing sales to Mikrotik: ' + (error as Error).message);
+        } finally {
+            setIsBulkSyncing(false);
+        }
+    };
+
     return (
         <>
             <div className={receiptToPrint ? 'printable-area' : 'hidden'}>
@@ -292,6 +324,19 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                             <button onClick={handlePrintReport} className="px-4 py-2 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-lg font-semibold flex items-center gap-2">
                                 <PrinterIcon className="w-5 h-5" /> Print Report
                             </button>
+                            <button 
+                                onClick={handleBulkSyncToMikrotik} 
+                                className="px-4 py-2 text-sm text-white bg-purple-600 hover:bg-purple-500 rounded-lg font-semibold flex items-center gap-2"
+                                disabled={isBulkSyncing}
+                                title="Sync all sales to Mikrotik cloud"
+                            >
+                                {isBulkSyncing ? (
+                                    <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div>
+                                ) : (
+                                    <ArrowPathIcon className="w-5 h-5" />
+                                )}
+                                Sync to Cloud
+                            </button>
                             <button onClick={() => setIsAddOpen(true)} className="px-4 py-2 text-sm text-white bg-green-600 hover:bg-green-500 rounded-lg font-semibold">
                                 Add Invoice
                             </button>
@@ -302,6 +347,49 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                              )}
                         </div>
                     </div>
+
+                    {/* Bulk Sync Results */}
+                    {bulkSyncResult && (
+                        <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
+                            <h3 className="text-lg font-semibold text-purple-900 dark:text-purple-100 mb-2">Bulk Sync Results</h3>
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                                <div className="text-center">
+                                    <div className="text-2xl font-bold text-green-600">{bulkSyncResult.synced}</div>
+                                    <div className="text-slate-600 dark:text-slate-400">Synced</div>
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-2xl font-bold text-yellow-600">{bulkSyncResult.skipped}</div>
+                                    <div className="text-slate-600 dark:text-slate-400">Skipped</div>
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-2xl font-bold text-red-600">{bulkSyncResult.errors}</div>
+                                    <div className="text-slate-600 dark:text-slate-400">Errors</div>
+                                </div>
+                            </div>
+                            {bulkSyncResult.errorDetails.length > 0 && (
+                                <div className="mt-4">
+                                    <details className="text-sm">
+                                        <summary className="cursor-pointer text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200">
+                                            View error details ({bulkSyncResult.errorDetails.length})
+                                        </summary>
+                                        <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                                            {bulkSyncResult.errorDetails.map((error, index) => (
+                                                <div key={index} className="text-red-600 dark:text-red-400 text-xs">
+                                                    Sale {error.saleId}: {error.error}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </details>
+                                </div>
+                            )}
+                            <button 
+                                onClick={() => setBulkSyncResult(null)}
+                                className="mt-3 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300"
+                            >
+                                Clear results
+                            </button>
+                        </div>
+                    )}
                     
                     {isAddOpen && (
                         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
