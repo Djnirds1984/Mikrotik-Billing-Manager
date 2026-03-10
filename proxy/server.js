@@ -1418,10 +1418,14 @@ async function startServer() {
                                     customer.dueDate = commentData.dueDate;
                                     needsUpdate = true;
                                 }
-                                if ((commentData.planName || commentData.plan) && (commentData.planName || commentData.plan) !== customer.planName) {
-                                    customer.planName = commentData.planName || commentData.plan;
+                                
+                                // Plan Name: Fallback to profile if plan/planName is missing in comment
+                                const extractedPlanName = commentData.planName || commentData.plan || secret.profile;
+                                if (extractedPlanName && extractedPlanName !== customer.planName) {
+                                    customer.planName = extractedPlanName;
                                     needsUpdate = true;
                                 }
+
                                 if (commentData.planType && commentData.planType !== customer.planType) {
                                     customer.planType = commentData.planType;
                                     needsUpdate = true;
