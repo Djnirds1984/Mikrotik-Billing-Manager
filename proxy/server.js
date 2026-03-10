@@ -45,6 +45,37 @@ if (!fs.existsSync(APPLICATIONS_UPLOADS_DIR)) {
     fs.mkdirSync(APPLICATIONS_UPLOADS_DIR, { recursive: true });
 }
 
+async function syncCustomerToSupabase(customer) {
+    if (!customer || !customer.username) return;
+    try {
+        const payload = {
+            id: customer.id,
+            username: customer.username,
+            router_id: customer.routerId,
+            full_name: customer.fullName,
+            address: customer.address,
+            contact_number: customer.contactNumber,
+            email: customer.email,
+            account_number: customer.accountNumber,
+            gps: customer.gps,
+            application_id: customer.applicationId
+        };
+        const { error } = await supabase.from('mikrotik_pppoe_users').upsert(payload, { onConflict: 'username' });
+        if (error) console.error('Supabase Sync Error:', error);
+    } catch (e) {
+        console.error('Supabase Sync Exception:', e);
+    }
+}
+
+async function deleteCustomerFromSupabase(id) {
+    try {
+        const { error } = await supabase.from('mikrotik_pppoe_users').delete().eq('id', id);
+        if (error) console.error('Supabase Delete Error:', error);
+    } catch (e) {
+        console.error('Supabase Delete Exception:', e);
+    }
+}
+
 let db;
 let superadminDb;
 
@@ -1338,6 +1369,11 @@ async function startServer() {
                     const setClause = keys.map(k => `${k} = ?`).join(',');
                     await db.run(`UPDATE customers SET ${setClause} WHERE id = ?`, [...values, existing.id]);
                 }
+                
+                // Sync to Supabase
+                const updatedCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [existing.id]);
+                await syncCustomerToSupabase(updatedCustomer);
+
                 res.json({ message: 'Updated existing customer', id: existing.id });
             } else {
                 // Insert new
@@ -1348,6 +1384,11 @@ async function startServer() {
                 const values = Object.values(req.body);
                 const placeholders = keys.map(() => '?').join(',');
                 await db.run(`INSERT INTO customers (${keys.join(',')}) VALUES (${placeholders})`, values);
+                
+                // Sync to Supabase
+                const newCustomer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
+                await syncCustomerToSupabase(newCustomer);
+
                 res.json({ message: 'Created new customer' });
             }
         } catch (e) {
@@ -1367,13 +1408,20 @@ async function startServer() {
             const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
             const values = [...Object.values(req.body), id];
             await db.run(`UPDATE customers SET ${updates} WHERE id = ?`, values);
+            
+            // Sync to Supabase
+            const updatedCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
+            await syncCustomerToSupabase(updatedCustomer);
+
             res.json({ message: 'Updated' });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
     dbRouter.delete('/customers/:id', async (req, res) => {
         try {
-            await db.run(`DELETE FROM customers WHERE id = ?`, req.params.id);
+            const id = req.params.id;
+            await deleteCustomerFromSupabase(id);
+            await db.run(`DELETE FROM customers WHERE id = ?`, id);
             res.json({ message: 'Deleted' });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
@@ -2027,6 +2075,10 @@ async function startServer() {
                 await db.run('UPDATE client_users SET account_number = ? WHERE id = ?', [acc, user.id]);
                 if (cust && (!cust.accountNumber || String(cust.accountNumber).trim() === '')) {
                     await db.run('UPDATE customers SET accountNumber = ? WHERE routerId = ? AND username = ?', [acc, user.router_id, user.pppoe_username || user.username]);
+                    
+                    // Sync to Supabase
+                    const updatedCustomer = await db.get('SELECT * FROM customers WHERE routerId = ? AND username = ?', [user.router_id, user.pppoe_username || user.username]);
+                    await syncCustomerToSupabase(updatedCustomer);
                 }
             }
             res.json({
