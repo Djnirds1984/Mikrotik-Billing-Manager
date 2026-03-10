@@ -224,7 +224,8 @@ async function initDb() {
                 clientAddress TEXT,
                 clientContact TEXT,
                 clientEmail TEXT,
-                invoiceId TEXT
+                invoiceId TEXT,
+                coveredMonth TEXT
             );
             CREATE TABLE IF NOT EXISTS client_invoices (
                 id TEXT PRIMARY KEY,
@@ -734,8 +735,8 @@ async function startServer() {
                             const router = await db.get('SELECT name FROM routers WHERE id = ?', [existing.routerId]);
                             const saleId = `sale_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
                             await db.run(
-                                `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, routerName, currency, clientAddress, clientContact, clientEmail, invoiceId)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, routerName, currency, clientAddress, clientContact, clientEmail, invoiceId, coveredMonth)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                                 [
                                     saleId,
                                     existing.routerId,
@@ -748,7 +749,8 @@ async function startServer() {
                                     router?.name || '',
                                     existing.currency || 'PHP',
                                     null, null, null,
-                                    existing.id
+                                    existing.id,
+                                    null
                                 ]
                             );
                         }
