@@ -713,6 +713,83 @@ async function startServer() {
                 const values = Object.values(req.body);
                 const placeholders = keys.map(() => '?').join(',');
                 await db.run(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${placeholders})`, values);
+                
+                // If this is a sales record, sync to mikrotik sales logs
+                if (table === 'sales_records' && supabase) {
+                    try {
+                        // Get the created record
+                        const createdId = req.body.id;
+                        const createdSale = await db.get('SELECT * FROM sales_records WHERE id = ?', [createdId]);
+                        
+                        if (createdSale) {
+                            // Get license info
+                            const settings = await db.get('SELECT * FROM settings WHERE id = 1');
+                            if (settings?.licenseKey) {
+                                // Find license in Supabase
+                                const { data: licenseData, error: licenseError } = await supabase
+                                    .from('mikrotik_licenses')
+                                    .select('id')
+                                    .eq('license_key', settings.licenseKey)
+                                    .single();
+
+                                if (!licenseError && licenseData) {
+                                    // Get router info
+                                    const router = await db.get('SELECT * FROM routers WHERE id = ?', [createdSale.routerId]);
+                                    if (router) {
+                                        // Find router in Supabase
+                                        const { data: routerData, error: routerError } = await supabase
+                                            .from('mikrotik_routers')
+                                            .select('id')
+                                            .eq('license_id', licenseData.id)
+                                            .eq('router_ip', router.host)
+                                            .single();
+
+                                        let routerId = routerData?.id;
+
+                                        // Create router if not exists
+                                        if (!routerId && !routerError) {
+                                            const { data: newRouter, error: createRouterError } = await supabase
+                                                .from('mikrotik_routers')
+                                                .insert([{
+                                                    license_id: licenseData.id,
+                                                    router_name: router.name || 'Unknown',
+                                                    router_ip: router.host || 'Unknown',
+                                                    router_model: router.model || 'Unknown',
+                                                    router_serial: router.serial || 'Unknown',
+                                                    router_version: router.version || 'Unknown',
+                                                    created_at: new Date().toISOString()
+                                                }])
+                                                .select()
+                                                .single();
+
+                                            if (!createRouterError && newRouter) {
+                                                routerId = newRouter.id;
+                                            }
+                                        }
+
+                                        // Create sales log if router exists
+                                        if (routerId) {
+                                            await supabase
+                                                .from('mikrotik_sales_logs')
+                                                .insert([{
+                                                    license_id: licenseData.id,
+                                                    router_id: routerId,
+                                                    amount: createdSale.finalAmount || 0,
+                                                    currency: createdSale.currency || 'PHP',
+                                                    transaction_type: 'sale',
+                                                    created_at: createdSale.date || new Date().toISOString()
+                                                }]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (syncError) {
+                        console.error('Error syncing to mikrotik sales logs:', syncError);
+                        // Don't fail the main operation if sync fails
+                    }
+                }
+                
                 res.json({ message: 'Created' });
             } catch (e) {
                 res.status(500).json({ message: e.message });
@@ -756,6 +833,72 @@ async function startServer() {
                                     null
                                 ]
                             );
+                            
+                            // Sync to mikrotik sales logs
+                            if (supabase) {
+                                try {
+                                    // Get license info
+                                    const settings = await db.get('SELECT * FROM settings WHERE id = 1');
+                                    if (settings?.licenseKey) {
+                                        // Find license in Supabase
+                                        const { data: licenseData, error: licenseError } = await supabase
+                                            .from('mikrotik_licenses')
+                                            .select('id')
+                                            .eq('license_key', settings.licenseKey)
+                                            .single();
+
+                                        if (!licenseError && licenseData) {
+                                            // Find router in Supabase
+                                            const { data: routerData, error: routerError } = await supabase
+                                                .from('mikrotik_routers')
+                                                .select('id')
+                                                .eq('license_id', licenseData.id)
+                                                .eq('router_ip', existing.host)
+                                                .single();
+
+                                            let routerId = routerData?.id;
+
+                                            // Create router if not exists
+                                            if (!routerId && !routerError) {
+                                                const { data: newRouter, error: createRouterError } = await supabase
+                                                    .from('mikrotik_routers')
+                                                    .insert([{
+                                                        license_id: licenseData.id,
+                                                        router_name: router?.name || 'Unknown',
+                                                        router_ip: existing.host || 'Unknown',
+                                                        router_model: 'Unknown',
+                                                        router_serial: 'Unknown',
+                                                        router_version: 'Unknown',
+                                                        created_at: new Date().toISOString()
+                                                    }])
+                                                    .select()
+                                                    .single();
+
+                                                if (!createRouterError && newRouter) {
+                                                    routerId = newRouter.id;
+                                                }
+                                            }
+
+                                            // Create sales log if router exists
+                                            if (routerId) {
+                                                await supabase
+                                                    .from('mikrotik_sales_logs')
+                                                    .insert([{
+                                                        license_id: licenseData.id,
+                                                        router_id: routerId,
+                                                        amount: existing.amount || 0,
+                                                        currency: existing.currency || 'PHP',
+                                                        transaction_type: 'sale',
+                                                        created_at: new Date().toISOString()
+                                                    }]);
+                                            }
+                                        }
+                                    }
+                                } catch (syncError) {
+                                    console.error('Error syncing to mikrotik sales logs:', syncError);
+                                    // Don't fail the main operation if sync fails
+                                }
+                            }
                         }
                     }
                 }
@@ -791,6 +934,184 @@ async function startServer() {
     createCrud('/client-invoices', 'client_invoices');
     createCrud('/sales', 'sales_records');
     createCrud('/applications', 'applications');
+
+    // Mikrotik Sales Logs API - Sync with Supabase
+    dbRouter.get('/mikrotik-sales-logs', async (req, res) => {
+        try {
+            const { routerId, licenseId } = req.query;
+            
+            if (!supabase) {
+                return res.status(500).json({ message: 'Supabase not configured' });
+            }
+
+            let query = supabase
+                .from('mikrotik_sales_logs')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (routerId) {
+                query = query.eq('router_id', routerId);
+            }
+            
+            if (licenseId) {
+                query = query.eq('license_id', licenseId);
+            }
+
+            const { data, error } = await query;
+            
+            if (error) {
+                console.error('Error fetching mikrotik sales logs:', error);
+                return res.status(500).json({ message: error.message });
+            }
+
+            res.json(data);
+        } catch (e) {
+            console.error('Failed to fetch mikrotik sales logs:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.post('/mikrotik-sales-logs', async (req, res) => {
+        try {
+            const { license_id, router_id, amount, currency, transaction_type } = req.body;
+            
+            if (!supabase) {
+                return res.status(500).json({ message: 'Supabase not configured' });
+            }
+
+            if (!license_id || !router_id || !amount || !transaction_type) {
+                return res.status(400).json({ message: 'Missing required fields: license_id, router_id, amount, transaction_type' });
+            }
+
+            const { data, error } = await supabase
+                .from('mikrotik_sales_logs')
+                .insert([{
+                    license_id,
+                    router_id,
+                    amount: parseFloat(amount),
+                    currency: currency || 'PHP',
+                    transaction_type,
+                    created_at: new Date().toISOString()
+                }])
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Error creating mikrotik sales log:', error);
+                return res.status(500).json({ message: error.message });
+            }
+
+            res.json(data);
+        } catch (e) {
+            console.error('Failed to create mikrotik sales log:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.post('/sales/sync-to-mikrotik', async (req, res) => {
+        try {
+            const { saleId } = req.body;
+            
+            if (!supabase) {
+                return res.status(500).json({ message: 'Supabase not configured' });
+            }
+
+            if (!saleId) {
+                return res.status(400).json({ message: 'Sale ID is required' });
+            }
+
+            // Get the sale record
+            const sale = await db.get('SELECT * FROM sales_records WHERE id = ?', [saleId]);
+            if (!sale) {
+                return res.status(404).json({ message: 'Sale record not found' });
+            }
+
+            // Get router info to find license
+            const router = await db.get('SELECT * FROM routers WHERE id = ?', [sale.routerId]);
+            if (!router) {
+                return res.status(404).json({ message: 'Router not found' });
+            }
+
+            // Get license info
+            const settings = await db.get('SELECT * FROM settings WHERE id = 1');
+            if (!settings?.licenseKey) {
+                return res.status(400).json({ message: 'No license key found' });
+            }
+
+            // Find license in Supabase
+            const { data: licenseData, error: licenseError } = await supabase
+                .from('mikrotik_licenses')
+                .select('id')
+                .eq('license_key', settings.licenseKey)
+                .single();
+
+            if (licenseError || !licenseData) {
+                return res.status(404).json({ message: 'License not found in Supabase' });
+            }
+
+            // Find router in Supabase
+            const { data: routerData, error: routerError } = await supabase
+                .from('mikrotik_routers')
+                .select('id')
+                .eq('license_id', licenseData.id)
+                .eq('router_ip', router.host)
+                .single();
+
+            let routerId = routerData?.id;
+
+            // Create router if not exists
+            if (!routerId) {
+                const { data: newRouter, error: createRouterError } = await supabase
+                    .from('mikrotik_routers')
+                    .insert([{
+                        license_id: licenseData.id,
+                        router_name: router.name,
+                        router_ip: router.host,
+                        router_model: router.model || 'Unknown',
+                        router_serial: router.serial || 'Unknown',
+                        router_version: router.version || 'Unknown',
+                        created_at: new Date().toISOString()
+                    }])
+                    .select()
+                    .single();
+
+                if (createRouterError) {
+                    return res.status(500).json({ message: 'Failed to create router in Supabase' });
+                }
+
+                routerId = newRouter.id;
+            }
+
+            // Create sales log
+            const { data: salesLog, error: salesLogError } = await supabase
+                .from('mikrotik_sales_logs')
+                .insert([{
+                    license_id: licenseData.id,
+                    router_id: routerId,
+                    amount: sale.finalAmount,
+                    currency: sale.currency || 'PHP',
+                    transaction_type: 'sale',
+                    created_at: sale.date || new Date().toISOString()
+                }])
+                .select()
+                .single();
+
+            if (salesLogError) {
+                console.error('Error creating sales log:', salesLogError);
+                return res.status(500).json({ message: 'Failed to create sales log in Supabase' });
+            }
+
+            res.json({ 
+                success: true, 
+                message: 'Sale synced to Mikrotik successfully',
+                data: salesLog 
+            });
+
+        } catch (e) {
+            console.error('Failed to sync sale to mikrotik:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
 
     // Customers API (Manual Upsert)
     dbRouter.get('/customers', async (req, res) => {

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { SaleRecord, CompanySettings } from '../types.ts';
-import { CurrencyDollarIcon, TrashIcon, PrinterIcon } from '../constants.tsx';
+import { CurrencyDollarIcon, TrashIcon, PrinterIcon, ArrowPathIcon } from '../constants.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
 import { PrintableThermalReceipt } from './PrintableThermalReceipt.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -8,12 +8,15 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { dbApi } from '../services/databaseService.ts';
 import { getAuthHeader } from '../services/databaseService.ts';
 import type { PanelSettings } from '../types.ts';
+import { mikrotikSalesService } from '../services/mikrotikSalesService.ts';
+import { MikrotikSalesLogs } from './MikrotikSalesLogs.tsx';
 
 interface SalesReportProps {
     salesData: SaleRecord[];
     deleteSale: (saleId: string) => void;
     clearSales: () => void;
     companySettings: CompanySettings;
+    selectedRouter?: any;
 }
 
 const StatCard: React.FC<{ title: string, value: string | number, icon: React.ReactNode }> = ({ title, value, icon }) => (
@@ -26,7 +29,7 @@ const StatCard: React.FC<{ title: string, value: string | number, icon: React.Re
     </div>
 );
 
-export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale, clearSales, companySettings }) => {
+export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale, clearSales, companySettings, selectedRouter }) => {
     const { hasPermission } = useAuth();
     const { formatCurrency } = useLocalization();
     const [startDate, setStartDate] = useState('');
@@ -46,6 +49,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [invoiceToEdit, setInvoiceToEdit] = useState<any | null>(null);
     const [isEditOpen, setIsEditOpen] = useState<boolean>(false);
     const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
+    const [isSyncing, setIsSyncing] = useState<string | null>(null);
 
     const filteredSales = useMemo(() => {
         return salesData.filter(sale => {
@@ -249,6 +253,23 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     useEffect(() => {
         dbApi.get<PanelSettings>('/panel-settings').then(setPanelSettings).catch(() => setPanelSettings(null));
     }, []);
+
+    const handleSyncToMikrotik = async (saleId: string) => {
+        setIsSyncing(saleId);
+        try {
+            const result = await mikrotikSalesService.syncSaleToMikrotik(saleId);
+            if (result.success) {
+                alert('Sale synced to Mikrotik successfully!');
+            } else {
+                alert('Failed to sync sale: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Error syncing sale to mikrotik:', error);
+            alert('Error syncing sale to Mikrotik: ' + (error as Error).message);
+        } finally {
+            setIsSyncing(null);
+        }
+    };
 
     return (
         <>
@@ -464,6 +485,18 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                                 <button onClick={() => handlePrintReceipt(sale, 'thermal')} className="p-2 text-slate-500 dark:text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 rounded-md" title="Print Acknowledgement Receipt (Thermal)">
                                                     <PrinterIcon className="h-5 w-5" />
                                                 </button>
+                                                <button 
+                                                    onClick={() => handleSyncToMikrotik(sale.id)} 
+                                                    className="p-2 text-slate-500 dark:text-slate-400 hover:text-purple-500 dark:hover:text-purple-400 rounded-md" 
+                                                    title="Sync to Mikrotik"
+                                                    disabled={isSyncing === sale.id}
+                                                >
+                                                    {isSyncing === sale.id ? (
+                                                        <div className="animate-spin h-5 w-5 border-2 border-purple-500 border-t-transparent rounded-full"></div>
+                                                    ) : (
+                                                        <ArrowPathIcon className="h-5 w-5" />
+                                                    )}
+                                                </button>
                                                 {hasPermission('sales_report:delete') && (
                                                     <button onClick={() => deleteSale(sale.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md" title="Delete Record">
                                                         <TrashIcon className="h-5 w-5" />
@@ -473,7 +506,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                         </tr>
                                     )) : (
                                         <tr>
-                                            <td colSpan={8} className="text-center py-8 text-slate-500">
+                                            <td colSpan={9} className="text-center py-8 text-slate-500">
                                                 No sales records found for the selected period.
                                             </td>
                                         </tr>
@@ -599,6 +632,11 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                             </div>
                         )}
                     </div>
+                </div>
+                
+                {/* Mikrotik Sales Logs Section */}
+                <div className="mt-8">
+                    <MikrotikSalesLogs routerId={selectedRouter?.id} />
                 </div>
             </div>
         </>

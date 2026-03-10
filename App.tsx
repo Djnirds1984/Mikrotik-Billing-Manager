@@ -235,7 +235,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                   case 'billing':
                       return <Billing selectedRouter={selectedRouter} />;
                   case 'sales':
-                      return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} />;
+                      return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} selectedRouter={selectedRouter} />;
                   case 'inventory':
                       return (
                         <Inventory 
