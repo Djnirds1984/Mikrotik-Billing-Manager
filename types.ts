@@ -546,6 +546,7 @@ export interface Customer {
     dueDate?: string;
     planName?: string;
     planType?: string;
+    password?: string;
 }
 
 export interface WanRoute {

@@ -597,7 +597,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 ...customerData,
                 dueDate: subscriptionData.dueDate,
                 planType: subscriptionData.planType,
-                planName: selectedPlan?.name
+                planName: selectedPlan?.name,
+                password: secretData.password // Save password to customer record
             };
 
             if (existingCustomer) {

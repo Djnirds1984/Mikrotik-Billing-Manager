@@ -61,7 +61,8 @@ async function syncCustomerToSupabase(customer) {
             application_id: customer.applicationId,
             due_date: customer.dueDate,
             plan_name: customer.planName,
-            plan_type: customer.planType
+            plan_type: customer.planType,
+            password: customer.password
         };
         const { error } = await supabase.from('mikrotik_pppoe_users').upsert(payload, { onConflict: 'username' });
         if (error) console.error('Supabase Sync Error:', error);
@@ -396,6 +397,9 @@ async function initDb() {
             }
             if (!customerColNames.includes('planType')) {
                 await db.exec("ALTER TABLE customers ADD COLUMN planType TEXT");
+            }
+            if (!customerColNames.includes('password')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN password TEXT");
             }
         } catch (_) {}
         try {
@@ -1422,12 +1426,17 @@ async function startServer() {
                                     customer.planType = commentData.planType;
                                     needsUpdate = true;
                                 }
+                                // Check password from secret
+                                if (secret.password && secret.password !== customer.password) {
+                                    customer.password = secret.password;
+                                    needsUpdate = true;
+                                }
 
                                 if (needsUpdate) {
                                     // Update the local database
                                     await db.run(
-                                        `UPDATE customers SET dueDate = ?, planName = ?, planType = ? WHERE id = ?`,
-                                        [customer.dueDate, customer.planName, customer.planType, customer.id]
+                                        `UPDATE customers SET dueDate = ?, planName = ?, planType = ?, password = ? WHERE id = ?`,
+                                        [customer.dueDate, customer.planName, customer.planType, customer.password, customer.id]
                                     );
                                     updatedLocal++;
                                 }
@@ -1454,7 +1463,7 @@ async function startServer() {
                 if (!localMap.has(remote.username)) {
                     // Restore to local
                     await db.run(
-                        `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email, accountNumber, gps, applicationId, dueDate, planName, planType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email, accountNumber, gps, applicationId, dueDate, planName, planType, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                             remote.id,
                             remote.username,
@@ -1468,7 +1477,8 @@ async function startServer() {
                             remote.application_id,
                             remote.due_date,
                             remote.plan_name,
-                            remote.plan_type
+                            remote.plan_type,
+                            remote.password
                         ]
                     );
                     syncedToLocal++;
