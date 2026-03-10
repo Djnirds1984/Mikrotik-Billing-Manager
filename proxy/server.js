@@ -58,7 +58,10 @@ async function syncCustomerToSupabase(customer) {
             email: customer.email,
             account_number: customer.accountNumber,
             gps: customer.gps,
-            application_id: customer.applicationId
+            application_id: customer.applicationId,
+            due_date: customer.dueDate,
+            plan_name: customer.planName,
+            plan_type: customer.planType
         };
         const { error } = await supabase.from('mikrotik_pppoe_users').upsert(payload, { onConflict: 'username' });
         if (error) console.error('Supabase Sync Error:', error);
@@ -384,6 +387,15 @@ async function initDb() {
             }
             if (!customerColNames.includes('applicationId')) {
                 await db.exec("ALTER TABLE customers ADD COLUMN applicationId TEXT");
+            }
+            if (!customerColNames.includes('dueDate')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN dueDate TEXT");
+            }
+            if (!customerColNames.includes('planName')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN planName TEXT");
+            }
+            if (!customerColNames.includes('planType')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN planType TEXT");
             }
         } catch (_) {}
         try {
@@ -1368,7 +1380,7 @@ async function startServer() {
                 if (!localMap.has(remote.username)) {
                     // Restore to local
                     await db.run(
-                        `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email, accountNumber, gps, applicationId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email, accountNumber, gps, applicationId, dueDate, planName, planType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                             remote.id,
                             remote.username,
@@ -1379,7 +1391,10 @@ async function startServer() {
                             remote.email,
                             remote.account_number,
                             remote.gps,
-                            remote.application_id
+                            remote.application_id,
+                            remote.due_date,
+                            remote.plan_name,
+                            remote.plan_type
                         ]
                     );
                     syncedToLocal++;

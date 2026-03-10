@@ -543,6 +543,9 @@ export interface Customer {
     accountNumber?: string;
     gps?: string;
     applicationId?: string;
+    dueDate?: string;
+    planName?: string;
+    planType?: string;
 }
 
 export interface WanRoute {

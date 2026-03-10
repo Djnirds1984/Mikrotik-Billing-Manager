@@ -593,8 +593,15 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             });
 
             // Update local customer DB
+            const enrichedCustomerData = {
+                ...customerData,
+                dueDate: subscriptionData.dueDate,
+                planType: subscriptionData.planType,
+                planName: selectedPlan?.name
+            };
+
             if (existingCustomer) {
-                await updateCustomer({ ...existingCustomer, ...customerData });
+                await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
             } else {
                 const hasCustomerInfo = Object.values(customerData).some(val => val && String(val).trim() !== '');
                 if (hasCustomerInfo) {
@@ -604,10 +611,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         await addCustomer({ 
                             routerId: selectedRouter.id, 
                             username: secretData.name, 
-                            ...customerData 
+                            ...enrichedCustomerData 
                         });
                     } else {
-                        await updateCustomer({ ...alreadyExists, ...customerData });
+                        await updateCustomer({ ...alreadyExists, ...enrichedCustomerData });
                     }
                 }
             }
