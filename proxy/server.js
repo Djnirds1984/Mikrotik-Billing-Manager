@@ -227,8 +227,6 @@ async function initDb() {
                 invoiceId TEXT,
                 coveredMonth TEXT
             );
-            -- Add coveredMonth column to existing tables
-            ALTER TABLE sales_records ADD COLUMN IF NOT EXISTS coveredMonth TEXT;
             CREATE TABLE IF NOT EXISTS client_invoices (
                 id TEXT PRIMARY KEY,
                 routerId TEXT,
@@ -379,6 +377,9 @@ async function initDb() {
             }
             if (!salesColNames.includes('planType')) {
                 await db.exec("ALTER TABLE sales_records ADD COLUMN planType TEXT DEFAULT 'prepaid'");
+            }
+            if (!salesColNames.includes('coveredMonth')) {
+                await db.exec("ALTER TABLE sales_records ADD COLUMN coveredMonth TEXT");
             }
         } catch (_) {}
         console.log('Database initialized successfully');
