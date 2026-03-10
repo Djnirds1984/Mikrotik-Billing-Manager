@@ -785,8 +785,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             if (!confirm('This will sync all PPPoE users between Local Database and Cloud. Missing users will be restored/backed up. Continue?')) return;
                             setIsLoading(true);
                             try {
-                                const data = await dbApi.post<{ message: string, stats: { toCloud: number, toLocal: number } }>('/customers/sync', {});
-                                alert(`Sync Complete!\nTo Cloud: ${data.stats.toCloud}\nTo Local: ${data.stats.toLocal}`);
+                                const data = await dbApi.post<{ message: string, stats: { toCloud: number, toLocal: number, updatedLocal: number } }>('/customers/sync', {});
+                                alert(`Sync Complete!\nTo Cloud: ${data.stats.toCloud}\nTo Local: ${data.stats.toLocal}\nUpdated Local: ${data.stats.updatedLocal}`);
                                 fetchData();
                             } catch (e) {
                                 alert(`Sync failed: ${(e as Error).message}`);

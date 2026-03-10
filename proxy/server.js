@@ -1368,6 +1368,80 @@ async function startServer() {
             let syncedToLocal = 0;
             let updatedLocal = 0;
 
+            // --- 2.5 Enrich Local Data from Mikrotik Secrets (Fix missing plan/due date) ---
+            // Group local customers by routerId to batch requests
+            const customersByRouter = {};
+            for (const c of localCustomers) {
+                if (c.routerId) {
+                    if (!customersByRouter[c.routerId]) customersByRouter[c.routerId] = [];
+                    customersByRouter[c.routerId].push(c);
+                }
+            }
+
+            // Process each router
+            for (const routerId of Object.keys(customersByRouter)) {
+                try {
+                    // Fetch all secrets for this router from Backend API
+                    // Note: This relies on the backend running on the same machine/network.
+                    // If the backend is on a different port, ensure it's correct (default 3002).
+                    // The 'node-routeros-v2' client is used internally by the backend.
+                    // We can call the backend API endpoint directly.
+                    // Assuming backend is running on port 3002 or we can use internal RouterOS client if available.
+                    // However, 'proxy/server.js' IS the backend (port 3001).
+                    // The `node-routeros-v2` logic is usually in `api-backend/server.js` (port 3002).
+                    // Let's assume we can fetch from localhost:3002.
+                    
+                    const secretsUrl = `http://localhost:3002/${routerId}/ppp/secret/print`;
+                    const response = await axios.get(secretsUrl);
+                    const secrets = Array.isArray(response.data) ? response.data : [];
+                    
+                    // Map secrets by name for quick lookup
+                    const secretMap = new Map();
+                    for (const s of secrets) {
+                        if (s.name) secretMap.set(s.name, s);
+                    }
+
+                    // Update customers with data from secrets
+                    for (const customer of customersByRouter[routerId]) {
+                        const secret = secretMap.get(customer.username);
+                        if (secret && secret.comment) {
+                            try {
+                                const commentData = JSON.parse(secret.comment);
+                                let needsUpdate = false;
+                                
+                                // Check and update fields if they are missing or different
+                                if (commentData.dueDate && commentData.dueDate !== customer.dueDate) {
+                                    customer.dueDate = commentData.dueDate;
+                                    needsUpdate = true;
+                                }
+                                if ((commentData.planName || commentData.plan) && (commentData.planName || commentData.plan) !== customer.planName) {
+                                    customer.planName = commentData.planName || commentData.plan;
+                                    needsUpdate = true;
+                                }
+                                if (commentData.planType && commentData.planType !== customer.planType) {
+                                    customer.planType = commentData.planType;
+                                    needsUpdate = true;
+                                }
+
+                                if (needsUpdate) {
+                                    // Update the local database
+                                    await db.run(
+                                        `UPDATE customers SET dueDate = ?, planName = ?, planType = ? WHERE id = ?`,
+                                        [customer.dueDate, customer.planName, customer.planType, customer.id]
+                                    );
+                                    updatedLocal++;
+                                }
+                            } catch (parseErr) {
+                                // Ignore non-JSON comments or parsing errors
+                            }
+                        }
+                    }
+                } catch (routerErr) {
+                    console.error(`Failed to sync secrets for router ${routerId}:`, routerErr.message);
+                }
+            }
+            // -------------------------------------------------------------------------------
+
             // 3. Local -> Supabase (Sync missing or update)
             for (const local of localCustomers) {
                 // Always upsert to cloud to ensure latest local state is preserved
@@ -1410,7 +1484,8 @@ async function startServer() {
                 message: 'Sync complete',
                 stats: {
                     toCloud: syncedToCloud,
-                    toLocal: syncedToLocal
+                    toLocal: syncedToLocal,
+                    updatedLocal: updatedLocal
                 }
             });
         } catch (e) {
