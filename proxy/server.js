@@ -1338,7 +1338,72 @@ async function startServer() {
         }
     });
 
-    // Customers API (Manual Upsert)
+    // Sync All Customers (Bi-directional)
+    dbRouter.post('/customers/sync', async (req, res) => {
+        try {
+            console.log('Starting full customer sync...');
+            
+            // 1. Fetch all local customers
+            const localCustomers = await db.all('SELECT * FROM customers');
+            const localMap = new Map(localCustomers.map(c => [c.username, c]));
+
+            // 2. Fetch all Supabase customers
+            const { data: remoteCustomers, error } = await supabase.from('mikrotik_pppoe_users').select('*');
+            if (error) throw new Error(`Supabase fetch failed: ${error.message}`);
+            const remoteMap = new Map(remoteCustomers.map(c => [c.username, c]));
+
+            let syncedToCloud = 0;
+            let syncedToLocal = 0;
+            let updatedLocal = 0;
+
+            // 3. Local -> Supabase (Sync missing or update)
+            for (const local of localCustomers) {
+                // Always upsert to cloud to ensure latest local state is preserved
+                await syncCustomerToSupabase(local);
+                syncedToCloud++;
+            }
+
+            // 4. Supabase -> Local (Restore missing)
+            for (const remote of remoteCustomers) {
+                if (!localMap.has(remote.username)) {
+                    // Restore to local
+                    await db.run(
+                        `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email, accountNumber, gps, applicationId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        [
+                            remote.id,
+                            remote.username,
+                            remote.router_id,
+                            remote.full_name,
+                            remote.address,
+                            remote.contact_number,
+                            remote.email,
+                            remote.account_number,
+                            remote.gps,
+                            remote.application_id
+                        ]
+                    );
+                    syncedToLocal++;
+                } else {
+                    // Optional: If local exists, we could update it if remote is newer?
+                    // For now, let's assume local is master, so we already pushed local -> cloud above.
+                    // But if local is missing fields that remote has (e.g. after a partial data loss?), maybe update?
+                    // Let's stick to "Restore missing" for safety to avoid overwriting active local changes.
+                }
+            }
+
+            res.json({
+                message: 'Sync complete',
+                stats: {
+                    toCloud: syncedToCloud,
+                    toLocal: syncedToLocal
+                }
+            });
+        } catch (e) {
+            console.error('Sync failed:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     dbRouter.get('/customers', async (req, res) => {
         try {
             const { routerId } = req.query;
