@@ -291,6 +291,16 @@ async function initDb() {
                 description TEXT,
                 amount REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS pisowifi_income (
+                id TEXT PRIMARY KEY,
+                resellerName TEXT,
+                vendoLocation TEXT,
+                percentage REAL,
+                grossSales REAL,
+                expenses REAL,
+                netTotal REAL,
+                createdAt TEXT
+            );
             CREATE TABLE IF NOT EXISTS employees (
                 id TEXT PRIMARY KEY,
                 fullName TEXT NOT NULL,
@@ -973,6 +983,7 @@ async function startServer() {
     createCrud('/billing-plans', 'billing_plans');
     createCrud('/inventory', 'inventory');
     createCrud('/expenses', 'expenses');
+    createCrud('/pisowifi-income', 'pisowifi_income');
     createCrud('/employees', 'employees');
     // Customers handled manually for upsert
     // createCrud('/customers', 'customers');

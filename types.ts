@@ -346,6 +346,17 @@ export interface ExpenseRecord {
     amount: number;
 }
 
+export interface PisowifiIncomeRecord {
+    id: string;
+    resellerName: string;
+    vendoLocation: string;
+    percentage: number;
+    grossSales: number;
+    expenses: number;
+    netTotal: number;
+    createdAt: string;
+}
+
 
 export interface CompanySettings {
     companyName?: string;
