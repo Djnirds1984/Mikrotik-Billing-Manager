@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import type { InventoryItem, ExpenseRecord, PisowifiIncomeRecord } from '../types.ts';
+import type { InventoryItem, ExpenseRecord, PisowifiIncomeRecord, PisowifiReseller } from '../types.ts';
 // FIX: Import missing ReceiptPercentIcon.
 import { EditIcon, TrashIcon, SearchIcon, ArchiveBoxIcon, ReceiptPercentIcon, CurrencyDollarIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
@@ -332,11 +332,13 @@ interface PisowifiIncomeFormModalProps {
     onClose: () => void;
     onSave: (record: PisowifiIncomeRecord | Omit<PisowifiIncomeRecord, 'id' | 'createdAt'>) => void;
     initialData: PisowifiIncomeRecord | null;
+    resellers: PisowifiReseller[];
+    defaultResellerId?: string;
 }
 
-const PisowifiIncomeFormModal: React.FC<PisowifiIncomeFormModalProps> = ({ isOpen, onClose, onSave, initialData }) => {
+const PisowifiIncomeFormModal: React.FC<PisowifiIncomeFormModalProps> = ({ isOpen, onClose, onSave, initialData, resellers, defaultResellerId }) => {
     const [form, setForm] = useState({
-        resellerName: '',
+        resellerId: '',
         vendoLocation: '',
         percentage: '',
         grossSales: '',
@@ -365,31 +367,41 @@ const PisowifiIncomeFormModal: React.FC<PisowifiIncomeFormModalProps> = ({ isOpe
     React.useEffect(() => {
         if (!isOpen) return;
         if (initialData) {
+            const matchByName = initialData.resellerName
+                ? resellers.find(r => r.name.toLowerCase() === String(initialData.resellerName).toLowerCase())
+                : undefined;
+            const resellerId = initialData.resellerId || matchByName?.id || '';
             const raw = Number(initialData.percentage) || 0;
             const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
             setForm({
-                resellerName: initialData.resellerName || '',
+                resellerId,
                 vendoLocation: initialData.vendoLocation || '',
                 percentage: percent ? String(percent) : '',
                 grossSales: String(initialData.grossSales ?? ''),
                 expenses: String(initialData.expenses ?? ''),
             });
         } else {
-            setForm({ resellerName: '', vendoLocation: '', percentage: '', grossSales: '', expenses: '' });
+            setForm({ resellerId: defaultResellerId || '', vendoLocation: '', percentage: '', grossSales: '', expenses: '' });
         }
-    }, [initialData, isOpen]);
+    }, [initialData, isOpen, defaultResellerId, resellers]);
 
     if (!isOpen) return null;
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
         setForm(prev => ({ ...prev, [name]: value }));
     };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        const reseller = resellers.find(r => r.id === form.resellerId);
+        if (!reseller) {
+            alert("Please select a reseller.");
+            return;
+        }
         const dataToSave = {
-            resellerName: form.resellerName.trim(),
+            resellerId: reseller.id,
+            resellerName: reseller.name,
             vendoLocation: form.vendoLocation.trim(),
             percentage: normalizedPercent,
             grossSales: parseFloat(form.grossSales) || 0,
@@ -412,8 +424,13 @@ const PisowifiIncomeFormModal: React.FC<PisowifiIncomeFormModalProps> = ({ isOpe
                         <h3 className="text-xl font-bold text-[--color-primary-500] dark:text-[--color-primary-400] mb-4">{initialData ? 'Edit Pisowifi Income' : 'Add Pisowifi Income'}</h3>
                         <div className="space-y-4">
                             <div>
-                                <label htmlFor="resellerName" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Reseller Name</label>
-                                <input type="text" name="resellerName" id="resellerName" value={form.resellerName} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                <label htmlFor="resellerId" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Reseller</label>
+                                <select name="resellerId" id="resellerId" value={form.resellerId} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
+                                    <option value="" disabled>Select reseller...</option>
+                                    {resellers.map(r => (
+                                        <option key={r.id} value={r.id}>{r.name}</option>
+                                    ))}
+                                </select>
                             </div>
                             <div>
                                 <label htmlFor="vendoLocation" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Vendo Location</label>
@@ -457,15 +474,96 @@ const PisowifiIncomeFormModal: React.FC<PisowifiIncomeFormModalProps> = ({ isOpe
     );
 };
 
-const PisowifiIncomeManager: React.FC<{
+interface PisowifiResellerFormModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (reseller: PisowifiReseller | Omit<PisowifiReseller, 'id' | 'createdAt'>) => void;
+    initialData: PisowifiReseller | null;
+}
+
+const PisowifiResellerFormModal: React.FC<PisowifiResellerFormModalProps> = ({ isOpen, onClose, onSave, initialData }) => {
+    const [form, setForm] = useState({ name: '', contactNumber: '', notes: '' });
+
+    React.useEffect(() => {
+        if (!isOpen) return;
+        if (initialData) {
+            setForm({
+                name: initialData.name || '',
+                contactNumber: initialData.contactNumber || '',
+                notes: initialData.notes || '',
+            });
+        } else {
+            setForm({ name: '', contactNumber: '', notes: '' });
+        }
+    }, [initialData, isOpen]);
+
+    if (!isOpen) return null;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const { name, value } = e.target;
+        setForm(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        const dataToSave = {
+            name: form.name.trim(),
+            contactNumber: form.contactNumber.trim() || undefined,
+            notes: form.notes.trim() || undefined,
+        };
+
+        if (!dataToSave.name) {
+            alert("Reseller name is required.");
+            return;
+        }
+
+        if (initialData) onSave({ ...initialData, ...dataToSave });
+        else onSave(dataToSave);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg border border-slate-200 dark:border-slate-700">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold text-[--color-primary-500] dark:text-[--color-primary-400] mb-4">{initialData ? 'Edit Reseller' : 'Add Reseller'}</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Reseller Name</label>
+                                <input type="text" name="name" id="name" value={form.name} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                            </div>
+                            <div>
+                                <label htmlFor="contactNumber" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Contact Number (Optional)</label>
+                                <input type="text" name="contactNumber" id="contactNumber" value={form.contactNumber} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                            </div>
+                            <div>
+                                <label htmlFor="notes" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Notes (Optional)</label>
+                                <textarea name="notes" id="notes" value={form.notes} onChange={handleChange} rows={2} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end space-x-3 rounded-b-lg">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Cancel</button>
+                        <button type="submit" className="px-4 py-2 text-sm font-medium rounded-md text-white bg-[--color-primary-600] hover:bg-[--color-primary-500]">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+interface ResellerIncomeHistoryModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    reseller: PisowifiReseller;
     records: PisowifiIncomeRecord[];
-    addRecord: (record: Omit<PisowifiIncomeRecord, 'id' | 'createdAt'>) => void;
-    updateRecord: (record: PisowifiIncomeRecord) => void;
-    deleteRecord: (recordId: string) => void;
-}> = ({ records, addRecord, updateRecord, deleteRecord }) => {
+    onAddIncome: () => void;
+    onEditIncome: (record: PisowifiIncomeRecord) => void;
+    onDeleteIncome: (recordId: string) => void;
+}
+
+const ResellerIncomeHistoryModal: React.FC<ResellerIncomeHistoryModalProps> = ({ isOpen, onClose, reseller, records, onAddIncome, onEditIncome, onDeleteIncome }) => {
     const { formatCurrency } = useLocalization();
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingRecord, setEditingRecord] = useState<PisowifiIncomeRecord | null>(null);
 
     const totals = useMemo(() => {
         return records.reduce(
@@ -476,67 +574,237 @@ const PisowifiIncomeManager: React.FC<{
                 const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
                 const pctAmount = gross * (percent / 100);
                 const net = gross - pctAmount - exp;
-
                 acc.gross += gross;
+                acc.percent += pctAmount;
                 acc.expenses += exp;
                 acc.net += net;
                 return acc;
             },
-            { gross: 0, expenses: 0, net: 0 }
+            { gross: 0, percent: 0, expenses: 0, net: 0 }
         );
     }, [records]);
 
-    const handleSave = (data: PisowifiIncomeRecord | Omit<PisowifiIncomeRecord, 'id' | 'createdAt'>) => {
-        if ('id' in data) updateRecord(data);
-        else addRecord(data);
-        setIsModalOpen(false);
-    };
-
-    const handleDelete = (recordId: string) => {
-        if (window.confirm("Are you sure you want to delete this record?")) {
-            deleteRecord(recordId);
-        }
-    };
+    if (!isOpen) return null;
 
     return (
-        <div>
-            <PisowifiIncomeFormModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} initialData={editingRecord} />
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-5xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="p-6 border-b border-slate-200 dark:border-slate-700">
+                    <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                        <div>
+                            <h3 className="text-xl font-bold text-[--color-primary-500] dark:text-[--color-primary-400]">{reseller.name}</h3>
+                            <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                                {reseller.contactNumber ? reseller.contactNumber : '—'}
+                            </div>
+                            {reseller.notes ? <div className="text-sm text-slate-600 dark:text-slate-300 mt-1">{reseller.notes}</div> : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => downloadCSV(records.map(r => {
+                                const gross = Number(r.grossSales) || 0;
+                                const exp = Number(r.expenses) || 0;
+                                const raw = Number(r.percentage) || 0;
+                                const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
+                                const pctAmount = gross * (percent / 100);
+                                const net = gross - pctAmount - exp;
+                                return {
+                                    resellerName: reseller.name,
+                                    vendoLocation: r.vendoLocation,
+                                    percentage: percent,
+                                    percentageAmount: pctAmount,
+                                    grossSales: gross,
+                                    expenses: exp,
+                                    netTotal: net,
+                                    createdAt: r.createdAt,
+                                };
+                            }), `${reseller.name}_income.csv`)} className="px-4 py-2 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-lg font-semibold">Export CSV</button>
+                            <button onClick={onAddIncome} className="bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-bold py-2 px-4 rounded-lg">Add Income</button>
+                        </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <div className="text-xs text-slate-500 dark:text-slate-400">Gross</div>
+                            <div className="text-lg font-bold">{formatCurrency(totals.gross)}</div>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <div className="text-xs text-slate-500 dark:text-slate-400">Percent Total</div>
+                            <div className="text-lg font-bold">{formatCurrency(totals.percent)}</div>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <div className="text-xs text-slate-500 dark:text-slate-400">Expenses</div>
+                            <div className="text-lg font-bold text-red-600 dark:text-red-400">{formatCurrency(totals.expenses)}</div>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <div className="text-xs text-slate-500 dark:text-slate-400">Net</div>
+                            <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(totals.net)}</div>
+                        </div>
+                    </div>
+                </div>
 
-            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Gross Sales</p>
-                    <p className="text-2xl font-bold text-slate-900 dark:text-slate-100">{formatCurrency(totals.gross)}</p>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Expenses</p>
-                    <p className="text-2xl font-bold text-red-600 dark:text-red-400">{formatCurrency(totals.expenses)}</p>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Net Total</p>
-                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(totals.net)}</p>
+                <div className="p-6">
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-900/50">
+                                    <tr>
+                                        <th className="px-6 py-3">Vendo Location</th>
+                                        <th className="px-6 py-3 text-right">Percentage</th>
+                                        <th className="px-6 py-3 text-right">Percent Total</th>
+                                        <th className="px-6 py-3 text-right">Gross Sales</th>
+                                        <th className="px-6 py-3 text-right">Expenses</th>
+                                        <th className="px-6 py-3 text-right">Net Total</th>
+                                        <th className="px-6 py-3">Date</th>
+                                        <th className="px-6 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {records.length > 0 ? records.map(r => {
+                                        const gross = Number(r.grossSales) || 0;
+                                        const exp = Number(r.expenses) || 0;
+                                        const raw = Number(r.percentage) || 0;
+                                        const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
+                                        const pctAmount = gross * (percent / 100);
+                                        const net = gross - pctAmount - exp;
+                                        return (
+                                            <tr key={r.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                                <td className="px-6 py-4 text-slate-600 dark:text-slate-300">{r.vendoLocation}</td>
+                                                <td className="px-6 py-4 text-right font-mono">{percent.toFixed(2)}%</td>
+                                                <td className="px-6 py-4 text-right font-mono">{formatCurrency(pctAmount)}</td>
+                                                <td className="px-6 py-4 text-right font-mono">{formatCurrency(gross)}</td>
+                                                <td className="px-6 py-4 text-right font-mono text-red-600 dark:text-red-400">{formatCurrency(exp)}</td>
+                                                <td className="px-6 py-4 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(net)}</td>
+                                                <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</td>
+                                                <td className="px-6 py-4 text-right space-x-1">
+                                                    <button onClick={() => onEditIncome(r)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400] rounded-md"><EditIcon className="h-5 w-5" /></button>
+                                                    <button onClick={() => onDeleteIncome(r.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md"><TrashIcon className="h-5 w-5" /></button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    }) : (
+                                        <tr><td colSpan={8} className="text-center py-8 text-slate-500">No records yet.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div className="mt-4 flex justify-end">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Close</button>
+                    </div>
                 </div>
             </div>
+        </div>
+    );
+};
 
-            <div className="flex justify-end gap-2 mb-6">
-                <button onClick={() => downloadCSV(records.map(r => {
+const PisowifiIncomeManager: React.FC<{
+    records: PisowifiIncomeRecord[];
+    addRecord: (record: Omit<PisowifiIncomeRecord, 'id' | 'createdAt'>) => void;
+    updateRecord: (record: PisowifiIncomeRecord) => void;
+    deleteRecord: (recordId: string) => void;
+    resellers: PisowifiReseller[];
+    addReseller: (reseller: Omit<PisowifiReseller, 'id' | 'createdAt'>) => void;
+    updateReseller: (reseller: PisowifiReseller) => void;
+    deleteReseller: (resellerId: string) => void;
+}> = ({ records, addRecord, updateRecord, deleteRecord, resellers, addReseller, updateReseller, deleteReseller }) => {
+    const { formatCurrency } = useLocalization();
+    const [isIncomeModalOpen, setIsIncomeModalOpen] = useState(false);
+    const [editingIncome, setEditingIncome] = useState<PisowifiIncomeRecord | null>(null);
+    const [incomeDefaultResellerId, setIncomeDefaultResellerId] = useState<string | undefined>(undefined);
+    const [isResellerModalOpen, setIsResellerModalOpen] = useState(false);
+    const [editingReseller, setEditingReseller] = useState<PisowifiReseller | null>(null);
+    const [activeResellerId, setActiveResellerId] = useState<string | null>(null);
+
+    const resellerById = useMemo(() => new Map(resellers.map(r => [r.id, r])), [resellers]);
+
+    const recordsByResellerId = useMemo(() => {
+        const map = new Map<string, PisowifiIncomeRecord[]>();
+        for (const rec of records) {
+            const directId = rec.resellerId && resellerById.has(rec.resellerId) ? rec.resellerId : undefined;
+            const byName = !directId && rec.resellerName
+                ? resellers.find(r => r.name.toLowerCase() === String(rec.resellerName).toLowerCase())?.id
+                : undefined;
+            const key = directId || byName;
+            if (!key) continue;
+            const list = map.get(key) || [];
+            list.push(rec);
+            map.set(key, list);
+        }
+        for (const [key, list] of map.entries()) {
+            list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            map.set(key, list);
+        }
+        return map;
+    }, [records, resellers, resellerById]);
+
+    const resellerSummaries = useMemo(() => {
+        return resellers.map(reseller => {
+            const list = recordsByResellerId.get(reseller.id) || [];
+            const totals = list.reduce(
+                (acc, r) => {
                     const gross = Number(r.grossSales) || 0;
                     const exp = Number(r.expenses) || 0;
                     const raw = Number(r.percentage) || 0;
                     const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
                     const pctAmount = gross * (percent / 100);
                     const net = gross - pctAmount - exp;
-                    return {
-                        resellerName: r.resellerName,
-                        vendoLocation: r.vendoLocation,
-                        percentage: percent,
-                        percentageAmount: pctAmount,
-                        grossSales: gross,
-                        expenses: exp,
-                        netTotal: net,
-                        createdAt: r.createdAt,
-                    };
-                }), 'pisowifi_income.csv')} className="px-4 py-2 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-lg font-semibold">Export CSV</button>
-                <button onClick={() => { setEditingRecord(null); setIsModalOpen(true); }} className="bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-bold py-2 px-4 rounded-lg">Add Income</button>
+                    acc.gross += gross;
+                    acc.percent += pctAmount;
+                    acc.expenses += exp;
+                    acc.net += net;
+                    return acc;
+                },
+                { gross: 0, percent: 0, expenses: 0, net: 0 }
+            );
+            const lastDate = list[0]?.createdAt ? new Date(list[0].createdAt).getTime() : 0;
+            return { reseller, list, totals, lastDate };
+        }).sort((a, b) => (b.lastDate || 0) - (a.lastDate || 0));
+    }, [recordsByResellerId, resellers]);
+
+    const handleSaveIncome = (data: PisowifiIncomeRecord | Omit<PisowifiIncomeRecord, 'id' | 'createdAt'>) => {
+        if ('id' in data) updateRecord(data);
+        else addRecord(data);
+        setIsIncomeModalOpen(false);
+    };
+
+    const handleDeleteIncome = (recordId: string) => {
+        if (window.confirm("Are you sure you want to delete this record?")) {
+            deleteRecord(recordId);
+        }
+    };
+
+    const handleSaveReseller = (data: PisowifiReseller | Omit<PisowifiReseller, 'id' | 'createdAt'>) => {
+        if ('id' in data) updateReseller(data);
+        else addReseller(data);
+        setIsResellerModalOpen(false);
+    };
+
+    const openAddIncome = (defaultId?: string) => {
+        setEditingIncome(null);
+        setIncomeDefaultResellerId(defaultId);
+        setIsIncomeModalOpen(true);
+    };
+
+    const activeReseller = activeResellerId ? resellerById.get(activeResellerId) || null : null;
+    const activeRecords = activeReseller ? (recordsByResellerId.get(activeReseller.id) || []) : [];
+
+    return (
+        <div>
+            <PisowifiIncomeFormModal isOpen={isIncomeModalOpen} onClose={() => setIsIncomeModalOpen(false)} onSave={handleSaveIncome} initialData={editingIncome} resellers={resellers} defaultResellerId={incomeDefaultResellerId} />
+            <PisowifiResellerFormModal isOpen={isResellerModalOpen} onClose={() => setIsResellerModalOpen(false)} onSave={handleSaveReseller} initialData={editingReseller} />
+            {activeReseller ? (
+                <ResellerIncomeHistoryModal
+                    isOpen={true}
+                    onClose={() => setActiveResellerId(null)}
+                    reseller={activeReseller}
+                    records={activeRecords}
+                    onAddIncome={() => openAddIncome(activeReseller.id)}
+                    onEditIncome={(r) => { setEditingIncome(r); setIncomeDefaultResellerId(activeReseller.id); setIsIncomeModalOpen(true); }}
+                    onDeleteIncome={(id) => handleDeleteIncome(id)}
+                />
+            ) : null}
+
+            <div className="flex justify-end gap-2 mb-6">
+                <button onClick={() => { setEditingReseller(null); setIsResellerModalOpen(true); }} className="px-4 py-2 text-sm text-white bg-slate-700 hover:bg-slate-600 rounded-lg font-semibold">Add Reseller</button>
+                <button onClick={() => openAddIncome()} className="bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-bold py-2 px-4 rounded-lg">Add Income</button>
             </div>
 
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md overflow-hidden">
@@ -544,44 +812,41 @@ const PisowifiIncomeManager: React.FC<{
                     <table className="w-full text-sm text-left">
                         <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-900/50">
                             <tr>
-                                <th className="px-6 py-3">Reseller Name</th>
-                                <th className="px-6 py-3">Vendo Location</th>
-                                <th className="px-6 py-3 text-right">Percentage</th>
+                                <th className="px-6 py-3">Reseller</th>
+                                <th className="px-6 py-3 text-right">Records</th>
+                                <th className="px-6 py-3 text-right">Gross</th>
                                 <th className="px-6 py-3 text-right">Percent Total</th>
-                                <th className="px-6 py-3 text-right">Gross Sales</th>
                                 <th className="px-6 py-3 text-right">Expenses</th>
-                                <th className="px-6 py-3 text-right">Net Total</th>
-                                <th className="px-6 py-3">Date</th>
+                                <th className="px-6 py-3 text-right">Net</th>
+                                <th className="px-6 py-3">Last</th>
                                 <th className="px-6 py-3 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {records.length > 0 ? records.map(r => {
-                                const gross = Number(r.grossSales) || 0;
-                                const exp = Number(r.expenses) || 0;
-                                const raw = Number(r.percentage) || 0;
-                                const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
-                                const pctAmount = gross * (percent / 100);
-                                const net = gross - pctAmount - exp;
-
-                                return (
-                                <tr key={r.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                    <td className="px-6 py-4 font-medium text-slate-900 dark:text-slate-200">{r.resellerName}</td>
-                                    <td className="px-6 py-4 text-slate-600 dark:text-slate-300">{r.vendoLocation}</td>
-                                    <td className="px-6 py-4 text-right font-mono text-slate-700 dark:text-slate-200">{percent.toFixed(2)}%</td>
-                                    <td className="px-6 py-4 text-right font-mono text-slate-900 dark:text-slate-100">{formatCurrency(pctAmount)}</td>
-                                    <td className="px-6 py-4 text-right font-mono text-slate-900 dark:text-slate-100">{formatCurrency(gross)}</td>
-                                    <td className="px-6 py-4 text-right font-mono text-red-600 dark:text-red-400">{formatCurrency(exp)}</td>
-                                    <td className="px-6 py-4 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(net)}</td>
-                                    <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</td>
+                            {resellerSummaries.length > 0 ? resellerSummaries.map(s => (
+                                <tr key={s.reseller.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                    <td className="px-6 py-4">
+                                        <button onClick={() => setActiveResellerId(s.reseller.id)} className="font-medium text-[--color-primary-600] dark:text-[--color-primary-400] hover:underline">{s.reseller.name}</button>
+                                        {s.reseller.contactNumber ? <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{s.reseller.contactNumber}</div> : null}
+                                    </td>
+                                    <td className="px-6 py-4 text-right font-mono">{s.list.length}</td>
+                                    <td className="px-6 py-4 text-right font-mono">{formatCurrency(s.totals.gross)}</td>
+                                    <td className="px-6 py-4 text-right font-mono">{formatCurrency(s.totals.percent)}</td>
+                                    <td className="px-6 py-4 text-right font-mono text-red-600 dark:text-red-400">{formatCurrency(s.totals.expenses)}</td>
+                                    <td className="px-6 py-4 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(s.totals.net)}</td>
+                                    <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{s.lastDate ? new Date(s.lastDate).toLocaleString() : '—'}</td>
                                     <td className="px-6 py-4 text-right space-x-1">
-                                        <button onClick={() => { setEditingRecord(r); setIsModalOpen(true); }} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400] rounded-md"><EditIcon className="h-5 w-5" /></button>
-                                        <button onClick={() => handleDelete(r.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md"><TrashIcon className="h-5 w-5" /></button>
+                                        <button onClick={() => setActiveResellerId(s.reseller.id)} className="px-3 py-1 text-xs rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600">View</button>
+                                        <button onClick={() => { setEditingReseller(s.reseller); setIsResellerModalOpen(true); }} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400] rounded-md"><EditIcon className="h-5 w-5" /></button>
+                                        <button onClick={() => {
+                                            const hasRecords = (recordsByResellerId.get(s.reseller.id) || []).length > 0;
+                                            const msg = hasRecords ? "This reseller has income records. Delete reseller anyway?" : "Delete this reseller?";
+                                            if (window.confirm(msg)) deleteReseller(s.reseller.id);
+                                        }} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md"><TrashIcon className="h-5 w-5" /></button>
                                     </td>
                                 </tr>
-                                );
-                            }) : (
-                                <tr><td colSpan={9} className="text-center py-8 text-slate-500">No records yet.</td></tr>
+                            )) : (
+                                <tr><td colSpan={8} className="text-center py-8 text-slate-500">No resellers yet.</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -606,6 +871,10 @@ interface InventoryProps {
     addPisowifiIncome: (record: Omit<PisowifiIncomeRecord, 'id' | 'createdAt'>) => void;
     updatePisowifiIncome: (record: PisowifiIncomeRecord) => void;
     deletePisowifiIncome: (recordId: string) => void;
+    pisowifiResellers: PisowifiReseller[];
+    addPisowifiReseller: (reseller: Omit<PisowifiReseller, 'id' | 'createdAt'>) => void;
+    updatePisowifiReseller: (reseller: PisowifiReseller) => void;
+    deletePisowifiReseller: (resellerId: string) => void;
 }
 
 const TabButton: React.FC<{ label: string, icon: React.ReactNode, isActive: boolean, onClick: () => void }> = ({ label, icon, isActive, onClick }) => (
@@ -648,6 +917,10 @@ export const Inventory: React.FC<InventoryProps> = (props) => {
                     addRecord={props.addPisowifiIncome}
                     updateRecord={props.updatePisowifiIncome}
                     deleteRecord={props.deletePisowifiIncome}
+                    resellers={props.pisowifiResellers}
+                    addReseller={props.addPisowifiReseller}
+                    updateReseller={props.updatePisowifiReseller}
+                    deleteReseller={props.deletePisowifiReseller}
                 />
             )}
         </div>

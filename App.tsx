@@ -9,6 +9,7 @@ import { useSalesData } from './hooks/useSalesData.ts';
 import { useInventoryData } from './hooks/useInventoryData.ts';
 import { useExpensesData } from './hooks/useExpensesData.ts';
 import { usePisowifiIncomeData } from './hooks/usePisowifiIncomeData.ts';
+import { usePisowifiResellersData } from './hooks/usePisowifiResellersData.ts';
 import { useCompanySettings } from './hooks/useCompanySettings.ts';
 import { usePayrollData } from './hooks/usePayrollData.ts';
 import { LocalizationProvider, useLocalization } from './contexts/LocalizationContext.tsx';
@@ -107,6 +108,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   const { items, addItem, updateItem, deleteItem } = useInventoryData(currentView === 'inventory');
   const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData(currentView === 'inventory');
   const { records: pisowifiIncome, addRecord: addPisowifiIncome, updateRecord: updatePisowifiIncome, deleteRecord: deletePisowifiIncome } = usePisowifiIncomeData(currentView === 'inventory');
+  const { resellers: pisowifiResellers, addReseller: addPisowifiReseller, updateReseller: updatePisowifiReseller, deleteReseller: deletePisowifiReseller } = usePisowifiResellersData(currentView === 'inventory');
   const payrollData = usePayrollData(currentView === 'payroll');
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
@@ -253,6 +255,10 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                             addPisowifiIncome={addPisowifiIncome}
                             updatePisowifiIncome={updatePisowifiIncome}
                             deletePisowifiIncome={deletePisowifiIncome}
+                            pisowifiResellers={pisowifiResellers}
+                            addPisowifiReseller={addPisowifiReseller}
+                            updatePisowifiReseller={updatePisowifiReseller}
+                            deletePisowifiReseller={deletePisowifiReseller}
                         />
                       );
                   case 'payroll':

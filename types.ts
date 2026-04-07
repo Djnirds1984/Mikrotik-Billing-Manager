@@ -348,12 +348,21 @@ export interface ExpenseRecord {
 
 export interface PisowifiIncomeRecord {
     id: string;
+    resellerId?: string;
     resellerName: string;
     vendoLocation: string;
     percentage: number;
     grossSales: number;
     expenses: number;
     netTotal: number;
+    createdAt: string;
+}
+
+export interface PisowifiReseller {
+    id: string;
+    name: string;
+    contactNumber?: string;
+    notes?: string;
     createdAt: string;
 }
 

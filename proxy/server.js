@@ -293,12 +293,20 @@ async function initDb() {
             );
             CREATE TABLE IF NOT EXISTS pisowifi_income (
                 id TEXT PRIMARY KEY,
+                resellerId TEXT,
                 resellerName TEXT,
                 vendoLocation TEXT,
                 percentage REAL,
                 grossSales REAL,
                 expenses REAL,
                 netTotal REAL,
+                createdAt TEXT
+            );
+            CREATE TABLE IF NOT EXISTS pisowifi_resellers (
+                id TEXT PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                contactNumber TEXT,
+                notes TEXT,
                 createdAt TEXT
             );
             CREATE TABLE IF NOT EXISTS employees (
@@ -437,6 +445,33 @@ async function initDb() {
             }
             if (!salesColNames.includes('coveredMonth')) {
                 await db.exec("ALTER TABLE sales_records ADD COLUMN coveredMonth TEXT");
+            }
+        } catch (_) {}
+        try {
+            const pwiCols = await db.all("PRAGMA table_info(pisowifi_income)");
+            const pwiColNames = pwiCols.map(c => c.name);
+            if (!pwiColNames.includes('resellerId')) {
+                await db.exec("ALTER TABLE pisowifi_income ADD COLUMN resellerId TEXT");
+            }
+        } catch (_) {}
+        try {
+            const resellerNames = await db.all("SELECT DISTINCT TRIM(resellerName) AS name FROM pisowifi_income WHERE resellerName IS NOT NULL AND TRIM(resellerName) <> ''");
+            for (const row of resellerNames) {
+                const name = row?.name ? String(row.name).trim() : '';
+                if (!name) continue;
+                const existing = await db.get("SELECT id FROM pisowifi_resellers WHERE LOWER(name) = LOWER(?) LIMIT 1", [name]);
+                let resellerId = existing?.id;
+                if (!resellerId) {
+                    resellerId = `pwr_${crypto.createHash('sha1').update(name.toLowerCase()).digest('hex').slice(0, 12)}`;
+                    await db.run(
+                        "INSERT OR IGNORE INTO pisowifi_resellers (id, name, createdAt) VALUES (?, ?, ?)",
+                        [resellerId, name, new Date().toISOString()]
+                    );
+                }
+                await db.run(
+                    "UPDATE pisowifi_income SET resellerId = ? WHERE (resellerId IS NULL OR resellerId = '') AND resellerName = ?",
+                    [resellerId, name]
+                );
             }
         } catch (_) {}
         console.log('Database initialized successfully');
@@ -984,6 +1019,7 @@ async function startServer() {
     createCrud('/inventory', 'inventory');
     createCrud('/expenses', 'expenses');
     createCrud('/pisowifi-income', 'pisowifi_income');
+    createCrud('/pisowifi-resellers', 'pisowifi_resellers');
     createCrud('/employees', 'employees');
     // Customers handled manually for upsert
     // createCrud('/customers', 'customers');
