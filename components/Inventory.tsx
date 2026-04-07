@@ -343,19 +343,34 @@ const PisowifiIncomeFormModal: React.FC<PisowifiIncomeFormModalProps> = ({ isOpe
         expenses: '',
     });
 
+    const normalizedPercent = useMemo(() => {
+        const raw = parseFloat(form.percentage);
+        if (!Number.isFinite(raw) || raw <= 0) return 0;
+        if (raw === 1) return 1;
+        if (raw > 1) return raw;
+        return raw * 100;
+    }, [form.percentage]);
+
+    const percentAmount = useMemo(() => {
+        const gross = parseFloat(form.grossSales) || 0;
+        return gross * (normalizedPercent / 100);
+    }, [form.grossSales, normalizedPercent]);
+
     const computedNetTotal = useMemo(() => {
         const gross = parseFloat(form.grossSales) || 0;
         const exp = parseFloat(form.expenses) || 0;
-        return gross - exp;
-    }, [form.grossSales, form.expenses]);
+        return gross - percentAmount - exp;
+    }, [form.grossSales, form.expenses, percentAmount]);
 
     React.useEffect(() => {
         if (!isOpen) return;
         if (initialData) {
+            const raw = Number(initialData.percentage) || 0;
+            const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
             setForm({
                 resellerName: initialData.resellerName || '',
                 vendoLocation: initialData.vendoLocation || '',
-                percentage: String(initialData.percentage ?? ''),
+                percentage: percent ? String(percent) : '',
                 grossSales: String(initialData.grossSales ?? ''),
                 expenses: String(initialData.expenses ?? ''),
             });
@@ -376,7 +391,7 @@ const PisowifiIncomeFormModal: React.FC<PisowifiIncomeFormModalProps> = ({ isOpe
         const dataToSave = {
             resellerName: form.resellerName.trim(),
             vendoLocation: form.vendoLocation.trim(),
-            percentage: parseFloat(form.percentage) || 0,
+            percentage: normalizedPercent,
             grossSales: parseFloat(form.grossSales) || 0,
             expenses: parseFloat(form.expenses) || 0,
             netTotal: computedNetTotal,
@@ -416,13 +431,17 @@ const PisowifiIncomeFormModal: React.FC<PisowifiIncomeFormModalProps> = ({ isOpe
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
+                                    <label htmlFor="percentAmount" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{normalizedPercent.toFixed(2)}% Total</label>
+                                    <input type="number" name="percentAmount" id="percentAmount" value={percentAmount.toFixed(2)} readOnly className="mt-1 block w-full bg-slate-200 dark:bg-slate-600 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                </div>
+                                <div>
                                     <label htmlFor="expenses" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Expenses</label>
                                     <input type="number" name="expenses" id="expenses" value={form.expenses} onChange={handleChange} required min="0" step="0.01" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
                                 </div>
-                                <div>
-                                    <label htmlFor="netTotal" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Net Total</label>
-                                    <input type="number" name="netTotal" id="netTotal" value={computedNetTotal.toFixed(2)} readOnly className="mt-1 block w-full bg-slate-200 dark:bg-slate-600 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
-                                </div>
+                            </div>
+                            <div>
+                                <label htmlFor="netTotal" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Net Total</label>
+                                <input type="number" name="netTotal" id="netTotal" value={computedNetTotal.toFixed(2)} readOnly className="mt-1 block w-full bg-slate-200 dark:bg-slate-600 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
                             </div>
                         </div>
                     </div>
@@ -451,9 +470,16 @@ const PisowifiIncomeManager: React.FC<{
     const totals = useMemo(() => {
         return records.reduce(
             (acc, r) => {
-                acc.gross += Number(r.grossSales) || 0;
-                acc.expenses += Number(r.expenses) || 0;
-                acc.net += Number(r.netTotal) || 0;
+                const gross = Number(r.grossSales) || 0;
+                const exp = Number(r.expenses) || 0;
+                const raw = Number(r.percentage) || 0;
+                const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
+                const pctAmount = gross * (percent / 100);
+                const net = gross - pctAmount - exp;
+
+                acc.gross += gross;
+                acc.expenses += exp;
+                acc.net += net;
                 return acc;
             },
             { gross: 0, expenses: 0, net: 0 }
@@ -492,7 +518,24 @@ const PisowifiIncomeManager: React.FC<{
             </div>
 
             <div className="flex justify-end gap-2 mb-6">
-                <button onClick={() => downloadCSV(records, 'pisowifi_income.csv')} className="px-4 py-2 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-lg font-semibold">Export CSV</button>
+                <button onClick={() => downloadCSV(records.map(r => {
+                    const gross = Number(r.grossSales) || 0;
+                    const exp = Number(r.expenses) || 0;
+                    const raw = Number(r.percentage) || 0;
+                    const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
+                    const pctAmount = gross * (percent / 100);
+                    const net = gross - pctAmount - exp;
+                    return {
+                        resellerName: r.resellerName,
+                        vendoLocation: r.vendoLocation,
+                        percentage: percent,
+                        percentageAmount: pctAmount,
+                        grossSales: gross,
+                        expenses: exp,
+                        netTotal: net,
+                        createdAt: r.createdAt,
+                    };
+                }), 'pisowifi_income.csv')} className="px-4 py-2 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-lg font-semibold">Export CSV</button>
                 <button onClick={() => { setEditingRecord(null); setIsModalOpen(true); }} className="bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-bold py-2 px-4 rounded-lg">Add Income</button>
             </div>
 
@@ -504,6 +547,7 @@ const PisowifiIncomeManager: React.FC<{
                                 <th className="px-6 py-3">Reseller Name</th>
                                 <th className="px-6 py-3">Vendo Location</th>
                                 <th className="px-6 py-3 text-right">Percentage</th>
+                                <th className="px-6 py-3 text-right">Percent Total</th>
                                 <th className="px-6 py-3 text-right">Gross Sales</th>
                                 <th className="px-6 py-3 text-right">Expenses</th>
                                 <th className="px-6 py-3 text-right">Net Total</th>
@@ -512,22 +556,32 @@ const PisowifiIncomeManager: React.FC<{
                             </tr>
                         </thead>
                         <tbody>
-                            {records.length > 0 ? records.map(r => (
+                            {records.length > 0 ? records.map(r => {
+                                const gross = Number(r.grossSales) || 0;
+                                const exp = Number(r.expenses) || 0;
+                                const raw = Number(r.percentage) || 0;
+                                const percent = raw <= 0 ? 0 : raw === 1 ? 1 : raw > 1 ? raw : raw * 100;
+                                const pctAmount = gross * (percent / 100);
+                                const net = gross - pctAmount - exp;
+
+                                return (
                                 <tr key={r.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                     <td className="px-6 py-4 font-medium text-slate-900 dark:text-slate-200">{r.resellerName}</td>
                                     <td className="px-6 py-4 text-slate-600 dark:text-slate-300">{r.vendoLocation}</td>
-                                    <td className="px-6 py-4 text-right font-mono text-slate-700 dark:text-slate-200">{(Number(r.percentage) || 0).toFixed(2)}%</td>
-                                    <td className="px-6 py-4 text-right font-mono text-slate-900 dark:text-slate-100">{formatCurrency(Number(r.grossSales) || 0)}</td>
-                                    <td className="px-6 py-4 text-right font-mono text-red-600 dark:text-red-400">{formatCurrency(Number(r.expenses) || 0)}</td>
-                                    <td className="px-6 py-4 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(Number(r.netTotal) || 0)}</td>
+                                    <td className="px-6 py-4 text-right font-mono text-slate-700 dark:text-slate-200">{percent.toFixed(2)}%</td>
+                                    <td className="px-6 py-4 text-right font-mono text-slate-900 dark:text-slate-100">{formatCurrency(pctAmount)}</td>
+                                    <td className="px-6 py-4 text-right font-mono text-slate-900 dark:text-slate-100">{formatCurrency(gross)}</td>
+                                    <td className="px-6 py-4 text-right font-mono text-red-600 dark:text-red-400">{formatCurrency(exp)}</td>
+                                    <td className="px-6 py-4 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(net)}</td>
                                     <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</td>
                                     <td className="px-6 py-4 text-right space-x-1">
                                         <button onClick={() => { setEditingRecord(r); setIsModalOpen(true); }} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400] rounded-md"><EditIcon className="h-5 w-5" /></button>
                                         <button onClick={() => handleDelete(r.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md"><TrashIcon className="h-5 w-5" /></button>
                                     </td>
                                 </tr>
-                            )) : (
-                                <tr><td colSpan={8} className="text-center py-8 text-slate-500">No records yet.</td></tr>
+                                );
+                            }) : (
+                                <tr><td colSpan={9} className="text-center py-8 text-slate-500">No records yet.</td></tr>
                             )}
                         </tbody>
                     </table>

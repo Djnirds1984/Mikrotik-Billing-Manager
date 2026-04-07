@@ -7,6 +7,14 @@ export const usePisowifiIncomeData = (autoLoad: boolean = true) => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    const normalizePercent = (value: unknown) => {
+        const raw = Number(value) || 0;
+        if (raw <= 0) return 0;
+        if (raw === 1) return 1;
+        if (raw > 1) return raw;
+        return raw * 100;
+    };
+
     const fetchRecords = useCallback(async () => {
         setIsLoading(true);
         setError(null);
@@ -33,7 +41,9 @@ export const usePisowifiIncomeData = (autoLoad: boolean = true) => {
     const addRecord = async (newRecordData: Omit<PisowifiIncomeRecord, 'id' | 'createdAt' | 'netTotal'> & { netTotal?: number }) => {
         const grossSales = Number(newRecordData.grossSales) || 0;
         const expenses = Number(newRecordData.expenses) || 0;
-        const netTotal = typeof newRecordData.netTotal === 'number' ? newRecordData.netTotal : grossSales - expenses;
+        const percentage = normalizePercent(newRecordData.percentage);
+        const percentAmount = grossSales * (percentage / 100);
+        const netTotal = grossSales - percentAmount - expenses;
 
         try {
             const newRecord: PisowifiIncomeRecord = {
@@ -41,7 +51,7 @@ export const usePisowifiIncomeData = (autoLoad: boolean = true) => {
                 grossSales,
                 expenses,
                 netTotal,
-                percentage: Number(newRecordData.percentage) || 0,
+                percentage,
                 id: `pwi_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
                 createdAt: new Date().toISOString(),
             };
@@ -55,12 +65,16 @@ export const usePisowifiIncomeData = (autoLoad: boolean = true) => {
 
     const updateRecord = async (updatedRecord: PisowifiIncomeRecord) => {
         try {
-            const netTotal = (Number(updatedRecord.grossSales) || 0) - (Number(updatedRecord.expenses) || 0);
+            const grossSales = Number(updatedRecord.grossSales) || 0;
+            const expenses = Number(updatedRecord.expenses) || 0;
+            const percentage = normalizePercent(updatedRecord.percentage);
+            const percentAmount = grossSales * (percentage / 100);
+            const netTotal = grossSales - percentAmount - expenses;
             const toSave: PisowifiIncomeRecord = {
                 ...updatedRecord,
-                percentage: Number(updatedRecord.percentage) || 0,
-                grossSales: Number(updatedRecord.grossSales) || 0,
-                expenses: Number(updatedRecord.expenses) || 0,
+                percentage,
+                grossSales,
+                expenses,
                 netTotal,
             };
             await dbApi.patch(`/pisowifi-income/${updatedRecord.id}`, toSave);
@@ -82,4 +96,3 @@ export const usePisowifiIncomeData = (autoLoad: boolean = true) => {
 
     return { records, addRecord, updateRecord, deleteRecord, isLoading, error, reload: fetchRecords };
 };
-
