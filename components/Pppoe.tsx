@@ -402,20 +402,34 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     // Search State
     const [searchTerm, setSearchTerm] = useState('');
     const [searchInput, setSearchInput] = useState('');
+    const firstMatchRef = useRef<HTMLTableRowElement>(null);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Debounce search input
+    // Debounce search input — cancel pending debounce when applying immediately
+    const applySearchImmediately = useCallback((value: string) => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        setSearchTerm(value);
+    }, []);
+
     useEffect(() => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
         if (searchInput === '') {
             setSearchTerm('');
             return;
         }
-
-        const timeoutId = setTimeout(() => {
+        debounceRef.current = setTimeout(() => {
             setSearchTerm(searchInput);
-        }, 500); // 500ms delay for "suggestions" feel
+        }, 500);
 
-        return () => clearTimeout(timeoutId);
+        return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
     }, [searchInput]);
+
+    // Scroll to first match when search results change
+    useEffect(() => {
+        if (searchTerm && firstMatchRef.current) {
+            firstMatchRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, [searchTerm]);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -471,18 +485,37 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const sortedUsers = useMemo(() => {
         let sortableItems = [...combinedUsers];
 
-        // Apply Search
+        // Apply Search with relevance ranking
         if (searchTerm) {
             const lowerTerm = searchTerm.toLowerCase().trim();
             if (lowerTerm) {
-                sortableItems = sortableItems.filter(user => 
+                // Filter matches
+                const matched = sortableItems.filter(user => 
                     (user.name || '').toLowerCase().includes(lowerTerm) ||
                     (user.customer?.fullName || '').toLowerCase().includes(lowerTerm) ||
+                    (user.customer?.accountNumber || '').toLowerCase().includes(lowerTerm) ||
                     (user.profile || '').toLowerCase().includes(lowerTerm) ||
-                    (user.subscription?.planType || '').toLowerCase().includes(lowerTerm) ||
-                    (user.subscription?.dueDate || '').toLowerCase().includes(lowerTerm) ||
-                    (user.subscription?.plan || '').toLowerCase().includes(lowerTerm)
+                    (user.subscription?.plan || '').toLowerCase().includes(lowerTerm) ||
+                    (user.subscription?.dueDate || '').toLowerCase().includes(lowerTerm)
                 );
+
+                // Sort by relevance: username exact match > username starts with > name match > other field match
+                matched.sort((a, b) => {
+                    const aName = (a.name || '').toLowerCase();
+                    const bName = (b.name || '').toLowerCase();
+                    const aFull = (a.customer?.fullName || '').toLowerCase();
+                    const bFull = (b.customer?.fullName || '').toLowerCase();
+                    const aAcct = (a.customer?.accountNumber || '').toLowerCase();
+                    const bAcct = (b.customer?.accountNumber || '').toLowerCase();
+
+                    const aScore = aName === lowerTerm ? 0 : aName.startsWith(lowerTerm) ? 1 : aFull.startsWith(lowerTerm) ? 2 : aAcct.startsWith(lowerTerm) ? 3 : 4;
+                    const bScore = bName === lowerTerm ? 0 : bName.startsWith(lowerTerm) ? 1 : bFull.startsWith(lowerTerm) ? 2 : bAcct.startsWith(lowerTerm) ? 3 : 4;
+
+                    if (aScore !== bScore) return aScore - bScore;
+                    return aName.localeCompare(bName);
+                });
+
+                sortableItems = matched;
             }
         }
 
@@ -761,14 +794,14 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             onChange={(e) => setSearchInput(e.target.value)}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
-                                    setSearchTerm(searchInput);
+                                    applySearchImmediately(searchInput);
                                 }
                             }}
                             className="w-full pl-10 pr-4 py-2 rounded-lg border dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                         />
                         <button 
                             className="absolute left-3 top-2.5 text-slate-400 hover:text-primary-500 focus:outline-none"
-                            onClick={() => setSearchTerm(searchInput)}
+                            onClick={() => applySearchImmediately(searchInput)}
                         >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -885,8 +918,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                 </td>
                             </tr>
                         ) : (
-                            sortedUsers.map(user => (
-                                <tr key={user.id} className={`border-b dark:border-slate-700 ${user.disabled === 'true' ? 'opacity-50' : ''}`}>
+                            sortedUsers.map((user, index) => (
+                                <tr key={user.id} ref={index === 0 && searchTerm ? firstMatchRef : undefined} className={`border-b dark:border-slate-700 ${user.disabled === 'true' ? 'opacity-50' : ''} ${index === 0 && searchTerm ? 'ring-2 ring-primary-400 ring-offset-1' : ''}`}>
                                     <td className="px-6 py-4 font-medium text-center">
                                         <p className="text-slate-900 dark:text-slate-100">
                                             <HighlightText text={user.name || ''} highlight={searchTerm} />
