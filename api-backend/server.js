@@ -648,7 +648,7 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
 
         // Common Scheduler Script (RouterOS format)
         const schedName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
-        const onEvent = `/ip firewall address-list remove [find where address="${address}" and list="authorized-dhcp-users"]; /ip firewall connection remove [find where src-address~"^${address}"]; :local leaseId [/ip dhcp-server lease find where address="${address}"]; if ([:len $leaseId] > 0) do={ /ip firewall address-list add address="${address}" list="pending-dhcp-users" timeout=1d comment="${macAddress}"; }`;
+        const onEvent = `/ip firewall address-list remove [find where address='${address}' and list='authorized-dhcp-users']; /ip firewall connection remove [find where src-address~'^${address}']; :local leaseId [/ip dhcp-server lease find where address='${address}']; if ([:len $leaseId] > 0) do={ /ip firewall address-list add address='${address}' list='pending-dhcp-users' timeout=1d comment='${macAddress}'; }`;
         
         const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
         const rosDate = `${months[expiresAt.getMonth()]}/${String(expiresAt.getDate()).padStart(2,'0')}/${expiresAt.getFullYear()}`;
@@ -1113,7 +1113,7 @@ app.post('/:routerId/ppp/grace/grant', getRouter, async (req, res) => {
         const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const rosDate = `${months[expiresAt.getMonth()]}/${String(expiresAt.getDate()).padStart(2,'0')}/${expiresAt.getFullYear()}`; const rosTime = expiresAt.toTimeString().split(' ')[0];
         const schedName = `ppp-grace-expire-${String(name)}`;
-        const onEvent = `/log info \"PPPoE grace expired: ${String(name)}\"; :do { /ppp/active/remove [find name=\"${String(name)}\"]; }`;
+        const onEvent = `/log info 'PPPoE grace expired: ${String(name)}'; :do { /ppp/active/remove [find name='${String(name)}']; }`;
         const commentExtend = { graceDays: Number(graceDays), graceActivatedAt: activatedAt, kickFlag: true, originalPlanType: originalPlanType || '' };
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
