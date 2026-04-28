@@ -419,7 +419,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         }
         debounceRef.current = setTimeout(() => {
             setSearchTerm(searchInput);
-        }, 500);
+        }, 300);
 
         return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
     }, [searchInput]);
@@ -560,7 +560,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             });
         }
         return sortableItems;
-    }, [combinedUsers, sortConfig]);
+    }, [combinedUsers, sortConfig, searchTerm]);
 
     const requestSort = (key: string) => {
         let direction: 'asc' | 'desc' = 'asc';
