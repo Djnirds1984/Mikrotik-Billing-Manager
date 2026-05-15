@@ -447,6 +447,7 @@ export interface PanelHostStatus {
   };
   uptime: string;
   temperature?: number;
+  wanIp?: string;
 }
 
 export interface TelegramSettings {

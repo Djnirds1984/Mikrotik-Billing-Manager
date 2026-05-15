@@ -2510,6 +2510,10 @@ async function startServer() {
     app.use('/api/license', licenseRouter);
 
     // --- System / Host Status ---
+    // Cache WAN IP in memory — it rarely changes, no need to hit ipify on every 5s poll
+    let wanIpCache = { ip: null, fetchedAt: 0 };
+    const WAN_IP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
     app.get('/api/host-status', protect, async (req, res) => {
         try {
             const cpu = await si.currentLoad();
@@ -2527,6 +2531,22 @@ async function startServer() {
             } catch (err) {
                 console.warn("Failed to get CPU temperature", err);
             }
+
+            // Fetch WAN/Public IP with a short timeout so it never blocks the response
+            let wanIp = null;
+            try {
+                const now = Date.now();
+                if (wanIpCache.ip && (now - wanIpCache.fetchedAt) < WAN_IP_CACHE_TTL_MS) {
+                    wanIp = wanIpCache.ip;
+                } else {
+                    const ipRes = await axios.get('https://api.ipify.org?format=json', { timeout: 3000 });
+                    wanIp = ipRes.data?.ip || null;
+                    wanIpCache = { ip: wanIp, fetchedAt: now };
+                }
+            } catch (err) {
+                console.warn("Failed to get WAN IP", err.message);
+                wanIp = wanIpCache.ip || null; // serve stale if available
+            }
             
             res.json({
                 cpuUsage: cpu.currentLoad,
@@ -2543,7 +2563,8 @@ async function startServer() {
                     percent: disk.use
                 },
                 temperature,
-                uptime: os.uptime() + 's' // Adding uptime as per interface, though not in original response
+                uptime: os.uptime() + 's',
+                wanIp,
             });
         } catch (e) {
             res.status(500).json({ message: e.message });

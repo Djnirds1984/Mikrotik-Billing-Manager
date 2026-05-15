@@ -398,6 +398,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         <StatItem label="CPU Usage" value={`${(hostStatus.cpuUsage || 0).toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage || 0} colorClass="bg-green-500" /></StatItem>
                         <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used}/${hostStatus.memory?.total})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
                         <StatItem label="Disk Usage" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used}/${hostStatus.disk?.total})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
+                        <StatItem label="WAN IP" value={hostStatus.wanIp || '—'} />
                      </>
                      )}
                  </StatCard>
@@ -445,6 +446,11 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         {hostStatus.temperature !== undefined && hostStatus.temperature !== null && (
                              <StatItem label="Temperature" value={`${hostStatus.temperature.toFixed(1)}°C`}><ProgressBar percent={hostStatus.temperature} colorClass="bg-orange-500" /></StatItem>
                         )}
+                        <StatItem
+                            label="WAN IP"
+                            value={hostStatus.wanIp || '—'}
+                            icon={<SignalIcon className="w-4 h-4 text-slate-400" />}
+                        />
                     </>
                     )}
                 </StatCard>
