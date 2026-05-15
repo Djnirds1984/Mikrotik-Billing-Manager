@@ -332,27 +332,47 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   );
 };
 
+const LICENSE_CACHE_KEY = 'licenseStatus_cache';
+
+const getCachedLicense = (): LicenseStatus | null => {
+    try {
+        const raw = sessionStorage.getItem(LICENSE_CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+};
+
 const AppRouter: React.FC = () => {
     const { user, isLoading, hasUsers } = useAuth();
     const [authView, setAuthView] = useState<'login' | 'register' | 'forgot'>('login');
-    const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
-    const [isLicenseLoading, setIsLicenseLoading] = useState(true);
+    const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(() => getCachedLicense());
+    // If we have a cached license, skip the loading screen on refresh
+    const [isLicenseLoading, setIsLicenseLoading] = useState(() => getCachedLicense() === null);
     let licenseCheckInterval = React.useRef<number | null>(null);
 
     const checkLicense = useCallback(async () => {
         try {
             const res = await fetch('/api/license/status', { headers: getAuthHeader() });
-             if (!res.ok) {
+            if (!res.ok) {
+                // Non-OK response (e.g. 401, 500) — don't clear a valid cached status,
+                // just log it. Only a definitive "not licensed" payload should change state.
                 console.error('Failed to fetch license status:', res.statusText);
-                setLicenseStatus(null);
+                setIsLicenseLoading(false);
                 return;
             }
             const data: LicenseStatus = await res.json();
             setLicenseStatus(data);
+            // Persist to sessionStorage so refreshes don't flicker
+            if (data.licensed) {
+                sessionStorage.setItem(LICENSE_CACHE_KEY, JSON.stringify(data));
+            } else {
+                sessionStorage.removeItem(LICENSE_CACHE_KEY);
+            }
             console.log('DEBUG: License status updated', data);
         } catch (error) {
-            console.error(error);
-            setLicenseStatus(null); // Treat errors as unlicensed
+            // Network/transient error — keep the last known status to avoid false "unlicensed" flash
+            console.error('License check error (keeping last known status):', error);
         } finally {
             setIsLicenseLoading(false);
         }
@@ -378,10 +398,11 @@ const AppRouter: React.FC = () => {
             if (licenseCheckInterval.current) {
                 clearInterval(licenseCheckInterval.current);
             }
-            licenseCheckInterval.current = window.setInterval(checkLicense, 5000);
+            licenseCheckInterval.current = window.setInterval(checkLicense, 60000);
         } else if (!isLoading) {
             setIsLicenseLoading(false);
             setLicenseStatus(null);
+            sessionStorage.removeItem(LICENSE_CACHE_KEY);
              if (licenseCheckInterval.current) {
                 clearInterval(licenseCheckInterval.current);
             }
