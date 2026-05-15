@@ -792,8 +792,8 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
         const rosDate = d ? `${months[d.getMonth()]}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}` : null;
         const rosTime = d ? d.toTimeString().split(' ')[0] : null;
-        const onEventProfile = subscriptionData?.nonPaymentProfile ? ` /ppp/secret/set [find name="${String(secretData.name)}"] profile=${String(subscriptionData.nonPaymentProfile)}` : '';
-const onEvent = `/log info message="PPPoE auto-kick: ${String(secretData.name)}"\n:do { /ppp/active/remove [find name="${String(secretData.name)}"] } on-error={}\n${onEventProfile}`;
+        const onEventProfile = subscriptionData?.nonPaymentProfile ? `\n/ppp secret set [find name="${String(secretData.name)}"] profile="${String(subscriptionData.nonPaymentProfile)}"` : '';
+const onEvent = `/log info message="PPPoE auto-kick: ${String(secretData.name)}"\n:do { /ppp active remove [find name="${String(secretData.name)}"] } on-error={}${onEventProfile}`;
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
@@ -1032,8 +1032,8 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
         const rosDate = `${months[expires.getMonth()]}/${String(expires.getDate()).padStart(2,'0')}/${expires.getFullYear()}`;
         const rosTime = expires.toTimeString().split(' ')[0];
         const schedName = `ppp-auto-kick-${String(secret.name)}`;
-        const onEventProfile = nonPaymentProfile ? ` /ppp/secret/set [find name="${String(secret.name)}"] profile=${String(nonPaymentProfile)}` : '';
-const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:do { /ppp/active/remove [find name="${String(secret.name)}"] } on-error={}\n${onEventProfile}`;
+        const onEventProfile = nonPaymentProfile ? `\n/ppp secret set [find name="${String(secret.name)}"] profile="${String(nonPaymentProfile)}"` : '';
+const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:do { /ppp active remove [find name="${String(secret.name)}"] } on-error={}${onEventProfile}`;
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
