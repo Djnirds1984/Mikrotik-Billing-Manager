@@ -150,6 +150,7 @@ async function initDb() {
         if (!columnNames.includes('landingPageConfig')) await db.exec("ALTER TABLE settings ADD COLUMN landingPageConfig TEXT");
         if (!columnNames.includes('licenseCache')) await db.exec("ALTER TABLE settings ADD COLUMN licenseCache TEXT");
         if (!columnNames.includes('licenseCacheAt')) await db.exec("ALTER TABLE settings ADD COLUMN licenseCacheAt TEXT");
+        if (!columnNames.includes('deviceId')) await db.exec("ALTER TABLE settings ADD COLUMN deviceId TEXT");
 
         // Hotfix: ensure chat notifications route to Captive Chat in Admin
         try {
@@ -486,55 +487,70 @@ async function initDb() {
 // --- Helpers ---
 const getDeviceId = async () => {
     try {
-        // Prioritize CPU Hardware ID for licensing system
+        // Once generated, persist the device ID to the DB so it never changes between runs.
+        // This prevents license "bound to another device" errors caused by fluctuating CPU speed readings.
+        const stored = await db.get('SELECT deviceId FROM settings WHERE id = 1');
+        if (stored?.deviceId) {
+            return stored.deviceId;
+        }
+
+        // Generate a stable hardware ID
         const cpu = await si.cpu();
         const sys = await si.system();
         const uuid = await si.uuid();
-        
-        // Use CPU Hardware ID first - combination of brand, model, speed, and cores
-        if (cpu && cpu.brand && cpu.speed && cpu.cores) {
-            const cpuHardwareId = `${cpu.brand}-${cpu.speed}-${cpu.cores}-${cpu.physicalCores || cpu.cores}`;
-            return crypto.createHash('sha256').update(cpuHardwareId).digest('hex');
+
+        let rawId = null;
+
+        // Use CPU brand + cores only — speed is excluded because it fluctuates with CPU frequency scaling
+        if (cpu && cpu.brand && cpu.cores) {
+            rawId = `${cpu.brand}-${cpu.cores}-${cpu.physicalCores || cpu.cores}`;
         }
 
         // Fallback to System Serial (Host Board Serial) if valid
-        if (sys.serial && sys.serial !== '-' && sys.serial !== 'Default string' && sys.serial !== 'To be filled by O.E.M.') {
-             return crypto.createHash('sha256').update(sys.serial).digest('hex');
+        if (!rawId && sys.serial && sys.serial !== '-' && sys.serial !== 'Default string' && sys.serial !== 'To be filled by O.E.M.') {
+            rawId = sys.serial;
         }
 
         // Fallback to Hardware UUID
-        if (uuid.hardware && uuid.hardware !== '-') {
-            return crypto.createHash('sha256').update(uuid.hardware).digest('hex');
+        if (!rawId && uuid.hardware && uuid.hardware !== '-') {
+            rawId = uuid.hardware;
         }
 
         // Fallback to OS UUID (Windows MachineGuid / Linux machine-id)
-        if (uuid.os && uuid.os !== '-') {
-            return crypto.createHash('sha256').update(uuid.os).digest('hex');
+        if (!rawId && uuid.os && uuid.os !== '-') {
+            rawId = uuid.os;
         }
 
         // Final Fallback: MAC Addresses
-        const networkInterfaces = os.networkInterfaces();
-        let macs = [];
-        const ignoredInterfacePattern = /^(zt|docker|veth|br-|tun|tap|lo)/i;
-
-        for (const [name, interfaces] of Object.entries(networkInterfaces)) {
-            if (ignoredInterfacePattern.test(name)) {
-                continue;
-            }
-            for (const iface of interfaces) {
-                if (iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal) {
-                    macs.push(iface.mac);
+        if (!rawId) {
+            const networkInterfaces = os.networkInterfaces();
+            let macs = [];
+            const ignoredInterfacePattern = /^(zt|docker|veth|br-|tun|tap|lo)/i;
+            for (const [name, interfaces] of Object.entries(networkInterfaces)) {
+                if (ignoredInterfacePattern.test(name)) continue;
+                for (const iface of interfaces) {
+                    if (iface.mac && iface.mac !== '00:00:00:00:00:00' && !iface.internal) {
+                        macs.push(iface.mac);
+                    }
                 }
             }
+            macs.sort();
+            rawId = macs.join('') || (os.hostname() + os.arch() + os.platform());
         }
-        
-        macs.sort();
-        const uniqueId = macs.join('') || (os.hostname() + os.arch() + os.platform());
-        return crypto.createHash('sha256').update(uniqueId).digest('hex');
+
+        const deviceId = crypto.createHash('sha256').update(rawId).digest('hex');
+
+        // Persist so future calls always return the same value
+        try {
+            await db.run('UPDATE settings SET deviceId = ? WHERE id = 1', [deviceId]);
+        } catch (e) {
+            console.warn('[getDeviceId] Could not persist deviceId:', e.message);
+        }
+
+        return deviceId;
 
     } catch (e) {
         console.error('Failed to get device ID:', e);
-        // Fallback to hostname if everything fails
         return crypto.createHash('sha256').update(os.hostname()).digest('hex');
     }
 };
@@ -2385,10 +2401,38 @@ async function startServer() {
             }
 
             if (license.hardware_id && license.hardware_id !== deviceId) {
-                const result = { licensed: false, deviceId, message: 'License is bound to another device.' };
-                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
-                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
-                return res.json(result);
+                // --- Self-healing migration ---
+                // The old getDeviceId() included cpu.speed which fluctuates.
+                // If the stored Supabase hardware_id matches the OLD formula for this machine,
+                // automatically migrate it to the new stable ID so the user isn't locked out.
+                let migrated = false;
+                try {
+                    const cpu = await si.cpu();
+                    if (cpu && cpu.brand && cpu.speed && cpu.cores) {
+                        const oldRawId = `${cpu.brand}-${cpu.speed}-${cpu.cores}-${cpu.physicalCores || cpu.cores}`;
+                        const oldDeviceId = crypto.createHash('sha256').update(oldRawId).digest('hex');
+                        if (license.hardware_id === oldDeviceId) {
+                            // This IS the same machine — migrate the hardware_id to the new stable value
+                            await supabase
+                                .from('mikrotik_licenses')
+                                .update({ hardware_id: deviceId })
+                                .eq('id', license.id);
+                            // Also clear the license cache so next check re-validates cleanly
+                            await db.run('UPDATE settings SET licenseCache = NULL, licenseCacheAt = NULL WHERE id = 1');
+                            console.log('[License] Migrated hardware_id from speed-based to stable ID');
+                            migrated = true;
+                        }
+                    }
+                } catch (migErr) {
+                    console.warn('[License] Migration check failed:', migErr.message);
+                }
+
+                if (!migrated) {
+                    const result = { licensed: false, deviceId, message: 'License is bound to another device.' };
+                    await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
+                        [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
+                    return res.json(result);
+                }
             }
 
             if (!license.is_active) {
