@@ -448,6 +448,7 @@ export interface PanelHostStatus {
   uptime: string;
   temperature?: number;
   wanIp?: string;
+  localIps?: { iface: string; ip: string }[];
 }
 
 export interface TelegramSettings {

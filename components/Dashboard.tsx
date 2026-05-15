@@ -399,6 +399,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used}/${hostStatus.memory?.total})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
                         <StatItem label="Disk Usage" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used}/${hostStatus.disk?.total})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
                         <StatItem label="WAN IP" value={hostStatus.wanIp || '—'} />
+                        {hostStatus.localIps && hostStatus.localIps.length > 0 && hostStatus.localIps.map(({ iface, ip }) => (
+                            <StatItem key={iface} label={`Local IP (${iface})`} value={ip} />
+                        ))}
                      </>
                      )}
                  </StatCard>
@@ -451,6 +454,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                             value={hostStatus.wanIp || '—'}
                             icon={<SignalIcon className="w-4 h-4 text-slate-400" />}
                         />
+                        {hostStatus.localIps && hostStatus.localIps.length > 0 && hostStatus.localIps.map(({ iface, ip }) => (
+                            <StatItem key={iface} label={`Local IP (${iface})`} value={ip} icon={<SignalIcon className="w-4 h-4 text-slate-400" />} />
+                        ))}
                     </>
                     )}
                 </StatCard>

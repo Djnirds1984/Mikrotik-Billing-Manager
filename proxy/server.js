@@ -2547,6 +2547,23 @@ async function startServer() {
                 console.warn("Failed to get WAN IP", err.message);
                 wanIp = wanIpCache.ip || null; // serve stale if available
             }
+
+            // Get local IPv4 addresses from all non-virtual network interfaces
+            const localIps = [];
+            try {
+                const ignoredPattern = /^(zt|docker|veth|br-|tun|tap|lo|vmnet|vbox)/i;
+                const nets = os.networkInterfaces();
+                for (const [name, addrs] of Object.entries(nets)) {
+                    if (ignoredPattern.test(name)) continue;
+                    for (const addr of addrs) {
+                        if (addr.family === 'IPv4' && !addr.internal) {
+                            localIps.push({ iface: name, ip: addr.address });
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn("Failed to get local IPs", err.message);
+            }
             
             res.json({
                 cpuUsage: cpu.currentLoad,
@@ -2565,6 +2582,7 @@ async function startServer() {
                 temperature,
                 uptime: os.uptime() + 's',
                 wanIp,
+                localIps,
             });
         } catch (e) {
             res.status(500).json({ message: e.message });
