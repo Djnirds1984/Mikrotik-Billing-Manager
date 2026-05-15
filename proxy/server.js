@@ -148,6 +148,8 @@ async function initDb() {
         if (!columnNames.includes('databaseEngine')) await db.exec("ALTER TABLE settings ADD COLUMN databaseEngine TEXT DEFAULT 'sqlite'");
         if (!columnNames.includes('notificationSettings')) await db.exec("ALTER TABLE settings ADD COLUMN notificationSettings TEXT");
         if (!columnNames.includes('landingPageConfig')) await db.exec("ALTER TABLE settings ADD COLUMN landingPageConfig TEXT");
+        if (!columnNames.includes('licenseCache')) await db.exec("ALTER TABLE settings ADD COLUMN licenseCache TEXT");
+        if (!columnNames.includes('licenseCacheAt')) await db.exec("ALTER TABLE settings ADD COLUMN licenseCacheAt TEXT");
 
         // Hotfix: ensure chat notifications route to Captive Chat in Admin
         try {
@@ -2313,14 +2315,25 @@ async function startServer() {
     licenseRouter.use(protect);
     
     licenseRouter.get('/status', async (req, res) => {
+        const LICENSE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
         try {
             const deviceId = await getDeviceId();
-            
-            // Check local cache first
-            const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
+            const settings = await db.get('SELECT licenseKey, licenseCache, licenseCacheAt FROM settings WHERE id = 1');
             const localLicenseKey = settings?.licenseKey;
 
-            // If no local license key, check Supabase for existing license bound to this CPU hardware ID
+            // --- Serve from cache if fresh ---
+            if (settings?.licenseCache && settings?.licenseCacheAt) {
+                const cacheAge = Date.now() - new Date(settings.licenseCacheAt).getTime();
+                if (cacheAge < LICENSE_CACHE_TTL_MS) {
+                    try {
+                        const cached = JSON.parse(settings.licenseCache);
+                        return res.json(cached);
+                    } catch (_) { /* corrupt cache, fall through to re-validate */ }
+                }
+            }
+
+            // --- No local license key: check Supabase by hardware ID ---
             if (!localLicenseKey) {
                 const { data: existingLicense, error: existingError } = await supabase
                     .from('mikrotik_licenses')
@@ -2330,16 +2343,13 @@ async function startServer() {
                     .maybeSingle();
 
                 if (!existingError && existingLicense) {
-                    // Found existing license for this hardware ID, restore it locally
                     await db.run('UPDATE settings SET licenseKey = ? WHERE id = 1', [existingLicense.license_key]);
-                    
-                    // Update last check-in
                     await supabase
                         .from('mikrotik_licenses')
                         .update({ last_check_in: new Date().toISOString() })
                         .eq('id', existingLicense.id);
 
-                    return res.json({ 
+                    const result = { 
                         licensed: true, 
                         expires: existingLicense.expires_at, 
                         deviceId, 
@@ -2347,13 +2357,20 @@ async function startServer() {
                         plan: existingLicense.plan_type,
                         maxRouters: existingLicense.max_routers,
                         message: 'License restored from server after system reset.'
-                    });
+                    };
+                    await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
+                        [JSON.stringify(result), new Date().toISOString()]);
+                    return res.json(result);
                 }
 
-                return res.json({ licensed: false, deviceId, message: 'No license key found locally.' });
+                const result = { licensed: false, deviceId, message: 'No license key found locally.' };
+                // Cache negative result for a shorter time (30 seconds) to avoid hammering Supabase
+                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
+                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
+                return res.json(result);
             }
 
-            // Verify with Supabase (server-based licensing)
+            // --- Verify license key with Supabase ---
             const { data: license, error } = await supabase
                 .from('mikrotik_licenses')
                 .select('*')
@@ -2361,22 +2378,34 @@ async function startServer() {
                 .maybeSingle();
 
             if (error || !license) {
-                 return res.json({ licensed: false, deviceId, message: 'License key not found in server.' });
+                const result = { licensed: false, deviceId, message: 'License key not found in server.' };
+                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
+                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
+                return res.json(result);
             }
 
             if (license.hardware_id && license.hardware_id !== deviceId) {
-                return res.json({ licensed: false, deviceId, message: 'License is bound to another device.' });
+                const result = { licensed: false, deviceId, message: 'License is bound to another device.' };
+                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
+                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
+                return res.json(result);
             }
 
             if (!license.is_active) {
-                return res.json({ licensed: false, deviceId, message: 'License has been deactivated.' });
+                const result = { licensed: false, deviceId, message: 'License has been deactivated.' };
+                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
+                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
+                return res.json(result);
             }
 
             if (license.expires_at && new Date(license.expires_at) < new Date()) {
-                return res.json({ licensed: false, deviceId, message: 'License has expired.' });
+                const result = { licensed: false, deviceId, message: 'License has expired.' };
+                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
+                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
+                return res.json(result);
             }
 
-            // If hardware_id is null, bind it now (first use)
+            // Bind hardware_id on first use
             if (!license.hardware_id) {
                 await supabase
                     .from('mikrotik_licenses')
@@ -2384,23 +2413,39 @@ async function startServer() {
                     .eq('id', license.id);
             }
 
-            // Update last check-in
-            await supabase
+            // Update last check-in (fire and forget — don't block the response)
+            supabase
                 .from('mikrotik_licenses')
                 .update({ last_check_in: new Date().toISOString() })
-                .eq('id', license.id);
+                .eq('id', license.id)
+                .then(() => {}).catch(() => {});
 
-            res.json({ 
+            const result = { 
                 licensed: true, 
                 expires: license.expires_at, 
                 deviceId, 
                 licenseKey: localLicenseKey,
                 plan: license.plan_type,
                 maxRouters: license.max_routers
-            });
+            };
+
+            // Cache the valid result for 5 minutes
+            await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
+                [JSON.stringify(result), new Date().toISOString()]);
+
+            res.json(result);
 
         } catch (err) { 
-            console.error(err);
+            console.error('[License] Status check error:', err);
+            // On unexpected error, try to serve stale cache rather than returning unlicensed
+            try {
+                const settings = await db.get('SELECT licenseCache FROM settings WHERE id = 1');
+                if (settings?.licenseCache) {
+                    const cached = JSON.parse(settings.licenseCache);
+                    console.warn('[License] Serving stale cache due to error');
+                    return res.json(cached);
+                }
+            } catch (_) {}
             res.status(500).json({ message: err.message }); 
         }
     });
@@ -2446,7 +2491,7 @@ async function startServer() {
             }
 
             // Save locally
-            await db.run('UPDATE settings SET licenseKey = ? WHERE id = 1', [licenseKey]);
+            await db.run('UPDATE settings SET licenseKey = ?, licenseCache = NULL, licenseCacheAt = NULL WHERE id = 1', [licenseKey]);
             
             res.json({ success: true, message: 'License activated successfully!' });
         } catch (err) { 
@@ -2456,8 +2501,8 @@ async function startServer() {
     });
 
     licenseRouter.post('/revoke', async (req, res) => {
-        // Just remove local key, we don't necessarily want to deactivate it on server unless specified
-        await db.run('UPDATE settings SET licenseKey = NULL WHERE id = 1');
+        // Just remove local key and clear cache
+        await db.run('UPDATE settings SET licenseKey = NULL, licenseCache = NULL, licenseCacheAt = NULL WHERE id = 1');
         res.json({ success: true, message: 'License removed from this device.' });
     });
 
