@@ -14,6 +14,11 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [invoiceToView, setInvoiceToView] = useState<any | null>(null);
   const [invoiceToPrint, setInvoiceToPrint] = useState<any | null>(null);
   const [panelSettings, setPanelSettings] = useState<any | null>(null);
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [ticketCategory, setTicketCategory] = useState('no_internet');
+  const [ticketDescription, setTicketDescription] = useState('');
+  const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
+  const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
   useEffect(() => {
     try { localStorage.setItem('suppressReload', '1'); } catch {}
     return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
@@ -48,6 +53,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
       // But wait, I can just fetch the status.
       
       fetchStatus(data);
+      fetchClientTickets(data.pppoeUsername || data.username);
       setView('dashboard');
     } catch (e) {
       setError((e as Error).message);
@@ -80,6 +86,47 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
         console.error("Failed to load status", e);
     }
   }
+
+  const fetchClientTickets = async (uname: string) => {
+    try {
+      const res = await fetch(`/api/public/client-portal/tickets?username=${encodeURIComponent(uname)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTickets(Array.isArray(data) ? data : []);
+      }
+    } catch (e) {
+      console.error("Failed to load tickets", e);
+    }
+  };
+
+  const handleSubmitTicket = async () => {
+    if (!ticketCategory) return;
+    setIsSubmittingTicket(true);
+    setTicketFeedback(null);
+    try {
+      const res = await fetch('/api/public/client-portal/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: clientInfo?.pppoeUsername || clientInfo?.username,
+          client_user_id: clientInfo?.id,
+          client_type: 'pppoe',
+          category: ticketCategory,
+          description: ticketDescription,
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setTicketFeedback('Ticket submitted successfully!');
+      setTicketDescription('');
+      setTicketCategory('no_internet');
+      fetchClientTickets(clientInfo?.pppoeUsername || clientInfo?.username);
+    } catch (e) {
+      setTicketFeedback(`Error: ${(e as Error).message}`);
+    } finally {
+      setIsSubmittingTicket(false);
+    }
+  };
   
   useEffect(() => {
     (async () => {
@@ -210,6 +257,75 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
             </div>
             </div>
             
+            {/* Report an Issue / Repair Tickets Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-sm">
+                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 font-semibold text-slate-800 dark:text-white">Report an Issue</div>
+                <div className="p-4 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Issue Type</label>
+                    <select value={ticketCategory} onChange={e => setTicketCategory(e.target.value)} className="w-full px-3 py-2 border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="no_internet">No Internet</option>
+                      <option value="slow_connection">Slow Connection</option>
+                      <option value="intermittent">Intermittent Connection</option>
+                      <option value="line_issue">Line / Cable Issue</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
+                    <textarea value={ticketDescription} onChange={e => setTicketDescription(e.target.value)} rows={3} className="w-full px-3 py-2 border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Describe your issue..." />
+                  </div>
+                  <button onClick={handleSubmitTicket} disabled={isSubmittingTicket} className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition-colors disabled:opacity-50">
+                    {isSubmittingTicket ? 'Submitting...' : 'Submit Repair Ticket'}
+                  </button>
+                  {ticketFeedback && (
+                    <div className={`text-sm text-center p-2 rounded ${ticketFeedback.startsWith('Error') ? 'text-red-600 bg-red-50 dark:bg-red-900/20' : 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20'}`}>{ticketFeedback}</div>
+                  )}
+                </div>
+              </div>
+              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-sm">
+                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 font-semibold text-slate-800 dark:text-white">My Tickets</div>
+                <div className="p-4">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left text-slate-600 dark:text-slate-300">
+                      <thead className="text-xs text-slate-700 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-700/50">
+                        <tr>
+                          <th className="px-3 py-2">Date</th>
+                          <th className="px-3 py-2">Issue</th>
+                          <th className="px-3 py-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tickets.map((t, i) => (
+                          <tr key={i} className="border-b border-slate-100 dark:border-slate-700">
+                            <td className="px-3 py-2 text-xs">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}</td>
+                            <td className="px-3 py-2">{
+                              t.category === 'no_internet' ? 'No Internet' :
+                              t.category === 'slow_connection' ? 'Slow Connection' :
+                              t.category === 'intermittent' ? 'Intermittent' :
+                              t.category === 'line_issue' ? 'Line Issue' : 'Other'
+                            }</td>
+                            <td className="px-3 py-2">
+                              <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                                t.status === 'open' ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400' :
+                                t.status === 'in_progress' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' :
+                                t.status === 'resolved' ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400' :
+                                'bg-slate-200 text-slate-600 dark:bg-slate-600/50 dark:text-slate-400'
+                              }`}>{t.status === 'in_progress' ? 'In Progress' : t.status?.charAt(0).toUpperCase() + t.status?.slice(1)}</span>
+                            </td>
+                          </tr>
+                        ))}
+                        {tickets.length === 0 && (
+                          <tr><td colSpan={3} className="px-3 py-6 text-center text-slate-500">No tickets submitted.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {invoiceToView && (
               <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 no-print">
                 <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg w-full max-w-2xl">

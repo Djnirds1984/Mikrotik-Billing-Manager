@@ -26,6 +26,7 @@ export type View =
   | 'super_admin'
   | 'dhcp-portal'
   | 'client_portal_users'
+  | 'repair_tickets'
   | 'notifications'
   | 'captive_chat'
   | 'application_form';

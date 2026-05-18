@@ -396,6 +396,22 @@ async function initDb() {
                 pdfPath TEXT,
                 createdAt TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS repair_tickets (
+                id TEXT PRIMARY KEY,
+                client_user_id TEXT,
+                username TEXT NOT NULL,
+                client_type TEXT DEFAULT 'pppoe',
+                category TEXT NOT NULL,
+                description TEXT,
+                status TEXT DEFAULT 'open',
+                priority TEXT DEFAULT 'normal',
+                admin_notes TEXT,
+                created_by TEXT DEFAULT 'client',
+                assigned_to TEXT,
+                resolved_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT
+            );
         `);
         // Ensure new columns exist (idempotent migrations)
         try {
@@ -2325,6 +2341,81 @@ async function startServer() {
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
+
+    // --- Repair Tickets (Admin - Protected) ---
+    app.get('/api/repair-tickets', protect, async (req, res) => {
+        try {
+            const { status, priority, client_type } = req.query;
+            let query = 'SELECT * FROM repair_tickets WHERE 1=1';
+            const params = [];
+            if (status) { query += ' AND status = ?'; params.push(status); }
+            if (priority) { query += ' AND priority = ?'; params.push(priority); }
+            if (client_type) { query += ' AND client_type = ?'; params.push(client_type); }
+            query += ' ORDER BY created_at DESC';
+            const tickets = await db.all(query, params);
+            res.json(tickets);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    app.post('/api/repair-tickets', protect, async (req, res) => {
+        const { username, client_user_id, client_type, category, description, priority } = req.body;
+        if (!username || !category) return res.status(400).json({ message: 'Username and category are required' });
+        try {
+            const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const now = new Date().toISOString();
+            await db.run(
+                'INSERT INTO repair_tickets (id, client_user_id, username, client_type, category, description, priority, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [id, client_user_id || null, username, client_type || 'pppoe', category, description || '', priority || 'normal', 'admin', now, now]
+            );
+            res.json({ message: 'Ticket created', id });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    app.put('/api/repair-tickets/:id', protect, async (req, res) => {
+        const { status, priority, admin_notes, assigned_to } = req.body;
+        try {
+            const ticket = await db.get('SELECT * FROM repair_tickets WHERE id = ?', [req.params.id]);
+            if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
+            const now = new Date().toISOString();
+            const resolved_at = status === 'resolved' ? now : ticket.resolved_at;
+            await db.run(
+                'UPDATE repair_tickets SET status = ?, priority = ?, admin_notes = ?, assigned_to = ?, resolved_at = ?, updated_at = ? WHERE id = ?',
+                [status || ticket.status, priority || ticket.priority, admin_notes ?? ticket.admin_notes, assigned_to ?? ticket.assigned_to, resolved_at, now, req.params.id]
+            );
+            res.json({ message: 'Ticket updated' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    app.delete('/api/repair-tickets/:id', protect, async (req, res) => {
+        try {
+            await db.run('DELETE FROM repair_tickets WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Ticket deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // --- Repair Tickets (Public - Client Portal) ---
+    app.post('/api/public/client-portal/tickets', async (req, res) => {
+        const { username, client_user_id, client_type, category, description } = req.body;
+        if (!username || !category) return res.status(400).json({ message: 'Username and category are required' });
+        try {
+            const id = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const now = new Date().toISOString();
+            await db.run(
+                'INSERT INTO repair_tickets (id, client_user_id, username, client_type, category, description, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+                [id, client_user_id || null, username, client_type || 'pppoe', category, description || '', 'client', now, now]
+            );
+            res.json({ message: 'Ticket submitted successfully', id });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    app.get('/api/public/client-portal/tickets', async (req, res) => {
+        const { username } = req.query;
+        if (!username) return res.status(400).json({ message: 'Username is required' });
+        try {
+            const tickets = await db.all('SELECT * FROM repair_tickets WHERE username = ? ORDER BY created_at DESC', [username]);
+            res.json(tickets);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
 
     // --- License ---
     const licenseRouter = express.Router();

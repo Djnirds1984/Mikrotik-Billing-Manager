@@ -48,6 +48,7 @@ const UnlicensedComponent = React.lazy(() => import('./components/UnlicensedComp
 const DhcpPortal = React.lazy(() => import('./components/DhcpPortal.tsx').then(m => ({ default: m.DhcpPortal })));
 const ClientPortal = React.lazy(() => import('./components/ClientPortal.tsx').then(m => ({ default: m.ClientPortal })));
 const ClientPortalUsers = React.lazy(() => import('./components/ClientPortalUsers.tsx').then(m => ({ default: m.ClientPortalUsers })));
+const RepairTickets = React.lazy(() => import('./components/RepairTickets.tsx').then(m => ({ default: m.RepairTickets })));
 const CaptivePortalPage = React.lazy(() => import('./components/CaptivePortalPage.tsx').then(m => ({ default: m.CaptivePortalPage })));
 const NotificationsPage = React.lazy(() => import('./components/NotificationsPage.tsx').then(m => ({ default: m.NotificationsPage })));
 const Payroll = React.lazy(() => import('./components/Payroll.tsx').then(m => ({ default: m.Payroll })));
@@ -184,7 +185,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
 
     const licensedViews: View[] = [
         'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
-        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'client_portal_users'
+        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'client_portal_users', 'repair_tickets'
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
@@ -281,6 +282,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <PanelRoles />;
                   case 'client_portal_users':
                     return <ClientPortalUsers />;
+                  case 'repair_tickets':
+                    return <RepairTickets />;
                   case 'license':
                       return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
                   case 'super_admin':
