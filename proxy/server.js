@@ -2887,6 +2887,67 @@ async function startServer() {
         }
     });
 
+    app.get('/api/zt/install', protect, (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+        const HANG_TIMEOUT_MS = 60000; // 60 seconds without output = possible hang
+        let lastActivity = Date.now();
+        let hangCheckInterval = null;
+
+        send({ log: '> Starting ZeroTier installation: curl -s https://install.zerotier.com | sudo bash' });
+        send({ log: '> Monitoring for activity...' });
+
+        const child = exec('curl -s https://install.zerotier.com | sudo bash', {
+            env: { ...process.env, PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' }
+        });
+
+        // Hang detection interval
+        hangCheckInterval = setInterval(() => {
+            const elapsed = Date.now() - lastActivity;
+            if (elapsed >= HANG_TIMEOUT_MS) {
+                const seconds = Math.floor(elapsed / 1000);
+                send({ log: `⚠️  WARNING: No output received for ${seconds}s. Installation may be hanging...`, isWarning: true });
+            }
+        }, 15000); // Check every 15 seconds
+
+        child.stdout.on('data', (data) => {
+            lastActivity = Date.now();
+            send({ log: data.toString() });
+        });
+
+        child.stderr.on('data', (data) => {
+            lastActivity = Date.now();
+            send({ log: data.toString(), isError: true });
+        });
+
+        child.on('close', (code) => {
+            clearInterval(hangCheckInterval);
+            if (code === 0) {
+                send({ status: 'success', log: '✅ ZeroTier installed successfully!' });
+            } else {
+                send({ status: 'error', message: `Installation failed with exit code ${code}.` });
+            }
+            send({ status: 'finished' });
+            res.end();
+        });
+
+        child.on('error', (err) => {
+            clearInterval(hangCheckInterval);
+            send({ status: 'error', message: `Failed to start installation: ${err.message}` });
+            send({ status: 'finished' });
+            res.end();
+        });
+
+        // If client disconnects, kill the process
+        req.on('close', () => {
+            clearInterval(hangCheckInterval);
+            if (!child.killed) child.kill();
+        });
+    });
+
     // PiTunnel
     app.get('/api/pitunnel/status', protect, async (req, res) => {
         try {

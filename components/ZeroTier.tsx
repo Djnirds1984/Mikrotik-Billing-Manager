@@ -7,7 +7,7 @@ import { CodeBlock } from './CodeBlock.tsx';
 import { SudoInstructionBox } from './SudoInstructionBox.tsx';
 
 // --- Local Components ---
-const LogViewer: React.FC<{ logs: string[] }> = ({ logs }) => {
+const LogViewer: React.FC<{ logs: { text: string; isWarning?: boolean; isError?: boolean }[] }> = ({ logs }) => {
     const logContainerRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         if (logContainerRef.current) {
@@ -18,7 +18,7 @@ const LogViewer: React.FC<{ logs: string[] }> = ({ logs }) => {
     return (
         <div ref={logContainerRef} className="bg-slate-100 dark:bg-slate-900 text-xs font-mono text-slate-700 dark:text-slate-300 p-4 rounded-md h-64 overflow-y-auto border border-slate-200 dark:border-slate-600">
             {logs.map((log, index) => (
-                <pre key={index} className="whitespace-pre-wrap break-words">{log}</pre>
+                <pre key={index} className={`whitespace-pre-wrap break-words ${log.isWarning ? 'text-amber-600 dark:text-amber-400 font-semibold' : log.isError ? 'text-red-500 dark:text-red-400' : ''}`}>{log.text}</pre>
             ))}
         </div>
     );
@@ -100,12 +100,16 @@ export const ZeroTier: React.FC = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string>('');
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [installLogs, setInstallLogs] = useState<string[]>([]);
+    const [installLogs, setInstallLogs] = useState<{ text: string; isWarning?: boolean; isError?: boolean }[]>([]);
+    const [installElapsed, setInstallElapsed] = useState(0);
+    const installTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 
     const fetchData = useCallback(async () => {
         setStatus('loading');
         setInstallLogs([]); // Clear logs on fetch
+        setInstallElapsed(0);
+        if (installTimerRef.current) clearInterval(installTimerRef.current);
         try {
             const result = await getZeroTierStatus();
             setData(result);
@@ -133,28 +137,44 @@ export const ZeroTier: React.FC = () => {
     const handleInstall = () => {
         setStatus('installing');
         setInstallLogs([]);
+        setInstallElapsed(0);
+
+        // Start elapsed timer
+        const startTime = Date.now();
+        installTimerRef.current = setInterval(() => {
+            setInstallElapsed(Math.floor((Date.now() - startTime) / 1000));
+        }, 1000);
+
         const eventSource = new EventSource('/api/zt/install');
 
         eventSource.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.log) {
-                setInstallLogs(prev => [...prev, data.log.trim()]);
+                setInstallLogs(prev => [...prev, { 
+                    text: data.log.trim(), 
+                    isWarning: data.isWarning || false, 
+                    isError: data.isError || false 
+                }]);
             }
             if (data.status === 'success') {
                  setStatus('install_success');
+                 if (installTimerRef.current) clearInterval(installTimerRef.current);
             }
             if (data.status === 'error') {
                 setStatus('error');
                 setErrorMessage(data.message || "Installation failed. Check the logs.");
+                if (installTimerRef.current) clearInterval(installTimerRef.current);
             }
             if (data.status === 'finished') {
                 eventSource.close();
+                if (installTimerRef.current) clearInterval(installTimerRef.current);
             }
         };
         eventSource.onerror = () => {
             setStatus('error');
             setErrorMessage('Connection to the server was lost during installation.');
             eventSource.close();
+            if (installTimerRef.current) clearInterval(installTimerRef.current);
         };
     };
 
@@ -254,8 +274,22 @@ export const ZeroTier: React.FC = () => {
                 
                 {status === 'installing' && (
                     <div className="mt-6">
-                        <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-2">Installation in Progress...</h3>
+                        <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">Installation in Progress...</h3>
+                            <span className="text-sm font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">
+                                ⏱ {Math.floor(installElapsed / 60)}:{String(installElapsed % 60).padStart(2, '0')}
+                            </span>
+                        </div>
                         <LogViewer logs={installLogs} />
+                        {installElapsed > 60 && (
+                            <div className="mt-2 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg flex items-start gap-2">
+                                <ExclamationTriangleIcon className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                                <p className="text-sm text-amber-700 dark:text-amber-300">
+                                    Installation has been running for over {Math.floor(installElapsed / 60)} minute{installElapsed >= 120 ? 's' : ''}. 
+                                    If no new output appears, the process may be hanging. Consider checking your network connection or server terminal.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 )}
                 
