@@ -20,7 +20,9 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
-  const [paymentReceipt, setPaymentReceipt] = useState<{ user: string; amount: string; invoice: string; date: string } | null>(null);
+  const [paymentReceipt, setPaymentReceipt] = useState<{ user: string; amount: string; invoice: string; date: string; base?: string; fee?: string; method?: string } | null>(null);
+  const [paymongoConfig, setPaymongoConfig] = useState<{ enabled: boolean; passFeesToCustomer: boolean }>({ enabled: false, passFeesToCustomer: false });
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'gcash' | 'paymaya' | 'grab_pay' | 'qrph' | 'card'>('gcash');
   useEffect(() => {
     try { localStorage.setItem('suppressReload', '1'); } catch {}
     return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
@@ -53,11 +55,17 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
         const user = params.get('user') || '';
         const amount = params.get('amount') || '0';
         const invoice = params.get('invoice') || `INV-${Date.now()}`;
+        const base = params.get('base') || undefined;
+        const fee = params.get('fee') || undefined;
+        const method = params.get('method') || undefined;
         setPaymentReceipt({
           user,
           amount,
           invoice,
           date: new Date().toLocaleString(),
+          base,
+          fee,
+          method,
         });
         // Clean the URL so refresh won't re-trigger the modal
         const cleanUrl = window.location.pathname;
@@ -66,6 +74,24 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     } catch (e) {
       console.warn('Failed to parse payment URL params', e);
     }
+  }, []);
+
+  // Fetch public PayMongo config (enabled + passFeesToCustomer flag)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/public/paymongo-config');
+        if (res.ok) {
+          const data = await res.json();
+          setPaymongoConfig({
+            enabled: !!data.enabled,
+            passFeesToCustomer: !!data.passFeesToCustomer,
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to load PayMongo config', e);
+      }
+    })();
   }, []);
 
   // We don't need to fetch routers for login anymore as username is unique
@@ -213,6 +239,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
           description: `${currentPlanName} Subscription Payment`,
           pppoeUsername: clientInfo.pppoeUsername,
           planName: currentPlanName,
+          paymentMethod: selectedPaymentMethod,
           successUrl: `${window.location.origin}/client_portal?payment=success`,
           cancelUrl: `${window.location.origin}/client_portal?payment=cancelled`
         })
@@ -260,6 +287,13 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
               ₱{Number(paymentReceipt.amount).toFixed(2)}
             </span>
           </div>
+          {paymentReceipt.base && paymentReceipt.fee && (
+            <div className="text-xs bg-slate-50 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-700 rounded p-2 space-y-1">
+              <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Plan Amount:</span><span>₱{Number(paymentReceipt.base).toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Convenience Fee{paymentReceipt.method ? ` (${paymentReceipt.method.toUpperCase()})` : ''}:</span><span>₱{Number(paymentReceipt.fee).toFixed(2)}</span></div>
+              <div className="flex justify-between font-semibold pt-1 border-t border-slate-200 dark:border-slate-600"><span>Total Charged:</span><span className="text-emerald-600 dark:text-emerald-400">₱{Number(paymentReceipt.amount).toFixed(2)}</span></div>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-slate-500 dark:text-slate-400">Date</span>
             <span className="font-semibold">{paymentReceipt.date}</span>
@@ -315,6 +349,42 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                     >
                       {isPaying ? 'Redirecting to payment...' : 'Pay Now / Renew Subscription'}
                     </button>
+                    {paymongoConfig.passFeesToCustomer && planPrice && (() => {
+                      const base = Number(planPrice);
+                      const computeTotal = (m: string) => {
+                        if (m === 'card') return (base + 15) / (1 - 0.035);
+                        if (m === 'qrph') return base / (1 - 0.020);
+                        return base / (1 - 0.029);
+                      };
+                      const total = Math.round(computeTotal(selectedPaymentMethod) * 100) / 100;
+                      const fee = Math.round((total - base) * 100) / 100;
+                      return (
+                        <div className="mt-3 space-y-2">
+                          <div className="text-xs p-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+                            ⚠️ A small convenience fee will be added to your total bill by the payment gateway.
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Choose Payment Method</label>
+                            <select
+                              value={selectedPaymentMethod}
+                              onChange={e => setSelectedPaymentMethod(e.target.value as any)}
+                              className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                            >
+                              <option value="gcash">GCash (2.9%)</option>
+                              <option value="paymaya">Maya (2.9%)</option>
+                              <option value="grab_pay">GrabPay (2.9%)</option>
+                              <option value="qrph">QRPh (2.0%)</option>
+                              <option value="card">Credit/Debit Card (3.5% + ₱15)</option>
+                            </select>
+                          </div>
+                          <div className="text-xs bg-slate-50 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-700 rounded p-2 space-y-1">
+                            <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Plan Amount:</span><span>₱{base.toFixed(2)}</span></div>
+                            <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Convenience Fee:</span><span>₱{fee.toFixed(2)}</span></div>
+                            <div className="flex justify-between font-semibold pt-1 border-t border-slate-200 dark:border-slate-600"><span>Total to Pay:</span><span className="text-emerald-600 dark:text-emerald-400">₱{total.toFixed(2)}</span></div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                 </div>
                 </div>
             </div>

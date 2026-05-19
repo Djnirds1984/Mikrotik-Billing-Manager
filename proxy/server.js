@@ -1775,6 +1775,21 @@ async function startServer() {
             res.status(500).json({ message: e.message });
         }
     });
+
+    // Public PayMongo config — exposes only safe fields needed by Client Portal UI
+    app.get('/api/public/paymongo-config', async (req, res) => {
+        try {
+            const s = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            let p = {};
+            try { p = JSON.parse(s?.paymongoSettings || '{}'); } catch (_) {}
+            res.json({
+                enabled: !!p.enabled,
+                passFeesToCustomer: !!p.passFeesToCustomer,
+            });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
     
     app.use('/uploads', express.static(UPLOADS_DIR));
     
@@ -2211,16 +2226,57 @@ async function startServer() {
                 return res.status(400).json({ message: 'PayMongo Secret Key is missing.' });
             }
 
-            const { amount, description, pppoeUsername, planName, successUrl, cancelUrl } = req.body;
+            const { amount, description, pppoeUsername, planName, successUrl, cancelUrl, paymentMethod } = req.body;
 
             if (!amount || !description || !pppoeUsername) {
                 return res.status(400).json({ message: 'amount, description, and pppoeUsername are required.' });
             }
 
+            // Convenience fee recalculation
+            // PayMongo fees:
+            //   - E-Wallets (gcash, paymaya, grab_pay): 2.9%
+            //   - QRPh: 2.0%
+            //   - Card: 3.5% + 15 PHP
+            const baseAmount = Number(amount);
+            const passFees = !!pSettings.passFeesToCustomer;
+            const method = (paymentMethod || 'gcash').toLowerCase();
+
+            const computeTotal = (base, m) => {
+                if (m === 'card') return (base + 15) / (1 - 0.035);
+                if (m === 'qrph') return base / (1 - 0.020);
+                // default e-wallet (gcash, paymaya, grab_pay)
+                return base / (1 - 0.029);
+            };
+
+            const totalAmount = passFees ? Math.round(computeTotal(baseAmount, method) * 100) / 100 : baseAmount;
+            const convenienceFee = Math.round((totalAmount - baseAmount) * 100) / 100;
+
+            // Restrict checkout to the chosen method when passing fees so the calculated
+            // total matches the actual fee charged by PayMongo.
+            const methodMap = {
+                gcash: ['gcash'],
+                paymaya: ['paymaya'],
+                grab_pay: ['grab_pay'],
+                qrph: ['qrph'],
+                card: ['card'],
+            };
+            const allowedMethods = passFees
+                ? (methodMap[method] || ['gcash'])
+                : ['gcash', 'card', 'paymaya', 'grab_pay'];
+
             // Build dynamic success_url back to the client's own portal with invoice details
             const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '') || 'http://localhost';
             const invoiceNo = `INV-${Date.now()}`;
-            const dynamicSuccessUrl = `${origin}/client_portal?payment=success&user=${encodeURIComponent(pppoeUsername)}&amount=${encodeURIComponent(amount)}&invoice=${encodeURIComponent(invoiceNo)}`;
+            const sp = new URLSearchParams({
+                payment: 'success',
+                user: pppoeUsername,
+                amount: String(totalAmount),
+                base: String(baseAmount),
+                fee: String(convenienceFee),
+                method: method,
+                invoice: invoiceNo,
+            });
+            const dynamicSuccessUrl = `${origin}/client_portal?${sp.toString()}`;
             const dynamicCancelUrl = `${origin}/client_portal?payment=cancelled&user=${encodeURIComponent(pppoeUsername)}`;
 
             const payload = {
@@ -2228,11 +2284,11 @@ async function startServer() {
                     attributes: {
                         line_items: [{
                             name: planName || description || 'Internet Subscription',
-                            amount: Math.round(amount * 100), // PayMongo uses centavos
+                            amount: Math.round(totalAmount * 100), // PayMongo uses centavos
                             currency: 'PHP',
                             quantity: 1
                         }],
-                        payment_method_types: ['gcash', 'card', 'paymaya', 'grab_pay'],
+                        payment_method_types: allowedMethods,
                         description: `${description}|${pppoeUsername}`,
                         success_url: dynamicSuccessUrl,
                         cancel_url: dynamicCancelUrl,
@@ -2240,6 +2296,11 @@ async function startServer() {
                             pppoe_username: pppoeUsername,
                             plan_name: planName || '',
                             invoice_no: invoiceNo,
+                            base_amount: String(baseAmount),
+                            convenience_fee: String(convenienceFee),
+                            total_amount: String(totalAmount),
+                            payment_method: method,
+                            pass_fees: passFees ? '1' : '0',
                         }
                     }
                 }
