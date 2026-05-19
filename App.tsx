@@ -19,7 +19,7 @@ import { useAuth } from './contexts/AuthContext.tsx';
 import type { View, LicenseStatus, PanelSettings } from './types.ts';
 import { getAuthHeader, getPanelSettings } from './services/databaseService.ts';
 import { initializeAiClient } from './services/geminiService.ts';
-import { initializeXenditService } from './services/xenditService.ts';
+import { initializePayMongoService } from './services/paymongoService.ts';
 
 const Dashboard = React.lazy(() => import('./components/Dashboard.tsx').then(m => ({ default: m.Dashboard })));
 const Scripting = React.lazy(() => import('./components/Scripting.tsx').then(m => ({ default: m.Scripting })));
@@ -122,13 +122,13 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
             const aiKey = settings?.geminiApiKey || (window as any).process?.env?.API_KEY;
             initializeAiClient(aiKey);
 
-            if (settings?.xenditSettings?.enabled && settings.xenditSettings.secretKey) {
-                initializeXenditService({
-                    secretKey: settings.xenditSettings.secretKey,
-                    publicKey: settings.xenditSettings.publicKey,
-                    webhookToken: settings.xenditSettings.webhookToken,
+            if (settings?.paymongoSettings?.enabled && settings.paymongoSettings.secretKey) {
+                initializePayMongoService({
+                    publicKey: settings.paymongoSettings.publicKey,
+                    secretKey: settings.paymongoSettings.secretKey,
+                    webhookSecret: settings.paymongoSettings.webhookSecret,
                 });
-                console.log("Xendit Service Initialized.");
+                console.log("PayMongo Service Initialized.");
             }
 
         } catch (error) {

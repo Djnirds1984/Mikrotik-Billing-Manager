@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import type { PanelSettings, TelegramSettings, XenditSettings } from '../types.ts';
+import type { PanelSettings, TelegramSettings, PayMongoSettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
@@ -14,7 +14,7 @@ const SunIcon: React.FC<{ className?: string }> = ({ className }) => <svg classN
 const MoonIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /></svg>;
 const ComputerDesktopIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>;
 const MessageIcon: React.FC<{ className?: string }> = ({ className }) => ( <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.76 9.76 0 01-2.53-.405m-3.038-5.858a2.25 2.25 0 00-3.75-3.75C3.302 4.03 7.056 2.25 12 2.25c4.97 0 9 3.694 9 8.25z" /></svg>);
-const XenditIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12.35 12.63l-2.48 2.48a.5.5 0 01-.71 0l-2.48-2.48a.5.5 0 010-.71l2.48-2.48a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71z" /><path fillRule="evenodd" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 5.36a.5.5 0 00-.71 0l-2.48 2.48a.5.5 0 000 .71l2.48 2.48a.5.5 0 00.71 0l2.48-2.48a.5.5 0 000-.71L16.64 5.36zm-1.07 7.06a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71l-2.48 2.48a.5.5 0 01-.71 0l-2.48-2.48a.5.5 0 010-.71l2.48-2.48zM5.36 7.36a.5.5 0 01.71 0l2.48 2.48a.5.5 0 010 .71l-2.48 2.48a.5.5 0 01-.71 0L2.88 10.55a.5.5 0 010-.71l2.48-2.48z" clipRule="evenodd" /></svg>);
+const PayMongoIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>);
 
 const TabButton: React.FC<{
     label: string;
@@ -229,19 +229,19 @@ const TelegramTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
     );
 };
 
-const XenditTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
-    const xendit = settings.xenditSettings || {} as XenditSettings;
-    const update = (field: keyof XenditSettings, value: any) => {
-        setSettings(s => ({ ...s, xenditSettings: { ...s.xenditSettings, [field]: value } as XenditSettings }));
+const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
+    const paymongo = settings.paymongoSettings || {} as PayMongoSettings;
+    const update = (field: keyof PayMongoSettings, value: any) => {
+        setSettings(s => ({ ...s, paymongoSettings: { ...s.paymongoSettings, [field]: value } as PayMongoSettings }));
     };
 
     return (
-        <SettingsSection title="Xendit Payment Gateway">
-            <Toggle label="Enable Xendit Payments" checked={xendit.enabled || false} onChange={c => update('enabled', c)} />
-            <div className={`space-y-4 ${!xendit.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
-                <TextInput label="Secret Key" name="secretKey" value={xendit.secretKey || ''} onChange={e => update('secretKey', e.target.value)} type="password" />
-                <TextInput label="Public Key" name="publicKey" value={xendit.publicKey || ''} onChange={e => update('publicKey', e.target.value)} type="password" />
-                <TextInput label="Webhook Token" name="webhookToken" value={xendit.webhookToken || ''} onChange={e => update('webhookToken', e.target.value)} type="password" />
+        <SettingsSection title="PayMongo Payment Gateway">
+            <Toggle label="Enable PayMongo Payments" checked={paymongo.enabled || false} onChange={c => update('enabled', c)} />
+            <div className={`space-y-4 ${!paymongo.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                <TextInput label="Public Key" name="publicKey" value={paymongo.publicKey || ''} onChange={e => update('publicKey', e.target.value)} type="password" />
+                <TextInput label="Secret Key" name="secretKey" value={paymongo.secretKey || ''} onChange={e => update('secretKey', e.target.value)} type="password" />
+                <TextInput label="Webhook Secret" name="webhookSecret" value={paymongo.webhookSecret || ''} onChange={e => update('webhookSecret', e.target.value)} type="password" />
             </div>
         </SettingsSection>
     );
@@ -653,7 +653,7 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
     );
 };
 
-type Tab = 'panel' | 'ai' | 'telegram' | 'xendit' | 'landing-page';
+type Tab = 'panel' | 'ai' | 'telegram' | 'paymongo' | 'landing-page';
 
 export const SystemSettings: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('panel');
@@ -718,7 +718,7 @@ export const SystemSettings: React.FC = () => {
         { id: 'panel', label: 'Panel', icon: <CogIcon className="w-5 h-5" /> },
         { id: 'ai', label: 'AI', icon: <KeyIcon className="w-5 h-5" /> },
         { id: 'telegram', label: 'Telegram', icon: <MessageIcon className="w-5 h-5" /> },
-        { id: 'xendit', label: 'Xendit', icon: <XenditIcon className="w-5 h-5" /> },
+        { id: 'paymongo', label: 'PayMongo', icon: <PayMongoIcon className="w-5 h-5" /> },
         { id: 'landing-page', label: 'Landing Page', icon: <GlobeIcon className="w-5 h-5" /> },
     ];
     
@@ -730,7 +730,7 @@ export const SystemSettings: React.FC = () => {
             case 'panel': return <PanelTab settings={settings} setSettings={setSettings} />;
             case 'ai': return <AiTab settings={settings} setSettings={setSettings} />;
             case 'telegram': return <TelegramTab settings={settings} setSettings={setSettings} onTest={handleTestTelegram} isTesting={isTesting} />;
-            case 'xendit': return <XenditTab settings={settings} setSettings={setSettings} />;
+            case 'paymongo': return <PayMongoTab settings={settings} setSettings={setSettings} />;
             case 'landing-page': return <LandingPageTab settings={settings} setSettings={setSettings} />;
             default: return null;
         }

@@ -126,6 +126,6 @@
     },
     "system": {
         "telegram_settings": "Mga Setting ng Telegram",
-        "xendit_settings": "Xendit Payment Gateway"
+        "paymongo_settings": "PayMongo Payment Gateway"
     }
 }

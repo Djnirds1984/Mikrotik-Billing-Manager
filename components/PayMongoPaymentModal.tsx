@@ -1,19 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
 import type { PppSecret, BillingPlanWithId, PanelSettings } from '../types';
-import { initializeXenditService, getXenditService, isXenditConfigured } from '../services/xenditService';
+import { initializePayMongoService, getPayMongoService, isPayMongoConfigured } from '../services/paymongoService';
 import { Loader } from './Loader';
 
-interface XenditPaymentModalProps {
+interface PayMongoPaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   client: PppSecret;
   plan: BillingPlanWithId;
   companySettings: PanelSettings;
-  onPaymentSuccess: (invoiceId: string) => void;
+  onPaymentSuccess: (sessionId: string) => void;
 }
 
-export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
+export const PayMongoPaymentModal: React.FC<PayMongoPaymentModalProps> = ({
   isOpen,
   onClose,
   client,
@@ -23,23 +23,20 @@ export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
-  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
-      createXenditInvoice();
+      createPayMongoCheckout();
     } else {
-      // Reset state when modal closes
-      setInvoiceUrl(null);
-      setInvoiceId(null);
+      setCheckoutUrl(null);
       setError(null);
     }
   }, [isOpen]);
 
-  const createXenditInvoice = async () => {
-    if (!isXenditConfigured(companySettings)) {
-      setError('Xendit payment gateway is not configured. Please contact support.');
+  const createPayMongoCheckout = async () => {
+    if (!isPayMongoConfigured(companySettings)) {
+      setError('PayMongo payment gateway is not configured. Please contact support.');
       return;
     }
 
@@ -47,58 +44,27 @@ export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
     setError(null);
 
     try {
-      // Initialize service (no keys needed in frontend now, handled by backend)
-      initializeXenditService();
+      initializePayMongoService();
 
-      const xenditService = getXenditService();
-      
-      const invoice = await xenditService.createBillingInvoice(
+      const paymongoService = getPayMongoService();
+
+      const checkout = await paymongoService.createCheckoutSession(
         client,
         plan,
         companySettings
       );
 
-      setInvoiceUrl(invoice.invoice_url);
-      setInvoiceId(invoice.id);
+      setCheckoutUrl(checkout.checkout_url);
 
-      // Start polling for payment status
-      startPaymentPolling(invoice.id);
+      // Redirect to PayMongo checkout page
+      window.location.href = checkout.checkout_url;
+
+      onPaymentSuccess(checkout.session_id);
     } catch (err) {
-      console.error('Failed to create Xendit invoice:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create payment invoice');
+      console.error('Failed to create PayMongo checkout:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create payment checkout');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const startPaymentPolling = (invoiceId: string) => {
-    // Poll every 5 seconds for payment status
-    const interval = setInterval(async () => {
-      try {
-        const xenditService = getXenditService();
-        const invoice = await xenditService.getInvoice(invoiceId);
-        
-        if (invoice.status === 'PAID' || invoice.status === 'SETTLED') {
-          clearInterval(interval);
-          onPaymentSuccess(invoiceId);
-          onClose();
-        } else if (invoice.status === 'EXPIRED') {
-          clearInterval(interval);
-          setError('Payment has expired. Please try again.');
-        }
-      } catch (err) {
-        console.error('Error polling payment status:', err);
-      }
-    }, 5000);
-
-    // Stop polling when modal closes
-    return () => clearInterval(interval);
-  };
-
-  const handleOpenPaymentPage = () => {
-    if (invoiceUrl) {
-      // Open Xendit payment page in new tab
-      window.open(invoiceUrl, '_blank', 'width=800,height=600');
     }
   };
 
@@ -126,7 +92,7 @@ export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
             <div className="text-center py-8">
               <Loader />
               <p className="mt-4 text-gray-600 dark:text-gray-300">
-                Creating payment invoice...
+                Redirecting to secure payment gateway...
               </p>
             </div>
           )}
@@ -146,7 +112,7 @@ export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
             </div>
           )}
 
-          {!isLoading && !error && invoiceUrl && (
+          {!isLoading && !error && checkoutUrl && (
             <div className="text-center">
               <div className="mb-4">
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
@@ -171,23 +137,23 @@ export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
               </div>
 
               <p className="text-gray-600 dark:text-gray-300 mb-4">
-                Click the button below to proceed with payment. You will be redirected to our secure payment partner.
+                You will be redirected to PayMongo's secure payment page.
               </p>
 
               <button
-                onClick={handleOpenPaymentPage}
+                onClick={() => { if (checkoutUrl) window.location.href = checkoutUrl; }}
                 className="w-full bg-[--color-primary-600] hover:bg-[--color-primary-500] text-white font-medium py-3 px-4 rounded-lg transition-colors"
               >
                 Proceed to Payment
               </button>
 
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-4">
-                Powered by Xendit - Secure Payment Processing
+                Powered by PayMongo - Secure Payment Processing
               </p>
             </div>
           )}
 
-          {!isLoading && !error && !invoiceUrl && (
+          {!isLoading && !error && !checkoutUrl && (
             <div className="text-center py-8">
               <p className="text-gray-600 dark:text-gray-300">
                 Preparing payment gateway...

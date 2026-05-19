@@ -154,7 +154,7 @@
     },
     "system": {
         "telegram_settings": "Telegram Settings",
-        "xendit_settings": "Xendit Payment Gateway"
+        "paymongo_settings": "PayMongo Payment Gateway"
     },
     "updater": {
         "check_latest_version": "Check for the latest version of the panel.",

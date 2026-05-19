@@ -11,7 +11,6 @@ const os = require('os');
 const crypto = require('crypto');
 const axios = require('axios');
 const https = require('https');
-const { Xendit } = require('xendit-node');
 const si = require('systeminformation');
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
@@ -127,7 +126,7 @@ async function initDb() {
                 email TEXT,
                 logoBase64 TEXT,
                 telegramSettings TEXT,
-                xenditSettings TEXT,
+                paymongoSettings TEXT,
                 databaseEngine TEXT DEFAULT 'sqlite',
                 dbHost TEXT,
                 dbPort INTEGER,
@@ -144,7 +143,7 @@ async function initDb() {
         const columns = await db.all("PRAGMA table_info(settings)");
         const columnNames = columns.map(c => c.name);
         if (!columnNames.includes('telegramSettings')) await db.exec("ALTER TABLE settings ADD COLUMN telegramSettings TEXT");
-        if (!columnNames.includes('xenditSettings')) await db.exec("ALTER TABLE settings ADD COLUMN xenditSettings TEXT");
+        if (!columnNames.includes('paymongoSettings')) await db.exec("ALTER TABLE settings ADD COLUMN paymongoSettings TEXT");
         if (!columnNames.includes('databaseEngine')) await db.exec("ALTER TABLE settings ADD COLUMN databaseEngine TEXT DEFAULT 'sqlite'");
         if (!columnNames.includes('notificationSettings')) await db.exec("ALTER TABLE settings ADD COLUMN notificationSettings TEXT");
         if (!columnNames.includes('landingPageConfig')) await db.exec("ALTER TABLE settings ADD COLUMN landingPageConfig TEXT");
@@ -1682,7 +1681,7 @@ async function startServer() {
             const s = await db.get('SELECT * FROM settings WHERE id = 1');
             if(s) {
                 try { s.telegramSettings = JSON.parse(s.telegramSettings); } catch(e) {}
-                try { s.xenditSettings = JSON.parse(s.xenditSettings); } catch(e) {}
+                try { s.paymongoSettings = JSON.parse(s.paymongoSettings); } catch(e) {}
                 try { s.notificationSettings = JSON.parse(s.notificationSettings); } catch(e) {}
                 try { s.landingPageConfig = JSON.parse(s.landingPageConfig); } catch(e) {}
             }
@@ -1717,7 +1716,7 @@ async function startServer() {
         try {
             const data = { ...req.body };
             if (data.telegramSettings) data.telegramSettings = JSON.stringify(data.telegramSettings);
-            if (data.xenditSettings) data.xenditSettings = JSON.stringify(data.xenditSettings);
+            if (data.paymongoSettings) data.paymongoSettings = JSON.stringify(data.paymongoSettings);
             if (data.notificationSettings) data.notificationSettings = JSON.stringify(data.notificationSettings);
             if (data.landingPageConfig) data.landingPageConfig = JSON.stringify(data.landingPageConfig);
             
@@ -2194,52 +2193,166 @@ async function startServer() {
         }
     });
 
-    // --- Xendit API ---
-    const xenditRouter = express.Router();
-    xenditRouter.use(protect);
+    // --- PayMongo API ---
+    const paymongoRouter = express.Router();
+    // Note: create-checkout is public so client portal users can initiate payments
+    // without admin JWT tokens.
 
-    xenditRouter.post('/invoice', async (req, res) => {
+    // A. Checkout Initiation Route
+    paymongoRouter.post('/create-checkout', async (req, res) => {
         try {
-            const settings = await db.get('SELECT xenditSettings FROM settings WHERE id = 1');
-            if (!settings || !settings.xenditSettings) {
-                return res.status(400).json({ message: 'Xendit settings not configured in database.' });
-            }
-            
-            const xSettings = JSON.parse(settings.xenditSettings);
-            if (!xSettings.secretKey) {
-                return res.status(400).json({ message: 'Xendit Secret Key is missing.' });
+            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            if (!settings || !settings.paymongoSettings) {
+                return res.status(400).json({ message: 'PayMongo settings not configured in database.' });
             }
 
-            const x = new Xendit({ secretKey: xSettings.secretKey });
-            const { Invoice } = x;
+            const pSettings = JSON.parse(settings.paymongoSettings);
+            if (!pSettings.secretKey) {
+                return res.status(400).json({ message: 'PayMongo Secret Key is missing.' });
+            }
 
-            const resp = await Invoice.createInvoice({
-                data: req.body
+            const { amount, description, pppoeUsername, planName, successUrl, cancelUrl } = req.body;
+
+            if (!amount || !description || !pppoeUsername) {
+                return res.status(400).json({ message: 'amount, description, and pppoeUsername are required.' });
+            }
+
+            const payload = {
+                data: {
+                    attributes: {
+                        amount: Math.round(amount * 100), // PayMongo uses centavos
+                        description: `${description}|${pppoeUsername}`,
+                        currency: 'PHP',
+                        success_url: successUrl || `${req.headers.origin || 'http://localhost'}/payment/success`,
+                        cancel_url: cancelUrl || `${req.headers.origin || 'http://localhost'}/payment/failed`,
+                        metadata: {
+                            pppoe_username: pppoeUsername,
+                            plan_name: planName || '',
+                        }
+                    }
+                }
+            };
+
+            const response = await axios.post('https://api.paymongo.com/v1/checkout_sessions', payload, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Basic ${Buffer.from(pSettings.secretKey + ':').toString('base64')}`
+                },
+                timeout: 30000
             });
-            res.json(resp);
+
+            const checkoutData = response.data?.data;
+            if (!checkoutData || !checkoutData.attributes?.checkout_url) {
+                return res.status(500).json({ message: 'PayMongo did not return a checkout URL.' });
+            }
+
+            res.json({
+                checkout_url: checkoutData.attributes.checkout_url,
+                session_id: checkoutData.id,
+                amount: amount,
+                description: description
+            });
         } catch (err) {
-            console.error('Xendit Error:', err);
-            res.status(500).json({ message: err.message });
+            console.error('PayMongo Checkout Error:', err.response?.data || err.message);
+            res.status(500).json({
+                message: err.response?.data?.errors?.[0]?.detail || err.message || 'Failed to create PayMongo checkout session.'
+            });
         }
     });
 
-    xenditRouter.get('/invoice/:id', async (req, res) => {
+    app.use('/api/payments', paymongoRouter);
+
+    // B. Standalone Webhook Endpoint (NO auth middleware - must be public for PayMongo)
+    app.post('/api/paymongo-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
         try {
-            const settings = await db.get('SELECT xenditSettings FROM settings WHERE id = 1');
-            const xSettings = JSON.parse(settings?.xenditSettings || '{}');
-            if (!xSettings.secretKey) return res.status(400).json({ message: 'Xendit unconfigured' });
+            const paymongoSignature = req.headers['x-paymongo-signature'];
+            if (!paymongoSignature) {
+                return res.status(400).json({ message: 'Missing x-paymongo-signature header.' });
+            }
 
-            const x = new Xendit({ secretKey: xSettings.secretKey });
-            const { Invoice } = x;
-            
-            const resp = await Invoice.getInvoice({ invoiceID: req.params.id });
-            res.json(resp);
+            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            const pSettings = JSON.parse(settings?.paymongoSettings || '{}');
+            const webhookSecret = pSettings.webhookSecret;
+
+            if (!webhookSecret) {
+                console.error('[PayMongo Webhook] Webhook secret not configured.');
+                return res.status(400).json({ message: 'Webhook secret not configured.' });
+            }
+
+            const rawBody = req.body;
+            const payloadString = rawBody.toString();
+
+            // Verify signature using crypto.createHmac('sha256', webhookSecret)
+            const expectedSignature = crypto.createHmac('sha256', webhookSecret).update(payloadString).digest('hex');
+
+            if (expectedSignature !== paymongoSignature) {
+                console.error('[PayMongo Webhook] Signature verification failed.');
+                return res.status(400).json({ message: 'Invalid signature.' });
+            }
+
+            const payload = JSON.parse(payloadString);
+            const eventType = payload.data?.attributes?.type;
+
+            if (eventType !== 'checkout_session.payment.paid') {
+                return res.status(200).json({ message: 'Event ignored.', eventType });
+            }
+
+            const checkoutData = payload.data?.attributes?.data;
+            const attributes = checkoutData?.attributes;
+            const description = attributes?.description || '';
+            const pppoeUsername = description.split('|').pop()?.trim();
+
+            if (!pppoeUsername) {
+                console.error('[PayMongo Webhook] Could not extract PPPoE username from description:', description);
+                return res.status(400).json({ message: 'PPPoE username not found in description.' });
+            }
+
+            console.log(`[PayMongo Webhook] Payment received for user: ${pppoeUsername}`);
+
+            // --- PLACEHOLDER: User Activation Logic ---
+            // TODO: Implement the following using your existing core functions:
+
+            async function extendSubscriptionDueDate(username: string, days: number = 30) {
+                // TODO: Call your existing function to extend client's subscription due date
+                console.log(`[PayMongo Webhook] Extending subscription for ${username} by ${days} days.`);
+                // Example:
+                // const customer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
+                // const newDueDate = new Date();
+                // newDueDate.setDate(newDueDate.getDate() + days);
+                // await db.run('UPDATE customers SET dueDate = ? WHERE username = ?', [newDueDate.toISOString().split('T')[0], username]);
+            }
+
+            async function restoreMikroTikProfile(username: string) {
+                // TODO: Call your existing function to change user's secret profile from "Expired_Profile" back to active speed plan
+                console.log(`[PayMongo Webhook] Restoring MikroTik profile for ${username}.`);
+                // Example:
+                // const customer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
+                // if (customer && customer.routerId) {
+                //     const router = await db.get('SELECT * FROM routers WHERE id = ?', [customer.routerId]);
+                //     if (router) { ... }
+                // }
+            }
+
+            async function kickActiveSession(username: string) {
+                // TODO: Call your existing function to execute /ppp/active/remove on MikroTik
+                console.log(`[PayMongo Webhook] Kicking active session for ${username}.`);
+                // Example:
+                // const customer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
+                // if (customer && customer.routerId) {
+                //     await axios.post(`http://localhost:3002/${customer.routerId}/ppp/active/kick`, { name: username });
+                // }
+            }
+
+            await extendSubscriptionDueDate(pppoeUsername, 30);
+            await restoreMikroTikProfile(pppoeUsername);
+            await kickActiveSession(pppoeUsername);
+
+            res.status(200).json({ message: 'Webhook processed successfully.', pppoeUsername });
         } catch (err) {
-            res.status(500).json({ message: err.message });
+            console.error('PayMongo Webhook Error:', err.message);
+            res.status(500).json({ message: err.message || 'Webhook processing failed.' });
         }
     });
-
-    app.use('/api/xendit', xenditRouter);
 
     // Landing Page Advertising Image Downloader
     app.post('/api/landing/ad-image-download', protect, async (req, res) => {

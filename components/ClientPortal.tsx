@@ -18,6 +18,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [ticketCategory, setTicketCategory] = useState('no_internet');
   const [ticketDescription, setTicketDescription] = useState('');
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
   useEffect(() => {
     try { localStorage.setItem('suppressReload', '1'); } catch {}
@@ -150,6 +151,43 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     }, 150);
   };
 
+  const handlePayNow = async () => {
+    const currentPlanName = status?.profile || 'Unknown';
+    const currentPlanPrice = payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
+    if (!clientInfo?.pppoeUsername || !currentPlanPrice) {
+      setError('Unable to initiate payment. Plan price not found.');
+      return;
+    }
+    setIsPaying(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/payments/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: Number(currentPlanPrice),
+          description: `${currentPlanName} Subscription Payment`,
+          pppoeUsername: clientInfo.pppoeUsername,
+          planName: currentPlanName,
+          successUrl: `${window.location.origin}/client-portal?payment=success`,
+          cancelUrl: `${window.location.origin}/client-portal?payment=cancelled`
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to create checkout session');
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
+    } catch (e) {
+      console.error('Payment initiation failed:', e);
+      setError(`Payment error: ${(e as Error).message}`);
+    } finally {
+      setIsPaying(false);
+    }
+  };
+
   if (view === 'dashboard') {
     const planName = status?.profile || 'Unknown';
     const planPrice = payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
@@ -179,7 +217,13 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Overall Status:</span> <span className={`px-2 py-1 rounded text-xs font-bold ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{overallStatus}</span></div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Subscription Expires:</span> {expires || 'Unknown'}</div>
                 <div className="pt-4">
-                    <button className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium transition-colors">Pay Now / Renew Subscription</button>
+                    <button
+                      onClick={handlePayNow}
+                      disabled={isPaying}
+                      className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded font-medium transition-colors"
+                    >
+                      {isPaying ? 'Redirecting to payment...' : 'Pay Now / Renew Subscription'}
+                    </button>
                 </div>
                 </div>
             </div>

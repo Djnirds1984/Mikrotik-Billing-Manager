@@ -462,11 +462,11 @@ export interface TelegramSettings {
     enableUserPaid: boolean;
 }
 
-export interface XenditSettings {
+export interface PayMongoSettings {
     enabled: boolean;
-    secretKey: string;
     publicKey: string;
-    webhookToken: string;
+    secretKey: string;
+    webhookSecret: string;
 }
 
 export interface LandingPagePage {
@@ -547,7 +547,7 @@ export interface PanelSettings {
         dhcpNearExpiryHours: number;
     };
     telegramSettings?: TelegramSettings;
-    xenditSettings?: XenditSettings;
+    paymongoSettings?: PayMongoSettings;
     landingPageConfig?: LandingPageConfig;
 }
 

@@ -150,6 +150,6 @@
     },
     "system": {
         "telegram_settings": "Configuración de Telegram",
-        "xendit_settings": "Pasarela de Pago Xendit"
+        "paymongo_settings": "Pasarela de Pago PayMongo"
     }
 }
