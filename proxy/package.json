@@ -24,6 +24,6 @@
     "sqlite": "^5.1.1",
     "sqlite3": "5.1.6",
     "systeminformation": "^5.21.22",
-    "tar": "^7.1.0",
+    "tar": "^7.1.0"
   }
 }
