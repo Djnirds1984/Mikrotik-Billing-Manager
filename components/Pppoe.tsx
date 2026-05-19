@@ -839,7 +839,140 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>
                 </div>
             </div>
-            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-x-auto">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
+                {/* Mobile card view */}
+                <div className="md:hidden divide-y divide-slate-200 dark:divide-slate-700">
+                    {sortedUsers.length === 0 ? (
+                        <div className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+                            {searchTerm ? (
+                                <div className="flex flex-col items-center gap-2">
+                                    <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                    <p>No users found matching "{searchTerm}"</p>
+                                </div>
+                            ) : (
+                                <p>No PPPoE users found.</p>
+                            )}
+                        </div>
+                    ) : (
+                        sortedUsers.map((user, index) => {
+                            const isPostpaid = user.subscription.planType === 'postpaid';
+                            let isDue = false;
+                            try {
+                                if (user.comment) {
+                                    const parsed = JSON.parse(user.comment);
+                                    if (parsed.dueDateTime) {
+                                        isDue = new Date(parsed.dueDateTime).getTime() <= Date.now();
+                                    } else if (parsed.dueDate) {
+                                        const dt = new Date(`${parsed.dueDate}T23:59:59`);
+                                        isDue = dt.getTime() <= Date.now();
+                                    }
+                                }
+                            } catch (_) {}
+                            const profileName = (user.profile || '').toLowerCase();
+                            const isNonPayProfile = ['non-payment','nonpayment','cut','disable','disabled'].some(tag => profileName.includes(tag));
+                            const showGrace = isPostpaid && (isDue || isNonPayProfile);
+                            return (
+                                <div
+                                    key={user.id}
+                                    ref={index === 0 && searchTerm ? firstMatchRef : undefined}
+                                    className={`p-4 ${user.disabled === 'true' ? 'opacity-50' : ''} ${index === 0 && searchTerm ? 'ring-2 ring-primary-400 ring-inset' : ''}`}
+                                >
+                                    <div className="flex justify-between items-start gap-2 mb-3">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">
+                                                <HighlightText text={user.name || ''} highlight={searchTerm} />
+                                            </p>
+                                            <p className="text-xs text-slate-500 truncate">
+                                                <HighlightText text={user.customer?.fullName || ''} highlight={searchTerm} />
+                                            </p>
+                                        </div>
+                                        {isPostpaid ? (
+                                            <span className="shrink-0 px-2 py-1 text-xs font-semibold rounded-full bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300">Postpaid</span>
+                                        ) : (
+                                            <span className="shrink-0 px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">Prepaid</span>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                                        <div>
+                                            <div className="text-slate-400 uppercase text-[10px] font-bold">Account #</div>
+                                            <div className="text-slate-700 dark:text-slate-200 truncate">
+                                                <HighlightText text={user.customer?.accountNumber || '—'} highlight={searchTerm} />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="text-slate-400 uppercase text-[10px] font-bold">Profile</div>
+                                            <div className="text-slate-700 dark:text-slate-200 truncate">
+                                                <HighlightText text={user.profile || '—'} highlight={searchTerm} />
+                                            </div>
+                                        </div>
+                                        <div className="col-span-2">
+                                            <div className="text-slate-400 uppercase text-[10px] font-bold">Subscription Due</div>
+                                            <div className="text-slate-700 dark:text-slate-200">
+                                                <HighlightText text={user.subscription.dueDate || '—'} highlight={searchTerm} />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }}
+                                            className="px-3 py-2 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition-colors"
+                                        >
+                                            Pay
+                                        </button>
+                                        <button
+                                            onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }}
+                                            className="px-3 py-2 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700 transition-colors"
+                                        >
+                                            Edit
+                                        </button>
+                                        {showGrace && (
+                                            <button
+                                                onClick={() => { setSelectedSecret(user); setGraceModalOpen(true); }}
+                                                className="px-3 py-2 text-sm bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 transition-colors col-span-2"
+                                            >
+                                                Grace
+                                            </button>
+                                        )}
+                                        <button
+                                            className={`px-3 py-2 text-sm rounded-md font-semibold transition-colors ${
+                                                user.disabled === 'true'
+                                                ? 'bg-slate-500 text-white hover:bg-slate-600'
+                                                : 'bg-teal-600 text-white hover:bg-teal-700'
+                                            }`}
+                                            onClick={async () => {
+                                                if (!window.confirm(`Are you sure you want to ${user.disabled === 'true' ? 'enable' : 'disable'} this account?`)) return;
+                                                try {
+                                                    await savePppUser(selectedRouter, {
+                                                        initialSecret: user,
+                                                        secretData: { ...user, disabled: user.disabled === 'true' ? 'false' : 'true' },
+                                                        subscriptionData: user.subscription
+                                                    });
+                                                    await fetchData();
+                                                } catch (err) {
+                                                    alert(`Failed to update status: ${(err as Error).message}`);
+                                                }
+                                            }}
+                                        >
+                                            {user.disabled === 'true' ? 'Enable' : 'Disable'}
+                                        </button>
+                                        {hasPermission('pppoe_users:delete') && (
+                                            <button
+                                                onClick={() => handleDeleteUser(user.id)}
+                                                className="px-3 py-2 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700 transition-colors"
+                                            >
+                                                Delete
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+                {/* Desktop table view */}
+                <div className="hidden md:block overflow-x-auto">
                  <table className="w-full text-sm md:min-w-[900px]">
                     <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                         <tr>
@@ -1029,6 +1162,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         )}
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
     );
