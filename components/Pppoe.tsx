@@ -204,7 +204,7 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
                         {profiles.map(p => (
                             <tr key={p.id} className="border-b dark:border-slate-700">
                                 <td className="px-6 py-4 font-medium">{p.name}</td><td className="px-6 py-4">{p['local-address'] || 'n/a'}</td><td className="px-6 py-4">{p['remote-address'] || 'n/a'}</td><td className="px-6 py-4">{p['rate-limit'] || 'N/A'}</td>
-                                <td className="px-6 py-4 text-right space-x-2"><button onClick={() => { setEditingProfile(p); setIsModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button><button onClick={() => handleDelete(p.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button></td>
+                                <td className="px-3 py-2 md:px-6 md:py-4 text-right"><div className="flex flex-wrap gap-2 justify-end"><button onClick={() => { setEditingProfile(p); setIsModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button><button onClick={() => handleDelete(p.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button></div></td>
                             </tr>
                         ))}
                     </tbody>
@@ -784,9 +784,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />
             <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} profiles={profiles} onSave={handleGraceSave} />
 
-             <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-4">
-                    <div className="relative w-64">
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
+                    <div className="relative w-full sm:w-64">
                         <input
                             type="text"
                             placeholder="Search users..."
@@ -840,7 +840,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 </div>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-x-auto">
-                 <table className="w-full text-sm min-w-[900px]">
+                 <table className="w-full text-sm md:min-w-[900px]">
                     <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                         <tr>
                             <th 
@@ -948,7 +948,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     <td className="text-center">
                                         <HighlightText text={user.subscription.dueDate || ''} highlight={searchTerm} />
                                     </td>
-                                    <td className="px-6 py-4 text-right space-x-2">
+                                    <td className="px-3 py-2 md:px-6 md:py-4 text-right">
+                                        <div className="flex flex-wrap gap-2 justify-end">
                                         <button
                                             onClick={() => { setSelectedSecret(user); setPaymentModalOpen(true); }}
                                             className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 transition-colors"
@@ -1021,6 +1022,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                                 Delete
                                             </button>
                                         )}
+                                        </div>
                                     </td>
                                 </tr>
                             ))
@@ -1660,7 +1662,7 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
                         <tr key={s.id} className={`border-b dark:border-slate-700 ${s.disabled === 'true' ? 'opacity-50' : ''}`}>
                             <td className="px-6 py-4 font-medium">{s['service-name']}</td><td className="px-6 py-4">{s.interface}</td><td className="px-6 py-4">{s['default-profile']}</td>
                             <td className="px-6 py-4">{s.disabled === 'true' ? <span className="text-red-500">Disabled</span> : <span className="text-green-500">Enabled</span>}</td>
-                            <td className="px-6 py-4 text-right space-x-2"><button onClick={() => { setEditingServer(s); setIsModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button><button onClick={() => handleDelete(s.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button></td>
+                            <td className="px-3 py-2 md:px-6 md:py-4 text-right"><div className="flex flex-wrap gap-2 justify-end"><button onClick={() => { setEditingServer(s); setIsModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button><button onClick={() => handleDelete(s.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button></div></td>
                         </tr>
                     ))}</tbody>
                 </table>
@@ -1693,7 +1695,7 @@ export const Pppoe: React.FC<{
     return (
         <div className="space-y-8">
             <div className="border-b border-slate-200 dark:border-slate-700">
-                <nav className="flex space-x-2" aria-label="Tabs">
+                <nav className="flex space-x-2 overflow-x-auto pb-1" aria-label="Tabs">
                     <TabButton label={t('pppoe.users')} icon={<UsersIcon className="w-5 h-5" />} isActive={activeTab === 'users'} onClick={() => setActiveTab('users')} />
                     <TabButton label={t('pppoe.active_users')} icon={<UsersIcon className="w-5 h-5" />} isActive={activeTab === 'active_users'} onClick={() => setActiveTab('active_users')} />
                     <TabButton label="Offline Users" icon={<ExclamationTriangleIcon className="w-5 h-5" />} isActive={activeTab === 'offline_users'} onClick={() => setActiveTab('offline_users')} />
