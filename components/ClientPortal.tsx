@@ -193,8 +193,8 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
           description: `${currentPlanName} Subscription Payment`,
           pppoeUsername: clientInfo.pppoeUsername,
           planName: currentPlanName,
-          successUrl: `${window.location.origin}/client-portal?payment=success`,
-          cancelUrl: `${window.location.origin}/client-portal?payment=cancelled`
+          successUrl: `${window.location.origin}/client_portal?payment=success`,
+          cancelUrl: `${window.location.origin}/client_portal?payment=cancelled`
         })
       });
       const data = await res.json();

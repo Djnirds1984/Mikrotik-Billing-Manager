@@ -2220,8 +2220,8 @@ async function startServer() {
             // Build dynamic success_url back to the client's own portal with invoice details
             const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '') || 'http://localhost';
             const invoiceNo = `INV-${Date.now()}`;
-            const dynamicSuccessUrl = `${origin}/client-portal?payment=success&user=${encodeURIComponent(pppoeUsername)}&amount=${encodeURIComponent(amount)}&invoice=${encodeURIComponent(invoiceNo)}`;
-            const dynamicCancelUrl = `${origin}/client-portal?payment=cancelled&user=${encodeURIComponent(pppoeUsername)}`;
+            const dynamicSuccessUrl = `${origin}/client_portal?payment=success&user=${encodeURIComponent(pppoeUsername)}&amount=${encodeURIComponent(amount)}&invoice=${encodeURIComponent(invoiceNo)}`;
+            const dynamicCancelUrl = `${origin}/client_portal?payment=cancelled&user=${encodeURIComponent(pppoeUsername)}`;
 
             const payload = {
                 data: {
