@@ -2969,138 +2969,253 @@ async function startServer() {
     });
 
     app.get('/api/update-status', protect, (req, res) => {
-        res.json({ status: 'uptodate', message: 'System is up to date (mock).' });
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+        const REPO_ROOT_LOCAL = path.dirname(__dirname);
+        const localExec = (cmd) => new Promise((resolve, reject) => {
+            exec(cmd, { cwd: REPO_ROOT_LOCAL, maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+                if (err) reject(new Error(stderr || err.message));
+                else resolve((stdout || '').trim());
+            });
+        });
+
+        (async () => {
+            try {
+                send({ log: 'Reading local repository...' });
+                const remoteUrl = await localExec('git config --get remote.origin.url');
+                const m = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+                if (!m) throw new Error('Local origin is not a GitHub repository');
+                const [, owner, repo] = m;
+
+                send({ log: `Detected GitHub repo: ${owner}/${repo}` });
+                const localHash = await localExec('git rev-parse HEAD');
+                const branch = await localExec('git rev-parse --abbrev-ref HEAD').catch(() => 'main');
+
+                send({ log: `Querying latest commit on origin/${branch}...` });
+                const headers = {
+                    'Accept': 'application/vnd.github+json',
+                    'User-Agent': 'Mikrotik-Billing-Manager-Updater',
+                };
+                if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+                const remote = await axios.get(`https://api.github.com/repos/${owner}/${repo}/commits/${branch}`, { headers, timeout: 15000 });
+                const remoteHash = remote.data?.sha || '';
+
+                if (!remoteHash) throw new Error('Could not read remote commit SHA');
+
+                if (localHash === remoteHash) {
+                    send({ status: 'uptodate', message: 'You are running the latest version.', localHash, remoteHash });
+                } else {
+                    send({
+                        status: 'available',
+                        message: `New version available on ${branch}.`,
+                        localHash: localHash.substring(0, 7),
+                        remoteHash: remoteHash.substring(0, 7),
+                        latestCommitMessage: remote.data?.commit?.message || '',
+                        latestCommitAuthor: remote.data?.commit?.author?.name || '',
+                        latestCommitDate: remote.data?.commit?.author?.date || '',
+                    });
+                }
+                res.end();
+            } catch (err) {
+                send({ status: 'error', message: err.message });
+                res.end();
+            }
+        })();
+
+        req.on('close', () => { try { res.end(); } catch {} });
     });
 
     // --- GitHub Integration Endpoints ---
-    
-    // Helper function to parse GitHub repository info
+
+    // Repository root (one level up from /proxy)
+    const REPO_ROOT = path.dirname(__dirname);
+
+    // Local helper to run shell commands (also defined globally below for other modules)
+    const ghExec = (cmd, opts = {}) => new Promise((resolve, reject) => {
+        exec(cmd, { cwd: REPO_ROOT, maxBuffer: 10 * 1024 * 1024, ...opts }, (error, stdout, stderr) => {
+            if (error) return reject(new Error(stderr || error.message));
+            resolve((stdout || '').trim());
+        });
+    });
+
+    // GitHub API helper (supports optional GITHUB_TOKEN for higher rate limits / private repos)
+    const githubApi = async (endpoint) => {
+        const headers = {
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'Mikrotik-Billing-Manager-Updater',
+            'X-GitHub-Api-Version': '2022-11-28',
+        };
+        if (process.env.GITHUB_TOKEN) {
+            headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+        }
+        const response = await axios.get(`https://api.github.com${endpoint}`, {
+            headers,
+            timeout: 15000,
+        });
+        return response.data;
+    };
+
+    // Helper function to validate GitHub owner/repo
     const parseGitHubRepo = (owner, repo) => {
         if (!owner || !repo) {
             throw new Error('Owner and repository name are required');
         }
-        // Basic validation for GitHub username/repo format
         if (!/^[a-zA-Z0-9-_.]+$/.test(owner) || !/^[a-zA-Z0-9-_.]+$/.test(repo)) {
             throw new Error('Invalid GitHub repository format');
         }
-        return { owner, repo };
+        return { owner, repo: repo.replace(/\.git$/, '') };
     };
 
-    // Get repository information
+    // Current local version (git HEAD info)
+    app.get('/api/current-version', protect, async (req, res) => {
+        try {
+            const [logOutput, remoteUrl, branchName] = await Promise.all([
+                ghExec('git log -1 --pretty=format:%h%x00%s%x00%b%x00%an%x00%ad --date=iso'),
+                ghExec('git config --get remote.origin.url').catch(() => ''),
+                ghExec('git rev-parse --abbrev-ref HEAD').catch(() => ''),
+            ]);
+            const parts = (logOutput || '').split('\0');
+            res.json({
+                hash: parts[0] || 'N/A',
+                title: parts[1] || 'No commits found',
+                description: (parts[2] || '').trim(),
+                author: parts[3] || '',
+                date: parts[4] || '',
+                remoteUrl: remoteUrl || '',
+                branch: branchName || '',
+            });
+        } catch (error) {
+            res.status(500).json({ message: `Failed to read local git info: ${error.message}` });
+        }
+    });
+
+    // Get repository information (REAL GitHub API call)
     app.get('/api/github/repo-info', protect, requireSuperadmin, async (req, res) => {
         try {
-            const { owner, repo } = req.query;
-            const repoInfo = parseGitHubRepo(owner, repo);
-            
-            // For now, return mock data - in production, this would call GitHub API
+            const { owner, repo } = parseGitHubRepo(req.query.owner, req.query.repo);
+            const data = await githubApi(`/repos/${owner}/${repo}`);
             res.json({
-                owner: repoInfo.owner,
-                repo: repoInfo.repo,
-                description: 'Mikrotik Billing Manager Panel',
-                stars: 42,
-                forks: 15,
-                isPrivate: false,
-                defaultBranch: 'main',
-                lastUpdated: new Date().toISOString()
+                owner: data.owner?.login || owner,
+                repo: data.name || repo,
+                fullName: data.full_name,
+                description: data.description || '',
+                stars: data.stargazers_count || 0,
+                forks: data.forks_count || 0,
+                isPrivate: !!data.private,
+                defaultBranch: data.default_branch || 'main',
+                lastUpdated: data.pushed_at || data.updated_at,
+                htmlUrl: data.html_url,
+                cloneUrl: data.clone_url,
             });
         } catch (error) {
-            res.status(400).json({ message: error.message });
+            const status = error.response?.status || 400;
+            const msg = error.response?.data?.message || error.message;
+            res.status(status === 404 ? 404 : 400).json({
+                message: status === 404 ? 'Repository not found or not accessible.' : `GitHub API error: ${msg}`
+            });
         }
     });
 
-    // Get repository branches
+    // Get repository branches (REAL GitHub API call, with pagination)
     app.get('/api/github/branches', protect, requireSuperadmin, async (req, res) => {
         try {
-            const { owner, repo } = req.query;
-            const repoInfo = parseGitHubRepo(owner, repo);
-            
-            // Mock branches data - in production, this would call GitHub API
-            const branches = [
-                { name: 'main', protected: true, sha: 'abc123' },
-                { name: 'develop', protected: false, sha: 'def456' },
-                { name: 'feature/new-ui', protected: false, sha: 'ghi789' }
-            ];
-            
-            res.json(branches);
+            const { owner, repo } = parseGitHubRepo(req.query.owner, req.query.repo);
+            const all = [];
+            // Paginate up to 5 pages (500 branches max) to be safe
+            for (let page = 1; page <= 5; page++) {
+                const data = await githubApi(`/repos/${owner}/${repo}/branches?per_page=100&page=${page}`);
+                if (!Array.isArray(data) || data.length === 0) break;
+                all.push(...data.map(b => ({
+                    name: b.name,
+                    protected: !!b.protected,
+                    sha: b.commit?.sha || '',
+                })));
+                if (data.length < 100) break;
+            }
+            res.json(all);
         } catch (error) {
-            res.status(400).json({ message: error.message });
+            const status = error.response?.status || 400;
+            const msg = error.response?.data?.message || error.message;
+            res.status(status === 404 ? 404 : 400).json({
+                message: status === 404 ? 'Repository not found or not accessible.' : `GitHub API error: ${msg}`
+            });
         }
     });
 
-    // Pull from repository (non-streaming)
+    // Pull from repository (non-streaming, executes real git pull)
     app.post('/api/github/pull', protect, requireSuperadmin, async (req, res) => {
         try {
-            const { repoUrl, branch } = req.body;
-            if (!repoUrl || !branch) {
-                return res.status(400).json({ message: 'Repository URL and branch are required' });
+            const { branch } = req.body;
+            if (!branch) {
+                return res.status(400).json({ message: 'Branch is required' });
             }
-            
-            // Mock pull operation - in production, this would execute git commands
+            if (!/^[a-zA-Z0-9-_./]+$/.test(branch)) {
+                return res.status(400).json({ message: 'Invalid branch name' });
+            }
+            await ghExec('git fetch origin');
+            const pullOut = await ghExec(`git pull origin ${branch}`);
+            const stat = await ghExec('git diff --shortstat HEAD@{1} HEAD').catch(() => '');
             res.json({
                 success: true,
-                message: `Successfully pulled from ${branch} branch`,
-                changes: {
-                    filesChanged: 5,
-                    insertions: 127,
-                    deletions: 43
-                }
+                message: `Successfully pulled from ${branch}`,
+                output: pullOut,
+                stat,
             });
         } catch (error) {
-            res.status(500).json({ 
-                success: false, 
+            res.status(500).json({
+                success: false,
                 message: 'Pull operation failed',
-                error: error.message 
+                error: error.message,
             });
         }
     });
 
-    // Pull from repository (streaming)
+    // Pull from repository (streaming via SSE, executes real git pull)
     app.get('/api/github/pull-stream', protect, requireSuperadmin, (req, res) => {
-        try {
-            const { repoUrl, branch } = req.query;
-            if (!repoUrl || !branch) {
-                return res.status(400).json({ message: 'Repository URL and branch are required' });
-            }
-            
-            res.writeHead(200, {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-            });
-            
-            // Mock streaming pull operation
-            const steps = [
-                { log: 'Fetching repository information...', delay: 500 },
-                { log: `Connecting to branch: ${branch}...`, delay: 800 },
-                { log: 'Checking for updates...', delay: 600 },
-                { log: 'Downloading changes...', delay: 1200 },
-                { log: 'Applying updates...', delay: 900 },
-                { log: 'Update completed successfully!', delay: 400 }
-            ];
-            
-            let currentStep = 0;
-            
-            const sendStep = () => {
-                if (currentStep < steps.length) {
-                    const step = steps[currentStep];
-                    res.write(`data: ${JSON.stringify({ log: step.log })}\n\n`);
-                    currentStep++;
-                    setTimeout(sendStep, step.delay);
-                } else {
-                    res.write(`data: ${JSON.stringify({ 
-                        status: 'completed',
-                        message: 'Pull operation completed successfully',
-                        changes: { filesChanged: 5, insertions: 127, deletions: 43 }
-                    })}\n\n`);
-                    res.end();
-                }
-            };
-            
-            sendStep();
-            
-        } catch (error) {
-            res.status(500).json({ message: error.message });
+        const { branch } = req.query;
+        if (!branch || !/^[a-zA-Z0-9-_./]+$/.test(branch)) {
+            return res.status(400).json({ message: 'Valid branch is required' });
         }
+
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        });
+        const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+        const { spawn } = require('child_process');
+
+        const runStreaming = (cmd, args, label) => new Promise((resolve, reject) => {
+            send({ log: `\n$ ${label || (cmd + ' ' + args.join(' '))}` });
+            const child = spawn(cmd, args, { cwd: REPO_ROOT, shell: false });
+            child.stdout.on('data', d => d.toString().split(/\r?\n/).forEach(line => line && send({ log: line })));
+            child.stderr.on('data', d => d.toString().split(/\r?\n/).forEach(line => line && send({ log: line })));
+            child.on('error', reject);
+            child.on('close', code => code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`)));
+        });
+
+        (async () => {
+            try {
+                send({ log: `Fetching latest from origin (${branch})...` });
+                await runStreaming('git', ['fetch', 'origin', branch]);
+                send({ log: `Pulling changes...` });
+                await runStreaming('git', ['pull', 'origin', branch]);
+                send({
+                    status: 'completed',
+                    message: `Successfully pulled latest from ${branch}.`,
+                });
+                res.end();
+            } catch (err) {
+                send({ status: 'error', message: err.message });
+                res.end();
+            }
+        })();
+
+        req.on('close', () => { try { res.end(); } catch {} });
     });
     
     // --- REMOTE ACCESS ENDPOINTS (ZeroTier, PiTunnel, Ngrok, Dataplicity) ---
