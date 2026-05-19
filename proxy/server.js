@@ -2312,7 +2312,7 @@ async function startServer() {
             // --- PLACEHOLDER: User Activation Logic ---
             // TODO: Implement the following using your existing core functions:
 
-            async function extendSubscriptionDueDate(username: string, days: number = 30) {
+            async function extendSubscriptionDueDate(username, days = 30) {
                 // TODO: Call your existing function to extend client's subscription due date
                 console.log(`[PayMongo Webhook] Extending subscription for ${username} by ${days} days.`);
                 // Example:
@@ -2322,7 +2322,7 @@ async function startServer() {
                 // await db.run('UPDATE customers SET dueDate = ? WHERE username = ?', [newDueDate.toISOString().split('T')[0], username]);
             }
 
-            async function restoreMikroTikProfile(username: string) {
+            async function restoreMikroTikProfile(username) {
                 // TODO: Call your existing function to change user's secret profile from "Expired_Profile" back to active speed plan
                 console.log(`[PayMongo Webhook] Restoring MikroTik profile for ${username}.`);
                 // Example:
@@ -2333,7 +2333,7 @@ async function startServer() {
                 // }
             }
 
-            async function kickActiveSession(username: string) {
+            async function kickActiveSession(username) {
                 // TODO: Call your existing function to execute /ppp/active/remove on MikroTik
                 console.log(`[PayMongo Webhook] Kicking active session for ${username}.`);
                 // Example:
