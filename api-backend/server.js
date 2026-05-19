@@ -442,7 +442,8 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
                 await client.close();
             }
         } else {
-            const response = await req.routerInstance.get('/ppp/active');
+            // Generous timeout: routers with many active sessions can exceed the 15s default.
+            const response = await req.routerInstance.get('/ppp/active', { timeout: 60000 });
             
             // For REST, we can also fetch interface stats
             // Same issue: real-time speed (bits/sec) vs total bytes.
@@ -487,6 +488,54 @@ app.get('/:routerId/log/print', getRouter, async (req, res) => {
 });
 
 // 3b. PPP Active Traffic Monitor (New Endpoint)
+// Short-lived in-process cache for the per-router interface list, so we don't
+// re-fetch the (potentially huge) /interface table on every traffic poll.
+// Key: routerId, Value: { data: Interface[], expiresAt: number }
+const INTERFACE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const interfaceListCache = new Map();
+
+const fetchPppoeInterfaces = async (req) => {
+    const routerId = req.router.id;
+    const cached = interfaceListCache.get(routerId);
+    if (cached && cached.expiresAt > Date.now() && Array.isArray(cached.data) && cached.data.length > 0) {
+        return cached.data;
+    }
+
+    const client = req.routerInstance;
+    let interfaces = [];
+
+    if (req.router.api_type === 'legacy') {
+        try { await client.connect(); } catch (_) {}
+        try {
+            interfaces = await writeLegacySafe(client, ['/interface/print', '?type=pppoe-in']);
+            if (!interfaces || interfaces.length === 0) {
+                interfaces = await writeLegacySafe(client, ['/interface/print', '?dynamic=true']);
+            }
+        } catch (_) {}
+    } else {
+        // REST: use a generous per-request timeout; routers with thousands of dynamic
+        // PPPoE interfaces can take well over 15s to serialize the whole table.
+        const longTimeout = { timeout: 60000 };
+        const tryGet = async (url) => {
+            try {
+                const r = await client.get(url, longTimeout);
+                return Array.isArray(r.data) ? r.data : [];
+            } catch (_) {
+                return [];
+            }
+        };
+        // Prefer the narrowest filter first.
+        interfaces = await tryGet('/interface?type=pppoe-in');
+        if (!interfaces.length) interfaces = await tryGet('/interface?dynamic=true');
+        if (!interfaces.length) interfaces = await tryGet('/interface');
+    }
+
+    if (Array.isArray(interfaces) && interfaces.length > 0) {
+        interfaceListCache.set(routerId, { data: interfaces, expiresAt: Date.now() + INTERFACE_CACHE_TTL_MS });
+    }
+    return interfaces || [];
+};
+
 app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
     const { names } = req.body; // Array of ppp active names (usernames)
     if (!names || !Array.isArray(names) || names.length === 0) return res.json({});
@@ -497,25 +546,10 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
         // 1. Resolve Interface Names
         // We need to map PPP User Name -> Actual Interface Name
         // Standard is <pppoe-username>, but it varies.
-        // We fetch ALL pppoe-in interfaces to find matches.
+        // Cached lookup so high-frequency polling doesn't re-fetch every time.
         let interfaces = [];
         try {
-            if (req.router.api_type === 'legacy') {
-                await client.connect();
-                // Try fetching pppoe-in first
-                interfaces = await writeLegacySafe(client, ['/interface/print', '?type=pppoe-in']);
-                // If empty, fetch all dynamic interfaces as fallback
-                if (!interfaces || interfaces.length === 0) {
-                     interfaces = await writeLegacySafe(client, ['/interface/print', '?dynamic=true']);
-                }
-            } else {
-                const r = await client.get('/interface?type=pppoe-in');
-                interfaces = r.data;
-                if (!interfaces || interfaces.length === 0) {
-                     const r2 = await client.get('/interface?dynamic=true');
-                     interfaces = r2.data;
-                }
-            }
+            interfaces = await fetchPppoeInterfaces(req);
         } catch (err) {
             console.warn("Failed to fetch interfaces for mapping:", err.message);
         }
@@ -558,7 +592,8 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
         if (req.router.api_type === 'legacy') {
             // Legacy monitor-traffic
             try {
-                // client is already connected
+                // Ensure legacy connection is open (cache hits skip connect()).
+                try { await client.connect(); } catch (_) {}
                 // Legacy API uses real interface names — strip <> for dynamic interfaces.
                 const legacyNames = uniqueInterfaces.map(key => {
                     // key may be a .id like *1A or a display name; map back to a usable name.
@@ -622,12 +657,13 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
                 let lastErr = null;
                 for (const candidate of candidates) {
                     if (captured) break;
-                    // Two payload variants per candidate (boolean once and empty-string once)
+                    // Two payload variants per candidate (some RouterOS REST builds reject
+                    // boolean true for `once`, others reject empty string — try both).
+                    // Note: `numbers` is rejected by some firmwares with "unknown parameter numbers",
+                    // so we don't try it here.
                     const payloads = [
                         { interface: candidate, once: true },
                         { interface: candidate, once: '' },
-                        // numbers is the CLI-style alias accepted by some versions
-                        { numbers: candidate, once: true },
                     ];
                     for (const payload of payloads) {
                         try {
