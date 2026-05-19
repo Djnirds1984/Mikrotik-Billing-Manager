@@ -3217,7 +3217,185 @@ async function startServer() {
 
         req.on('close', () => { try { res.end(); } catch {} });
     });
-    
+
+    // ----- Update / Rollback (real implementations) -----
+    // Helper: SSE-stream a child process line by line and resolve when it exits.
+    const streamProcess = (sendFn, cmd, args, opts = {}) => new Promise((resolve, reject) => {
+        const { spawn } = require('child_process');
+        sendFn({ log: `\n$ ${cmd} ${args.join(' ')}` });
+        const child = spawn(cmd, args, { cwd: REPO_ROOT, shell: false, ...opts });
+        const onLine = (buf, isErr) => buf.toString().split(/\r?\n/).forEach(line => {
+            if (line) sendFn({ log: line, isError: !!isErr });
+        });
+        child.stdout.on('data', d => onLine(d, false));
+        child.stderr.on('data', d => onLine(d, false)); // npm/git emit progress on stderr; not real errors
+        child.on('error', reject);
+        child.on('close', code => code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`)));
+    });
+
+    // Detached PM2 restart so the restart command survives this process exiting.
+    const triggerPm2Restart = () => {
+        try {
+            const { spawn } = require('child_process');
+            const isWin = process.platform === 'win32';
+            // Restart all PM2 processes after a short delay to let the SSE response flush.
+            const cmd = isWin
+                ? ['cmd', ['/c', 'timeout /t 3 >NUL & pm2 restart all']]
+                : ['sh', ['-c', 'sleep 3 && pm2 restart all']];
+            const child = spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' });
+            child.unref();
+        } catch (e) {
+            console.warn('Failed to trigger PM2 restart:', e.message);
+        }
+    };
+
+    // POST /api/update-app  (SSE) — backup DB, git pull, npm install, build, restart
+    app.get('/api/update-app', protect, requireSuperadmin, (req, res) => {
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        });
+        const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+        (async () => {
+            try {
+                // 1) Detect current branch
+                send({ log: 'Detecting current branch...' });
+                const branch = (await ghExec('git rev-parse --abbrev-ref HEAD').catch(() => 'main')).trim() || 'main';
+                send({ log: `Branch: ${branch}` });
+
+                // 2) Backup the database before touching anything
+                try {
+                    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+                    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+                    const backupName = `panel_backup_${ts}.db`;
+                    const backupPath = path.join(BACKUP_DIR, backupName);
+                    if (fs.existsSync(DB_PATH)) {
+                        await fs.promises.copyFile(DB_PATH, backupPath);
+                        send({ log: `Database backed up to ${backupName}` });
+                    } else {
+                        send({ log: 'No existing panel.db found; skipping DB backup.' });
+                    }
+                } catch (be) {
+                    send({ log: `WARNING: DB backup failed: ${be.message}`, isError: true });
+                }
+
+                // 3) Stash any local changes so git pull never blocks on conflicts
+                send({ log: 'Stashing any local changes (safety)...' });
+                await streamProcess(send, 'git', ['stash', '--include-untracked']).catch(() => {});
+
+                // 4) Real git fetch + pull
+                send({ log: `Fetching latest from origin/${branch}...` });
+                await streamProcess(send, 'git', ['fetch', 'origin', branch]);
+                send({ log: `Pulling latest...` });
+                await streamProcess(send, 'git', ['pull', '--ff-only', 'origin', branch]);
+
+                // 5) Install dependencies (root)
+                send({ log: 'Installing root dependencies (npm install)...' });
+                const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+                await streamProcess(send, npmCmd, ['install', '--no-audit', '--no-fund']);
+
+                // 6) Install dependencies (proxy)
+                if (fs.existsSync(path.join(__dirname, 'package.json'))) {
+                    send({ log: 'Installing proxy dependencies...' });
+                    await streamProcess(send, npmCmd, ['install', '--no-audit', '--no-fund'], { cwd: __dirname }).catch(e => {
+                        send({ log: `proxy npm install warning: ${e.message}`, isError: true });
+                    });
+                }
+
+                // 7) Install dependencies (api-backend) if present
+                const apiBackendDir = path.join(REPO_ROOT, 'api-backend');
+                if (fs.existsSync(path.join(apiBackendDir, 'package.json'))) {
+                    send({ log: 'Installing api-backend dependencies...' });
+                    await streamProcess(send, npmCmd, ['install', '--no-audit', '--no-fund'], { cwd: apiBackendDir }).catch(e => {
+                        send({ log: `api-backend npm install warning: ${e.message}`, isError: true });
+                    });
+                }
+
+                // 8) Build frontend (best-effort; some deployments serve dev mode)
+                try {
+                    send({ log: 'Building frontend (npm run build)...' });
+                    await streamProcess(send, npmCmd, ['run', 'build']);
+                } catch (e) {
+                    send({ log: `Frontend build skipped/failed (continuing): ${e.message}`, isError: true });
+                }
+
+                send({ log: 'Update complete. Triggering PM2 restart...' });
+                send({ status: 'restarting', message: 'Update complete. Restarting services.' });
+
+                // Flush + close, then trigger restart
+                setTimeout(() => {
+                    try { res.end(); } catch {}
+                    triggerPm2Restart();
+                }, 500);
+            } catch (err) {
+                send({ log: `Update failed: ${err.message}`, isError: true });
+                send({ status: 'error', message: err.message });
+                try { res.end(); } catch {}
+            }
+        })();
+
+        req.on('close', () => { try { res.end(); } catch {} });
+    });
+
+    // GET /api/rollback-app?backupFile=xxx.db  (SSE) — restore DB then restart
+    app.get('/api/rollback-app', protect, requireSuperadmin, (req, res) => {
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        });
+        const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+        (async () => {
+            try {
+                const { backupFile } = req.query;
+                if (!backupFile || typeof backupFile !== 'string') {
+                    throw new Error('backupFile query parameter is required');
+                }
+                // Path safety
+                if (backupFile.includes('..') || backupFile.includes('/') || backupFile.includes('\\')) {
+                    throw new Error('Invalid backup filename');
+                }
+                if (!backupFile.endsWith('.db')) {
+                    throw new Error('Backup file must end in .db');
+                }
+                const backupPath = path.join(BACKUP_DIR, backupFile);
+                if (!backupPath.startsWith(BACKUP_DIR)) throw new Error('Invalid backup path');
+                if (!fs.existsSync(backupPath)) throw new Error(`Backup file not found: ${backupFile}`);
+
+                // Save a safety copy of the CURRENT DB before overwriting
+                try {
+                    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+                    const preRollbackName = `panel_pre_rollback_${ts}.db`;
+                    const preRollbackPath = path.join(BACKUP_DIR, preRollbackName);
+                    if (fs.existsSync(DB_PATH)) {
+                        await fs.promises.copyFile(DB_PATH, preRollbackPath);
+                        send({ log: `Pre-rollback snapshot saved as ${preRollbackName}` });
+                    }
+                } catch (e) {
+                    send({ log: `WARNING: pre-rollback snapshot failed: ${e.message}`, isError: true });
+                }
+
+                send({ log: `Restoring database from ${backupFile}...` });
+                await fs.promises.copyFile(backupPath, DB_PATH);
+                send({ log: 'Database restored.' });
+
+                send({ status: 'restarting', message: 'Rollback complete. Restarting services.' });
+                setTimeout(() => {
+                    try { res.end(); } catch {}
+                    triggerPm2Restart();
+                }, 500);
+            } catch (err) {
+                send({ log: `Rollback failed: ${err.message}`, isError: true });
+                send({ status: 'error', message: err.message });
+                try { res.end(); } catch {}
+            }
+        })();
+
+        req.on('close', () => { try { res.end(); } catch {} });
+    });
     // --- REMOTE ACCESS ENDPOINTS (ZeroTier, PiTunnel, Ngrok, Dataplicity) ---
     // Helper function to execute shell commands
     const runCommand = (cmd) => new Promise((resolve, reject) => {
