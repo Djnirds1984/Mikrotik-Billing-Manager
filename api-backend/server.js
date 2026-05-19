@@ -520,8 +520,8 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
             console.warn("Failed to fetch interfaces for mapping:", err.message);
         }
 
-        const interfaceMap = {}; // username -> interfaceName
-        const validInterfaceNames = [];
+        const interfaceMap = {}; // username -> { name, id }
+        const validInterfaceKeys = []; // we will prefer .id for REST monitor-traffic
 
         if (Array.isArray(interfaces)) {
             names.forEach(uName => {
@@ -536,14 +536,17 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
                 );
 
                 if (match) {
-                    interfaceMap[uName] = match.name;
-                    validInterfaceNames.push(match.name);
+                    const id = match['.id'] || match.id;
+                    interfaceMap[uName] = { name: match.name, id };
+                    // Prefer .id (e.g. *1A) for dynamic interfaces — display names with
+                    // angle brackets/spaces/commas are rejected by REST monitor-traffic.
+                    validInterfaceKeys.push(id || match.name);
                 }
             });
         }
 
         // Deduplicate
-        const uniqueInterfaces = [...new Set(validInterfaceNames)];
+        const uniqueInterfaces = [...new Set(validInterfaceKeys)];
         if (uniqueInterfaces.length === 0) {
              if (req.router.api_type === 'legacy') await client.close();
              return res.json({});
@@ -556,7 +559,14 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
             // Legacy monitor-traffic
             try {
                 // client is already connected
-                const cmd = ['/interface/monitor-traffic', `=interface=${uniqueInterfaces.join(',')}`, '=once'];
+                // Legacy API uses real interface names — strip <> for dynamic interfaces.
+                const legacyNames = uniqueInterfaces.map(key => {
+                    // key may be a .id like *1A or a display name; map back to a usable name.
+                    const entry = Object.values(interfaceMap).find(v => v.id === key || v.name === key);
+                    const rawName = entry?.name || key;
+                    return rawName.replace(/^</, '').replace(/>$/, '');
+                });
+                const cmd = ['/interface/monitor-traffic', `=interface=${legacyNames.join(',')}`, '=once'];
                 const stats = await writeLegacySafe(client, cmd);
                 
                 if (Array.isArray(stats)) {
@@ -564,8 +574,9 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
                         // We have stats for interface s.name.
                         // Find which user(s) map to this interface.
                         // This is reverse lookup.
-                        Object.entries(interfaceMap).forEach(([u, iName]) => {
-                            if (iName === s.name) {
+                        Object.entries(interfaceMap).forEach(([u, v]) => {
+                            const stripped = (v.name || '').replace(/^</, '').replace(/>$/, '');
+                            if (v.name === s.name || stripped === s.name) {
                                 result[u] = {
                                     rx: parseInt(s['rx-bits-per-second'] || 0),
                                     tx: parseInt(s['tx-bits-per-second'] || 0)
@@ -581,52 +592,73 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
             // REST: monitor-traffic per interface (some RouterOS REST versions reject
             // comma-separated lists or string 'true' for the `once` flag, returning 400).
             // Iterating individually keeps one bad interface from killing the whole batch.
-            // Build a reverse map: interfaceName -> [usernames]
+            // Build a reverse map: key (.id or name) -> [usernames]
             const reverseMap = {};
-            Object.entries(interfaceMap).forEach(([u, iName]) => {
-                if (!reverseMap[iName]) reverseMap[iName] = [];
-                reverseMap[iName].push(u);
+            Object.entries(interfaceMap).forEach(([u, v]) => {
+                const key = v.id || v.name;
+                if (!reverseMap[key]) reverseMap[key] = [];
+                reverseMap[key].push(u);
+                // Also index by name (in case the response echoes back name not .id)
+                if (v.name && v.name !== key) {
+                    if (!reverseMap[v.name]) reverseMap[v.name] = [];
+                    reverseMap[v.name].push(u);
+                }
             });
 
-            await Promise.all(uniqueInterfaces.map(async (iName) => {
-                try {
-                    // Use boolean `true` (not string 'true') and a single interface name
-                    const r = await client.post('/interface/monitor-traffic', {
-                        interface: iName,
-                        once: true,
-                    });
-                    const arr = Array.isArray(r.data) ? r.data : [r.data];
-                    arr.forEach(s => {
-                        const users = reverseMap[s.name] || reverseMap[iName] || [];
-                        users.forEach(u => {
-                            result[u] = {
-                                rx: parseInt(s['rx-bits-per-second'] || 0),
-                                tx: parseInt(s['tx-bits-per-second'] || 0),
-                            };
-                        });
-                    });
-                } catch (e) {
-                    // Retry once with the legacy 'once' string flag (older RouterOS REST builds)
-                    try {
-                        const r2 = await client.post('/interface/monitor-traffic', {
-                            interface: iName,
-                            once: '',
-                        });
-                        const arr2 = Array.isArray(r2.data) ? r2.data : [r2.data];
-                        arr2.forEach(s => {
-                            const users = reverseMap[s.name] || reverseMap[iName] || [];
-                            users.forEach(u => {
-                                result[u] = {
-                                    rx: parseInt(s['rx-bits-per-second'] || 0),
-                                    tx: parseInt(s['tx-bits-per-second'] || 0),
-                                };
+            await Promise.all(uniqueInterfaces.map(async (key) => {
+                const entry = Object.values(interfaceMap).find(v => v.id === key || v.name === key);
+                const fallbackName = entry ? (entry.name || '').replace(/^</, '').replace(/>$/, '') : key;
+
+                // Try a sequence of candidate values to satisfy different RouterOS REST builds:
+                // 1) .id (most reliable for dynamic interfaces with bracketed display names)
+                // 2) stripped name (no surrounding < >)
+                // 3) raw name (last resort)
+                const candidates = [];
+                if (entry?.id) candidates.push(entry.id);
+                if (fallbackName) candidates.push(fallbackName);
+                if (entry?.name && !candidates.includes(entry.name)) candidates.push(entry.name);
+
+                let captured = false;
+                let lastErr = null;
+                for (const candidate of candidates) {
+                    if (captured) break;
+                    // Two payload variants per candidate (boolean once and empty-string once)
+                    const payloads = [
+                        { interface: candidate, once: true },
+                        { interface: candidate, once: '' },
+                        // numbers is the CLI-style alias accepted by some versions
+                        { numbers: candidate, once: true },
+                    ];
+                    for (const payload of payloads) {
+                        try {
+                            const r = await client.post('/interface/monitor-traffic', payload);
+                            const arr = Array.isArray(r.data) ? r.data : [r.data];
+                            arr.forEach(s => {
+                                const users =
+                                    reverseMap[s.name] ||
+                                    reverseMap[candidate] ||
+                                    reverseMap[entry?.id] ||
+                                    reverseMap[entry?.name] ||
+                                    [];
+                                users.forEach(u => {
+                                    result[u] = {
+                                        rx: parseInt(s['rx-bits-per-second'] || 0),
+                                        tx: parseInt(s['tx-bits-per-second'] || 0),
+                                    };
+                                });
                             });
-                        });
-                    } catch (e2) {
-                        const status = e2.response?.status || e.response?.status;
-                        const detail = e2.response?.data?.detail || e2.response?.data?.message || e2.message;
-                        console.warn(`REST Traffic monitor failed for interface="${iName}" status=${status || 'n/a'}: ${detail}`);
+                            captured = true;
+                            break;
+                        } catch (e) {
+                            lastErr = e;
+                        }
                     }
+                }
+
+                if (!captured && lastErr) {
+                    const status = lastErr.response?.status;
+                    const detail = lastErr.response?.data?.detail || lastErr.response?.data?.message || lastErr.message;
+                    console.warn(`REST Traffic monitor failed for interface="${entry?.name || key}" status=${status || 'n/a'}: ${detail}`);
                 }
             }));
         }
