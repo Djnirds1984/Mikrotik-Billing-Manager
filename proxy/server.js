@@ -2220,9 +2220,14 @@ async function startServer() {
             const payload = {
                 data: {
                     attributes: {
-                        amount: Math.round(amount * 100), // PayMongo uses centavos
+                        line_items: [{
+                            name: planName || description || 'Internet Subscription',
+                            amount: Math.round(amount * 100), // PayMongo uses centavos
+                            currency: 'PHP',
+                            quantity: 1
+                        }],
+                        payment_method_types: ['gcash', 'card', 'paymaya', 'grab_pay'],
                         description: `${description}|${pppoeUsername}`,
-                        currency: 'PHP',
                         success_url: successUrl || `${req.headers.origin || 'http://localhost'}/payment/success`,
                         cancel_url: cancelUrl || `${req.headers.origin || 'http://localhost'}/payment/failed`,
                         metadata: {
