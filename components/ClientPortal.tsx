@@ -26,6 +26,25 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
   }, []);
 
+  // Restore client session on mount (so user stays logged in after PayMongo redirect)
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('clientPortalSession');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.pppoeUsername) {
+          setClientInfo(parsed);
+          setView('dashboard');
+          // Refresh live status/payments/tickets so the UI is up to date after the redirect
+          fetchStatus(parsed);
+          fetchClientTickets(parsed.pppoeUsername || parsed.username);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to restore client session', e);
+    }
+  }, []);
+
   // Detect ?payment=success in the URL after PayMongo redirect and render a receipt
   useEffect(() => {
     try {
@@ -64,6 +83,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
       if (!res.ok) { setError(data.message || 'Login failed'); return; }
       
       setClientInfo(data);
+      try { sessionStorage.setItem('clientPortalSession', JSON.stringify(data)); } catch {}
       setFeedback('Login successful');
       
       // Fetch Status using the returned routerId and pppoeUsername
@@ -275,7 +295,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 Welcome, {clientInfo?.username}!
                 <span className="ml-3 text-sm font-normal text-slate-600 dark:text-slate-300">Account Number: {clientInfo?.accountNumber || '—'}</span>
             </h1>
-            <button onClick={() => { setView('login'); setClientInfo(null); setUsername(''); setPassword(''); }} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
+            <button onClick={() => { try { sessionStorage.removeItem('clientPortalSession'); } catch {}; setView('login'); setClientInfo(null); setUsername(''); setPassword(''); }} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
