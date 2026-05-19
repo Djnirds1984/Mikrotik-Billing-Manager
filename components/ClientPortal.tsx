@@ -20,9 +20,33 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
+  const [paymentReceipt, setPaymentReceipt] = useState<{ user: string; amount: string; invoice: string; date: string } | null>(null);
   useEffect(() => {
     try { localStorage.setItem('suppressReload', '1'); } catch {}
     return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
+  }, []);
+
+  // Detect ?payment=success in the URL after PayMongo redirect and render a receipt
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('payment') === 'success') {
+        const user = params.get('user') || '';
+        const amount = params.get('amount') || '0';
+        const invoice = params.get('invoice') || `INV-${Date.now()}`;
+        setPaymentReceipt({
+          user,
+          amount,
+          invoice,
+          date: new Date().toLocaleString(),
+        });
+        // Clean the URL so refresh won't re-trigger the modal
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+    } catch (e) {
+      console.warn('Failed to parse payment URL params', e);
+    }
   }, []);
 
   // We don't need to fetch routers for login anymore as username is unique
@@ -188,6 +212,52 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     }
   };
 
+  // Reusable receipt overlay shown after successful PayMongo redirect
+  const paymentReceiptOverlay = paymentReceipt && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div className="bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-5 text-white text-center">
+          <div className="mx-auto w-14 h-14 rounded-full bg-white/20 flex items-center justify-center mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold">Payment Successful</h2>
+          <p className="text-sm opacity-90 mt-1">Your renewal is being processed</p>
+        </div>
+        <div className="p-6 space-y-4 text-slate-700 dark:text-slate-200">
+          <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
+            <span className="text-slate-500 dark:text-slate-400">Invoice No.</span>
+            <span className="font-semibold">{paymentReceipt.invoice}</span>
+          </div>
+          <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
+            <span className="text-slate-500 dark:text-slate-400">PPPoE User</span>
+            <span className="font-semibold">{paymentReceipt.user}</span>
+          </div>
+          <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
+            <span className="text-slate-500 dark:text-slate-400">Amount Paid</span>
+            <span className="font-bold text-emerald-600 dark:text-emerald-400 text-lg">
+              ₱{Number(paymentReceipt.amount).toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500 dark:text-slate-400">Date</span>
+            <span className="font-semibold">{paymentReceipt.date}</span>
+          </div>
+          <p className="text-xs text-center text-slate-500 dark:text-slate-400 pt-2">
+            Your subscription will be reactivated shortly. Please allow a few minutes for the system to apply your renewal.
+          </p>
+          <button
+            onClick={() => setPaymentReceipt(null)}
+            className="w-full mt-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   if (view === 'dashboard') {
     const planName = status?.profile || 'Unknown';
     const planPrice = payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
@@ -198,6 +268,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-6">
+        {paymentReceiptOverlay}
         <div className="max-w-5xl mx-auto space-y-6">
             <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded shadow">
             <h1 className="text-2xl font-semibold text-slate-800 dark:text-white">
@@ -493,6 +564,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 p-4">
+        {paymentReceiptOverlay}
         <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-lg shadow-lg p-8 space-y-6">
             <div className="text-center">
                 <h2 className="text-3xl font-bold text-slate-800 dark:text-white">Client Portal</h2>

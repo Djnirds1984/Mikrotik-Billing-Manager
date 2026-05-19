@@ -2217,6 +2217,12 @@ async function startServer() {
                 return res.status(400).json({ message: 'amount, description, and pppoeUsername are required.' });
             }
 
+            // Build dynamic success_url back to the client's own portal with invoice details
+            const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '') || 'http://localhost';
+            const invoiceNo = `INV-${Date.now()}`;
+            const dynamicSuccessUrl = `${origin}/client-portal?payment=success&user=${encodeURIComponent(pppoeUsername)}&amount=${encodeURIComponent(amount)}&invoice=${encodeURIComponent(invoiceNo)}`;
+            const dynamicCancelUrl = `${origin}/client-portal?payment=cancelled&user=${encodeURIComponent(pppoeUsername)}`;
+
             const payload = {
                 data: {
                     attributes: {
@@ -2228,11 +2234,12 @@ async function startServer() {
                         }],
                         payment_method_types: ['gcash', 'card', 'paymaya', 'grab_pay'],
                         description: `${description}|${pppoeUsername}`,
-                        success_url: successUrl || `${req.headers.origin || 'http://localhost'}/payment/success`,
-                        cancel_url: cancelUrl || `${req.headers.origin || 'http://localhost'}/payment/failed`,
+                        success_url: dynamicSuccessUrl,
+                        cancel_url: dynamicCancelUrl,
                         metadata: {
                             pppoe_username: pppoeUsername,
                             plan_name: planName || '',
+                            invoice_no: invoiceNo,
                         }
                     }
                 }
