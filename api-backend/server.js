@@ -578,23 +578,57 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
                 await client.close();
             }
         } else {
-            // REST
-            try {
-                const r = await client.post('/interface/monitor-traffic', { interface: uniqueInterfaces.join(','), once: 'true' });
-                const data = Array.isArray(r.data) ? r.data : [r.data]; // Handle single result
-                data.forEach(s => {
-                    Object.entries(interfaceMap).forEach(([u, iName]) => {
-                        if (iName === s.name) {
+            // REST: monitor-traffic per interface (some RouterOS REST versions reject
+            // comma-separated lists or string 'true' for the `once` flag, returning 400).
+            // Iterating individually keeps one bad interface from killing the whole batch.
+            // Build a reverse map: interfaceName -> [usernames]
+            const reverseMap = {};
+            Object.entries(interfaceMap).forEach(([u, iName]) => {
+                if (!reverseMap[iName]) reverseMap[iName] = [];
+                reverseMap[iName].push(u);
+            });
+
+            await Promise.all(uniqueInterfaces.map(async (iName) => {
+                try {
+                    // Use boolean `true` (not string 'true') and a single interface name
+                    const r = await client.post('/interface/monitor-traffic', {
+                        interface: iName,
+                        once: true,
+                    });
+                    const arr = Array.isArray(r.data) ? r.data : [r.data];
+                    arr.forEach(s => {
+                        const users = reverseMap[s.name] || reverseMap[iName] || [];
+                        users.forEach(u => {
                             result[u] = {
                                 rx: parseInt(s['rx-bits-per-second'] || 0),
-                                tx: parseInt(s['tx-bits-per-second'] || 0)
+                                tx: parseInt(s['tx-bits-per-second'] || 0),
                             };
-                        }
+                        });
                     });
-                });
-            } catch (e) {
-                 console.warn("REST Traffic monitor failed", e.message);
-            }
+                } catch (e) {
+                    // Retry once with the legacy 'once' string flag (older RouterOS REST builds)
+                    try {
+                        const r2 = await client.post('/interface/monitor-traffic', {
+                            interface: iName,
+                            once: '',
+                        });
+                        const arr2 = Array.isArray(r2.data) ? r2.data : [r2.data];
+                        arr2.forEach(s => {
+                            const users = reverseMap[s.name] || reverseMap[iName] || [];
+                            users.forEach(u => {
+                                result[u] = {
+                                    rx: parseInt(s['rx-bits-per-second'] || 0),
+                                    tx: parseInt(s['tx-bits-per-second'] || 0),
+                                };
+                            });
+                        });
+                    } catch (e2) {
+                        const status = e2.response?.status || e.response?.status;
+                        const detail = e2.response?.data?.detail || e2.response?.data?.message || e2.message;
+                        console.warn(`REST Traffic monitor failed for interface="${iName}" status=${status || 'n/a'}: ${detail}`);
+                    }
+                }
+            }));
         }
         
         res.json(result);
