@@ -22,3 +22,32 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# === Per-install user data (must NEVER be replaced by git pull) ===
+# SQLite databases (panel + superadmin + WAL/SHM sidecars)
+proxy/panel.db
+proxy/panel.db-shm
+proxy/panel.db-wal
+proxy/superadmin.db
+proxy/superadmin.db-shm
+proxy/superadmin.db-wal
+database.sqlite
+database.sqlite-shm
+database.sqlite-wal
+
+# Per-install machine identity (must persist across git pull / redeploy)
+proxy/.device-id
+
+# Local environment + runtime config (never overwrite on update)
+proxy/.env
+env.js
+env.js.save
+
+# Tunneling / runtime configs written by the app
+proxy/ngrok-config.json
+
+# User-uploaded files (application forms, etc.)
+proxy/uploads/
+
+# Backup snapshots created by the updater
+proxy/backups/

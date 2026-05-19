@@ -3249,6 +3249,85 @@ async function startServer() {
         }
     };
 
+    // ------------------------------------------------------------------
+    // PRESERVE LIST — files/dirs that hold per-install user data and must
+    // survive `git pull`. Even if .gitignore is incomplete on a particular
+    // checkout, the updater snapshots these aside before pulling and
+    // restores them afterward so an update can NEVER act like a factory
+    // reset.
+    // ------------------------------------------------------------------
+    const PRESERVE_PATHS = [
+        'proxy/panel.db',
+        'proxy/panel.db-shm',
+        'proxy/panel.db-wal',
+        'proxy/superadmin.db',
+        'proxy/superadmin.db-shm',
+        'proxy/superadmin.db-wal',
+        'proxy/.env',
+        'proxy/.device-id',
+        'proxy/ngrok-config.json',
+        'proxy/uploads',
+        'database.sqlite',
+        'database.sqlite-shm',
+        'database.sqlite-wal',
+        'env.js',
+    ];
+
+    // Recursively copy a file or directory (used for snapshot + restore).
+    const copyRecursive = (src, dest) => {
+        const stat = fs.statSync(src);
+        if (stat.isDirectory()) {
+            if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+            for (const entry of fs.readdirSync(src)) {
+                copyRecursive(path.join(src, entry), path.join(dest, entry));
+            }
+        } else {
+            const parent = path.dirname(dest);
+            if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+            fs.copyFileSync(src, dest);
+        }
+    };
+
+    // Snapshot every existing PRESERVE_PATHS entry into snapshotRoot,
+    // returning the list of relative paths actually captured.
+    const snapshotUserData = (sendFn, snapshotRoot) => {
+        const captured = [];
+        for (const rel of PRESERVE_PATHS) {
+            const src = path.join(REPO_ROOT, rel);
+            if (!fs.existsSync(src)) continue;
+            try {
+                const dest = path.join(snapshotRoot, rel);
+                copyRecursive(src, dest);
+                captured.push(rel);
+            } catch (e) {
+                sendFn({ log: `WARNING: failed to snapshot ${rel}: ${e.message}`, isError: true });
+            }
+        }
+        return captured;
+    };
+
+    // Restore captured paths from snapshotRoot back into REPO_ROOT,
+    // overwriting whatever git pull may have pulled in.
+    const restoreUserData = (sendFn, snapshotRoot, captured) => {
+        for (const rel of captured) {
+            const src = path.join(snapshotRoot, rel);
+            const dest = path.join(REPO_ROOT, rel);
+            if (!fs.existsSync(src)) continue;
+            try {
+                // Remove whatever git wrote so we cleanly overlay user data.
+                if (fs.existsSync(dest)) {
+                    const st = fs.statSync(dest);
+                    if (st.isDirectory()) fs.rmSync(dest, { recursive: true, force: true });
+                    else fs.unlinkSync(dest);
+                }
+                copyRecursive(src, dest);
+                sendFn({ log: `Preserved: ${rel}` });
+            } catch (e) {
+                sendFn({ log: `ERROR: failed to restore ${rel}: ${e.message}`, isError: true });
+            }
+        }
+    };
+
     // POST /api/update-app  (SSE) — backup DB, git pull, npm install, build, restart
     app.get('/api/update-app', protect, requireSuperadmin, (req, res) => {
         res.writeHead(200, {
@@ -3257,6 +3336,9 @@ async function startServer() {
             'Connection': 'keep-alive',
         });
         const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+        let snapshotRoot = null;
+        let capturedPaths = [];
 
         (async () => {
             try {
@@ -3281,6 +3363,22 @@ async function startServer() {
                     send({ log: `WARNING: DB backup failed: ${be.message}`, isError: true });
                 }
 
+                // 2b) SNAPSHOT all per-install user data (DBs, .env, uploads,
+                //     device-id, etc.) so git pull cannot wipe them. This is
+                //     the critical guard against the "updater performed a
+                //     factory reset" failure mode where these files were
+                //     accidentally tracked in git.
+                try {
+                    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    snapshotRoot = path.join(BACKUP_DIR, `pre_update_snapshot_${stamp}`);
+                    if (!fs.existsSync(snapshotRoot)) fs.mkdirSync(snapshotRoot, { recursive: true });
+                    send({ log: 'Snapshotting per-install user data before pull...' });
+                    capturedPaths = snapshotUserData(send, snapshotRoot);
+                    send({ log: `Snapshot captured ${capturedPaths.length} item(s): ${capturedPaths.join(', ') || '(none)'}` });
+                } catch (se) {
+                    send({ log: `WARNING: snapshot stage failed: ${se.message}`, isError: true });
+                }
+
                 // 3) Stash any local changes so git pull never blocks on conflicts
                 send({ log: 'Stashing any local changes (safety)...' });
                 await streamProcess(send, 'git', ['stash', '--include-untracked']).catch(() => {});
@@ -3290,6 +3388,15 @@ async function startServer() {
                 await streamProcess(send, 'git', ['fetch', 'origin', branch]);
                 send({ log: `Pulling latest...` });
                 await streamProcess(send, 'git', ['pull', '--ff-only', 'origin', branch]);
+
+                // 4b) RESTORE per-install user data on top of whatever git
+                //     pulled in. Anything in PRESERVE_PATHS now reflects the
+                //     pre-update state — DBs intact, routers intact,
+                //     .env intact, uploads intact, device id intact.
+                if (snapshotRoot && capturedPaths.length > 0) {
+                    send({ log: 'Restoring per-install user data after pull...' });
+                    restoreUserData(send, snapshotRoot, capturedPaths);
+                }
 
                 // 5) Install dependencies (root)
                 send({ log: 'Installing root dependencies (npm install)...' });
