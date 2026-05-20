@@ -246,6 +246,7 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
     const [isCheckingStatus, setIsCheckingStatus] = useState(false);
     const [isReregistering, setIsReregistering] = useState(false);
     const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+    const [isDisablingWebhook, setIsDisablingWebhook] = useState<string | null>(null);
     const [webhookToast, setWebhookToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
     const showWebhookToast = (type: 'success' | 'error', message: string) => {
@@ -309,6 +310,26 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
             showWebhookToast('error', `Webhook unreachable: ${(err as Error).message}`);
         } finally {
             setIsTestingWebhook(false);
+        }
+    };
+
+    const handleDisableWebhook = async (webhookId: string) => {
+        if (!confirm('Disable this webhook? It will no longer receive PayMongo events.')) return;
+        setIsDisablingWebhook(webhookId);
+        try {
+            const res = await fetch('/api/paymongo-webhook-disable', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+                body: JSON.stringify({ webhookId })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.message || 'Disable failed.');
+            showWebhookToast('success', data.message || 'Webhook disabled successfully.');
+            await handleCheckStatus();
+        } catch (err) {
+            showWebhookToast('error', `Disable failed: ${(err as Error).message}`);
+        } finally {
+            setIsDisablingWebhook(null);
         }
     };
 
@@ -414,13 +435,24 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                                     const isEnabled = wh.status === 'enabled';
                                     return (
                                         <div key={wh.id || idx} className="border border-slate-200 dark:border-slate-700 rounded-lg p-4 space-y-2">
-                                            <div className="flex items-center gap-2">
-                                                <span className={`inline-block w-2.5 h-2.5 rounded-full ${
-                                                    isEnabled ? 'bg-green-500' : 'bg-red-500'
-                                                }`} />
-                                                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                                                    Webhook {idx + 1} — {isEnabled ? 'Enabled' : 'Disabled'}
-                                                </span>
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${
+                                                        isEnabled ? 'bg-green-500' : 'bg-red-500'
+                                                    }`} />
+                                                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                                                        Webhook {idx + 1} — {isEnabled ? 'Enabled' : 'Disabled'}
+                                                    </span>
+                                                </div>
+                                                {!urlMatches && (
+                                                    <button
+                                                        onClick={() => handleDisableWebhook(wh.id)}
+                                                        disabled={isDisablingWebhook === wh.id}
+                                                        className="px-2 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {isDisablingWebhook === wh.id ? 'Disabling...' : 'Disable'}
+                                                    </button>
+                                                )}
                                             </div>
                                             <div className="grid grid-cols-1 gap-2 text-sm">
                                                 <div>

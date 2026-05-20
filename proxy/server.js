@@ -2381,6 +2381,9 @@ async function startServer() {
             const webhooks = listResp.data?.data || [];
             console.log(`[PayMongo Webhook] Found ${webhooks.length} existing webhook(s).`);
 
+            let correctWebhookId = null;
+            let result = null;
+
             // Check for a webhook that matches our URL, events, and is enabled
             const matching = webhooks.find(wh => {
                 const attrs = wh.attributes || {};
@@ -2401,78 +2404,104 @@ async function startServer() {
                     await db.run('UPDATE settings SET paymongoSettings = ? WHERE id = 1', [JSON.stringify(pSettings)]);
                     console.log('[PayMongo Webhook] Stored webhook secret from existing webhook.');
                 }
-                return { success: true, message: 'Webhook already correctly registered.', webhookId: matching.id, webhookUrl };
+                correctWebhookId = matching.id;
+                result = { success: true, message: 'Webhook already correctly registered.', webhookId: matching.id, webhookUrl };
             }
 
-            // Check for a matching URL but wrong events or disabled
-            const urlMatch = webhooks.find(wh => (wh.attributes?.url || '') === webhookUrl);
+            if (!correctWebhookId) {
+                // Check for a matching URL but wrong events or disabled
+                const urlMatch = webhooks.find(wh => (wh.attributes?.url || '') === webhookUrl);
 
-            if (urlMatch) {
-                const attrs = urlMatch.attributes || {};
-                const eventsMatch = requiredEvents.every(e => (attrs.events || []).includes(e))
-                    && requiredEvents.length === (attrs.events || []).length;
+                if (urlMatch) {
+                    const attrs = urlMatch.attributes || {};
+                    const eventsMatch = requiredEvents.every(e => (attrs.events || []).includes(e))
+                        && requiredEvents.length === (attrs.events || []).length;
 
-                if (!eventsMatch) {
-                    // Wrong events — disable old webhook and create new one
-                    console.log(`[PayMongo Webhook] Webhook ${urlMatch.id} has wrong events, disabling and recreating.`);
-                    try {
-                        await axios.post(`https://api.paymongo.com/v1/webhooks/${urlMatch.id}/disable`, {}, {
+                    if (!eventsMatch) {
+                        // Wrong events — disable old webhook and create new one
+                        console.log(`[PayMongo Webhook] Webhook ${urlMatch.id} has wrong events, disabling and recreating.`);
+                        try {
+                            await axios.post(`https://api.paymongo.com/v1/webhooks/${urlMatch.id}/disable`, {}, {
+                                headers: { 'Authorization': authHeader },
+                                timeout: 10000
+                            });
+                        } catch (disableErr) {
+                            console.warn('[PayMongo Webhook] Could not disable old webhook:', disableErr.response?.data || disableErr.message);
+                        }
+                    } else if (attrs.status === 'disabled') {
+                        // Right events, just disabled — enable it
+                        console.log(`[PayMongo Webhook] Webhook ${urlMatch.id} is disabled, enabling it.`);
+                        const enableResp = await axios.post(`https://api.paymongo.com/v1/webhooks/${urlMatch.id}/enable`, {}, {
                             headers: { 'Authorization': authHeader },
                             timeout: 10000
                         });
-                    } catch (disableErr) {
-                        console.warn('[PayMongo Webhook] Could not disable old webhook:', disableErr.response?.data || disableErr.message);
+                        const enabledWh = enableResp.data?.data;
+                        if (enabledWh?.attributes?.secret) {
+                            pSettings.webhookSecret = enabledWh.attributes.secret;
+                            await db.run('UPDATE settings SET paymongoSettings = ? WHERE id = 1', [JSON.stringify(pSettings)]);
+                            console.log('[PayMongo Webhook] Stored webhook secret from enabled webhook.');
+                        }
+                        console.log(`[PayMongo Webhook] Enabled webhook ${urlMatch.id}.`);
+                        correctWebhookId = urlMatch.id;
+                        result = { success: true, message: 'Existing webhook enabled.', webhookId: urlMatch.id, webhookUrl };
                     }
-                } else if (attrs.status === 'disabled') {
-                    // Right events, just disabled — enable it
-                    console.log(`[PayMongo Webhook] Webhook ${urlMatch.id} is disabled, enabling it.`);
-                    const enableResp = await axios.post(`https://api.paymongo.com/v1/webhooks/${urlMatch.id}/enable`, {}, {
-                        headers: { 'Authorization': authHeader },
-                        timeout: 10000
-                    });
-                    const enabledWh = enableResp.data?.data;
-                    if (enabledWh?.attributes?.secret) {
-                        pSettings.webhookSecret = enabledWh.attributes.secret;
-                        await db.run('UPDATE settings SET paymongoSettings = ? WHERE id = 1', [JSON.stringify(pSettings)]);
-                        console.log('[PayMongo Webhook] Stored webhook secret from enabled webhook.');
+                }
+            }
+
+            if (!correctWebhookId) {
+                // Create a new webhook
+                console.log(`[PayMongo Webhook] Creating new webhook at ${webhookUrl}...`);
+                const createResp = await axios.post('https://api.paymongo.com/v1/webhooks', {
+                    data: {
+                        attributes: {
+                            url: webhookUrl,
+                            events: requiredEvents
+                        }
                     }
-                    console.log(`[PayMongo Webhook] Enabled webhook ${urlMatch.id}.`);
-                    return { success: true, message: 'Existing webhook enabled.', webhookId: urlMatch.id, webhookUrl };
+                }, {
+                    headers: {
+                        'Authorization': authHeader,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 15000
+                });
+
+                const newWebhook = createResp.data?.data;
+                if (!newWebhook) {
+                    console.error('[PayMongo Webhook] PayMongo did not return webhook data after creation.');
+                    return { success: false, message: 'PayMongo did not return webhook data.' };
+                }
+
+                // Save the webhook secret to the database
+                if (newWebhook.attributes?.secret) {
+                    pSettings.webhookSecret = newWebhook.attributes.secret;
+                    await db.run('UPDATE settings SET paymongoSettings = ? WHERE id = 1', [JSON.stringify(pSettings)]);
+                    console.log('[PayMongo Webhook] Saved new webhook secret to database.');
+                }
+
+                console.log(`[PayMongo Webhook] Created webhook id=${newWebhook.id} at ${webhookUrl}`);
+                correctWebhookId = newWebhook.id;
+                result = { success: true, message: 'Webhook created and registered.', webhookId: newWebhook.id, webhookUrl };
+            }
+
+            // Disable stale webhooks with mismatched URLs
+            if (correctWebhookId) {
+                for (const wh of webhooks) {
+                    if (wh.id !== correctWebhookId && (wh.attributes?.url || '') !== webhookUrl) {
+                        try {
+                            await axios.post(`https://api.paymongo.com/v1/webhooks/${wh.id}/disable`, {}, {
+                                headers: { 'Authorization': authHeader },
+                                timeout: 10000
+                            });
+                            console.log(`[PayMongo Webhook] Disabled stale webhook: ${wh.id} -> ${wh.attributes?.url || ''}`);
+                        } catch (disableErr) {
+                            console.warn(`[PayMongo Webhook] Could not disable stale webhook ${wh.id}:`, disableErr.response?.data || disableErr.message);
+                        }
+                    }
                 }
             }
 
-            // Create a new webhook
-            console.log(`[PayMongo Webhook] Creating new webhook at ${webhookUrl}...`);
-            const createResp = await axios.post('https://api.paymongo.com/v1/webhooks', {
-                data: {
-                    attributes: {
-                        url: webhookUrl,
-                        events: requiredEvents
-                    }
-                }
-            }, {
-                headers: {
-                    'Authorization': authHeader,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 15000
-            });
-
-            const newWebhook = createResp.data?.data;
-            if (!newWebhook) {
-                console.error('[PayMongo Webhook] PayMongo did not return webhook data after creation.');
-                return { success: false, message: 'PayMongo did not return webhook data.' };
-            }
-
-            // Save the webhook secret to the database
-            if (newWebhook.attributes?.secret) {
-                pSettings.webhookSecret = newWebhook.attributes.secret;
-                await db.run('UPDATE settings SET paymongoSettings = ? WHERE id = 1', [JSON.stringify(pSettings)]);
-                console.log('[PayMongo Webhook] Saved new webhook secret to database.');
-            }
-
-            console.log(`[PayMongo Webhook] Created webhook id=${newWebhook.id} at ${webhookUrl}`);
-            return { success: true, message: 'Webhook created and registered.', webhookId: newWebhook.id, webhookUrl };
+            return result || { success: false, message: 'Webhook handling did not complete.' };
 
         } catch (err) {
             const errMsg = err.response?.data?.errors?.[0]?.detail || err.message;
@@ -2503,7 +2532,7 @@ async function startServer() {
                 url: wh.attributes?.url || '',
                 events: wh.attributes?.events || [],
                 status: wh.attributes?.status || 'unknown',
-                createdAt: wh.attributes?.created_at || null
+                createdAt: wh.attributes?.created_at ? wh.attributes.created_at * 1000 : null
             }));
 
             // Use the webhookUrl configured in System Settings
@@ -2531,6 +2560,38 @@ async function startServer() {
         } catch (err) {
             console.error('[PayMongo Webhook Re-register] Error:', err.message);
             res.status(500).json({ success: false, message: err.message });
+        }
+    });
+
+    // F. PayMongo Webhook Disable Endpoint
+    app.post('/api/paymongo-webhook-disable', protect, async (req, res) => {
+        try {
+            const { webhookId } = req.body;
+            if (!webhookId) {
+                return res.status(400).json({ success: false, message: 'webhookId is required.' });
+            }
+
+            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            let pSettings = {};
+            try { pSettings = JSON.parse(settings?.paymongoSettings || '{}'); } catch (_) {}
+
+            if (!pSettings.secretKey) {
+                return res.status(400).json({ success: false, message: 'PayMongo secret key not configured.' });
+            }
+
+            const authHeader = `Basic ${Buffer.from(pSettings.secretKey + ':').toString('base64')}`;
+
+            await axios.post(`https://api.paymongo.com/v1/webhooks/${webhookId}/disable`, {}, {
+                headers: { 'Authorization': authHeader },
+                timeout: 10000
+            });
+
+            console.log(`[PayMongo Webhook] Manually disabled webhook: ${webhookId}`);
+            res.json({ success: true, message: 'Webhook disabled successfully.' });
+        } catch (err) {
+            const errMsg = err.response?.data?.errors?.[0]?.detail || err.message;
+            console.error('[PayMongo Webhook Disable] Error:', errMsg);
+            res.status(500).json({ success: false, message: errMsg });
         }
     });
 
