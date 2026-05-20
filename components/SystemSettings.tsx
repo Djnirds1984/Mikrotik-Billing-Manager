@@ -235,6 +235,97 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
         setSettings(s => ({ ...s, paymongoSettings: { ...s.paymongoSettings, [field]: value } as PayMongoSettings }));
     };
 
+    // Webhook diagnostics state
+    const [webhookStatus, setWebhookStatus] = useState<{
+        configured: boolean;
+        webhooks: Array<{ id: string; url: string; events: string[]; status: string; createdAt: string | null }>;
+        expectedUrl: string;
+        webhookSecretStored: boolean;
+        message: string;
+    } | null>(null);
+    const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+    const [isReregistering, setIsReregistering] = useState(false);
+    const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+    const [webhookToast, setWebhookToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+    const showWebhookToast = (type: 'success' | 'error', message: string) => {
+        setWebhookToast({ type, message });
+        setTimeout(() => setWebhookToast(null), 5000);
+    };
+
+    const handleCheckStatus = async () => {
+        setIsCheckingStatus(true);
+        try {
+            const res = await fetch('/api/paymongo-webhook-status', {
+                headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message || 'Failed to fetch webhook status.');
+            setWebhookStatus(data);
+        } catch (err) {
+            showWebhookToast('error', `Status check failed: ${(err as Error).message}`);
+        } finally {
+            setIsCheckingStatus(false);
+        }
+    };
+
+    const handleReregister = async () => {
+        if (!confirm('This will re-register your PayMongo webhook. Any existing webhook with a different URL will be replaced. Continue?')) return;
+        setIsReregistering(true);
+        try {
+            const res = await fetch('/api/paymongo-webhook-reregister', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeader() }
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.message || 'Re-registration failed.');
+            showWebhookToast('success', data.message || 'Webhook re-registered successfully.');
+            // Refresh status after re-register
+            await handleCheckStatus();
+        } catch (err) {
+            showWebhookToast('error', `Re-register failed: ${(err as Error).message}`);
+        } finally {
+            setIsReregistering(false);
+        }
+    };
+
+    const handleTestWebhook = async () => {
+        setIsTestingWebhook(true);
+        try {
+            const res = await fetch('/api/paymongo-webhook', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ test: true })
+            });
+            const data = await res.json();
+            if (res.status === 400 && data.message?.includes('signature')) {
+                showWebhookToast('success', 'Webhook endpoint is reachable (returned expected signature validation error).');
+            } else if (res.ok) {
+                showWebhookToast('success', 'Webhook endpoint is reachable and responded OK.');
+            } else {
+                showWebhookToast('error', `Webhook endpoint responded: ${data.message || res.status}`);
+            }
+        } catch (err) {
+            showWebhookToast('error', `Webhook unreachable: ${(err as Error).message}`);
+        } finally {
+            setIsTestingWebhook(false);
+        }
+    };
+
+    const getHealthColor = () => {
+        if (!webhookStatus || !webhookStatus.configured) return 'gray';
+        if (webhookStatus.webhooks.length === 0) return 'red';
+        const wh = webhookStatus.webhooks[0];
+        const urlMatches = wh.url === webhookStatus.expectedUrl;
+        const hasEvents = wh.events && wh.events.length > 0;
+        const isEnabled = wh.status === 'enabled';
+        if (urlMatches && hasEvents && isEnabled) return 'green';
+        if (wh.url || hasEvents) return 'yellow';
+        return 'red';
+    };
+
+    const healthColor = getHealthColor();
+
     return (
         <SettingsSection title="PayMongo Payment Gateway">
             <Toggle label="Enable PayMongo Payments" checked={paymongo.enabled || false} onChange={c => update('enabled', c)} />
@@ -252,6 +343,138 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                         When ON: customers pay an extra convenience fee so you receive 100% of the plan price.
                         When OFF: you absorb the PayMongo gateway fee from the plan price.
                     </p>
+                </div>
+
+                {/* Webhook Diagnostics Section */}
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-4">
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                        Webhook Diagnostics
+                        {webhookStatus && (
+                            <span className={`inline-block w-3 h-3 rounded-full ${
+                                healthColor === 'green' ? 'bg-green-500' :
+                                healthColor === 'yellow' ? 'bg-yellow-500' :
+                                healthColor === 'red' ? 'bg-red-500' :
+                                'bg-slate-400'
+                            }`} title={`Health: ${healthColor}`} />
+                        )}
+                    </h4>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={handleCheckStatus}
+                            disabled={isCheckingStatus || !paymongo.secretKey}
+                            className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isCheckingStatus ? 'Checking...' : 'Check Status'}
+                        </button>
+                        <button
+                            onClick={handleReregister}
+                            disabled={isReregistering || !paymongo.secretKey}
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isReregistering ? 'Registering...' : 'Re-register Webhook'}
+                        </button>
+                        <button
+                            onClick={handleTestWebhook}
+                            disabled={isTestingWebhook}
+                            className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isTestingWebhook ? 'Testing...' : 'Test Webhook'}
+                        </button>
+                    </div>
+
+                    {/* Toast Notification */}
+                    {webhookToast && (
+                        <div className={`p-3 rounded-md text-sm ${
+                            webhookToast.type === 'success'
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
+                        }`}>
+                            {webhookToast.message}
+                        </div>
+                    )}
+
+                    {/* Webhook Status Display */}
+                    {webhookStatus && (
+                        <div className="space-y-3">
+                            {!webhookStatus.configured ? (
+                                <div className="p-3 rounded-md bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-sm">
+                                    {webhookStatus.message}
+                                </div>
+                            ) : webhookStatus.webhooks.length === 0 ? (
+                                <div className="p-3 rounded-md bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-sm">
+                                    No webhooks registered. Click "Re-register Webhook" to create one.
+                                </div>
+                            ) : (
+                                webhookStatus.webhooks.map((wh, idx) => {
+                                    const urlMatches = wh.url === webhookStatus.expectedUrl;
+                                    const isEnabled = wh.status === 'enabled';
+                                    return (
+                                        <div key={wh.id || idx} className="border border-slate-200 dark:border-slate-700 rounded-lg p-4 space-y-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`inline-block w-2.5 h-2.5 rounded-full ${
+                                                    isEnabled ? 'bg-green-500' : 'bg-red-500'
+                                                }`} />
+                                                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                                                    Webhook {idx + 1} — {isEnabled ? 'Enabled' : 'Disabled'}
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-2 text-sm">
+                                                <div>
+                                                    <span className="text-slate-500 dark:text-slate-400">URL: </span>
+                                                    <span className={`font-mono text-xs break-all ${
+                                                        urlMatches ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
+                                                    }`}>
+                                                        {wh.url || '(empty)'}
+                                                    </span>
+                                                    {!urlMatches && (
+                                                        <span className="ml-2 text-xs text-red-600 dark:text-red-400 font-medium">(URL mismatch)</span>
+                                                    )}
+                                                </div>
+                                                <div>
+                                                    <span className="text-slate-500 dark:text-slate-400">Events: </span>
+                                                    <span className="font-mono text-xs">
+                                                        {wh.events.length > 0 ? wh.events.join(', ') : '(none)'}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-slate-500 dark:text-slate-400">Created: </span>
+                                                    <span className="text-xs">{wh.createdAt ? new Date(wh.createdAt).toLocaleString() : 'Unknown'}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+
+                            {/* Expected URL */}
+                            {webhookStatus.configured && (
+                                <div className="text-sm">
+                                    <span className="text-slate-500 dark:text-slate-400">Expected URL: </span>
+                                    <span className="font-mono text-xs text-slate-700 dark:text-slate-300">{webhookStatus.expectedUrl}</span>
+                                </div>
+                            )}
+
+                            {/* Webhook Secret Status */}
+                            <div className="text-sm flex items-center gap-2">
+                                <span className={`inline-block w-2.5 h-2.5 rounded-full ${
+                                    webhookStatus.webhookSecretStored ? 'bg-green-500' : 'bg-red-500'
+                                }`} />
+                                <span className="text-slate-500 dark:text-slate-400">Webhook Secret: </span>
+                                <span className={webhookStatus.webhookSecretStored ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}>
+                                    {webhookStatus.webhookSecretStored ? 'Stored locally' : 'Not stored — enter it in the Webhook Secret field above'}
+                                </span>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Hint when no status checked yet */}
+                    {!webhookStatus && paymongo.enabled && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Click "Check Status" to verify your PayMongo webhook configuration.
+                        </p>
+                    )}
                 </div>
             </div>
         </SettingsSection>

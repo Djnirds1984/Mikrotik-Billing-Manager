@@ -2347,6 +2347,223 @@ async function startServer() {
 
     app.use('/api/payments', paymongoRouter);
 
+    // C. PayMongo Webhook Auto-Registration
+    async function ensurePayMongoWebhook() {
+        const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+        if (!settings || !settings.paymongoSettings) {
+            console.log('[PayMongo Webhook] PayMongo settings not configured, skipping webhook registration.');
+            return { success: false, message: 'PayMongo settings not configured.' };
+        }
+
+        const pSettings = JSON.parse(settings.paymongoSettings);
+        if (!pSettings.secretKey) {
+            console.log('[PayMongo Webhook] PayMongo secret key not set, skipping webhook registration.');
+            return { success: false, message: 'PayMongo secret key not set.' };
+        }
+
+        // Determine the public domain for the webhook URL
+        // Priority: 1) paymongoSettings.webhookDomain  2) Check Cloudflare/ngrok tunnel  3) Fallback to billing.ajcvendosystem.com
+        let domain = pSettings.webhookDomain || null;
+        if (!domain) {
+            try {
+                // Try to get Cloudflare Tunnel hostname from systemd config
+                const cfConfig = await runCommand('cat /etc/cloudflared/config.yml 2>/dev/null || cat /root/.cloudflared/config.yml 2>/dev/null').catch(() => '');
+                const hostnameMatch = cfConfig.match(/hostname:\s*(.+)/);
+                if (hostnameMatch) domain = hostnameMatch[1].trim();
+            } catch (_) {}
+        }
+        if (!domain) {
+            try {
+                // Try ngrok tunnel URL
+                const tunnels = await axios.get('http://127.0.0.1:4040/api/tunnels', { timeout: 3000 }).catch(() => null);
+                if (tunnels?.data?.tunnels?.[0]?.public_url) {
+                    const ngrokUrl = new URL(tunnels.data.tunnels[0].public_url);
+                    domain = ngrokUrl.hostname;
+                }
+            } catch (_) {}
+        }
+        if (!domain) {
+            domain = 'billing.ajcvendosystem.com';
+            console.log('[PayMongo Webhook] No tunnel domain detected, using fallback:', domain);
+        }
+
+        const webhookUrl = `https://${domain}/api/paymongo-webhook`;
+        const requiredEvents = ['checkout_session.payment.paid'];
+        const authHeader = `Basic ${Buffer.from(pSettings.secretKey + ':').toString('base64')}`;
+
+        try {
+            // List existing webhooks
+            const listResp = await axios.get('https://api.paymongo.com/v1/webhooks', {
+                headers: { 'Authorization': authHeader },
+                timeout: 15000
+            });
+
+            const webhooks = listResp.data?.data || [];
+            console.log(`[PayMongo Webhook] Found ${webhooks.length} existing webhook(s).`);
+
+            // Check for a webhook that matches our URL, events, and is enabled
+            const matching = webhooks.find(wh => {
+                const attrs = wh.attributes || {};
+                const url = attrs.url || '';
+                const events = attrs.events || [];
+                const enabled = attrs.status === 'enabled';
+                return url === webhookUrl
+                    && requiredEvents.every(e => events.includes(e))
+                    && requiredEvents.length === events.length
+                    && enabled;
+            });
+
+            if (matching) {
+                console.log(`[PayMongo Webhook] Correct webhook already registered (id=${matching.id}).`);
+                // Ensure webhookSecret is stored
+                if (matching.attributes?.secret && !pSettings.webhookSecret) {
+                    pSettings.webhookSecret = matching.attributes.secret;
+                    await db.run('UPDATE settings SET paymongoSettings = ? WHERE id = 1', [JSON.stringify(pSettings)]);
+                    console.log('[PayMongo Webhook] Stored webhook secret from existing webhook.');
+                }
+                return { success: true, message: 'Webhook already correctly registered.', webhookId: matching.id, webhookUrl };
+            }
+
+            // Check for a matching URL but wrong events or disabled
+            const urlMatch = webhooks.find(wh => (wh.attributes?.url || '') === webhookUrl);
+
+            if (urlMatch) {
+                const attrs = urlMatch.attributes || {};
+                const eventsMatch = requiredEvents.every(e => (attrs.events || []).includes(e))
+                    && requiredEvents.length === (attrs.events || []).length;
+
+                if (!eventsMatch) {
+                    // Wrong events — disable old webhook and create new one
+                    console.log(`[PayMongo Webhook] Webhook ${urlMatch.id} has wrong events, disabling and recreating.`);
+                    try {
+                        await axios.post(`https://api.paymongo.com/v1/webhooks/${urlMatch.id}/disable`, {}, {
+                            headers: { 'Authorization': authHeader },
+                            timeout: 10000
+                        });
+                    } catch (disableErr) {
+                        console.warn('[PayMongo Webhook] Could not disable old webhook:', disableErr.response?.data || disableErr.message);
+                    }
+                } else if (attrs.status === 'disabled') {
+                    // Right events, just disabled — enable it
+                    console.log(`[PayMongo Webhook] Webhook ${urlMatch.id} is disabled, enabling it.`);
+                    const enableResp = await axios.post(`https://api.paymongo.com/v1/webhooks/${urlMatch.id}/enable`, {}, {
+                        headers: { 'Authorization': authHeader },
+                        timeout: 10000
+                    });
+                    const enabledWh = enableResp.data?.data;
+                    if (enabledWh?.attributes?.secret) {
+                        pSettings.webhookSecret = enabledWh.attributes.secret;
+                        await db.run('UPDATE settings SET paymongoSettings = ? WHERE id = 1', [JSON.stringify(pSettings)]);
+                        console.log('[PayMongo Webhook] Stored webhook secret from enabled webhook.');
+                    }
+                    console.log(`[PayMongo Webhook] Enabled webhook ${urlMatch.id}.`);
+                    return { success: true, message: 'Existing webhook enabled.', webhookId: urlMatch.id, webhookUrl };
+                }
+            }
+
+            // Create a new webhook
+            console.log(`[PayMongo Webhook] Creating new webhook at ${webhookUrl}...`);
+            const createResp = await axios.post('https://api.paymongo.com/v1/webhooks', {
+                data: {
+                    attributes: {
+                        url: webhookUrl,
+                        events: requiredEvents
+                    }
+                }
+            }, {
+                headers: {
+                    'Authorization': authHeader,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 15000
+            });
+
+            const newWebhook = createResp.data?.data;
+            if (!newWebhook) {
+                console.error('[PayMongo Webhook] PayMongo did not return webhook data after creation.');
+                return { success: false, message: 'PayMongo did not return webhook data.' };
+            }
+
+            // Save the webhook secret to the database
+            if (newWebhook.attributes?.secret) {
+                pSettings.webhookSecret = newWebhook.attributes.secret;
+                await db.run('UPDATE settings SET paymongoSettings = ? WHERE id = 1', [JSON.stringify(pSettings)]);
+                console.log('[PayMongo Webhook] Saved new webhook secret to database.');
+            }
+
+            console.log(`[PayMongo Webhook] Created webhook id=${newWebhook.id} at ${webhookUrl}`);
+            return { success: true, message: 'Webhook created and registered.', webhookId: newWebhook.id, webhookUrl };
+
+        } catch (err) {
+            const errMsg = err.response?.data?.errors?.[0]?.detail || err.message;
+            console.error('[PayMongo Webhook] Registration failed:', errMsg);
+            return { success: false, message: `Webhook registration failed: ${errMsg}` };
+        }
+    }
+
+    // D. PayMongo Webhook Status Endpoint
+    app.get('/api/paymongo-webhook-status', protect, async (req, res) => {
+        try {
+            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            let pSettings = {};
+            try { pSettings = JSON.parse(settings?.paymongoSettings || '{}'); } catch (_) {}
+
+            if (!pSettings.secretKey) {
+                return res.json({ configured: false, webhooks: [], message: 'PayMongo secret key not configured.' });
+            }
+
+            const authHeader = `Basic ${Buffer.from(pSettings.secretKey + ':').toString('base64')}`;
+            const listResp = await axios.get('https://api.paymongo.com/v1/webhooks', {
+                headers: { 'Authorization': authHeader },
+                timeout: 15000
+            });
+
+            const webhooks = (listResp.data?.data || []).map(wh => ({
+                id: wh.id,
+                url: wh.attributes?.url || '',
+                events: wh.attributes?.events || [],
+                status: wh.attributes?.status || 'unknown',
+                createdAt: wh.attributes?.created_at || null
+            }));
+
+            // Determine the expected webhook URL
+            let domain = pSettings.webhookDomain || null;
+            if (!domain) {
+                try {
+                    const cfConfig = await runCommand('cat /etc/cloudflared/config.yml 2>/dev/null || cat /root/.cloudflared/config.yml 2>/dev/null').catch(() => '');
+                    const hostnameMatch = cfConfig.match(/hostname:\s*(.+)/);
+                    if (hostnameMatch) domain = hostnameMatch[1].trim();
+                } catch (_) {}
+            }
+            if (!domain) domain = 'billing.ajcvendosystem.com';
+
+            const expectedUrl = `https://${domain}/api/paymongo-webhook`;
+
+            res.json({
+                configured: true,
+                webhooks,
+                expectedUrl,
+                webhookSecretStored: !!pSettings.webhookSecret,
+                message: `Found ${webhooks.length} webhook(s).`
+            });
+        } catch (err) {
+            const errMsg = err.response?.data?.errors?.[0]?.detail || err.message;
+            console.error('[PayMongo Webhook Status] Error:', errMsg);
+            res.status(500).json({ configured: false, webhooks: [], message: errMsg });
+        }
+    });
+
+    // E. PayMongo Webhook Re-Register Endpoint
+    app.post('/api/paymongo-webhook-reregister', protect, async (req, res) => {
+        try {
+            const result = await ensurePayMongoWebhook();
+            res.json(result);
+        } catch (err) {
+            console.error('[PayMongo Webhook Re-register] Error:', err.message);
+            res.status(500).json({ success: false, message: err.message });
+        }
+    });
+
     // B. Standalone Webhook Endpoint (NO auth middleware - must be public for PayMongo)
     app.post('/api/paymongo-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
         try {
@@ -4416,6 +4633,17 @@ WantedBy=multi-user.target`;
     app.listen(PORT, () => {
         console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
         console.log(`   Mode: Production (Static Files Served)`);
+
+        // Auto-register PayMongo webhook on startup
+        ensurePayMongoWebhook().then(result => {
+            if (result.success) {
+                console.log(`[PayMongo Webhook] Startup check: ${result.message}`);
+            } else {
+                console.warn(`[PayMongo Webhook] Startup check: ${result.message}`);
+            }
+        }).catch(err => {
+            console.warn('[PayMongo Webhook] Startup registration failed (non-fatal):', err.message);
+        });
     });
 
     // --- CAPTIVE PORTAL SERVER ---
