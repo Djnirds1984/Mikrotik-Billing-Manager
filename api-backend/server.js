@@ -1878,12 +1878,17 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
             };
 
             const { restMethod, restUrl, restData } = translateToRest(endpoint, method, body);
-            console.log(`[REST Proxy] ${restMethod} ${restUrl}`);
+
+            // Forward query parameters from the incoming request to the MikroTik REST API
+            const queryParams = new URLSearchParams(req.query).toString();
+            const finalUrl = queryParams ? `${restUrl}?${queryParams}` : restUrl;
+
+            console.log(`[REST Proxy] ${restMethod} ${finalUrl}`);
 
             try {
                 const response = await instance.request({
                     method: restMethod,
-                    url: restUrl,
+                    url: finalUrl,
                     data: restData
                 });
                 res.json(response.data);

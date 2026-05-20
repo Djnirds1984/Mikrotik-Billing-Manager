@@ -3022,9 +3022,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 { timeout: 20000 }
             );
             const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
-            const secret = secrets[0];
-            if (!secret) {
-                console.error(`[PayMongo Verify] PPP secret not found for user: ${pppoeUsername}`);
+            // Defensive: ensure we got the right user, not just the first secret in the list
+            const secret = secrets.find(s => s.name === pppoeUsername) || secrets[0];
+            if (!secret || secret.name !== pppoeUsername) {
+                console.error(`[PayMongo Verify] PPP secret not found for user: ${pppoeUsername}. Got: ${secret?.name || 'none'}`);
                 return res.status(200).json({ success: false, message: 'PPP secret not found on router.' });
             }
 
@@ -3222,9 +3223,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log('[PayMongo Webhook] Processing payment for user:', pppoeUsername, 'on router:', routerId);
             const secretResp = await axios.get(`${API_BACKEND}/${routerId}/ppp/secret?name=${encodeURIComponent(pppoeUsername)}`, { timeout: 20000 });
             const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
-            const secret = secrets[0];
-            if (!secret) {
-                console.error(`[PayMongo Webhook] PPP secret not found for user: ${pppoeUsername}`);
+            // Defensive: ensure we got the right user, not just the first secret in the list
+            const secret = secrets.find(s => s.name === pppoeUsername) || secrets[0];
+            if (!secret || secret.name !== pppoeUsername) {
+                console.error(`[PayMongo Webhook] PPP secret not found for user: ${pppoeUsername}. Got: ${secret?.name || 'none'}`);
                 return res.status(200).json({ message: 'PPP secret not found, skipping.', pppoeUsername });
             }
 
