@@ -340,8 +340,19 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   if (view === 'dashboard') {
     const planName = status?.profile || 'Unknown';
     const planPrice = payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
-    const isActive = !!status?.active;
-    const overallStatus = isActive ? 'Active' : 'Expired';
+
+    // Determine subscription status by profile + due date, NOT by whether
+    // the PPPoE session is currently connected. A user who is temporarily
+    // offline but has a valid subscription should still show "Active".
+    const isNonPaymentProfile = (status?.profile || '').toLowerCase() === 'non-payment';
+    const dueDateStr = status?.comment || '';
+    // Compare due date to current date in UTC so timezone offsets don't
+    // make a future due date appear expired.
+    const isPastDue = dueDateStr
+      ? new Date(dueDateStr + (dueDateStr.includes('T') ? '' : 'T23:59:59Z')).getTime() < Date.now()
+      : false;
+    const overallStatus = isNonPaymentProfile || isPastDue ? 'Expired' : 'Active';
+    const isConnected = !!status?.active;
     const lastPayment = payments[0] || null;
     const expires = status?.comment || (lastPayment?.newExpiry || lastPayment?.date);
     
@@ -364,7 +375,8 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">PPPoE Account:</span> {clientInfo?.pppoeUsername}</div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Account Number:</span> {clientInfo?.accountNumber || '—'}</div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Current Plan:</span> {planName}{planPrice ? ` (₱${Number(planPrice).toFixed(2)}/mo)` : ''}</div>
-                <div><span className="font-medium text-slate-800 dark:text-slate-200">Overall Status:</span> <span className={`px-2 py-1 rounded text-xs font-bold ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{overallStatus}</span></div>
+                <div><span className="font-medium text-slate-800 dark:text-slate-200">Overall Status:</span> <span className={`px-2 py-1 rounded text-xs font-bold ${overallStatus === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{overallStatus}</span></div>
+                <div><span className="font-medium text-slate-800 dark:text-slate-200">Connection:</span> <span className={`px-2 py-1 rounded text-xs font-bold ${isConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{isConnected ? 'Online' : 'Offline'}</span></div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Subscription Expires:</span> {expires || 'Unknown'}</div>
                 <div className="pt-4">
                     <button
