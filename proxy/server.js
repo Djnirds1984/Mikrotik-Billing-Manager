@@ -1832,17 +1832,17 @@ async function startServer() {
             let planName = '';
             try {
                 const c = JSON.parse(comment || '{}');
-                profile = c.plan || profile || '';
+                // Do NOT overwrite profile from comment — keep the live MikroTik profile
                 due = c.dueDateTime || c.dueDate || '';
                 planName = c.planName || c.plan || '';
             } catch (_) {}
-            // Look up billing plan by planName or pppoeProfile
+            // Look up billing plan: current MikroTik profile first, then fall back to comment planName
             let planRow = null;
-            if (planName) {
-                planRow = await db.get('SELECT name, price, currency FROM billing_plans WHERE name = ? AND routerId = ?', [planName, routerId]);
-            }
-            if (!planRow && profile) {
+            if (profile) {
                 planRow = await db.get('SELECT name, price, currency FROM billing_plans WHERE pppoeProfile = ? AND routerId = ?', [profile, routerId]);
+            }
+            if (!planRow && planName) {
+                planRow = await db.get('SELECT name, price, currency FROM billing_plans WHERE name = ? AND routerId = ?', [planName, routerId]);
             }
             if (!planRow && profile) {
                 planRow = await db.get('SELECT name, price, currency FROM billing_plans WHERE name = ? AND routerId = ?', [profile, routerId]);
