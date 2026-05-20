@@ -2925,179 +2925,16 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         res.json({ status: 'ok', message: 'PayMongo webhook endpoint is reachable', timestamp: Date.now() });
     });
 
-    // H. PayMongo Verify Payment (fallback for when Cloudflare blocks webhook delivery)
-    // Called by the client portal after a successful PayMongo redirect.
-    // Accepts { invoiceNo, pppoeUsername } - looks up the stored session, verifies with PayMongo,
-    // and runs the same subscription extension logic as the webhook handler.
+    // H. PayMongo Verify Payment (DEPRECATED)
+    // Previously used as a frontend fallback when webhooks were blocked.
+    // Nginx reverse proxy now delivers webhooks directly, so this endpoint
+    // only returns a deprecation notice for backward compatibility.
+    // DEPRECATED: This endpoint is no longer used for payment processing.
+    // PayMongo webhooks now reach the backend directly via Nginx reverse proxy,
+    // so all payment activation is handled by /api/paymongo-webhook.
     app.post('/api/paymongo-verify-payment', async (req, res) => {
-        const { invoiceNo, pppoeUsername } = req.body || {};
-        console.log(`[PayMongo Verify] ===== VERIFY REQUEST =====`);
-        console.log(`[PayMongo Verify] invoiceNo=${invoiceNo} pppoeUsername=${pppoeUsername}`);
-
-        if (!invoiceNo || !pppoeUsername) {
-            return res.status(400).json({ success: false, message: 'invoiceNo and pppoeUsername are required.' });
-        }
-
-        try {
-            // 1) Look up stored session
-            const storedSession = await db.get(
-                'SELECT * FROM paymongo_sessions WHERE invoice_no = ? AND pppoe_username = ?',
-                [invoiceNo, pppoeUsername]
-            );
-            if (!storedSession) {
-                console.warn(`[PayMongo Verify] Session not found in DB for invoice=${invoiceNo} user=${pppoeUsername}`);
-                return res.status(404).json({ success: false, message: 'Payment session not found. It may have expired or not yet been created.' });
-            }
-
-            // 2) Deduplication: already processed?
-            if (storedSession.status === 'processed') {
-                console.log(`[PayMongo Verify] Already processed: invoice=${invoiceNo}`);
-                return res.json({ success: true, alreadyProcessed: true, message: 'Payment was already processed.' });
-            }
-
-            // 3) Get PayMongo secret key
-            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
-            const pSettings = JSON.parse(settings?.paymongoSettings || '{}');
-            if (!pSettings.secretKey) {
-                console.error('[PayMongo Verify] Secret key not configured.');
-                return res.status(500).json({ success: false, message: 'PayMongo not configured on server.' });
-            }
-            const authHeader = `Basic ${Buffer.from(pSettings.secretKey + ':').toString('base64')}`;
-
-            // 4) Call PayMongo API to verify session status
-            console.log(`[PayMongo Verify] Fetching session from PayMongo: ${storedSession.session_id}`);
-            let checkoutSession;
-            try {
-                const pmResp = await axios.get(
-                    `https://api.paymongo.com/v1/checkout_sessions/${storedSession.session_id}`,
-                    { headers: { 'Authorization': authHeader }, timeout: 20000 }
-                );
-                checkoutSession = pmResp.data?.data;
-            } catch (pmErr) {
-                const errDetail = pmErr.response?.data?.errors?.[0]?.detail || pmErr.message;
-                console.error(`[PayMongo Verify] Failed to fetch session from PayMongo:`, errDetail);
-                return res.status(502).json({ success: false, message: `PayMongo API error: ${errDetail}` });
-            }
-
-            const csAttrs = checkoutSession?.attributes || {};
-            const payments = csAttrs.payments || [];
-            const firstPayment = payments[0];
-            const isPaid = csAttrs.paid_at && firstPayment?.attributes?.status === 'paid';
-
-            console.log(`[PayMongo Verify] paid_at=${csAttrs.paid_at} firstPayment.status=${firstPayment?.attributes?.status}`);
-
-            if (!isPaid) {
-                console.log(`[PayMongo Verify] Payment not yet confirmed by PayMongo for invoice=${invoiceNo}`);
-                return res.json({ success: false, message: 'Payment not yet confirmed by PayMongo. Please wait a moment and try again.' });
-            }
-
-            // 5) Extract metadata from the live checkout session
-            const metadata = csAttrs.metadata || {};
-            const metaPlanName = metadata.plan_name || storedSession.plan_name || '';
-            const metaBaseAmount = Number(metadata.base_amount || 0);
-            const metaTotalAmount = Number(metadata.total_amount || storedSession.amount || 0);
-            const metaConvenienceFee = Number(metadata.convenience_fee || 0);
-            const metaInvoiceNo = metadata.invoice_no || invoiceNo;
-
-            // 6) Find the router for this PPPoE user
-            let routerId = metadata.router_id || storedSession.router_id || null;
-            if (!routerId) {
-                const clientUser = await db.get('SELECT router_id FROM client_users WHERE pppoe_username = ?', [pppoeUsername]);
-                if (clientUser) routerId = clientUser.router_id;
-                else {
-                    const customer = await db.get('SELECT routerId FROM customers WHERE username = ?', [pppoeUsername]);
-                    if (customer) routerId = customer.routerId;
-                }
-            }
-            if (!routerId) {
-                console.error(`[PayMongo Verify] No router found for user: ${pppoeUsername}`);
-                return res.status(200).json({ success: false, message: 'Router not found for user.' });
-            }
-            console.log(`[PayMongo Verify] Found routerId=${routerId} for ${pppoeUsername}`);
-
-            // 7) Get the PPP secret from the router via api-backend
-            const API_BACKEND = 'http://127.0.0.1:3002';
-            const secretResp = await axios.get(
-                `${API_BACKEND}/${routerId}/ppp/secret?name=${encodeURIComponent(pppoeUsername)}`,
-                { timeout: 20000 }
-            );
-            const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
-            // Defensive: ensure we got the right user, not just the first secret in the list
-            const secret = secrets.find(s => s.name === pppoeUsername) || secrets[0];
-            if (!secret || secret.name !== pppoeUsername) {
-                console.error(`[PayMongo Verify] PPP secret not found for user: ${pppoeUsername}. Got: ${secret?.name || 'none'}`);
-                return res.status(200).json({ success: false, message: 'PPP secret not found on router.' });
-            }
-
-            // 8) Find the billing plan
-            let plan = null;
-            if (metaPlanName) {
-                plan = await db.get('SELECT * FROM billing_plans WHERE name = ? AND routerId = ?', [metaPlanName, routerId]);
-            }
-            if (!plan && secret.comment) {
-                try {
-                    const c = JSON.parse(secret.comment);
-                    const pName = c.planName || c.plan || '';
-                    if (pName) plan = await db.get('SELECT * FROM billing_plans WHERE name = ? AND routerId = ?', [pName, routerId]);
-                } catch (_) {}
-            }
-            if (!plan) {
-                plan = await db.get('SELECT * FROM billing_plans WHERE pppoeProfile = ? AND routerId = ?', [secret.profile, routerId]);
-            }
-            if (!plan || !plan.pppoeProfile) {
-                console.error(`[PayMongo Verify] Billing plan not found for user: ${pppoeUsername}, profile: ${secret.profile}`);
-                return res.status(200).json({ success: false, message: 'Billing plan not found.' });
-            }
-
-            // 9) Convert cycle text to days
-            const cycleDaysMap = { 'monthly': 30, 'quarterly': 90, 'yearly': 365 };
-            const cycleDays = cycleDaysMap[(plan.cycle || 'monthly').toLowerCase()] || 30;
-
-            // 10) Get nonPaymentProfile
-            let nonPaymentProfile = 'Non-Payment';
-            try {
-                const grace = await db.get('SELECT non_payment_profile FROM ppp_grace WHERE router_id = ? AND name = ?', [routerId, pppoeUsername]);
-                if (grace?.non_payment_profile) nonPaymentProfile = grace.non_payment_profile;
-            } catch (_) {}
-
-            // 11) Call payment/process to extend subscription
-            console.log(`[PayMongo Verify] Processing payment: plan=${plan.name}, cycleDays=${cycleDays}, profile=${plan.pppoeProfile}`);
-            const paymentResult = await axios.post(`${API_BACKEND}/${routerId}/ppp/payment/process`, {
-                secret: { name: secret.name, id: secret['.id'] || secret.id, comment: secret.comment },
-                plan: { name: plan.name, pppoeProfile: plan.pppoeProfile, cycleDays, planType: plan.planType || 'prepaid' },
-                nonPaymentProfile,
-                discountDays: 0,
-                paymentDate: new Date().toISOString().split('T')[0],
-            }, { timeout: 30000 });
-            console.log(`[PayMongo Verify] Payment processing result: ${paymentResult.status}`);
-
-            // 12) Record the sale
-            const router = await db.get('SELECT name FROM routers WHERE id = ?', [routerId]);
-            const finalAmount = metaTotalAmount || metaBaseAmount || plan.price || 0;
-            await db.run(
-                'INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, currency, routerName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [`sale-vf-${Date.now()}`, routerId, new Date().toISOString(), pppoeUsername, plan.name, plan.price, 0, finalAmount, plan.currency || 'PHP', router?.name || '']
-            );
-
-            // 13) Remove grace period entry if exists
-            await db.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [routerId, pppoeUsername]);
-
-            // 14) Update invoice status to PAID
-            await db.run("UPDATE client_invoices SET status = 'PAID' WHERE routerId = ? AND username = ? AND status = 'PENDING'", [routerId, pppoeUsername]);
-
-            // 15) Mark session as processed in paymongo_sessions table
-            await db.run(
-                "UPDATE paymongo_sessions SET status = 'processed', processed_at = ? WHERE invoice_no = ?",
-                [new Date().toISOString(), invoiceNo]
-            );
-
-            console.log(`[PayMongo Verify] Full activation complete for ${pppoeUsername} (invoice: ${metaInvoiceNo})`);
-            res.json({ success: true, message: 'Payment verified and subscription extended.', pppoeUsername, routerId });
-
-        } catch (err) {
-            console.error('[PayMongo Verify] ERROR:', err.message);
-            res.status(500).json({ success: false, message: err.message || 'Verification failed.' });
-        }
+        console.log('[PayMongo Verify] DEPRECATED endpoint called. Webhook flow is now the sole processing method.');
+        return res.json({ deprecated: true, message: 'Use webhook flow' });
     });
 
     // B. Standalone Webhook Endpoint (NO auth middleware - must be public for PayMongo)
@@ -3109,6 +2946,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }));
 
         try {
+            // === STEP 1: Verify Signature ===
             const paymongoSignature = req.headers['x-paymongo-signature'];
             if (!paymongoSignature) {
                 console.error('[PayMongo Webhook] Missing x-paymongo-signature header.');
@@ -3170,6 +3008,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
             console.log('[PayMongo Webhook] Signature verified OK (' + (isLiveMatch ? 'live' : 'test') + ' mode)');
 
+            // === STEP 2: Extract Payment Data ===
             const payload = JSON.parse(payloadString);
             const eventType = payload.data?.attributes?.type;
             console.log('[PayMongo Webhook] Event type:', eventType);
@@ -3201,6 +3040,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const metaConvenienceFee = Number(metadata.convenience_fee || 0);
             const metaInvoiceNo = metadata.invoice_no || `INV-${Date.now()}`;
 
+            // === STEP 3: Find User & Plan ===
             // 1) Find the router for this PPPoE user
             let routerId = metadata.router_id || null;
             if (!routerId) {
@@ -3220,7 +3060,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             // 2) Get the PPP secret from the router via api-backend
             const API_BACKEND = 'http://127.0.0.1:3002';
-            console.log('[PayMongo Webhook] Processing payment for user:', pppoeUsername, 'on router:', routerId);
+            console.log(`[PayMongo Webhook] Processing payment for: ${pppoeUsername}`);
             const secretResp = await axios.get(`${API_BACKEND}/${routerId}/ppp/secret?name=${encodeURIComponent(pppoeUsername)}`, { timeout: 20000 });
             const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
             // Defensive: ensure we got the right user, not just the first secret in the list
@@ -3251,6 +3091,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 return res.status(200).json({ message: 'Billing plan not found, skipping.', pppoeUsername });
             }
 
+            // === STEP 4: Extend Subscription (Profile + Due Date + Scheduler) ===
             // 4) Convert cycle text to days
             const cycleDaysMap = { 'monthly': 30, 'quarterly': 90, 'yearly': 365 };
             const cycleDays = cycleDaysMap[(plan.cycle || 'monthly').toLowerCase()] || 30;
@@ -3263,7 +3104,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             } catch (_) {}
 
             // 6) Call the existing payment/process endpoint to extend subscription
-            console.log(`[PayMongo Webhook] Processing payment: plan=${plan.name}, cycleDays=${cycleDays}, profile=${plan.pppoeProfile}`);
+            console.log(`[PayMongo Webhook] Plan=${plan.name}, cycleDays=${cycleDays}, profile=${plan.pppoeProfile}`);
             const paymentResult = await axios.post(`${API_BACKEND}/${routerId}/ppp/payment/process`, {
                 secret: { name: secret.name, id: secret['.id'] || secret.id, comment: secret.comment },
                 plan: { name: plan.name, pppoeProfile: plan.pppoeProfile, cycleDays, planType: plan.planType || 'prepaid' },
@@ -3272,8 +3113,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 paymentDate: new Date().toISOString().split('T')[0],
             }, { timeout: 30000 });
             console.log('[PayMongo Webhook] Payment processing result:', paymentResult.status || 'unknown');
-            console.log(`[PayMongo Webhook] Payment processed successfully for ${pppoeUsername}`);
+            const newDueDate = new Date();
+            newDueDate.setDate(newDueDate.getDate() + cycleDays);
+            console.log(`[PayMongo Webhook] Subscription extended to: ${newDueDate.toISOString().split('T')[0]}`);
 
+            // === STEP 5: Record Sale & Update Invoice ===
             // 7) Record the sale
             const router = await db.get('SELECT name FROM routers WHERE id = ?', [routerId]);
             const finalAmount = metaTotalAmount || metaBaseAmount || plan.price || 0;
@@ -3288,6 +3132,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             // 9) Update invoice status to PAID if one exists
             await db.run("UPDATE client_invoices SET status = 'PAID' WHERE routerId = ? AND username = ? AND status = 'PENDING'", [routerId, pppoeUsername]);
 
+            console.log('[PayMongo Webhook] Sale recorded, invoice updated');
             console.log(`[PayMongo Webhook] Full activation complete for ${pppoeUsername}`);
             res.status(200).json({ message: 'Webhook processed successfully.', pppoeUsername, routerId });
         } catch (err) {
