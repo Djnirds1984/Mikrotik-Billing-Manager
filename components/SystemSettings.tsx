@@ -293,21 +293,19 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
     const handleTestWebhook = async () => {
         setIsTestingWebhook(true);
         try {
-            const res = await fetch('/api/paymongo-webhook', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ test: true })
-            });
-            const data = await res.json();
-            if (res.status === 400 && data.message?.includes('signature')) {
-                showWebhookToast('success', 'Webhook endpoint is reachable (returned expected signature validation error).');
-            } else if (res.ok) {
-                showWebhookToast('success', 'Webhook endpoint is reachable and responded OK.');
+            const res = await fetch('/api/paymongo-webhook-ping');
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    showWebhookToast('success', 'Endpoint reachable — PayMongo can send events to this server.');
+                } else {
+                    showWebhookToast('error', `Endpoint not reachable: unexpected response.`);
+                }
             } else {
-                showWebhookToast('error', `Webhook endpoint responded: ${data.message || res.status}`);
+                showWebhookToast('error', `Endpoint not reachable: HTTP ${res.status}.`);
             }
         } catch (err) {
-            showWebhookToast('error', `Webhook unreachable: ${(err as Error).message}`);
+            showWebhookToast('error', `Endpoint not reachable: ${(err as Error).message}`);
         } finally {
             setIsTestingWebhook(false);
         }
@@ -433,18 +431,24 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                                 webhookStatus.webhooks.map((wh, idx) => {
                                     const urlMatches = wh.url === webhookStatus.expectedUrl;
                                     const isEnabled = wh.status === 'enabled';
+                                    const isDisabled = wh.status === 'disabled';
+                                    const isLocalUrl = /localhost|127\.0\.0\.1/.test(wh.url);
                                     return (
-                                        <div key={wh.id || idx} className="border border-slate-200 dark:border-slate-700 rounded-lg p-4 space-y-2">
+                                        <div key={wh.id || idx} className={`border rounded-lg p-4 space-y-2 ${
+                                            isDisabled
+                                                ? 'border-slate-200 dark:border-slate-700 opacity-50'
+                                                : 'border-slate-200 dark:border-slate-700'
+                                        }`}>
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-2">
                                                     <span className={`inline-block w-2.5 h-2.5 rounded-full ${
-                                                        isEnabled ? 'bg-green-500' : 'bg-red-500'
+                                                        isEnabled ? 'bg-green-500' : 'bg-slate-400'
                                                     }`} />
                                                     <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                                                        Webhook {idx + 1} — {isEnabled ? 'Enabled' : 'Disabled'}
+                                                        Webhook {idx + 1} — {isEnabled ? 'Enabled' : <span className="text-slate-500 dark:text-slate-400">Disabled</span>}
                                                     </span>
                                                 </div>
-                                                {!urlMatches && (
+                                                {!isDisabled && !urlMatches && (
                                                     <button
                                                         onClick={() => handleDisableWebhook(wh.id)}
                                                         disabled={isDisablingWebhook === wh.id}
@@ -454,6 +458,12 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                                                     </button>
                                                 )}
                                             </div>
+                                            {isLocalUrl && isEnabled && (
+                                                <div className="flex items-center gap-1.5 p-2 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs">
+                                                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                                    <span><strong>Warning:</strong> This webhook URL uses localhost/127.0.0.1 — PayMongo cannot reach local addresses. Use a public domain or tunnel (e.g., Cloudflare Tunnel, ngrok).</span>
+                                                </div>
+                                            )}
                                             <div className="grid grid-cols-1 gap-2 text-sm">
                                                 <div>
                                                     <span className="text-slate-500 dark:text-slate-400">URL: </span>

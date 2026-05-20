@@ -2488,6 +2488,11 @@ async function startServer() {
             if (correctWebhookId) {
                 for (const wh of webhooks) {
                     if (wh.id !== correctWebhookId && (wh.attributes?.url || '') !== webhookUrl) {
+                        // Skip if already disabled
+                        if (wh.attributes?.status === 'disabled') {
+                            console.log(`[PayMongo Webhook] Stale webhook already disabled: ${wh.id}`);
+                            continue;
+                        }
                         try {
                             await axios.post(`https://api.paymongo.com/v1/webhooks/${wh.id}/disable`, {}, {
                                 headers: { 'Authorization': authHeader },
@@ -2495,7 +2500,12 @@ async function startServer() {
                             });
                             console.log(`[PayMongo Webhook] Disabled stale webhook: ${wh.id} -> ${wh.attributes?.url || ''}`);
                         } catch (disableErr) {
-                            console.warn(`[PayMongo Webhook] Could not disable stale webhook ${wh.id}:`, disableErr.response?.data || disableErr.message);
+                            const errCode = disableErr.response?.data?.errors?.[0]?.code;
+                            if (errCode === 'resource_disabled_state') {
+                                console.log(`[PayMongo Webhook] Stale webhook ${wh.id} was already disabled (confirmed by API).`);
+                            } else {
+                                console.warn(`[PayMongo Webhook] Could not disable stale webhook ${wh.id}:`, disableErr.response?.data || disableErr.message);
+                            }
                         }
                     }
                 }
@@ -2581,18 +2591,32 @@ async function startServer() {
 
             const authHeader = `Basic ${Buffer.from(pSettings.secretKey + ':').toString('base64')}`;
 
-            await axios.post(`https://api.paymongo.com/v1/webhooks/${webhookId}/disable`, {}, {
-                headers: { 'Authorization': authHeader },
-                timeout: 10000
-            });
+            try {
+                await axios.post(`https://api.paymongo.com/v1/webhooks/${webhookId}/disable`, {}, {
+                    headers: { 'Authorization': authHeader },
+                    timeout: 10000
+                });
+                console.log(`[PayMongo Webhook] Manually disabled webhook: ${webhookId}`);
+            } catch (disableErr) {
+                const errCode = disableErr.response?.data?.errors?.[0]?.code;
+                if (errCode === 'resource_disabled_state') {
+                    console.log(`[PayMongo Webhook] Webhook ${webhookId} was already disabled.`);
+                } else {
+                    throw disableErr;
+                }
+            }
 
-            console.log(`[PayMongo Webhook] Manually disabled webhook: ${webhookId}`);
             res.json({ success: true, message: 'Webhook disabled successfully.' });
         } catch (err) {
             const errMsg = err.response?.data?.errors?.[0]?.detail || err.message;
             console.error('[PayMongo Webhook Disable] Error:', errMsg);
             res.status(500).json({ success: false, message: errMsg });
         }
+    });
+
+    // G. PayMongo Webhook Ping Endpoint (public, no auth - for reachability testing)
+    app.get('/api/paymongo-webhook-ping', (req, res) => {
+        res.json({ status: 'ok', message: 'PayMongo webhook endpoint is reachable', timestamp: Date.now() });
     });
 
     // B. Standalone Webhook Endpoint (NO auth middleware - must be public for PayMongo)
@@ -4341,10 +4365,11 @@ async function startServer() {
             await runCommand('sudo mv /tmp/cloudflared /usr/local/bin/cloudflared');
             await runCommand('sudo chmod +x /usr/local/bin/cloudflared');
             
-            // Authenticate with Cloudflare
-            sendLog('Authenticating with Cloudflare...');
-            await runCommand(`sudo /usr/local/bin/cloudflared tunnel login ${token}`);
-            
+            // Create systemd service using connector token (modern approach).
+            // The token embeds routing config set in the Cloudflare dashboard.
+            // ACTION REQUIRED after install: In the Cloudflare dashboard, set the
+            // public hostname for this tunnel to route to http://localhost:3001
+            // so that /api/paymongo-webhook and all API paths reach this proxy.
             // Create systemd service
             sendLog('Creating systemd service...');
             const serviceContent = `[Unit]
@@ -4354,7 +4379,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/cloudflared tunnel run
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token ${token}
 Restart=on-failure
 RestartSec=5s
 
@@ -4374,6 +4399,7 @@ WantedBy=multi-user.target`;
             await runCommand('sudo systemctl start cloudflared');
             
             sendLog('Cloudflare Tunnel installation completed successfully!', false);
+            sendLog('ACTION REQUIRED: In the Cloudflare dashboard, configure this tunnel public hostname to route to http://localhost:3001 so webhook and API traffic reaches this proxy server.', false);
             res.write(`data: ${JSON.stringify({ status: 'completed' })}\n\n`);
             res.end();
             
