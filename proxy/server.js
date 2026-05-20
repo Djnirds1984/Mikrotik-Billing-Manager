@@ -2597,9 +2597,16 @@ async function startServer() {
 
     // B. Standalone Webhook Endpoint (NO auth middleware - must be public for PayMongo)
     app.post('/api/paymongo-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+        console.log('[PayMongo Webhook] ===== WEBHOOK RECEIVED =====');
+        console.log('[PayMongo Webhook] Headers:', JSON.stringify({
+            'content-type': req.headers['content-type'],
+            'x-paymongo-signature': req.headers['x-paymongo-signature'] ? 'present' : 'MISSING'
+        }));
+
         try {
             const paymongoSignature = req.headers['x-paymongo-signature'];
             if (!paymongoSignature) {
+                console.error('[PayMongo Webhook] Missing x-paymongo-signature header.');
                 return res.status(400).json({ message: 'Missing x-paymongo-signature header.' });
             }
 
@@ -2611,22 +2618,59 @@ async function startServer() {
                 console.error('[PayMongo Webhook] Webhook secret not configured.');
                 return res.status(400).json({ message: 'Webhook secret not configured.' });
             }
+            console.log('[PayMongo Webhook] Webhook secret configured:', 'YES (' + webhookSecret.substring(0, 8) + '...)');
 
             const rawBody = req.body;
             const payloadString = rawBody.toString();
 
-            // Verify signature using crypto.createHmac('sha256', webhookSecret)
-            const expectedSignature = crypto.createHmac('sha256', webhookSecret).update(payloadString).digest('hex');
+            // --- Parse the x-paymongo-signature header ---
+            // Format: "t=1234567890,te=hex_signature,li=hex_signature"
+            //   t  = timestamp
+            //   te = test mode signature
+            //   li = live mode signature
+            const sigParts = {};
+            paymongoSignature.split(',').forEach(part => {
+                const eqIndex = part.indexOf('=');
+                if (eqIndex !== -1) {
+                    const key = part.substring(0, eqIndex).trim();
+                    const value = part.substring(eqIndex + 1).trim();
+                    sigParts[key] = value;
+                }
+            });
+            const timestamp = sigParts['t'];
+            const testSignature = sigParts['te'];
+            const liveSignature = sigParts['li'];
 
-            if (expectedSignature !== paymongoSignature) {
-                console.error('[PayMongo Webhook] Signature verification failed.');
+            if (!timestamp) {
+                console.error('[PayMongo Webhook] Signature header missing timestamp (t=). Raw header:', paymongoSignature.substring(0, 80));
+                return res.status(400).json({ message: 'Invalid signature header: missing timestamp.' });
+            }
+
+            // Compute expected signature: HMAC(timestamp + "." + rawPayload)
+            const signedPayload = timestamp + '.' + payloadString;
+            const expectedSignature = crypto.createHmac('sha256', webhookSecret).update(signedPayload).digest('hex');
+
+            // Compare against both test and live signatures
+            const isTestMatch = testSignature && expectedSignature === testSignature;
+            const isLiveMatch = liveSignature && expectedSignature === liveSignature;
+            const isValid = isTestMatch || isLiveMatch;
+
+            if (!isValid) {
+                console.error('[PayMongo Webhook] Signature FAILED.',
+                    'Expected:', expectedSignature.substring(0, 20) + '...',
+                    'te:', testSignature ? testSignature.substring(0, 20) + '...' : 'N/A',
+                    'li:', liveSignature ? liveSignature.substring(0, 20) + '...' : 'N/A',
+                    'timestamp:', timestamp);
                 return res.status(400).json({ message: 'Invalid signature.' });
             }
+            console.log('[PayMongo Webhook] Signature verified OK (' + (isLiveMatch ? 'live' : 'test') + ' mode)');
 
             const payload = JSON.parse(payloadString);
             const eventType = payload.data?.attributes?.type;
+            console.log('[PayMongo Webhook] Event type:', eventType);
 
             if (eventType !== 'checkout_session.payment.paid') {
+                console.log('[PayMongo Webhook] Ignoring event type:', eventType, '(expected: checkout_session.payment.paid)');
                 return res.status(200).json({ message: 'Event ignored.', eventType });
             }
 
@@ -2635,15 +2679,17 @@ async function startServer() {
             const description = attributes?.description || '';
             const pppoeUsername = description.split('|').pop()?.trim();
 
+            console.log('[PayMongo Webhook] Description:', description);
+            console.log('[PayMongo Webhook] PPPoE Username:', pppoeUsername || 'NOT FOUND');
+
             if (!pppoeUsername) {
                 console.error('[PayMongo Webhook] Could not extract PPPoE username from description:', description);
                 return res.status(400).json({ message: 'PPPoE username not found in description.' });
             }
 
-            console.log(`[PayMongo Webhook] Payment received for user: ${pppoeUsername}`);
-
             // --- Extract metadata from checkout session ---
             const metadata = attributes?.metadata || {};
+            console.log('[PayMongo Webhook] Metadata:', JSON.stringify(metadata));
             const metaPlanName = metadata.plan_name || '';
             const metaBaseAmount = Number(metadata.base_amount || 0);
             const metaTotalAmount = Number(metadata.total_amount || 0);
@@ -2669,6 +2715,7 @@ async function startServer() {
 
             // 2) Get the PPP secret from the router via api-backend
             const API_BACKEND = 'http://127.0.0.1:3002';
+            console.log('[PayMongo Webhook] Processing payment for user:', pppoeUsername, 'on router:', routerId);
             const secretResp = await axios.get(`${API_BACKEND}/${routerId}/ppp/secret?name=${encodeURIComponent(pppoeUsername)}`, { timeout: 20000 });
             const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
             const secret = secrets[0];
@@ -2718,6 +2765,7 @@ async function startServer() {
                 discountDays: 0,
                 paymentDate: new Date().toISOString().split('T')[0],
             }, { timeout: 30000 });
+            console.log('[PayMongo Webhook] Payment processing result:', paymentResult.status || 'unknown');
             console.log(`[PayMongo Webhook] Payment processed successfully for ${pppoeUsername}`);
 
             // 7) Record the sale
@@ -2737,7 +2785,7 @@ async function startServer() {
             console.log(`[PayMongo Webhook] Full activation complete for ${pppoeUsername}`);
             res.status(200).json({ message: 'Webhook processed successfully.', pppoeUsername, routerId });
         } catch (err) {
-            console.error('PayMongo Webhook Error:', err.message);
+            console.error('[PayMongo Webhook] ERROR:', err.message);
             res.status(500).json({ message: err.message || 'Webhook processing failed.' });
         }
     });
