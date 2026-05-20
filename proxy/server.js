@@ -2232,6 +2232,17 @@ async function startServer() {
                 return res.status(400).json({ message: 'amount, description, and pppoeUsername are required.' });
             }
 
+            // Look up the router_id for this PPPoE user so the webhook can find it
+            let checkoutRouterId = null;
+            try {
+                const cu = await db.get('SELECT router_id FROM client_users WHERE pppoe_username = ?', [pppoeUsername]);
+                if (cu) checkoutRouterId = cu.router_id;
+                else {
+                    const cust = await db.get('SELECT routerId FROM customers WHERE username = ?', [pppoeUsername]);
+                    if (cust) checkoutRouterId = cust.routerId;
+                }
+            } catch (_) {}
+
             // Convenience fee recalculation
             // PayMongo fees:
             //   - E-Wallets (gcash, paymaya, grab_pay): 2.9%
@@ -2295,6 +2306,7 @@ async function startServer() {
                         metadata: {
                             pppoe_username: pppoeUsername,
                             plan_name: planName || '',
+                            router_id: checkoutRouterId || '',
                             invoice_no: invoiceNo,
                             base_amount: String(baseAmount),
                             convenience_fee: String(convenienceFee),
@@ -2382,45 +2394,100 @@ async function startServer() {
 
             console.log(`[PayMongo Webhook] Payment received for user: ${pppoeUsername}`);
 
-            // --- PLACEHOLDER: User Activation Logic ---
-            // TODO: Implement the following using your existing core functions:
+            // --- Extract metadata from checkout session ---
+            const metadata = attributes?.metadata || {};
+            const metaPlanName = metadata.plan_name || '';
+            const metaBaseAmount = Number(metadata.base_amount || 0);
+            const metaTotalAmount = Number(metadata.total_amount || 0);
+            const metaConvenienceFee = Number(metadata.convenience_fee || 0);
+            const metaInvoiceNo = metadata.invoice_no || `INV-${Date.now()}`;
 
-            async function extendSubscriptionDueDate(username, days = 30) {
-                // TODO: Call your existing function to extend client's subscription due date
-                console.log(`[PayMongo Webhook] Extending subscription for ${username} by ${days} days.`);
-                // Example:
-                // const customer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
-                // const newDueDate = new Date();
-                // newDueDate.setDate(newDueDate.getDate() + days);
-                // await db.run('UPDATE customers SET dueDate = ? WHERE username = ?', [newDueDate.toISOString().split('T')[0], username]);
+            // 1) Find the router for this PPPoE user
+            let routerId = metadata.router_id || null;
+            if (!routerId) {
+                const clientUser = await db.get('SELECT router_id FROM client_users WHERE pppoe_username = ?', [pppoeUsername]);
+                if (clientUser) {
+                    routerId = clientUser.router_id;
+                } else {
+                    const customer = await db.get('SELECT routerId FROM customers WHERE username = ?', [pppoeUsername]);
+                    if (customer) routerId = customer.routerId;
+                }
+            }
+            if (!routerId) {
+                console.error(`[PayMongo Webhook] No router found for user: ${pppoeUsername}`);
+                return res.status(200).json({ message: 'Router not found for user, skipping.', pppoeUsername });
+            }
+            console.log(`[PayMongo Webhook] Found routerId=${routerId} for ${pppoeUsername}`);
+
+            // 2) Get the PPP secret from the router via api-backend
+            const API_BACKEND = 'http://127.0.0.1:3002';
+            const secretResp = await axios.get(`${API_BACKEND}/${routerId}/ppp/secret?name=${encodeURIComponent(pppoeUsername)}`, { timeout: 20000 });
+            const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
+            const secret = secrets[0];
+            if (!secret) {
+                console.error(`[PayMongo Webhook] PPP secret not found for user: ${pppoeUsername}`);
+                return res.status(200).json({ message: 'PPP secret not found, skipping.', pppoeUsername });
             }
 
-            async function restoreMikroTikProfile(username) {
-                // TODO: Call your existing function to change user's secret profile from "Expired_Profile" back to active speed plan
-                console.log(`[PayMongo Webhook] Restoring MikroTik profile for ${username}.`);
-                // Example:
-                // const customer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
-                // if (customer && customer.routerId) {
-                //     const router = await db.get('SELECT * FROM routers WHERE id = ?', [customer.routerId]);
-                //     if (router) { ... }
-                // }
+            // 3) Find the billing plan
+            let plan = null;
+            if (metaPlanName) {
+                plan = await db.get('SELECT * FROM billing_plans WHERE name = ? AND routerId = ?', [metaPlanName, routerId]);
+            }
+            if (!plan && secret.comment) {
+                try {
+                    const c = JSON.parse(secret.comment);
+                    const pName = c.planName || c.plan || '';
+                    if (pName) plan = await db.get('SELECT * FROM billing_plans WHERE name = ? AND routerId = ?', [pName, routerId]);
+                } catch (_) {}
+            }
+            if (!plan) {
+                // Fallback: find plan by matching pppoeProfile
+                plan = await db.get('SELECT * FROM billing_plans WHERE pppoeProfile = ? AND routerId = ?', [secret.profile, routerId]);
+            }
+            if (!plan || !plan.pppoeProfile) {
+                console.error(`[PayMongo Webhook] Billing plan not found for user: ${pppoeUsername}, profile: ${secret.profile}`);
+                return res.status(200).json({ message: 'Billing plan not found, skipping.', pppoeUsername });
             }
 
-            async function kickActiveSession(username) {
-                // TODO: Call your existing function to execute /ppp/active/remove on MikroTik
-                console.log(`[PayMongo Webhook] Kicking active session for ${username}.`);
-                // Example:
-                // const customer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
-                // if (customer && customer.routerId) {
-                //     await axios.post(`http://localhost:3002/${customer.routerId}/ppp/active/kick`, { name: username });
-                // }
-            }
+            // 4) Convert cycle text to days
+            const cycleDaysMap = { 'monthly': 30, 'quarterly': 90, 'yearly': 365 };
+            const cycleDays = cycleDaysMap[(plan.cycle || 'monthly').toLowerCase()] || 30;
 
-            await extendSubscriptionDueDate(pppoeUsername, 30);
-            await restoreMikroTikProfile(pppoeUsername);
-            await kickActiveSession(pppoeUsername);
+            // 5) Get nonPaymentProfile (from grace record or default)
+            let nonPaymentProfile = 'Non-Payment';
+            try {
+                const grace = await db.get('SELECT non_payment_profile FROM ppp_grace WHERE router_id = ? AND name = ?', [routerId, pppoeUsername]);
+                if (grace?.non_payment_profile) nonPaymentProfile = grace.non_payment_profile;
+            } catch (_) {}
 
-            res.status(200).json({ message: 'Webhook processed successfully.', pppoeUsername });
+            // 6) Call the existing payment/process endpoint to extend subscription
+            console.log(`[PayMongo Webhook] Processing payment: plan=${plan.name}, cycleDays=${cycleDays}, profile=${plan.pppoeProfile}`);
+            const paymentResult = await axios.post(`${API_BACKEND}/${routerId}/ppp/payment/process`, {
+                secret: { name: secret.name, id: secret['.id'] || secret.id, comment: secret.comment },
+                plan: { name: plan.name, pppoeProfile: plan.pppoeProfile, cycleDays, planType: plan.planType || 'prepaid' },
+                nonPaymentProfile,
+                discountDays: 0,
+                paymentDate: new Date().toISOString().split('T')[0],
+            }, { timeout: 30000 });
+            console.log(`[PayMongo Webhook] Payment processed successfully for ${pppoeUsername}`);
+
+            // 7) Record the sale
+            const router = await db.get('SELECT name FROM routers WHERE id = ?', [routerId]);
+            const finalAmount = metaTotalAmount || metaBaseAmount || plan.price || 0;
+            await db.run(
+                'INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, currency, routerName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [`sale-wh-${Date.now()}`, routerId, new Date().toISOString(), pppoeUsername, plan.name, plan.price, 0, finalAmount, plan.currency || 'PHP', router?.name || '']
+            );
+
+            // 8) Remove grace period entry if exists (user has now paid)
+            await db.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [routerId, pppoeUsername]);
+
+            // 9) Update invoice status to PAID if one exists
+            await db.run("UPDATE client_invoices SET status = 'PAID' WHERE routerId = ? AND username = ? AND status = 'PENDING'", [routerId, pppoeUsername]);
+
+            console.log(`[PayMongo Webhook] Full activation complete for ${pppoeUsername}`);
+            res.status(200).json({ message: 'Webhook processed successfully.', pppoeUsername, routerId });
         } catch (err) {
             console.error('PayMongo Webhook Error:', err.message);
             res.status(500).json({ message: err.message || 'Webhook processing failed.' });
@@ -4191,406 +4258,6 @@ WantedBy=multi-user.target`;
     superRouter.post('/upload-backup', rawBodySaver, async (req, res) => {
         try {
             if (!req.body || req.body.length === 0) {
-                return res.status(400).json({ message: 'No file uploaded.' });
-            }
-            
-            const backupFile = `uploaded-restore-${Date.now()}.mk`;
-            const backupPath = path.join(BACKUP_DIR, backupFile);
-            
-            await fs.promises.writeFile(backupPath, req.body);
-            
-            res.json({ message: 'Backup uploaded successfully.', filename: backupFile });
-        } catch (e) {
-            res.status(500).json({ message: `File upload failed: ${e.message}` });
-        }
-    });
-
-    superRouter.get('/restore-from-backup', (req, res) => {
-        res.setHeader('Content-Type', 'text/event-stream');
-        const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-        const { file } = req.query;
-
-        if (!file || file.includes('..') || !file.endsWith('.mk')) {
-            send({ status: 'error', message: 'Invalid backup file specified for restore.' });
-            return res.end();
-        }
-        
-        const restore = async () => {
-            try {
-                send({ log: `Starting full panel restore from ${file}...`});
-                const backupPath = path.join(BACKUP_DIR, file);
-                if (!fs.existsSync(backupPath)) throw new Error('Backup file not found on server.');
-
-                send({ log: 'Stopping all panel services via pm2...'});
-                await runCommand('pm2 stop all').catch(e => send({ log: `Could not stop pm2 (this is okay if it's not running): ${e.message}`, isError: true }));
-                
-                send({ log: 'Extracting backup over current application files...'});
-                const projectRoot = path.join(__dirname, '..');
-                await tar.x({
-                    file: backupPath,
-                    cwd: projectRoot,
-                    onentry: (entry) => send({ log: `Restoring: ${entry.path}` })
-                });
-                send({ log: 'Extraction complete.' });
-
-                send({ log: 'Re-installing dependencies for UI server...'});
-                await runCommand('npm install --prefix proxy');
-
-                send({ log: 'Re-installing dependencies for API backend...'});
-                await runCommand('npm install --prefix api-backend');
-
-                send({ log: 'Restarting panel services...'});
-                exec('pm2 restart all', (err, stdout) => {
-                     if (err) {
-                         send({ log: `PM2 restart failed: ${err.message}`, isError: true });
-                         send({ status: 'error', message: err.message });
-                    } else {
-                        send({ log: stdout });
-                        send({ status: 'restarting' });
-                    }
-                    res.end();
-                });
-
-            } catch (e) {
-                send({ log: e.message, isError: true });
-                send({ status: 'error', message: e.message });
-                res.end();
-            }
-        };
-        restore();
-    });
-
-    app.get('/download-backup/:filename', protect, (req, res) => {
-        const { filename } = req.params;
-        if (filename.includes('..') || !filename.endsWith('.mk')) {
-            return res.status(400).json({ message: 'Invalid filename' });
-        }
-        const filePath = path.join(BACKUP_DIR, filename);
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ message: 'Backup file not found' });
-        }
-        res.download(filePath);
-    });
-    
-    app.use('/api/superadmin', superRouter);
-    
-    const API_BACKEND_URL = 'http://127.0.0.1:3002';
-    const forward = async (method, url, req, res, data) => {
-        try {
-            const r = await axios({
-                method,
-                url: API_BACKEND_URL + url,
-                data,
-                headers: {
-                    authorization: req.headers.authorization || '',
-                    'content-type': req.headers['content-type'] || 'application/json'
-                },
-                timeout: 15000
-            });
-            res.status(r.status).send(r.data);
-        } catch (e) {
-            const s = e.response ? e.response.status : 500;
-            const m = e.response?.data || { message: e.message };
-            res.status(s).send(m);
-        }
-    };
-    
-    app.get('/api/roles', protect, async (req, res) => {
-        await forward('GET', '/api/roles', req, res);
-    });
-    app.get('/api/permissions', protect, async (req, res) => {
-        await forward('GET', '/api/permissions', req, res);
-    });
-    app.get('/api/panel-users', protect, async (req, res) => {
-        await forward('GET', '/api/panel-users', req, res);
-    });
-    app.post('/api/panel-users', protect, async (req, res) => {
-        await forward('POST', '/api/panel-users', req, res, req.body);
-    });
-    app.delete('/api/panel-users/:id', protect, async (req, res) => {
-        await forward('DELETE', `/api/panel-users/${req.params.id}`, req, res);
-    });
-    app.get('/api/roles/:roleId/permissions', protect, async (req, res) => {
-        await forward('GET', `/api/roles/${req.params.roleId}/permissions`, req, res);
-    });
-    app.put('/api/roles/:roleId/permissions', protect, async (req, res) => {
-        await forward('PUT', `/api/roles/${req.params.roleId}/permissions`, req, res, req.body);
-    });
-
-    // --- LOCALE FILES ROUTE (must come before static files) ---
-    app.get('/locales/:file', (req, res) => {
-        const file = req.params.file;
-        // Validate filename to prevent directory traversal
-        if (!/^[a-zA-Z]{2,3}\.json$/.test(file)) {
-            return res.status(400).json({ error: 'Invalid locale file' });
-        }
-        const localePath = path.join(__dirname, '..', 'locales', file);
-        res.sendFile(localePath, (err) => {
-            if (err) {
-                console.error(`Error serving locale file ${file}:`, err);
-                res.status(404).json({ error: 'Locale file not found' });
-            }
-        });
-    });
-
-    // --- PRODUCTION STATIC FILES ---
-    // Serve static files with proper caching
-    app.use(express.static(path.join(__dirname, '..', 'dist'), {
-        maxAge: '1d', // Cache static assets for 1 day
-        etag: true,
-        lastModified: true
-    }));
-    
-    // Fallback to index.html for SPA routing in production
-    app.get('*', (req, res) => {
-        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
-    });
-
-    app.listen(PORT, () => {
-        console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
-        console.log(`   Mode: Production (Static Files Served)`);
-    });
-
-    // --- CAPTIVE PORTAL SERVER ---
-    const CAPTIVE_PORT = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
-    const captiveApp = express();
-    
-    // Add redirect middleware for unauthorized clients
-    captiveApp.use((req, res, next) => {
-        const host = (req.headers.host || '').split(':')[0];
-        const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === 'localhost';
-        const isStaticAsset = /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
-        const isApi = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/');
-        
-        // Allow direct access to login page for admin IPs (including WAN IP)
-        if (isIpHost && req.path === '/login') {
-            return next(); // Allow direct access to login on IP addresses
-        }
-        
-        // Redirect unauthorized clients to captive portal (only for non-login paths)
-        if (isIpHost && !isApi && !isStaticAsset && req.path !== '/login' && req.path !== '/') {
-            return res.redirect(`http://${host}:${CAPTIVE_PORT}/captive`);
-        }
-        next();
-    });
-
-    // API route for captive portal landing page settings - MUST be first
-    captiveApp.get('/api/public/landing-page', async (req, res) => {
-        try {
-            const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
-            let cfg = {};
-            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
-            res.json({
-                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
-                config: cfg
-            });
-        } catch (e) {
-            console.error('Error in captive /api/public/landing-page:', e);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
-    // Serve captive portal static files
-    captiveApp.use(express.static(path.join(__dirname, '..', 'dist')));
-    
-    // Fallback to index.html for SPA routing
-    captiveApp.get('*', (req, res) => {
-        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
-    });
-
-    captiveApp.listen(CAPTIVE_PORT, () => {
-        console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
-    });
-}
-
-startServer();
-                send({ log: `Starting full panel restore from ${file}...`});
-                const backupPath = path.join(BACKUP_DIR, file);
-                if (!fs.existsSync(backupPath)) throw new Error('Backup file not found on server.');
-
-                send({ log: 'Stopping all panel services via pm2...'});
-                await runCommand('pm2 stop all').catch(e => send({ log: `Could not stop pm2 (this is okay if it's not running): ${e.message}`, isError: true }));
-                
-                send({ log: 'Extracting backup over current application files...'});
-                const projectRoot = path.join(__dirname, '..');
-                await tar.x({
-                    file: backupPath,
-                    cwd: projectRoot,
-                    onentry: (entry) => send({ log: `Restoring: ${entry.path}` })
-                });
-                send({ log: 'Extraction complete.' });
-
-                send({ log: 'Re-installing dependencies for UI server...'});
-                await runCommand('npm install --prefix proxy');
-
-                send({ log: 'Re-installing dependencies for API backend...'});
-                await runCommand('npm install --prefix api-backend');
-
-                send({ log: 'Restarting panel services...'});
-                exec('pm2 restart all', (err, stdout) => {
-                     if (err) {
-                         send({ log: `PM2 restart failed: ${err.message}`, isError: true });
-                         send({ status: 'error', message: err.message });
-                    } else {
-                        send({ log: stdout });
-                        send({ status: 'restarting' });
-                    }
-                    res.end();
-                });
-
-            } catch (e) {
-                send({ log: e.message, isError: true });
-                send({ status: 'error', message: e.message });
-                res.end();
-            }
-        };
-        restore();
-    });
-
-    app.get('/download-backup/:filename', protect, (req, res) => {
-        const { filename } = req.params;
-        if (filename.includes('..') || !filename.endsWith('.mk')) {
-            return res.status(400).json({ message: 'Invalid filename' });
-        }
-        const filePath = path.join(BACKUP_DIR, filename);
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ message: 'Backup file not found' });
-        }
-        res.download(filePath);
-    });
-    
-    app.use('/api/superadmin', superRouter);
-    
-    const API_BACKEND_URL = 'http://127.0.0.1:3002';
-    const forward = async (method, url, req, res, data) => {
-        try {
-            const r = await axios({
-                method,
-                url: API_BACKEND_URL + url,
-                data,
-                headers: {
-                    authorization: req.headers.authorization || '',
-                    'content-type': req.headers['content-type'] || 'application/json'
-                },
-                timeout: 15000
-            });
-            res.status(r.status).send(r.data);
-        } catch (e) {
-            const s = e.response ? e.response.status : 500;
-            const m = e.response?.data || { message: e.message };
-            res.status(s).send(m);
-        }
-    };
-    
-    app.get('/api/roles', protect, async (req, res) => {
-        await forward('GET', '/api/roles', req, res);
-    });
-    app.get('/api/permissions', protect, async (req, res) => {
-        await forward('GET', '/api/permissions', req, res);
-    });
-    app.get('/api/panel-users', protect, async (req, res) => {
-        await forward('GET', '/api/panel-users', req, res);
-    });
-    app.post('/api/panel-users', protect, async (req, res) => {
-        await forward('POST', '/api/panel-users', req, res, req.body);
-    });
-    app.delete('/api/panel-users/:id', protect, async (req, res) => {
-        await forward('DELETE', `/api/panel-users/${req.params.id}`, req, res);
-    });
-    app.get('/api/roles/:roleId/permissions', protect, async (req, res) => {
-        await forward('GET', `/api/roles/${req.params.roleId}/permissions`, req, res);
-    });
-    app.put('/api/roles/:roleId/permissions', protect, async (req, res) => {
-        await forward('PUT', `/api/roles/${req.params.roleId}/permissions`, req, res, req.body);
-    });
-
-    // --- LOCALE FILES ROUTE (must come before static files) ---
-    app.get('/locales/:file', (req, res) => {
-        const file = req.params.file;
-        // Validate filename to prevent directory traversal
-        if (!/^[a-zA-Z]{2,3}\.json$/.test(file)) {
-            return res.status(400).json({ error: 'Invalid locale file' });
-        }
-        const localePath = path.join(__dirname, '..', 'locales', file);
-        res.sendFile(localePath, (err) => {
-            if (err) {
-                console.error(`Error serving locale file ${file}:`, err);
-                res.status(404).json({ error: 'Locale file not found' });
-            }
-        });
-    });
-
-    // --- PRODUCTION STATIC FILES ---
-    // Serve static files with proper caching
-    app.use(express.static(path.join(__dirname, '..', 'dist'), {
-        maxAge: '1d', // Cache static assets for 1 day
-        etag: true,
-        lastModified: true
-    }));
-    
-    // Fallback to index.html for SPA routing in production
-    app.get('*', (req, res) => {
-        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
-    });
-
-    app.listen(PORT, () => {
-        console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
-        console.log(`   Mode: Production (Static Files Served)`);
-    });
-
-    // --- CAPTIVE PORTAL SERVER ---
-    const CAPTIVE_PORT = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
-    const captiveApp = express();
-    
-    // Add redirect middleware for unauthorized clients
-    captiveApp.use((req, res, next) => {
-        const host = (req.headers.host || '').split(':')[0];
-        const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === 'localhost';
-        const isStaticAsset = /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
-        const isApi = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/');
-        
-        // Allow direct access to login page for admin IPs (including WAN IP)
-        if (isIpHost && req.path === '/login') {
-            return next(); // Allow direct access to login on IP addresses
-        }
-        
-        // Redirect unauthorized clients to captive portal (only for non-login paths)
-        if (isIpHost && !isApi && !isStaticAsset && req.path !== '/login' && req.path !== '/') {
-            return res.redirect(`http://${host}:${CAPTIVE_PORT}/captive`);
-        }
-        next();
-    });
-
-    // API route for captive portal landing page settings - MUST be first
-    captiveApp.get('/api/public/landing-page', async (req, res) => {
-        try {
-            const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
-            let cfg = {};
-            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
-            res.json({
-                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
-                config: cfg
-            });
-        } catch (e) {
-            console.error('Error in captive /api/public/landing-page:', e);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
-    // Serve captive portal static files
-    captiveApp.use(express.static(path.join(__dirname, '..', 'dist')));
-    
-    // Fallback to index.html for SPA routing
-    captiveApp.get('*', (req, res) => {
-        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
-    });
-
-    captiveApp.listen(CAPTIVE_PORT, () => {
-        console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
-    });
-}
-
-startServer();
                 return res.status(400).json({ message: 'No file uploaded.' });
             }
             
