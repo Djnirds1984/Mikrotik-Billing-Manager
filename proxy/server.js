@@ -1829,12 +1829,32 @@ async function startServer() {
             let profile = secret?.profile || '';
             let due = '';
             let comment = secret?.comment || '';
+            let planName = '';
             try {
                 const c = JSON.parse(comment || '{}');
                 profile = c.plan || profile || '';
                 due = c.dueDateTime || c.dueDate || '';
+                planName = c.planName || c.plan || '';
             } catch (_) {}
-            res.json({ profile, active, comment: due || comment || '' });
+            // Look up billing plan by planName or pppoeProfile
+            let planRow = null;
+            if (planName) {
+                planRow = await db.get('SELECT name, price, currency FROM billing_plans WHERE name = ? AND routerId = ?', [planName, routerId]);
+            }
+            if (!planRow && profile) {
+                planRow = await db.get('SELECT name, price, currency FROM billing_plans WHERE pppoeProfile = ? AND routerId = ?', [profile, routerId]);
+            }
+            if (!planRow && profile) {
+                planRow = await db.get('SELECT name, price, currency FROM billing_plans WHERE name = ? AND routerId = ?', [profile, routerId]);
+            }
+            res.json({
+                profile,
+                active,
+                comment: due || comment || '',
+                planName: planRow?.name || planName || profile,
+                planPrice: planRow?.price || null,
+                currency: planRow?.currency || 'PHP'
+            });
         } catch (e) {
             const status = e.response ? e.response.status : 500;
             const msg = e.response?.data?.message || e.message;

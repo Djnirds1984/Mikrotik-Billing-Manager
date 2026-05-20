@@ -247,8 +247,8 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   };
 
   const handlePayNow = async () => {
-    const currentPlanName = status?.profile || 'Unknown';
-    const currentPlanPrice = payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
+    const currentPlanName = status?.planName || status?.profile || 'Unknown';
+    const currentPlanPrice = status?.planPrice ?? payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
     if (!clientInfo?.pppoeUsername || !currentPlanPrice) {
       setError('Unable to initiate payment. Plan price not found.');
       return;
