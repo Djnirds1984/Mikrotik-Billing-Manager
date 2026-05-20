@@ -4,8 +4,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
     getCurrentVersion, listBackups, deleteBackup, 
     streamUpdateStatus, streamUpdateApp, streamRollbackApp,
+    listUpdateSnapshots, deleteUpdateSnapshot, streamRollbackUpdate,
     parseGitHubUrl, getRepositoryInfo, getBranches, streamPullFromRepository
 } from '../services/updaterService.ts';
+import type { UpdateSnapshot } from '../services/updaterService.ts';
 import { UpdateIcon, CloudArrowUpIcon, CheckCircleIcon, ExclamationTriangleIcon, TrashIcon, QuestionMarkCircleIcon } from '../constants.tsx';
 import { Loader } from './Loader.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
@@ -74,6 +76,8 @@ export const Updater: React.FC = () => {
     const { t } = useLocalization();
     const [statusInfo, setStatusInfo] = useState<StatusInfo>({ status: 'idle', message: t('updater.check_latest_version') || 'Check for the latest version of the panel.' });
     const [backups, setBackups] = useState<string[]>([]);
+    const [updateSnapshots, setUpdateSnapshots] = useState<UpdateSnapshot[]>([]);
+    const [isDeletingSnapshot, setIsDeletingSnapshot] = useState<string | null>(null);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [currentVersionInfo, setCurrentVersionInfo] = useState<VersionInfo | null>(null);
     const [newVersionInfo, setNewVersionInfo] = useState<NewVersionInfo | null>(null);
@@ -103,6 +107,15 @@ export const Updater: React.FC = () => {
         }
     }, []);
 
+    const fetchUpdateSnapshots = useCallback(async () => {
+        try {
+            const data = await listUpdateSnapshots();
+            setUpdateSnapshots(data);
+        } catch (error) {
+            console.error('Failed to fetch update snapshots:', error);
+        }
+    }, []);
+
     useEffect(() => {
         const fetchCurrentVersion = async () => {
             setIsLoadingCurrentVersion(true);
@@ -119,6 +132,7 @@ export const Updater: React.FC = () => {
 
         fetchCurrentVersion();
         fetchBackups();
+        fetchUpdateSnapshots();
         
         // Load saved repository URL and branch from localStorage
         const savedRepoUrl = localStorage.getItem('updaterRepositoryUrl');
@@ -219,6 +233,43 @@ export const Updater: React.FC = () => {
             alert(`Error: ${(error as Error).message}`);
         } finally {
             setIsDeleting(null);
+        }
+    };
+
+    const handleRollbackUpdate = (snapshot: UpdateSnapshot) => {
+        const label = `${snapshot.timestamp || snapshot.id} (${(snapshot.prevCommit || '').slice(0, 7)})`;
+        if (!window.confirm(`Roll back the entire application to snapshot ${label}?\n\nThis will:\n  • git reset --hard to commit ${(snapshot.prevCommit || '').slice(0, 7)}\n  • restore the database from ${snapshot.dbBackupFile || '(none)'}\n  • restore ${snapshot.capturedPaths.length} preserved file(s)\n  • reinstall dependencies + rebuild + restart\n\nA safety snapshot of the CURRENT state will be saved first.`)) return;
+
+        setStatusInfo({ status: 'rollingback', message: `Rolling back update ${label}...` });
+        setLogs([]);
+
+        streamRollbackUpdate(snapshot.id, {
+            onMessage: (data) => {
+                if (data.log) setLogs(prev => [...prev, { text: data.log.trim(), isError: data.isError }]);
+                if (data.status === 'restarting') {
+                    setStatusInfo({ status: 'restarting', message: 'Rollback complete! Server is restarting...' });
+                    setTimeout(() => window.location.reload(), 8000);
+                }
+                if (data.status === 'error') {
+                    setStatusInfo({ status: 'error', message: data.message });
+                }
+            },
+            onError: (err) => {
+                setStatusInfo({ status: 'error', message: `Lost connection during rollback. ${err.message}` });
+            },
+        });
+    };
+
+    const handleDeleteUpdateSnapshot = async (id: string) => {
+        if (!window.confirm(`Permanently delete update snapshot "${id}"? The matching DB backup will also be removed. This cannot be undone.`)) return;
+        setIsDeletingSnapshot(id);
+        try {
+            await deleteUpdateSnapshot(id);
+            await fetchUpdateSnapshots();
+        } catch (error) {
+            alert(`Error: ${(error as Error).message}`);
+        } finally {
+            setIsDeletingSnapshot(null);
         }
     };
 
@@ -486,6 +537,50 @@ export const Updater: React.FC = () => {
                 <VersionInfoDisplay title="Current Version" info={currentVersionInfo} />
             )}
             
+             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-8">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Update Snapshots (Full Rollback)</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Each update creates a snapshot containing the previous git commit, database, and user data. Use these to roll the entire application back to any earlier point if a bug is introduced.</p>
+                    </div>
+                    <button onClick={fetchUpdateSnapshots} disabled={isWorking} className="px-3 py-1 text-sm bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-md font-semibold disabled:opacity-50">Refresh</button>
+                </div>
+                {updateSnapshots.length > 0 ? (
+                    <ul className="space-y-2">
+                        {updateSnapshots.map(snap => (
+                            <li key={snap.id} className="bg-slate-100 dark:bg-slate-700/50 p-3 rounded-md">
+                                <div className="flex justify-between items-start gap-3">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-mono text-sm text-slate-800 dark:text-slate-200 truncate">{snap.timestamp || snap.id}</span>
+                                            {snap.kind === 'pre-rollback-safety' && (
+                                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100">SAFETY</span>
+                                            )}
+                                        </div>
+                                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 space-x-3">
+                                            <span>branch: <span className="font-mono">{snap.branch || '-'}</span></span>
+                                            <span>commit: <span className="font-mono">{(snap.prevCommit || '-').slice(0, 7)}</span></span>
+                                            <span>db: <span className="font-mono">{snap.dbBackupExists ? '✓' : '✗'}</span></span>
+                                            <span>files: {snap.capturedPaths.length}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <button onClick={() => handleRollbackUpdate(snap)} disabled={isWorking || !snap.prevCommit} className="px-3 py-1 text-sm bg-amber-600 hover:bg-amber-500 text-white rounded-md font-semibold disabled:opacity-50" title={snap.prevCommit ? 'Roll back code + DB + user data to this point' : 'No commit recorded'}>
+                                            Rollback
+                                        </button>
+                                        <button onClick={() => handleDeleteUpdateSnapshot(snap.id)} disabled={isWorking} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-400 rounded-md disabled:opacity-50" title="Delete Snapshot">
+                                            {isDeletingSnapshot === snap.id ? <Loader /> : <TrashIcon className="h-4 w-4" />}
+                                        </button>
+                                    </div>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p className="text-slate-500 dark:text-slate-500 text-center py-4">No update snapshots yet. The next update will create one automatically.</p>
+                )}
+            </div>
+
              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-8">
                 <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">Application Backups</h3>
                  {backups.length > 0 ? (

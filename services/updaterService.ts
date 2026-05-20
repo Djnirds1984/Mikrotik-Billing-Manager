@@ -48,6 +48,24 @@ export const deleteBackup = (backupFile: string) => fetchData('/api/delete-backu
     body: JSON.stringify({ backupFile }),
 });
 
+// Full update-snapshot rollback (code + DB + user data) -----------------
+export interface UpdateSnapshot {
+    id: string;
+    timestamp: string | null;
+    branch: string | null;
+    prevCommit: string | null;
+    dbBackupFile: string | null;
+    dbBackupExists: boolean;
+    capturedPaths: string[];
+    snapshotDir: string;
+    kind?: string;
+}
+export const listUpdateSnapshots = () => fetchData<UpdateSnapshot[]>('/api/list-update-snapshots');
+export const deleteUpdateSnapshot = (id: string) => fetchData('/api/delete-update-snapshot', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+});
+
 
 // --- Streaming Logic using Fetch API ---
 interface StreamCallbacks {
@@ -117,6 +135,11 @@ export const streamUpdateApp = (callbacks: StreamCallbacks) => {
 
 export const streamRollbackApp = (backupFile: string, callbacks: StreamCallbacks) => {
     const url = `/api/rollback-app?backupFile=${encodeURIComponent(backupFile)}`;
+    streamEvents(url, callbacks);
+};
+
+export const streamRollbackUpdate = (id: string, callbacks: StreamCallbacks) => {
+    const url = `/api/rollback-update?id=${encodeURIComponent(id)}`;
     streamEvents(url, callbacks);
 };
 

@@ -3147,6 +3147,9 @@ async function startServer() {
 
     // Pull from repository (non-streaming, executes real git pull)
     app.post('/api/github/pull', protect, requireSuperadmin, async (req, res) => {
+        let snapshotRoot = null;
+        let capturedPaths = [];
+        const noopSend = (obj) => { try { console.log('[github/pull]', obj); } catch {} };
         try {
             const { branch } = req.body;
             if (!branch) {
@@ -3155,16 +3158,49 @@ async function startServer() {
             if (!/^[a-zA-Z0-9-_./]+$/.test(branch)) {
                 return res.status(400).json({ message: 'Invalid branch name' });
             }
+
+            // SNAPSHOT user data (DBs, .env, uploads, device id, etc.)
+            // BEFORE pulling — prevents git from overwriting any of
+            // those files if they happen to be tracked in the repo.
+            try {
+                if (typeof snapshotUserData === 'function') {
+                    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+                    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    snapshotRoot = path.join(BACKUP_DIR, `pre_pull_snapshot_${stamp}`);
+                    if (!fs.existsSync(snapshotRoot)) fs.mkdirSync(snapshotRoot, { recursive: true });
+                    capturedPaths = snapshotUserData(noopSend, snapshotRoot);
+                }
+            } catch (se) {
+                console.warn('[github/pull] snapshot stage failed:', se.message);
+            }
+
+            // Stash any local changes so the pull never aborts.
+            await ghExec('git stash --include-untracked').catch(() => {});
+
             await ghExec('git fetch origin');
             const pullOut = await ghExec(`git pull origin ${branch}`);
             const stat = await ghExec('git diff --shortstat HEAD@{1} HEAD').catch(() => '');
+
+            // RESTORE user data over whatever git pulled.
+            if (snapshotRoot && capturedPaths.length > 0 && typeof restoreUserData === 'function') {
+                try { restoreUserData(noopSend, snapshotRoot, capturedPaths); } catch (re) {
+                    console.warn('[github/pull] restore stage failed:', re.message);
+                }
+            }
+
             res.json({
                 success: true,
                 message: `Successfully pulled from ${branch}`,
                 output: pullOut,
                 stat,
+                preserved: capturedPaths,
             });
         } catch (error) {
+            // Best-effort restore on failure too, so a broken pull cannot
+            // leave the checkout in a half-overwritten state.
+            if (snapshotRoot && capturedPaths.length > 0 && typeof restoreUserData === 'function') {
+                try { restoreUserData(noopSend, snapshotRoot, capturedPaths); } catch {}
+            }
             res.status(500).json({
                 success: false,
                 message: 'Pull operation failed',
@@ -3198,18 +3234,61 @@ async function startServer() {
             child.on('close', code => code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`)));
         });
 
+        let snapshotRoot = null;
+        let capturedPaths = [];
+
         (async () => {
             try {
+                // SNAPSHOT: capture per-install user data (DBs, .env,
+                // uploads, device-id, etc.) before pulling. Without this
+                // a `git pull` will overwrite any of those files that are
+                // tracked in the repository — producing the "factory
+                // reset" symptom (routers/customers/settings disappear).
+                try {
+                    if (typeof snapshotUserData === 'function') {
+                        if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+                        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+                        snapshotRoot = path.join(BACKUP_DIR, `pre_pull_snapshot_${stamp}`);
+                        if (!fs.existsSync(snapshotRoot)) fs.mkdirSync(snapshotRoot, { recursive: true });
+                        send({ log: 'Snapshotting per-install user data before pull...' });
+                        capturedPaths = snapshotUserData(send, snapshotRoot);
+                        send({ log: `Snapshot captured ${capturedPaths.length} item(s): ${capturedPaths.join(', ') || '(none)'}` });
+                    }
+                } catch (se) {
+                    send({ log: `WARNING: snapshot stage failed: ${se.message}` });
+                }
+
+                // Stash any uncommitted changes so the pull cannot be blocked.
+                send({ log: 'Stashing any local changes (safety)...' });
+                await runStreaming('git', ['stash', '--include-untracked']).catch(() => {});
+
                 send({ log: `Fetching latest from origin (${branch})...` });
                 await runStreaming('git', ['fetch', 'origin', branch]);
                 send({ log: `Pulling changes...` });
                 await runStreaming('git', ['pull', 'origin', branch]);
+
+                // RESTORE: forcibly overlay user data back on top of
+                // whatever git pulled. Routers, customers, .env, uploads,
+                // device id are now exactly as they were pre-pull.
+                if (snapshotRoot && capturedPaths.length > 0 && typeof restoreUserData === 'function') {
+                    send({ log: 'Restoring per-install user data after pull...' });
+                    restoreUserData(send, snapshotRoot, capturedPaths);
+                }
+
                 send({
                     status: 'completed',
                     message: `Successfully pulled latest from ${branch}.`,
                 });
                 res.end();
             } catch (err) {
+                // On failure also try to restore so we don't leave the
+                // checkout half-overwritten by git.
+                if (snapshotRoot && capturedPaths.length > 0 && typeof restoreUserData === 'function') {
+                    try {
+                        send({ log: 'Pull failed — restoring user data from snapshot...' });
+                        restoreUserData(send, snapshotRoot, capturedPaths);
+                    } catch {}
+                }
                 send({ status: 'error', message: err.message });
                 res.end();
             }
@@ -3339,22 +3418,31 @@ async function startServer() {
 
         let snapshotRoot = null;
         let capturedPaths = [];
+        let updateSnapshotId = null;
+        let updateManifestPath = null;
+        let dbBackupRelName = null;
+        let prevCommit = null;
 
         (async () => {
             try {
-                // 1) Detect current branch
+                // 1) Detect current branch + pre-update commit (used by rollback)
                 send({ log: 'Detecting current branch...' });
                 const branch = (await ghExec('git rev-parse --abbrev-ref HEAD').catch(() => 'main')).trim() || 'main';
                 send({ log: `Branch: ${branch}` });
+                prevCommit = (await ghExec('git rev-parse HEAD').catch(() => '')).trim() || null;
+                if (prevCommit) send({ log: `Current commit: ${prevCommit}` });
+
+                // Shared id used for DB backup name + snapshot dir + manifest.
+                updateSnapshotId = new Date().toISOString().replace(/[:.]/g, '-');
 
                 // 2) Backup the database before touching anything
                 try {
                     if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-                    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-                    const backupName = `panel_backup_${ts}.db`;
+                    const backupName = `panel_backup_${updateSnapshotId}.db`;
                     const backupPath = path.join(BACKUP_DIR, backupName);
                     if (fs.existsSync(DB_PATH)) {
                         await fs.promises.copyFile(DB_PATH, backupPath);
+                        dbBackupRelName = backupName;
                         send({ log: `Database backed up to ${backupName}` });
                     } else {
                         send({ log: 'No existing panel.db found; skipping DB backup.' });
@@ -3369,14 +3457,34 @@ async function startServer() {
                 //     factory reset" failure mode where these files were
                 //     accidentally tracked in git.
                 try {
-                    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-                    snapshotRoot = path.join(BACKUP_DIR, `pre_update_snapshot_${stamp}`);
+                    snapshotRoot = path.join(BACKUP_DIR, `pre_update_snapshot_${updateSnapshotId}`);
                     if (!fs.existsSync(snapshotRoot)) fs.mkdirSync(snapshotRoot, { recursive: true });
                     send({ log: 'Snapshotting per-install user data before pull...' });
                     capturedPaths = snapshotUserData(send, snapshotRoot);
                     send({ log: `Snapshot captured ${capturedPaths.length} item(s): ${capturedPaths.join(', ') || '(none)'}` });
                 } catch (se) {
                     send({ log: `WARNING: snapshot stage failed: ${se.message}`, isError: true });
+                }
+
+                // 2c) Write the rollback manifest so /api/rollback-update can
+                //     fully restore code + DB + user data from this snapshot.
+                try {
+                    if (snapshotRoot) {
+                        const manifest = {
+                            id: updateSnapshotId,
+                            timestamp: new Date().toISOString(),
+                            branch,
+                            prevCommit,
+                            dbBackupFile: dbBackupRelName,
+                            snapshotDir: path.basename(snapshotRoot),
+                            capturedPaths,
+                        };
+                        updateManifestPath = path.join(snapshotRoot, 'manifest.json');
+                        fs.writeFileSync(updateManifestPath, JSON.stringify(manifest, null, 2));
+                        send({ log: `Rollback manifest written: ${path.basename(snapshotRoot)}/manifest.json` });
+                    }
+                } catch (me) {
+                    send({ log: `WARNING: manifest write failed: ${me.message}`, isError: true });
                 }
 
                 // 3) Stash any local changes so git pull never blocks on conflicts
@@ -3503,6 +3611,198 @@ async function startServer() {
 
         req.on('close', () => { try { res.end(); } catch {} });
     });
+
+    // GET /api/rollback-update?id=xxx (SSE) — FULL rollback (code + DB + user data)
+    app.get('/api/rollback-update', protect, requireSuperadmin, (req, res) => {
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        });
+        const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+        (async () => {
+            try {
+                const { id } = req.query;
+                if (!id || typeof id !== 'string' || /[\\/]/.test(id) || id.includes('..')) {
+                    throw new Error('Valid snapshot id is required');
+                }
+                const snapshotDir = path.join(BACKUP_DIR, `pre_update_snapshot_${id}`);
+                if (!snapshotDir.startsWith(BACKUP_DIR)) throw new Error('Invalid snapshot path');
+                if (!fs.existsSync(snapshotDir)) throw new Error(`Snapshot not found: ${id}`);
+                const manifestPath = path.join(snapshotDir, 'manifest.json');
+                if (!fs.existsSync(manifestPath)) throw new Error('Snapshot manifest is missing');
+                const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+                send({ log: `Rolling back to snapshot ${manifest.id || id}` });
+                send({ log: `  branch:    ${manifest.branch || '(unknown)'}` });
+                send({ log: `  commit:    ${manifest.prevCommit || '(unknown)'}` });
+                send({ log: `  db backup: ${manifest.dbBackupFile || '(none)'}` });
+                send({ log: `  preserved: ${(manifest.capturedPaths || []).length} item(s)` });
+
+                // 0) Pre-rollback safety snapshot of CURRENT state
+                try {
+                    const safetyId = `safety_${new Date().toISOString().replace(/[:.]/g, '-')}`;
+                    const safetyDir = path.join(BACKUP_DIR, `pre_update_snapshot_${safetyId}`);
+                    fs.mkdirSync(safetyDir, { recursive: true });
+                    const safetyDbName = `panel_backup_${safetyId}.db`;
+                    if (fs.existsSync(DB_PATH)) {
+                        await fs.promises.copyFile(DB_PATH, path.join(BACKUP_DIR, safetyDbName));
+                    }
+                    const safetyCaptured = snapshotUserData(send, safetyDir);
+                    const safetyHead = (await ghExec('git rev-parse HEAD').catch(() => '')).trim() || null;
+                    const safetyBranch = (await ghExec('git rev-parse --abbrev-ref HEAD').catch(() => 'main')).trim() || 'main';
+                    fs.writeFileSync(path.join(safetyDir, 'manifest.json'), JSON.stringify({
+                        id: safetyId, timestamp: new Date().toISOString(),
+                        branch: safetyBranch, prevCommit: safetyHead,
+                        dbBackupFile: fs.existsSync(DB_PATH) ? safetyDbName : null,
+                        snapshotDir: path.basename(safetyDir),
+                        capturedPaths: safetyCaptured, kind: 'pre-rollback-safety',
+                    }, null, 2));
+                    send({ log: `Pre-rollback safety snapshot saved as ${safetyId}` });
+                } catch (se) {
+                    send({ log: `WARNING: pre-rollback safety snapshot failed: ${se.message}`, isError: true });
+                }
+
+                // 1) Rewind code to the previous commit
+                if (manifest.prevCommit && /^[a-f0-9]{7,40}$/i.test(manifest.prevCommit)) {
+                    send({ log: 'Stashing any local changes (safety)...' });
+                    await streamProcess(send, 'git', ['stash', '--include-untracked']).catch(() => {});
+                    if (manifest.branch) {
+                        send({ log: `Fetching origin/${manifest.branch}...` });
+                        await streamProcess(send, 'git', ['fetch', 'origin', manifest.branch]).catch(e => {
+                            send({ log: `git fetch warning: ${e.message}`, isError: true });
+                        });
+                    }
+                    send({ log: `Resetting working tree to ${manifest.prevCommit}...` });
+                    await streamProcess(send, 'git', ['reset', '--hard', manifest.prevCommit]);
+                } else {
+                    send({ log: 'No valid prevCommit in manifest; skipping git rewind.', isError: true });
+                }
+
+                // 2) Restore DB from paired backup
+                if (manifest.dbBackupFile) {
+                    const dbBackupPath = path.join(BACKUP_DIR, manifest.dbBackupFile);
+                    if (dbBackupPath.startsWith(BACKUP_DIR) && fs.existsSync(dbBackupPath)) {
+                        send({ log: `Restoring database from ${manifest.dbBackupFile}...` });
+                        await fs.promises.copyFile(dbBackupPath, DB_PATH);
+                        send({ log: 'Database restored.' });
+                    } else {
+                        send({ log: `WARNING: db backup not found: ${manifest.dbBackupFile}`, isError: true });
+                    }
+                }
+
+                // 3) Restore user data files
+                const captured = Array.isArray(manifest.capturedPaths) ? manifest.capturedPaths : [];
+                if (captured.length > 0) {
+                    send({ log: 'Restoring per-install user data from snapshot...' });
+                    restoreUserData(send, snapshotDir, captured);
+                }
+
+                // 4) Reinstall dependencies
+                const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+                send({ log: 'Installing root dependencies (npm install)...' });
+                await streamProcess(send, npmCmd, ['install', '--no-audit', '--no-fund']).catch(e => {
+                    send({ log: `root npm install warning: ${e.message}`, isError: true });
+                });
+                if (fs.existsSync(path.join(__dirname, 'package.json'))) {
+                    send({ log: 'Installing proxy dependencies...' });
+                    await streamProcess(send, npmCmd, ['install', '--no-audit', '--no-fund'], { cwd: __dirname }).catch(e => {
+                        send({ log: `proxy npm install warning: ${e.message}`, isError: true });
+                    });
+                }
+                const apiBackendDir = path.join(REPO_ROOT, 'api-backend');
+                if (fs.existsSync(path.join(apiBackendDir, 'package.json'))) {
+                    send({ log: 'Installing api-backend dependencies...' });
+                    await streamProcess(send, npmCmd, ['install', '--no-audit', '--no-fund'], { cwd: apiBackendDir }).catch(e => {
+                        send({ log: `api-backend npm install warning: ${e.message}`, isError: true });
+                    });
+                }
+
+                // 5) Rebuild frontend (best-effort)
+                try {
+                    send({ log: 'Building frontend (npm run build)...' });
+                    await streamProcess(send, npmCmd, ['run', 'build']);
+                } catch (e) {
+                    send({ log: `Frontend build skipped/failed (continuing): ${e.message}`, isError: true });
+                }
+
+                send({ log: 'Rollback complete. Triggering PM2 restart...' });
+                send({ status: 'restarting', message: 'Rollback complete. Restarting services.' });
+                setTimeout(() => {
+                    try { res.end(); } catch {}
+                    triggerPm2Restart();
+                }, 500);
+            } catch (err) {
+                send({ log: `Rollback failed: ${err.message}`, isError: true });
+                send({ status: 'error', message: err.message });
+                try { res.end(); } catch {}
+            }
+        })();
+
+        req.on('close', () => { try { res.end(); } catch {} });
+    });
+
+    // GET /api/list-update-snapshots — enumerate rollback manifests
+    app.get('/api/list-update-snapshots', protect, requireSuperadmin, async (req, res) => {
+        try {
+            if (!fs.existsSync(BACKUP_DIR)) return res.json([]);
+            const entries = fs.readdirSync(BACKUP_DIR, { withFileTypes: true })
+                .filter(d => d.isDirectory() && d.name.startsWith('pre_update_snapshot_'));
+            const results = [];
+            for (const dirent of entries) {
+                const manifestPath = path.join(BACKUP_DIR, dirent.name, 'manifest.json');
+                if (!fs.existsSync(manifestPath)) continue;
+                try {
+                    const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+                    const dbBackupExists = !!(m.dbBackupFile && fs.existsSync(path.join(BACKUP_DIR, m.dbBackupFile)));
+                    results.push({
+                        id: m.id || dirent.name.replace('pre_update_snapshot_', ''),
+                        timestamp: m.timestamp || null,
+                        branch: m.branch || null,
+                        prevCommit: m.prevCommit || null,
+                        dbBackupFile: m.dbBackupFile || null,
+                        dbBackupExists,
+                        capturedPaths: Array.isArray(m.capturedPaths) ? m.capturedPaths : [],
+                        snapshotDir: dirent.name,
+                        kind: m.kind || 'pre-update',
+                    });
+                } catch {}
+            }
+            results.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+            res.json(results);
+        } catch (e) {
+            res.status(500).json({ message: `Failed to list update snapshots: ${e.message}` });
+        }
+    });
+
+    // POST /api/delete-update-snapshot { id } — remove snapshot dir + paired DB backup
+    app.post('/api/delete-update-snapshot', protect, requireSuperadmin, async (req, res) => {
+        try {
+            const { id } = req.body || {};
+            if (!id || typeof id !== 'string' || /[\\/]/.test(id) || id.includes('..')) {
+                return res.status(400).json({ message: 'Invalid id' });
+            }
+            const snapshotDir = path.join(BACKUP_DIR, `pre_update_snapshot_${id}`);
+            if (!snapshotDir.startsWith(BACKUP_DIR)) return res.status(400).json({ message: 'Invalid id' });
+            if (!fs.existsSync(snapshotDir)) return res.status(404).json({ message: 'Snapshot not found' });
+            let dbBackupFile = null;
+            try {
+                const m = JSON.parse(fs.readFileSync(path.join(snapshotDir, 'manifest.json'), 'utf8'));
+                dbBackupFile = m.dbBackupFile || null;
+            } catch {}
+            fs.rmSync(snapshotDir, { recursive: true, force: true });
+            if (dbBackupFile && /^[A-Za-z0-9._-]+\.db$/.test(dbBackupFile)) {
+                const dbPath = path.join(BACKUP_DIR, dbBackupFile);
+                if (dbPath.startsWith(BACKUP_DIR) && fs.existsSync(dbPath)) {
+                    try { fs.unlinkSync(dbPath); } catch {}
+                }
+            }
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ message: `Delete failed: ${e.message}` });
+        }
+    });
+
     // --- REMOTE ACCESS ENDPOINTS (ZeroTier, PiTunnel, Ngrok, Dataplicity) ---
     // Helper function to execute shell commands
     const runCommand = (cmd) => new Promise((resolve, reject) => {
@@ -3891,6 +4191,406 @@ WantedBy=multi-user.target`;
     superRouter.post('/upload-backup', rawBodySaver, async (req, res) => {
         try {
             if (!req.body || req.body.length === 0) {
+                return res.status(400).json({ message: 'No file uploaded.' });
+            }
+            
+            const backupFile = `uploaded-restore-${Date.now()}.mk`;
+            const backupPath = path.join(BACKUP_DIR, backupFile);
+            
+            await fs.promises.writeFile(backupPath, req.body);
+            
+            res.json({ message: 'Backup uploaded successfully.', filename: backupFile });
+        } catch (e) {
+            res.status(500).json({ message: `File upload failed: ${e.message}` });
+        }
+    });
+
+    superRouter.get('/restore-from-backup', (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+        const { file } = req.query;
+
+        if (!file || file.includes('..') || !file.endsWith('.mk')) {
+            send({ status: 'error', message: 'Invalid backup file specified for restore.' });
+            return res.end();
+        }
+        
+        const restore = async () => {
+            try {
+                send({ log: `Starting full panel restore from ${file}...`});
+                const backupPath = path.join(BACKUP_DIR, file);
+                if (!fs.existsSync(backupPath)) throw new Error('Backup file not found on server.');
+
+                send({ log: 'Stopping all panel services via pm2...'});
+                await runCommand('pm2 stop all').catch(e => send({ log: `Could not stop pm2 (this is okay if it's not running): ${e.message}`, isError: true }));
+                
+                send({ log: 'Extracting backup over current application files...'});
+                const projectRoot = path.join(__dirname, '..');
+                await tar.x({
+                    file: backupPath,
+                    cwd: projectRoot,
+                    onentry: (entry) => send({ log: `Restoring: ${entry.path}` })
+                });
+                send({ log: 'Extraction complete.' });
+
+                send({ log: 'Re-installing dependencies for UI server...'});
+                await runCommand('npm install --prefix proxy');
+
+                send({ log: 'Re-installing dependencies for API backend...'});
+                await runCommand('npm install --prefix api-backend');
+
+                send({ log: 'Restarting panel services...'});
+                exec('pm2 restart all', (err, stdout) => {
+                     if (err) {
+                         send({ log: `PM2 restart failed: ${err.message}`, isError: true });
+                         send({ status: 'error', message: err.message });
+                    } else {
+                        send({ log: stdout });
+                        send({ status: 'restarting' });
+                    }
+                    res.end();
+                });
+
+            } catch (e) {
+                send({ log: e.message, isError: true });
+                send({ status: 'error', message: e.message });
+                res.end();
+            }
+        };
+        restore();
+    });
+
+    app.get('/download-backup/:filename', protect, (req, res) => {
+        const { filename } = req.params;
+        if (filename.includes('..') || !filename.endsWith('.mk')) {
+            return res.status(400).json({ message: 'Invalid filename' });
+        }
+        const filePath = path.join(BACKUP_DIR, filename);
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ message: 'Backup file not found' });
+        }
+        res.download(filePath);
+    });
+    
+    app.use('/api/superadmin', superRouter);
+    
+    const API_BACKEND_URL = 'http://127.0.0.1:3002';
+    const forward = async (method, url, req, res, data) => {
+        try {
+            const r = await axios({
+                method,
+                url: API_BACKEND_URL + url,
+                data,
+                headers: {
+                    authorization: req.headers.authorization || '',
+                    'content-type': req.headers['content-type'] || 'application/json'
+                },
+                timeout: 15000
+            });
+            res.status(r.status).send(r.data);
+        } catch (e) {
+            const s = e.response ? e.response.status : 500;
+            const m = e.response?.data || { message: e.message };
+            res.status(s).send(m);
+        }
+    };
+    
+    app.get('/api/roles', protect, async (req, res) => {
+        await forward('GET', '/api/roles', req, res);
+    });
+    app.get('/api/permissions', protect, async (req, res) => {
+        await forward('GET', '/api/permissions', req, res);
+    });
+    app.get('/api/panel-users', protect, async (req, res) => {
+        await forward('GET', '/api/panel-users', req, res);
+    });
+    app.post('/api/panel-users', protect, async (req, res) => {
+        await forward('POST', '/api/panel-users', req, res, req.body);
+    });
+    app.delete('/api/panel-users/:id', protect, async (req, res) => {
+        await forward('DELETE', `/api/panel-users/${req.params.id}`, req, res);
+    });
+    app.get('/api/roles/:roleId/permissions', protect, async (req, res) => {
+        await forward('GET', `/api/roles/${req.params.roleId}/permissions`, req, res);
+    });
+    app.put('/api/roles/:roleId/permissions', protect, async (req, res) => {
+        await forward('PUT', `/api/roles/${req.params.roleId}/permissions`, req, res, req.body);
+    });
+
+    // --- LOCALE FILES ROUTE (must come before static files) ---
+    app.get('/locales/:file', (req, res) => {
+        const file = req.params.file;
+        // Validate filename to prevent directory traversal
+        if (!/^[a-zA-Z]{2,3}\.json$/.test(file)) {
+            return res.status(400).json({ error: 'Invalid locale file' });
+        }
+        const localePath = path.join(__dirname, '..', 'locales', file);
+        res.sendFile(localePath, (err) => {
+            if (err) {
+                console.error(`Error serving locale file ${file}:`, err);
+                res.status(404).json({ error: 'Locale file not found' });
+            }
+        });
+    });
+
+    // --- PRODUCTION STATIC FILES ---
+    // Serve static files with proper caching
+    app.use(express.static(path.join(__dirname, '..', 'dist'), {
+        maxAge: '1d', // Cache static assets for 1 day
+        etag: true,
+        lastModified: true
+    }));
+    
+    // Fallback to index.html for SPA routing in production
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    });
+
+    app.listen(PORT, () => {
+        console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
+        console.log(`   Mode: Production (Static Files Served)`);
+    });
+
+    // --- CAPTIVE PORTAL SERVER ---
+    const CAPTIVE_PORT = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
+    const captiveApp = express();
+    
+    // Add redirect middleware for unauthorized clients
+    captiveApp.use((req, res, next) => {
+        const host = (req.headers.host || '').split(':')[0];
+        const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === 'localhost';
+        const isStaticAsset = /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
+        const isApi = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/');
+        
+        // Allow direct access to login page for admin IPs (including WAN IP)
+        if (isIpHost && req.path === '/login') {
+            return next(); // Allow direct access to login on IP addresses
+        }
+        
+        // Redirect unauthorized clients to captive portal (only for non-login paths)
+        if (isIpHost && !isApi && !isStaticAsset && req.path !== '/login' && req.path !== '/') {
+            return res.redirect(`http://${host}:${CAPTIVE_PORT}/captive`);
+        }
+        next();
+    });
+
+    // API route for captive portal landing page settings - MUST be first
+    captiveApp.get('/api/public/landing-page', async (req, res) => {
+        try {
+            const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
+            let cfg = {};
+            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            res.json({
+                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
+                config: cfg
+            });
+        } catch (e) {
+            console.error('Error in captive /api/public/landing-page:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Serve captive portal static files
+    captiveApp.use(express.static(path.join(__dirname, '..', 'dist')));
+    
+    // Fallback to index.html for SPA routing
+    captiveApp.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    });
+
+    captiveApp.listen(CAPTIVE_PORT, () => {
+        console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
+    });
+}
+
+startServer();
+                send({ log: `Starting full panel restore from ${file}...`});
+                const backupPath = path.join(BACKUP_DIR, file);
+                if (!fs.existsSync(backupPath)) throw new Error('Backup file not found on server.');
+
+                send({ log: 'Stopping all panel services via pm2...'});
+                await runCommand('pm2 stop all').catch(e => send({ log: `Could not stop pm2 (this is okay if it's not running): ${e.message}`, isError: true }));
+                
+                send({ log: 'Extracting backup over current application files...'});
+                const projectRoot = path.join(__dirname, '..');
+                await tar.x({
+                    file: backupPath,
+                    cwd: projectRoot,
+                    onentry: (entry) => send({ log: `Restoring: ${entry.path}` })
+                });
+                send({ log: 'Extraction complete.' });
+
+                send({ log: 'Re-installing dependencies for UI server...'});
+                await runCommand('npm install --prefix proxy');
+
+                send({ log: 'Re-installing dependencies for API backend...'});
+                await runCommand('npm install --prefix api-backend');
+
+                send({ log: 'Restarting panel services...'});
+                exec('pm2 restart all', (err, stdout) => {
+                     if (err) {
+                         send({ log: `PM2 restart failed: ${err.message}`, isError: true });
+                         send({ status: 'error', message: err.message });
+                    } else {
+                        send({ log: stdout });
+                        send({ status: 'restarting' });
+                    }
+                    res.end();
+                });
+
+            } catch (e) {
+                send({ log: e.message, isError: true });
+                send({ status: 'error', message: e.message });
+                res.end();
+            }
+        };
+        restore();
+    });
+
+    app.get('/download-backup/:filename', protect, (req, res) => {
+        const { filename } = req.params;
+        if (filename.includes('..') || !filename.endsWith('.mk')) {
+            return res.status(400).json({ message: 'Invalid filename' });
+        }
+        const filePath = path.join(BACKUP_DIR, filename);
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ message: 'Backup file not found' });
+        }
+        res.download(filePath);
+    });
+    
+    app.use('/api/superadmin', superRouter);
+    
+    const API_BACKEND_URL = 'http://127.0.0.1:3002';
+    const forward = async (method, url, req, res, data) => {
+        try {
+            const r = await axios({
+                method,
+                url: API_BACKEND_URL + url,
+                data,
+                headers: {
+                    authorization: req.headers.authorization || '',
+                    'content-type': req.headers['content-type'] || 'application/json'
+                },
+                timeout: 15000
+            });
+            res.status(r.status).send(r.data);
+        } catch (e) {
+            const s = e.response ? e.response.status : 500;
+            const m = e.response?.data || { message: e.message };
+            res.status(s).send(m);
+        }
+    };
+    
+    app.get('/api/roles', protect, async (req, res) => {
+        await forward('GET', '/api/roles', req, res);
+    });
+    app.get('/api/permissions', protect, async (req, res) => {
+        await forward('GET', '/api/permissions', req, res);
+    });
+    app.get('/api/panel-users', protect, async (req, res) => {
+        await forward('GET', '/api/panel-users', req, res);
+    });
+    app.post('/api/panel-users', protect, async (req, res) => {
+        await forward('POST', '/api/panel-users', req, res, req.body);
+    });
+    app.delete('/api/panel-users/:id', protect, async (req, res) => {
+        await forward('DELETE', `/api/panel-users/${req.params.id}`, req, res);
+    });
+    app.get('/api/roles/:roleId/permissions', protect, async (req, res) => {
+        await forward('GET', `/api/roles/${req.params.roleId}/permissions`, req, res);
+    });
+    app.put('/api/roles/:roleId/permissions', protect, async (req, res) => {
+        await forward('PUT', `/api/roles/${req.params.roleId}/permissions`, req, res, req.body);
+    });
+
+    // --- LOCALE FILES ROUTE (must come before static files) ---
+    app.get('/locales/:file', (req, res) => {
+        const file = req.params.file;
+        // Validate filename to prevent directory traversal
+        if (!/^[a-zA-Z]{2,3}\.json$/.test(file)) {
+            return res.status(400).json({ error: 'Invalid locale file' });
+        }
+        const localePath = path.join(__dirname, '..', 'locales', file);
+        res.sendFile(localePath, (err) => {
+            if (err) {
+                console.error(`Error serving locale file ${file}:`, err);
+                res.status(404).json({ error: 'Locale file not found' });
+            }
+        });
+    });
+
+    // --- PRODUCTION STATIC FILES ---
+    // Serve static files with proper caching
+    app.use(express.static(path.join(__dirname, '..', 'dist'), {
+        maxAge: '1d', // Cache static assets for 1 day
+        etag: true,
+        lastModified: true
+    }));
+    
+    // Fallback to index.html for SPA routing in production
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    });
+
+    app.listen(PORT, () => {
+        console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
+        console.log(`   Mode: Production (Static Files Served)`);
+    });
+
+    // --- CAPTIVE PORTAL SERVER ---
+    const CAPTIVE_PORT = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
+    const captiveApp = express();
+    
+    // Add redirect middleware for unauthorized clients
+    captiveApp.use((req, res, next) => {
+        const host = (req.headers.host || '').split(':')[0];
+        const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host === 'localhost';
+        const isStaticAsset = /\.(js|css|tsx|ts|svg|png|jpg|ico|json|map)$/.test(req.path);
+        const isApi = req.path.startsWith('/api/') || req.path.startsWith('/mt-api/') || req.path.startsWith('/ws/');
+        
+        // Allow direct access to login page for admin IPs (including WAN IP)
+        if (isIpHost && req.path === '/login') {
+            return next(); // Allow direct access to login on IP addresses
+        }
+        
+        // Redirect unauthorized clients to captive portal (only for non-login paths)
+        if (isIpHost && !isApi && !isStaticAsset && req.path !== '/login' && req.path !== '/') {
+            return res.redirect(`http://${host}:${CAPTIVE_PORT}/captive`);
+        }
+        next();
+    });
+
+    // API route for captive portal landing page settings - MUST be first
+    captiveApp.get('/api/public/landing-page', async (req, res) => {
+        try {
+            const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
+            let cfg = {};
+            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            res.json({
+                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
+                config: cfg
+            });
+        } catch (e) {
+            console.error('Error in captive /api/public/landing-page:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Serve captive portal static files
+    captiveApp.use(express.static(path.join(__dirname, '..', 'dist')));
+    
+    // Fallback to index.html for SPA routing
+    captiveApp.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    });
+
+    captiveApp.listen(CAPTIVE_PORT, () => {
+        console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
+    });
+}
+
+startServer();
                 return res.status(400).json({ message: 'No file uploaded.' });
             }
             
