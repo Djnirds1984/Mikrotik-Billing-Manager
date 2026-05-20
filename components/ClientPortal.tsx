@@ -70,6 +70,31 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
         // Clean the URL so refresh won't re-trigger the modal
         const cleanUrl = window.location.pathname;
         window.history.replaceState({}, document.title, cleanUrl);
+
+        // Trigger subscription extension via verify-payment fallback
+        // (primary path when Cloudflare blocks webhook delivery)
+        if (user && invoice) {
+          (async () => {
+            try {
+              console.log(`[ClientPortal] Calling verify-payment for invoice=${invoice} user=${user}`);
+              const vRes = await fetch('/api/paymongo-verify-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ invoiceNo: invoice, pppoeUsername: user }),
+              });
+              const vData = await vRes.json();
+              if (vData.alreadyProcessed) {
+                console.log('[ClientPortal] Verify: subscription already processed (webhook may have run first).');
+              } else if (vData.success) {
+                console.log('[ClientPortal] Verify: subscription extended successfully.');
+              } else {
+                console.warn('[ClientPortal] Verify returned non-success:', vData.message);
+              }
+            } catch (vErr) {
+              console.warn('[ClientPortal] verify-payment call failed (non-fatal):', vErr);
+            }
+          })();
+        }
       }
     } catch (e) {
       console.warn('Failed to parse payment URL params', e);
