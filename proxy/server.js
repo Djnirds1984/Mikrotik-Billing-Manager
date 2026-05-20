@@ -2678,6 +2678,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log('[PayMongo Webhook] No webhook URL configured. Please set it in System Settings.');
             return { success: false, message: 'No webhook URL configured. Please set it in System Settings.' };
         }
+        console.log(`[PayMongo Webhook] Registering webhook URL: ${webhookUrl}`);
 
         const requiredEvents = ['checkout_session.payment.paid'];
         const authHeader = `Basic ${Buffer.from(pSettings.secretKey + ':').toString('base64')}`;
@@ -2927,7 +2928,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
     // G. PayMongo Webhook Ping Endpoint (public, no auth - for reachability testing)
     app.get('/api/paymongo-webhook-ping', (req, res) => {
-        res.json({ status: 'ok', message: 'PayMongo webhook endpoint is reachable', timestamp: Date.now() });
+        console.log('[PayMongo Webhook] PING received from:', req.ip);
+        res.json({ status: 'ok', message: 'Webhook endpoint is reachable', timestamp: new Date().toISOString() });
     });
 
     // H. PayMongo Verify Payment (DEPRECATED)
@@ -2944,16 +2946,19 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
     // B. Standalone Webhook Endpoint (NO auth middleware - must be public for PayMongo)
     app.post('/api/paymongo-webhook', async (req, res) => {
+        console.log('[PayMongo Webhook] ===== INCOMING POST from ' + req.ip + ' =====');
+        console.log('[PayMongo Webhook] Content-Type:', req.headers['content-type']);
+        console.log('[PayMongo Webhook] Body size:', req.rawBody ? req.rawBody.length : 'no rawBody');
         console.log('[PayMongo Webhook] ===== WEBHOOK RECEIVED =====');
 
         try {
             // === STEP 1: Verify Signature ===
-            const settings = await db.get("SELECT value FROM settings WHERE key = 'paymongoSettings'");
-            if (!settings) {
+            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            if (!settings || !settings.paymongoSettings) {
                 console.error('[PayMongo Webhook] No PayMongo settings in DB');
                 return res.status(500).json({ error: 'No settings' });
             }
-            const paymongoSettings = JSON.parse(settings.value);
+            const paymongoSettings = JSON.parse(settings.paymongoSettings);
             const webhookSecret = paymongoSettings.webhookSecret;
             if (!webhookSecret) {
                 console.error('[PayMongo Webhook] No webhook secret configured');
