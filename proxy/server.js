@@ -3174,6 +3174,61 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     } catch (kickErr) {
                         console.error('[PayMongo Webhook] Session kick error:', kickErr.message);
                     }
+
+                    // 4d. Create scheduler to auto-expire on due date (set to Non-Payment)
+                    try {
+                      console.log('[PayMongo Webhook] Creating expiration scheduler...');
+                      const schedulerName = `paymongo_expire_${username}`;
+                      
+                      // Remove existing scheduler for this user if any
+                      try {
+                        const existingRes = await axios.get(`${apiBase}/rest/system/scheduler`, {
+                          headers: { Authorization: authHeader },
+                          timeout: 10000
+                        });
+                        const schedulers = Array.isArray(existingRes.data) ? existingRes.data : [];
+                        for (const sched of schedulers) {
+                          if (sched.name === schedulerName && sched['.id']) {
+                            await axios.post(`${apiBase}/rest/system/scheduler/remove`, { '.id': sched['.id'] }, {
+                              headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                              timeout: 10000
+                            });
+                            console.log('[PayMongo Webhook] Removed old scheduler:', sched['.id']);
+                          }
+                        }
+                      } catch (delErr) {
+                        console.error('[PayMongo Webhook] Old scheduler cleanup error:', delErr.message);
+                      }
+
+                      // Calculate the interval from now to the due date
+                      const nowMs = Date.now();
+                      const dueMs = newDue.getTime();
+                      const diffSeconds = Math.max(0, Math.floor((dueMs - nowMs) / 1000));
+                      
+                      // Format start-date and start-time for RouterOS
+                      // RouterOS expects: start-date=mon/dd/yyyy start-time=HH:MM:SS
+                      const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+                      const startDate = `${months[newDue.getMonth()]}/${String(newDue.getDate()).padStart(2,'0')}/${newDue.getFullYear()}`;
+                      const startTime = `${String(newDue.getHours()).padStart(2,'0')}:${String(newDue.getMinutes()).padStart(2,'0')}:00`;
+
+                      // Create new scheduler - sets profile to Non-Payment and kicks session on due date
+                      const onEvent = `/ppp secret set [find name="${username}"] profile=Non-Payment\\r\\n/ppp active remove [find name="${username}"]`;
+                      
+                      await axios.put(`${apiBase}/rest/system/scheduler`, {
+                        name: schedulerName,
+                        'start-date': startDate,
+                        'start-time': startTime,
+                        interval: '',
+                        'on-event': onEvent,
+                        comment: `Auto-expire ${username} to Non-Payment on ${newDueStr}`
+                      }, {
+                        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                        timeout: 10000
+                      });
+                      console.log('[PayMongo Webhook] ✓ Scheduler created: Non-Payment on', newDueStr);
+                    } catch (schedErr) {
+                      console.error('[PayMongo Webhook] Scheduler creation error:', schedErr.message);
+                    }
                 }
             }
 
@@ -3184,9 +3239,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 const amountPaid = sessionAttributes?.line_items?.[0]?.amount
                     ? sessionAttributes.line_items[0].amount / 100
                     : (sessionAttributes?.amount ? sessionAttributes.amount / 100 : 0);
+                const saleId = `sale_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
                 await db.run(
-                    `INSERT INTO sales_records (date, username, planName, amount, paymentMethod, routerId, invoiceNo) VALUES (?, ?, ?, ?, 'PayMongo', ?, ?)`,
-                    [saleDate, username, planName || 'Unknown', amountPaid, routerId, invoiceNo]
+                    `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, invoiceId) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                    [saleId, routerId, saleDate, username, planName || 'Unknown', amountPaid, amountPaid, invoiceNo || null]
                 );
                 console.log('[PayMongo Webhook] ✓ Sale recorded, amount:', amountPaid);
             } catch (saleErr) {
@@ -3196,7 +3252,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             // Mark invoice as PAID
             if (invoiceNo) {
                 try {
-                    await db.run("UPDATE invoices SET status = 'PAID', paidAt = ? WHERE invoiceNo = ?", [new Date().toISOString(), invoiceNo]);
+                    await db.run("UPDATE client_invoices SET status = 'PAID' WHERE id = ?", [invoiceNo]);
                     console.log('[PayMongo Webhook] ✓ Invoice marked PAID:', invoiceNo);
                 } catch (invErr) {
                     console.error('[PayMongo Webhook] Invoice update error:', invErr.message);
