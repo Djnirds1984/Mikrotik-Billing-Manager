@@ -2361,33 +2361,13 @@ async function startServer() {
             return { success: false, message: 'PayMongo secret key not set.' };
         }
 
-        // Determine the public domain for the webhook URL
-        // Priority: 1) paymongoSettings.webhookDomain  2) Check Cloudflare/ngrok tunnel  3) Fallback to billing.ajcvendosystem.com
-        let domain = pSettings.webhookDomain || null;
-        if (!domain) {
-            try {
-                // Try to get Cloudflare Tunnel hostname from systemd config
-                const cfConfig = await runCommand('cat /etc/cloudflared/config.yml 2>/dev/null || cat /root/.cloudflared/config.yml 2>/dev/null').catch(() => '');
-                const hostnameMatch = cfConfig.match(/hostname:\s*(.+)/);
-                if (hostnameMatch) domain = hostnameMatch[1].trim();
-            } catch (_) {}
-        }
-        if (!domain) {
-            try {
-                // Try ngrok tunnel URL
-                const tunnels = await axios.get('http://127.0.0.1:4040/api/tunnels', { timeout: 3000 }).catch(() => null);
-                if (tunnels?.data?.tunnels?.[0]?.public_url) {
-                    const ngrokUrl = new URL(tunnels.data.tunnels[0].public_url);
-                    domain = ngrokUrl.hostname;
-                }
-            } catch (_) {}
-        }
-        if (!domain) {
-            domain = 'billing.ajcvendosystem.com';
-            console.log('[PayMongo Webhook] No tunnel domain detected, using fallback:', domain);
+        // Use the webhookUrl configured in System Settings
+        const webhookUrl = pSettings.webhookUrl;
+        if (!webhookUrl) {
+            console.log('[PayMongo Webhook] No webhook URL configured. Please set it in System Settings.');
+            return { success: false, message: 'No webhook URL configured. Please set it in System Settings.' };
         }
 
-        const webhookUrl = `https://${domain}/api/paymongo-webhook`;
         const requiredEvents = ['checkout_session.payment.paid'];
         const authHeader = `Basic ${Buffer.from(pSettings.secretKey + ':').toString('base64')}`;
 
@@ -2526,18 +2506,8 @@ async function startServer() {
                 createdAt: wh.attributes?.created_at || null
             }));
 
-            // Determine the expected webhook URL
-            let domain = pSettings.webhookDomain || null;
-            if (!domain) {
-                try {
-                    const cfConfig = await runCommand('cat /etc/cloudflared/config.yml 2>/dev/null || cat /root/.cloudflared/config.yml 2>/dev/null').catch(() => '');
-                    const hostnameMatch = cfConfig.match(/hostname:\s*(.+)/);
-                    if (hostnameMatch) domain = hostnameMatch[1].trim();
-                } catch (_) {}
-            }
-            if (!domain) domain = 'billing.ajcvendosystem.com';
-
-            const expectedUrl = `https://${domain}/api/paymongo-webhook`;
+            // Use the webhookUrl configured in System Settings
+            const expectedUrl = pSettings.webhookUrl || '';
 
             res.json({
                 configured: true,

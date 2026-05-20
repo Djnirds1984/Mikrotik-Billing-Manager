@@ -333,6 +333,8 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                 <TextInput label="Public Key" name="publicKey" value={paymongo.publicKey || ''} onChange={e => update('publicKey', e.target.value)} type="password" />
                 <TextInput label="Secret Key" name="secretKey" value={paymongo.secretKey || ''} onChange={e => update('secretKey', e.target.value)} type="password" />
                 <TextInput label="Webhook Secret" name="webhookSecret" value={paymongo.webhookSecret || ''} onChange={e => update('webhookSecret', e.target.value)} type="password" />
+                <TextInput label="Webhook URL" name="webhookUrl" value={paymongo.webhookUrl || ''} onChange={e => update('webhookUrl', e.target.value)} placeholder="https://yourdomain.com/api/paymongo-webhook" />
+                <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2">Full URL where PayMongo will send payment events (e.g., https://yourdomain.com/api/paymongo-webhook)</p>
                 <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
                     <Toggle
                         label="Pass Convenience Fee to Customer"
@@ -472,7 +474,10 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                     {/* Hint when no status checked yet */}
                     {!webhookStatus && paymongo.enabled && (
                         <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Click "Check Status" to verify your PayMongo webhook configuration.
+                            {!paymongo.webhookUrl
+                                ? 'Set the Webhook URL above, then click "Check Status" to verify your PayMongo webhook configuration.'
+                                : 'Click "Check Status" to verify your PayMongo webhook configuration.'
+                            }
                         </p>
                     )}
                 </div>

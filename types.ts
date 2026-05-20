@@ -467,6 +467,7 @@ export interface PayMongoSettings {
     publicKey: string;
     secretKey: string;
     webhookSecret: string;
+    webhookUrl?: string;
     passFeesToCustomer?: boolean;
 }
 
