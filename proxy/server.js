@@ -2946,32 +2946,44 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
     // B. Standalone Webhook Endpoint (NO auth middleware - must be public for PayMongo)
     app.post('/api/paymongo-webhook', async (req, res) => {
-        console.log('[PayMongo Webhook] ===== INCOMING POST from ' + req.ip + ' =====');
+        console.log('[PayMongo Webhook] ===== INCOMING POST =====');
+        console.log('[PayMongo Webhook] IP:', req.ip);
         console.log('[PayMongo Webhook] Content-Type:', req.headers['content-type']);
-        console.log('[PayMongo Webhook] Body size:', req.rawBody ? req.rawBody.length : 'no rawBody');
-        console.log('[PayMongo Webhook] ===== WEBHOOK RECEIVED =====');
+        console.log('[PayMongo Webhook] Has rawBody:', !!req.rawBody);
 
+        // ALWAYS return 200 to PayMongo — never let this endpoint crash the process
         try {
-            // === STEP 1: Verify Signature ===
-            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
-            if (!settings || !settings.paymongoSettings) {
-                console.error('[PayMongo Webhook] No PayMongo settings in DB');
-                return res.status(500).json({ error: 'No settings' });
+            // === STAGE 1: Fetch webhook secret from database ===
+            console.log('[PayMongo Webhook] STAGE 1: Fetching settings from database...');
+            let paymongoSettings;
+            try {
+                const row = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+                if (!row || !row.paymongoSettings) {
+                    console.error('[PayMongo Webhook] STAGE 1 FAILED: No paymongoSettings row found');
+                    return res.status(200).json({ received: true, error: 'no_settings' });
+                }
+                paymongoSettings = JSON.parse(row.paymongoSettings);
+                console.log('[PayMongo Webhook] STAGE 1 OK: Settings loaded, webhookSecret present:', !!paymongoSettings.webhookSecret);
+            } catch (dbErr) {
+                console.error('[PayMongo Webhook] STAGE 1 EXCEPTION:', dbErr.message);
+                return res.status(200).json({ received: true, error: 'db_error' });
             }
-            const paymongoSettings = JSON.parse(settings.paymongoSettings);
+
             const webhookSecret = paymongoSettings.webhookSecret;
             if (!webhookSecret) {
-                console.error('[PayMongo Webhook] No webhook secret configured');
-                return res.status(500).json({ error: 'No secret' });
+                console.error('[PayMongo Webhook] No webhookSecret in paymongoSettings');
+                return res.status(200).json({ received: true, error: 'no_secret' });
             }
 
+            // === STAGE 2: Verify signature ===
+            console.log('[PayMongo Webhook] STAGE 2: Verifying signature...');
             const signatureHeader = req.headers['x-paymongo-signature'];
             if (!signatureHeader) {
-                console.error('[PayMongo Webhook] Missing x-paymongo-signature header');
-                return res.status(401).json({ error: 'Missing signature header' });
+                console.error('[PayMongo Webhook] STAGE 2 FAILED: No x-paymongo-signature header');
+                return res.status(200).json({ received: true, error: 'no_signature' });
             }
 
-            // Parse: t=timestamp,te=test_sig,li=live_sig
+            // Parse t=timestamp,te=test_sig,li=live_sig
             const parts = {};
             signatureHeader.split(',').forEach(part => {
                 const idx = part.indexOf('=');
@@ -2983,75 +2995,80 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const timestamp = parts['t'];
             const testSig = parts['te'];
             const liveSig = parts['li'];
-
             console.log('[PayMongo Webhook] Timestamp:', timestamp);
-            console.log('[PayMongo Webhook] Test sig:', testSig ? testSig.substring(0, 12) + '...' : 'none');
-            console.log('[PayMongo Webhook] Live sig:', liveSig ? liveSig.substring(0, 12) + '...' : 'none');
+            console.log('[PayMongo Webhook] Test sig present:', !!testSig);
+            console.log('[PayMongo Webhook] Live sig present:', !!liveSig);
 
-            // Construct signed payload: timestamp.rawBody
             const rawBodyStr = req.rawBody ? req.rawBody.toString('utf-8') : JSON.stringify(req.body);
             const signedPayload = `${timestamp}.${rawBodyStr}`;
             const computedHmac = crypto.createHmac('sha256', webhookSecret)
                 .update(signedPayload)
                 .digest('hex');
 
-            console.log('[PayMongo Webhook] Computed:', computedHmac.substring(0, 12) + '...');
+            console.log('[PayMongo Webhook] Computed HMAC (first 16):', computedHmac.substring(0, 16));
+            console.log('[PayMongo Webhook] Test sig (first 16):', testSig ? testSig.substring(0, 16) : 'n/a');
+            console.log('[PayMongo Webhook] Live sig (first 16):', liveSig ? liveSig.substring(0, 16) : 'n/a');
 
             const isValid = (testSig && computedHmac === testSig) || (liveSig && computedHmac === liveSig);
             if (!isValid) {
-                console.error('[PayMongo Webhook] ✗ Signature verification FAILED');
-                return res.status(401).json({ error: 'Invalid signature' });
+                console.error('[PayMongo Webhook] STAGE 2 FAILED: Signature mismatch');
+                return res.status(200).json({ received: true, error: 'invalid_signature' });
             }
-            console.log('[PayMongo Webhook] ✓ Signature VERIFIED');
+            console.log('[PayMongo Webhook] STAGE 2 OK: Signature VERIFIED');
 
-            // === STEP 2: Extract Payment Data ===
-            const event = req.body;
-            const eventType = event?.data?.attributes?.type;
+            // === STAGE 3: Extract payment data with full optional chaining ===
+            console.log('[PayMongo Webhook] STAGE 3: Extracting payment data...');
+            const eventType = req.body?.data?.attributes?.type;
             console.log('[PayMongo Webhook] Event type:', eventType);
 
             if (eventType !== 'checkout_session.payment.paid') {
-                console.log('[PayMongo Webhook] Ignoring non-payment event:', eventType);
-                return res.json({ received: true });
+                console.log('[PayMongo Webhook] Not a payment event, ignoring');
+                return res.status(200).json({ received: true, ignored: true });
             }
 
-            // Drill into: data.attributes.data.attributes (the checkout session)
-            const checkoutSession = event?.data?.attributes?.data;
-            const sessionAttrs = checkoutSession?.attributes || {};
-            const metadata = sessionAttrs.metadata || {};
-            const description = sessionAttrs.description || '';
+            // PayMongo v1 deep nesting: data.attributes.data.attributes.metadata
+            const sessionAttributes = req.body?.data?.attributes?.data?.attributes;
+            const metadata = sessionAttributes?.metadata || {};
+            const description = sessionAttributes?.description || '';
 
-            // Extract username from metadata or description (format: "PlanName|username")
-            const username = metadata.pppoe_username || metadata.username || description.split('|').pop()?.trim();
+            console.log('[PayMongo Webhook] Session attributes keys:', sessionAttributes ? Object.keys(sessionAttributes).join(', ') : 'NONE');
+            console.log('[PayMongo Webhook] Metadata:', JSON.stringify(metadata));
+            console.log('[PayMongo Webhook] Description:', description);
+
+            // Extract username from metadata or description fallback (format: "PlanName|username")
+            const username = metadata.pppoe_username || metadata.username || (description.includes('|') ? description.split('|').pop().trim() : '');
             const durationDays = parseInt(metadata.duration_days || metadata.cycle_days || '30', 10);
-            const routerId = metadata.router_id;
-            const planName = metadata.plan_name;
-            const amountPaid = sessionAttrs.line_items?.[0]?.amount ? sessionAttrs.line_items[0].amount / 100 : (sessionAttrs.amount ? sessionAttrs.amount / 100 : 0);
+            const routerId = metadata.router_id || '';
+            const planName = metadata.plan_name || '';
+            const invoiceNo = metadata.invoice_no || '';
 
-            console.log('[PayMongo Webhook] Processing payment for:', username);
-            console.log('[PayMongo Webhook] Duration:', durationDays, 'days');
-            console.log('[PayMongo Webhook] Router:', routerId);
-            console.log('[PayMongo Webhook] Plan:', planName);
-            console.log('[PayMongo Webhook] Amount:', amountPaid);
+            console.log('[PayMongo Webhook] Username:', username);
+            console.log('[PayMongo Webhook] Duration days:', durationDays);
+            console.log('[PayMongo Webhook] Router ID:', routerId);
+            console.log('[PayMongo Webhook] Plan name:', planName);
 
             if (!username) {
-                console.error('[PayMongo Webhook] ERROR: No username found in metadata or description');
-                return res.status(400).json({ error: 'No username' });
+                console.error('[PayMongo Webhook] STAGE 3 WARNING: No username found in metadata or description');
+                return res.status(200).json({ received: true, error: 'no_username' });
+            }
+            console.log('[PayMongo Webhook] STAGE 3 OK: Data extracted');
+
+            // === STAGE 4: Get router config and extend subscription ===
+            console.log('[PayMongo Webhook] STAGE 4: Processing subscription extension...');
+            let routerConfig = null;
+            try {
+                if (routerId) {
+                    routerConfig = await db.get('SELECT * FROM routers WHERE id = ?', [routerId]);
+                }
+                if (!routerConfig) {
+                    // Try first router as fallback
+                    routerConfig = await db.get('SELECT * FROM routers LIMIT 1');
+                }
+                console.log('[PayMongo Webhook] Router config found:', !!routerConfig, routerConfig ? routerConfig.host || routerConfig.ip : 'none');
+            } catch (routerErr) {
+                console.error('[PayMongo Webhook] Router lookup error:', routerErr.message);
             }
 
-            // === STEP 3: Find User & Plan ===
-            // Look up billing plan from database
-            let billingPlan = null;
-            if (planName && routerId) {
-                billingPlan = await db.get('SELECT * FROM billing_plans WHERE name = ? AND routerId = ?', [planName, routerId]);
-            }
-            if (!billingPlan && routerId) {
-                billingPlan = await db.get('SELECT * FROM billing_plans WHERE routerId = ? LIMIT 1', [routerId]);
-            }
-
-            // Get router config for API calls
-            const routerConfig = routerId ? await db.get('SELECT * FROM routers WHERE id = ?', [routerId]) : null;
-
-            // === STEP 4: Extend Subscription (Profile + Due Date + Scheduler) ===
             if (routerConfig) {
                 const routerIp = routerConfig.host || routerConfig.ip;
                 const routerPort = routerConfig.port || 3002;
@@ -3060,23 +3077,26 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 const apiBase = `http://${routerIp}:${routerPort}`;
                 const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
 
-                // 4a. Get the PPP secret for this user
+                // 4a. Get PPP secret
                 let secret = null;
                 try {
-                    const secretRes = await axios.get(`${apiBase}/rest/ppp/secret?name=${username}`, {
+                    console.log('[PayMongo Webhook] Fetching PPP secret for:', username);
+                    const secretRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                        params: { name: username },
                         headers: { Authorization: authHeader },
-                        timeout: 15000
+                        timeout: 10000
                     });
                     const secrets = Array.isArray(secretRes.data) ? secretRes.data : [secretRes.data];
                     secret = secrets.find(s => s.name === username) || secrets[0];
-                } catch (err) {
-                    console.error('[PayMongo Webhook] Failed to fetch PPP secret:', err.message);
+                    console.log('[PayMongo Webhook] PPP secret found:', !!secret);
+                } catch (secretErr) {
+                    console.error('[PayMongo Webhook] PPP secret fetch error:', secretErr.message);
                 }
 
                 if (secret) {
                     // Parse existing comment
                     let comment = {};
-                    try { comment = JSON.parse(secret.comment || '{}'); } catch { comment = {}; }
+                    try { comment = JSON.parse(secret.comment || '{}'); } catch (e) { comment = {}; }
 
                     // Calculate new due date
                     const now = new Date();
@@ -3085,13 +3105,21 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     const newDue = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
                     const newDueStr = newDue.toISOString().replace('T', ' ').substring(0, 16);
 
-                    // Determine active profile
-                    const activeProfile = billingPlan?.pppoeProfile || comment.planName || planName || secret.profile;
+                    // Find active profile from billing plan
+                    let activeProfile = secret.profile;
+                    try {
+                        const billingPlan = await db.get('SELECT pppoeProfile, name FROM billing_plans WHERE pppoeProfile = ? OR name = ? LIMIT 1', [secret.profile, planName]);
+                        if (billingPlan) {
+                            activeProfile = billingPlan.pppoeProfile || activeProfile;
+                        }
+                    } catch (planErr) {
+                        console.error('[PayMongo Webhook] Billing plan lookup error:', planErr.message);
+                    }
 
-                    // 4b. Update PPP secret: change profile + update comment
+                    // 4b. Update PPP secret profile and comment
                     const updatedComment = JSON.stringify({
                         ...comment,
-                        planName: billingPlan?.name || planName || comment.planName,
+                        planName: planName || comment.planName,
                         dueDate: newDueStr.split(' ')[0],
                         dueDateTime: newDueStr,
                         planType: comment.planType || 'Postpaid'
@@ -3103,106 +3131,71 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             comment: updatedComment
                         }, {
                             headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                            timeout: 15000
+                            timeout: 10000
                         });
-                        console.log('[PayMongo Webhook] ✓ Profile changed to:', activeProfile);
-                        console.log('[PayMongo Webhook] ✓ Subscription extended to:', newDueStr);
-                    } catch (err) {
-                        console.error('[PayMongo Webhook] Failed to update PPP secret:', err.message);
+                        console.log('[PayMongo Webhook] ✓ Profile set to:', activeProfile);
+                        console.log('[PayMongo Webhook] ✓ Due date extended to:', newDueStr);
+                    } catch (updateErr) {
+                        console.error('[PayMongo Webhook] PPP secret update error:', updateErr.message);
                     }
 
-                    // 4c. Kick active session so client reconnects with new profile
+                    // 4c. Kick active session for reconnection
                     try {
-                        const activeRes = await axios.get(`${apiBase}/rest/ppp/active?name=${username}`, {
+                        const activeRes = await axios.get(`${apiBase}/rest/ppp/active`, {
+                            params: { name: username },
                             headers: { Authorization: authHeader },
-                            timeout: 15000
+                            timeout: 5000
                         });
-                        const activeSessions = Array.isArray(activeRes.data) ? activeRes.data : [];
-                        for (const session of activeSessions) {
-                            if (session['.id']) {
-                                await axios.post(`${apiBase}/rest/ppp/active/remove`, {
-                                    '.id': session['.id']
-                                }, {
+                        const sessions = Array.isArray(activeRes.data) ? activeRes.data : [];
+                        for (const session of sessions) {
+                            if (session['.id'] && session.name === username) {
+                                await axios.post(`${apiBase}/rest/ppp/active/remove`, { '.id': session['.id'] }, {
                                     headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                                    timeout: 15000
+                                    timeout: 5000
                                 });
-                                console.log('[PayMongo Webhook] ✓ Kicked active session:', session['.id']);
+                                console.log('[PayMongo Webhook] ✓ Kicked session:', session['.id']);
                             }
                         }
-                    } catch (err) {
-                        console.error('[PayMongo Webhook] Failed to kick session:', err.message);
-                    }
-
-                    // 4d. Create/update scheduler for auto-expiration
-                    try {
-                        const schedulerName = `paymongo_expire_${username}`;
-                        // Remove existing scheduler if any
-                        const existingSchedulers = await axios.get(`${apiBase}/rest/system/scheduler?name=${schedulerName}`, {
-                            headers: { Authorization: authHeader },
-                            timeout: 15000
-                        }).catch(() => ({ data: [] }));
-
-                        const existingList = Array.isArray(existingSchedulers.data) ? existingSchedulers.data : [];
-                        for (const sched of existingList) {
-                            if (sched['.id']) {
-                                await axios.post(`${apiBase}/rest/system/scheduler/remove`, { '.id': sched['.id'] }, {
-                                    headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                                    timeout: 15000
-                                }).catch(() => {});
-                            }
-                        }
-
-                        // Create new scheduler at the due date
-                        const interval = Math.max(0, Math.floor((newDue.getTime() - Date.now()) / 1000));
-                        await axios.put(`${apiBase}/rest/system/scheduler`, {
-                            name: schedulerName,
-                            'start-time': newDueStr.replace(' ', 'T'),
-                            interval: `${interval}s`,
-                            'on-event': `/ppp secret set [find name="${username}"] profile=Non-Payment`,
-                            comment: `Auto-generated by PayMongo webhook for ${username}`
-                        }, {
-                            headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                            timeout: 15000
-                        }).catch(err => {
-                            console.error('[PayMongo Webhook] Scheduler creation failed:', err.message);
-                        });
-                        console.log('[PayMongo Webhook] ✓ Scheduler set for:', newDueStr);
-                    } catch (err) {
-                        console.error('[PayMongo Webhook] Scheduler error:', err.message);
+                    } catch (kickErr) {
+                        console.error('[PayMongo Webhook] Session kick error:', kickErr.message);
                     }
                 }
             }
 
-            // === STEP 5: Record Sale & Update Invoice ===
+            // === STAGE 5: Record sale and update invoice ===
+            console.log('[PayMongo Webhook] STAGE 5: Recording sale...');
             try {
                 const saleDate = new Date().toISOString();
+                const amountPaid = sessionAttributes?.line_items?.[0]?.amount
+                    ? sessionAttributes.line_items[0].amount / 100
+                    : (sessionAttributes?.amount ? sessionAttributes.amount / 100 : 0);
                 await db.run(
-                    `INSERT INTO sales_records (date, username, planName, amount, paymentMethod, routerId, invoiceNo)
-                     VALUES (?, ?, ?, ?, 'PayMongo', ?, ?)`,
-                    [saleDate, username, planName || 'Unknown', amountPaid, routerId || '', metadata.invoice_no || '']
+                    `INSERT INTO sales_records (date, username, planName, amount, paymentMethod, routerId, invoiceNo) VALUES (?, ?, ?, ?, 'PayMongo', ?, ?)`,
+                    [saleDate, username, planName || 'Unknown', amountPaid, routerId, invoiceNo]
                 );
-                console.log('[PayMongo Webhook] ✓ Sale recorded');
-            } catch (err) {
-                console.error('[PayMongo Webhook] Failed to record sale:', err.message);
+                console.log('[PayMongo Webhook] ✓ Sale recorded, amount:', amountPaid);
+            } catch (saleErr) {
+                console.error('[PayMongo Webhook] Sale record error:', saleErr.message);
             }
 
-            // Mark invoice as PAID if exists
-            if (metadata.invoice_no) {
+            // Mark invoice as PAID
+            if (invoiceNo) {
                 try {
-                    await db.run("UPDATE invoices SET status = 'PAID', paidAt = ? WHERE invoiceNo = ?",
-                        [new Date().toISOString(), metadata.invoice_no]);
-                    console.log('[PayMongo Webhook] ✓ Invoice marked PAID:', metadata.invoice_no);
-                } catch (err) {
-                    console.error('[PayMongo Webhook] Invoice update error:', err.message);
+                    await db.run("UPDATE invoices SET status = 'PAID', paidAt = ? WHERE invoiceNo = ?", [new Date().toISOString(), invoiceNo]);
+                    console.log('[PayMongo Webhook] ✓ Invoice marked PAID:', invoiceNo);
+                } catch (invErr) {
+                    console.error('[PayMongo Webhook] Invoice update error:', invErr.message);
                 }
             }
 
             console.log('[PayMongo Webhook] ===== PROCESSING COMPLETE =====');
-            return res.json({ received: true, processed: true, username });
+            return res.status(200).json({ received: true, processed: true, username });
 
-        } catch (err) {
-            console.error('[PayMongo Webhook] FATAL ERROR:', err.message, err.stack);
-            return res.status(500).json({ error: 'Internal webhook error' });
+        } catch (fatalErr) {
+            // This outer catch ensures the process NEVER crashes
+            console.error('[PayMongo Webhook] FATAL UNCAUGHT ERROR:', fatalErr.message);
+            console.error('[PayMongo Webhook] Stack:', fatalErr.stack);
+            return res.status(200).json({ received: true, error: 'internal_error' });
         }
     });
 
