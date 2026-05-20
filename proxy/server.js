@@ -2176,6 +2176,269 @@ async function startServer() {
         }
     });
 
+    // --- Non-Payment PPPoE Redirect: Reusable IP Lookup ---
+    async function lookupPppoeByIp(clientIp) {
+        console.log(`[Non-Payment Lookup] Looking up PPPoE connection for IP: ${clientIp}`);
+        const routers = await db.all('SELECT id, name FROM routers');
+        if (!routers || routers.length === 0) {
+            console.log('[Non-Payment Lookup] No routers found in database');
+            return { success: false, error: 'no_routers' };
+        }
+        for (const router of routers) {
+            try {
+                const activeResp = await axios.get(
+                    `http://127.0.0.1:3002/${router.id}/ppp/active/print`,
+                    { timeout: 10000 }
+                );
+                const allActive = Array.isArray(activeResp.data) ? activeResp.data : [];
+                const match = allActive.find(a => a.address === clientIp);
+                if (!match) continue;
+                console.log(`[Non-Payment Lookup] Found active connection: ${match.name} on router ${router.name} (${router.id})`);
+                const username = match.name;
+                // Get the PPPoE secret for plan/due info
+                const secretResp = await axios.get(
+                    `http://127.0.0.1:3002/${router.id}/ppp/secret?name=${encodeURIComponent(username)}`,
+                    { timeout: 10000 }
+                );
+                const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
+                const secret = secrets[0];
+                if (!secret) {
+                    console.log(`[Non-Payment Lookup] No secret found for user ${username}`);
+                    return { success: false, error: 'secret_not_found' };
+                }
+                // Parse comment JSON for billing info
+                let planName = secret.profile || '';
+                let dueDate = '';
+                let dueDateTime = '';
+                let planType = '';
+                try {
+                    const c = JSON.parse(secret.comment || '{}');
+                    planName = c.planName || c.plan || planName;
+                    dueDate = c.dueDate || '';
+                    dueDateTime = c.dueDateTime || '';
+                    planType = c.planType || '';
+                } catch (_) {}
+                // Look up customer account number
+                let accountNumber = '';
+                try {
+                    const cust = await db.get('SELECT accountNumber FROM customers WHERE routerId = ? AND username = ?', [router.id, username]);
+                    accountNumber = cust?.accountNumber || '';
+                } catch (_) {}
+                // Look up billing plan price
+                let amount = '';
+                try {
+                    let planRow = null;
+                    if (planName) planRow = await db.get('SELECT price FROM billing_plans WHERE name = ? AND routerId = ?', [planName, router.id]);
+                    if (!planRow && secret.profile) planRow = await db.get('SELECT price FROM billing_plans WHERE pppoeProfile = ? AND routerId = ?', [secret.profile, router.id]);
+                    amount = planRow?.price || '';
+                } catch (_) {}
+                console.log(`[Non-Payment Lookup] Success: user=${username}, plan=${planName}, due=${dueDate}, amount=${amount}`);
+                return {
+                    success: true,
+                    username,
+                    planName,
+                    dueDate,
+                    dueDateTime,
+                    planType,
+                    profile: secret.profile || '',
+                    routerId: router.id,
+                    routerName: router.name,
+                    accountNumber,
+                    amount
+                };
+            } catch (err) {
+                if (err.code === 'ECONNABORTED') {
+                    console.log(`[Non-Payment Lookup] Timeout querying router ${router.name} (${router.id})`);
+                } else {
+                    console.error(`[Non-Payment Lookup] Error querying router ${router.name} (${router.id}):`, err.message);
+                }
+                continue; // try next router
+            }
+        }
+        console.log(`[Non-Payment Lookup] No active PPPoE connection found for IP: ${clientIp}`);
+        return { success: false, error: 'not_found' };
+    }
+
+    // --- Non-Payment PPPoE Redirect: API Endpoint ---
+    app.get('/api/public/ppp/lookup-by-ip', async (req, res) => {
+        try {
+            // Determine client IP: prefer query param for testing, then x-forwarded-for, then req.ip
+            let clientIp = req.query.ip || '';
+            if (!clientIp) {
+                clientIp = String(req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress || '').trim();
+                if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
+                clientIp = clientIp.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
+            }
+            if (!clientIp) {
+                return res.status(400).json({ success: false, error: 'no_ip' });
+            }
+            const result = await lookupPppoeByIp(clientIp);
+            res.json(result);
+        } catch (e) {
+            console.error('[Non-Payment Lookup] Unexpected error:', e.message);
+            res.status(500).json({ success: false, error: 'server_error' });
+        }
+    });
+
+    // --- Non-Payment PPPoE Redirect: HTML Page ---
+    app.get('/non-payment', async (req, res) => {
+        try {
+            // Determine client IP
+            let clientIp = String(req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress || '').trim();
+            if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
+            clientIp = clientIp.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
+
+            // Run lookup and fetch company settings in parallel
+            const [lookupResult, settingsRow] = await Promise.all([
+                lookupPppoeByIp(clientIp),
+                db.get('SELECT companyName, contactNumber, email FROM settings WHERE id = 1').catch(() => null)
+            ]);
+
+            const companyName = settingsRow?.companyName || '';
+            const companyPhone = settingsRow?.contactNumber || '';
+            const companyEmail = settingsRow?.email || '';
+
+            // Determine domain for Pay Now link
+            const host = req.get('host') || '';
+            const proto = req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http');
+            const domain = host ? `${proto}://${host}` : 'http://localhost:3001';
+            const payNowUrl = `${domain}/client_portal`;
+
+            let html;
+            if (lookupResult.success) {
+                const { username, planName, dueDate, dueDateTime, amount, accountNumber } = lookupResult;
+                // Format due date nicely
+                let dueDateDisplay = dueDateTime || dueDate || 'N/A';
+                if (dueDateDisplay !== 'N/A') {
+                    try {
+                        const d = new Date(dueDateDisplay);
+                        if (!isNaN(d.getTime())) {
+                            dueDateDisplay = d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                        }
+                    } catch (_) {}
+                }
+                // Format amount with peso sign
+                const amountDisplay = amount ? `\u20B1${Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'N/A';
+
+                html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Service Suspended</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #333; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.container { max-width: 500px; width: 100%; }
+.card { background: #fff; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.10); overflow: hidden; }
+.card-header { background: linear-gradient(135deg, #ef4444, #f97316); color: #fff; padding: 24px 20px; text-align: center; }
+.card-header h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.card-header p { font-size: 14px; opacity: 0.92; }
+.card-body { padding: 24px 20px; }
+.info-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+.info-row:last-child { border-bottom: none; }
+.info-label { font-size: 13px; color: #888; font-weight: 500; }
+.info-value { font-size: 14px; color: #222; font-weight: 600; text-align: right; }
+.amount-row .info-value { color: #ef4444; font-size: 18px; }
+.pay-btn { display: block; width: 100%; padding: 16px; margin-top: 20px; background: #22c55e; color: #fff; border: none; border-radius: 8px; font-size: 18px; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; transition: background 0.2s; }
+.pay-btn:hover { background: #16a34a; }
+.card-footer { padding: 16px 20px; background: #fafafa; text-align: center; border-top: 1px solid #f0f0f0; }
+.card-footer p { font-size: 12px; color: #999; line-height: 1.6; }
+.card-footer .contact { font-weight: 600; color: #666; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <div class="card-header">
+      <h1>&#9888; Internet Service Suspended</h1>
+      <p>Your internet service has been suspended due to non-payment.</p>
+    </div>
+    <div class="card-body">
+      <div class="info-row">
+        <span class="info-label">Account</span>
+        <span class="info-value">${accountNumber || username}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Username</span>
+        <span class="info-value">${username}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Plan</span>
+        <span class="info-value">${planName || 'N/A'}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Due Date</span>
+        <span class="info-value">${dueDateDisplay}</span>
+      </div>
+      <div class="info-row amount-row">
+        <span class="info-label">Amount Due</span>
+        <span class="info-value">${amountDisplay}</span>
+      </div>
+      <a href="${payNowUrl}" class="pay-btn">Pay Now</a>
+    </div>
+    <div class="card-footer">
+      <p>${companyName ? `Contact <span class="contact">${companyName}</span> for assistance.` : 'Please contact your service provider for assistance.'}</p>
+      ${companyPhone ? `<p class="contact">${companyPhone}</p>` : ''}
+      ${companyEmail ? `<p class="contact">${companyEmail}</p>` : ''}
+    </div>
+  </div>
+</div>
+</body>
+</html>`;
+            } else {
+                // Lookup failed - generic message
+                html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Service Suspended</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #333; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.container { max-width: 500px; width: 100%; }
+.card { background: #fff; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.10); overflow: hidden; }
+.card-header { background: linear-gradient(135deg, #ef4444, #f97316); color: #fff; padding: 24px 20px; text-align: center; }
+.card-header h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.card-header p { font-size: 14px; opacity: 0.92; }
+.card-body { padding: 24px 20px; text-align: center; }
+.card-body p { font-size: 14px; color: #555; line-height: 1.7; margin-bottom: 12px; }
+.card-footer { padding: 16px 20px; background: #fafafa; text-align: center; border-top: 1px solid #f0f0f0; }
+.card-footer p { font-size: 12px; color: #999; line-height: 1.6; }
+.card-footer .contact { font-weight: 600; color: #666; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <div class="card-header">
+      <h1>&#9888; Internet Service Suspended</h1>
+      <p>Your internet service has been suspended.</p>
+    </div>
+    <div class="card-body">
+      <p>Your internet access has been restricted. This is typically due to a billing issue or account concern.</p>
+      <p>Please contact your service provider to resolve this and restore your service.</p>
+    </div>
+    <div class="card-footer">
+      <p>${companyName ? `Contact <span class="contact">${companyName}</span> for assistance.` : 'Please contact your service provider for assistance.'}</p>
+      ${companyPhone ? `<p class="contact">${companyPhone}</p>` : ''}
+      ${companyEmail ? `<p class="contact">${companyEmail}</p>` : ''}
+    </div>
+  </div>
+</div>
+</body>
+</html>`;
+            }
+
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.send(html);
+        } catch (e) {
+            console.error('[Non-Payment Page] Error:', e.message);
+            res.status(500).send('<html><body><h2>Service Temporarily Unavailable</h2><p>Please try again later.</p></body></html>');
+        }
+    });
+
     app.get('/api/captive-thread', async (req, res) => {
         try {
             const ipParam = String(req.query.ip || '').trim();
