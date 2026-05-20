@@ -67,3 +67,61 @@ export const setZeroTierNetworkSetting = (networkId: string, setting: ZeroTierSe
         body: JSON.stringify({ networkId, setting, value }),
     });
 };
+
+// --- Streaming Logic using Fetch API ---
+interface StreamCallbacks {
+    onMessage: (data: any) => void;
+    onError: (error: Error) => void;
+    onClose?: () => void;
+}
+
+const streamEvents = async (url: string, callbacks: StreamCallbacks) => {
+    try {
+        const apiBaseUrl = '';
+        const response = await fetch(`${apiBaseUrl}${url}`, {
+            headers: getAuthHeader()
+        });
+
+        if (response.status === 401) {
+            localStorage.removeItem('authToken');
+            window.location.reload();
+            throw new Error('Session expired. Please log in again.');
+        }
+
+        if (!response.ok || !response.body) {
+            throw new Error(`Failed to connect to stream: ${response.statusText}`);
+        }
+
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = '';
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) {
+                if (callbacks.onClose) callbacks.onClose();
+                break;
+            }
+
+            buffer += value;
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || '';
+
+            for (const part of parts) {
+                if (part.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(part.substring(6));
+                        callbacks.onMessage(data);
+                    } catch (e) {
+                        console.error("Failed to parse SSE message:", e);
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        callbacks.onError(err as Error);
+    }
+};
+
+export const streamInstallZeroTier = (callbacks: StreamCallbacks) => {
+    streamEvents('/api/zt/install', callbacks);
+};

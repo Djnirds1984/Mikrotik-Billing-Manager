@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { ZeroTierNetwork, ZeroTierInfo } from '../types.ts';
-import { getZeroTierStatus, joinZeroTierNetwork, leaveZeroTierNetwork, setZeroTierNetworkSetting } from '../services/zeroTierPanelService.ts';
+import { getZeroTierStatus, joinZeroTierNetwork, leaveZeroTierNetwork, setZeroTierNetworkSetting, streamInstallZeroTier } from '../services/zeroTierPanelService.ts';
 import { Loader } from './Loader.tsx';
 import { TrashIcon, ZeroTierIcon, ExclamationTriangleIcon, CheckCircleIcon } from '../constants.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
@@ -113,7 +113,12 @@ export const ZeroTier: React.FC = () => {
         try {
             const result = await getZeroTierStatus();
             setData(result);
-            setStatus('ready');
+            // Detect if ZeroTier reports as not actually installed via placeholder data
+            if (result.info?.address === 'not_installed' || result.info?.version === '0.0.0') {
+                setStatus('not_installed');
+            } else {
+                setStatus('ready');
+            }
         } catch (err) {
             const error = err as any;
             console.error("Failed to fetch ZeroTier status:", error);
@@ -145,37 +150,34 @@ export const ZeroTier: React.FC = () => {
             setInstallElapsed(Math.floor((Date.now() - startTime) / 1000));
         }, 1000);
 
-        const eventSource = new EventSource('/api/zt/install');
-
-        eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.log) {
-                setInstallLogs(prev => [...prev, { 
-                    text: data.log.trim(), 
-                    isWarning: data.isWarning || false, 
-                    isError: data.isError || false 
-                }]);
-            }
-            if (data.status === 'success') {
-                 setStatus('install_success');
-                 if (installTimerRef.current) clearInterval(installTimerRef.current);
-            }
-            if (data.status === 'error') {
+        streamInstallZeroTier({
+            onMessage: (data) => {
+                if (data.log) {
+                    setInstallLogs(prev => [...prev, { 
+                        text: data.log.trim(), 
+                        isWarning: data.isWarning || false, 
+                        isError: data.isError || false 
+                    }]);
+                }
+                if (data.status === 'success') {
+                     setStatus('install_success');
+                     if (installTimerRef.current) clearInterval(installTimerRef.current);
+                }
+                if (data.status === 'error') {
+                    setStatus('error');
+                    setErrorMessage(data.message || "Installation failed. Check the logs.");
+                    if (installTimerRef.current) clearInterval(installTimerRef.current);
+                }
+            },
+            onClose: () => {
+                if (installTimerRef.current) clearInterval(installTimerRef.current);
+            },
+            onError: (err) => {
                 setStatus('error');
-                setErrorMessage(data.message || "Installation failed. Check the logs.");
+                setErrorMessage(`Connection to the server was lost during installation: ${err.message}`);
                 if (installTimerRef.current) clearInterval(installTimerRef.current);
             }
-            if (data.status === 'finished') {
-                eventSource.close();
-                if (installTimerRef.current) clearInterval(installTimerRef.current);
-            }
-        };
-        eventSource.onerror = () => {
-            setStatus('error');
-            setErrorMessage('Connection to the server was lost during installation.');
-            eventSource.close();
-            if (installTimerRef.current) clearInterval(installTimerRef.current);
-        };
+        });
     };
 
     const handleJoin = async (networkId: string) => {
