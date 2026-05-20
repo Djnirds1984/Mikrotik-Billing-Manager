@@ -3178,7 +3178,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     // 4d. Create scheduler to auto-expire on due date (set to Non-Payment)
                     try {
                       console.log('[PayMongo Webhook] Creating expiration scheduler...');
-                      const schedulerName = `paymongo_expire_${username}`;
+                      const schedulerName = `ppp-auto-kick-${username}`;
                       
                       // Remove existing scheduler for this user if any
                       try {
@@ -3200,25 +3200,18 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         console.error('[PayMongo Webhook] Old scheduler cleanup error:', delErr.message);
                       }
 
-                      // Calculate the interval from now to the due date
-                      const nowMs = Date.now();
-                      const dueMs = newDue.getTime();
-                      const diffSeconds = Math.max(0, Math.floor((dueMs - nowMs) / 1000));
-                      
-                      // Format start-date and start-time for RouterOS
-                      // RouterOS expects: start-date=mon/dd/yyyy start-time=HH:MM:SS
-                      const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-                      const startDate = `${months[newDue.getMonth()]}/${String(newDue.getDate()).padStart(2,'0')}/${newDue.getFullYear()}`;
-                      const startTime = `${String(newDue.getHours()).padStart(2,'0')}:${String(newDue.getMinutes()).padStart(2,'0')}:00`;
+                      // Format start-date as YYYY-MM-DD and start-time as HH:MM:SS (matching admin Pay format)
+                      const startDate = `${newDue.getFullYear()}-${String(newDue.getMonth() + 1).padStart(2, '0')}-${String(newDue.getDate()).padStart(2, '0')}`;
+                      const startTime = `${String(newDue.getHours()).padStart(2, '0')}:${String(newDue.getMinutes()).padStart(2, '0')}:00`;
 
-                      // Create new scheduler - sets profile to Non-Payment and kicks session on due date
-                      const onEvent = `/ppp secret set [find name="${username}"] profile=Non-Payment\\r\\n/ppp active remove [find name="${username}"]`;
+                      // Match exact on-event format from admin Pay button
+                      const onEvent = `/log info message="PPPoE auto-kick: ${username}";\n:do { /ppp active remove [find name="${username}"] } on-error={};\n/ppp secret set [find name="${username}"] profile="Non-Payment"`;
                       
-                      await axios.put(`${apiBase}/rest/system/scheduler`, {
+                      await axios.post(`${apiBase}/rest/system/scheduler/add`, {
                         name: schedulerName,
+                        interval: '0s',
                         'start-date': startDate,
                         'start-time': startTime,
-                        interval: '',
                         'on-event': onEvent,
                         comment: `Auto-expire ${username} to Non-Payment on ${newDueStr}`
                       }, {
