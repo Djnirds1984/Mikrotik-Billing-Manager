@@ -1,4 +1,4 @@
-ximport React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { RouterConfigWithId } from '../types.ts';
 
 export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
