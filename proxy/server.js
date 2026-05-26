@@ -1821,13 +1821,37 @@ async function startServer() {
         try {
             const { routerId, username } = req.query;
             if (!routerId || !username) return res.status(400).json({ message: 'routerId and username are required' });
+            
+            // Get router config for authentication
+            const routerConfig = await db.get('SELECT * FROM routers WHERE id = ?', [routerId]);
+            if (!routerConfig) {
+                return res.status(404).json({ message: 'Router not found' });
+            }
+            
+            const routerIp = routerConfig.host || routerConfig.ip;
+            const routerPort = routerConfig.port || 3002;
+            const routerUser = routerConfig.username || 'admin';
+            const routerPass = routerConfig.password || '';
+            const apiBase = `http://${routerIp}:${routerPort}`;
+            const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
+            
             const encUser = encodeURIComponent(String(username));
-            const secretResp = await axios.get(`http://localhost:3002/${routerId}/ppp/secret?name=${encUser}`);
+            
+            // Fetch PPP secret from MikroTik REST API
+            const secretResp = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                params: { name: username },
+                headers: { Authorization: authHeader },
+                timeout: 10000
+            });
             const secrets = Array.isArray(secretResp.data) ? secretResp.data : [];
-            const secret = secrets[0] || null;
+            const secret = secrets.find(s => s.name === username) || secrets[0] || null;
             let active = false;
             try {
-                const activeResp = await axios.get(`http://localhost:3002/${routerId}/ppp/active/print`);
+                const activeResp = await axios.get(`${apiBase}/rest/ppp/active`, {
+                    params: { name: username },
+                    headers: { Authorization: authHeader },
+                    timeout: 5000
+                });
                 const allActive = Array.isArray(activeResp.data) ? activeResp.data : [];
                 active = !!allActive.find(a => a.name === username);
             } catch (_) {}
