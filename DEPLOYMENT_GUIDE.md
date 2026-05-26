@@ -194,6 +194,8 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
     ```
     Save and exit the file (`Ctrl+X`, then `Y`, then `Enter`).
 
+**IMPORTANT: If you are using PayMongo payment gateway, you MUST add the webhook proxy configuration below.**
+
 3.  **Enable the Site and Restart Nginx:**
     This is a crucial three-step verification process.
 
@@ -234,9 +236,205 @@ Nginx will listen on the public port 80 and forward traffic to the correct Node.
 8.#ZEROTIER ACTIVATION
    curl -s https://install.zerotier.com | sudo bash
 
-## Step 5: Access Your Panel
+## Step 5: Configure PayMongo Payment Gateway (Optional)
+
+If you want to accept online payments through PayMongo, follow these steps:
+
+### 5.1: Get PayMongo API Credentials
+
+1. **Create a PayMongo Account**: Sign up at [PayMongo](https://www.paymongo.com/)
+2. **Get API Keys**: 
+   - Log in to your PayMongo dashboard
+   - Go to **Settings** > **Developers** > **API Keys**
+   - You will need:
+     - **Secret Key** (starts with `sk_test_` for test mode or `sk_live_` for live mode)
+     - **Publishable Key** (starts with `pk_test_` or `pk_live_`)
+
+### 5.2: Configure PayMongo in the Application
+
+1. **Access System Settings**: Log in to your Mikrotik Billing Manager as admin
+2. **Navigate to Settings**: Go to **System Settings** > **PayMongo** tab
+3. **Enter PayMongo Credentials**:
+   - **Public Key**: Paste your publishable key (e.g., `pk_test_xxxxx`)
+   - **Secret Key**: Paste your secret key (e.g., `sk_test_xxxxx`)
+   - **Webhook URL**: Enter the full public URL where PayMongo will send payment events
+     - Format: `https://yourdomain.com/api/paymongo-webhook`
+     - Example: `https://billing.yourisp.com/api/paymongo-webhook`
+   - **Webhook Secret**: This will be auto-generated when you register the webhook
+   - **Pass Convenience Fee to Customer**: Toggle ON if you want customers to pay the PayMongo processing fee (recommended)
+
+4. **Enable PayMongo**: Check the "Enable PayMongo" checkbox
+5. **Save Settings**: Click "Save Settings" at the bottom
+
+### 5.3: Register PayMongo Webhook
+
+1. **Click "Check Status"**: In the Webhook Diagnostics section, click this button to verify your configuration
+2. **Click "Re-register Webhook"**: This will register your webhook URL with PayMongo's API
+3. **Verify Webhook Status**: You should see your webhook listed with status "enabled"
+
+### 5.4: Configure Nginx for PayMongo Webhooks
+
+**CRITICAL**: PayMongo webhooks require special Nginx configuration to forward the signature header. Without this, payment processing will fail silently.
+
+1. **Edit Nginx Configuration**:
+   ```bash
+   sudo nano /etc/nginx/sites-available/default
+   ```
+
+2. **Add PayMongo Webhook Location Block**: Add this block **BEFORE** the main `location /` block:
+
+   ```nginx
+   # PayMongo Webhook (MUST be before location /)
+   location /api/paymongo-webhook {
+       proxy_pass http://localhost:3001/api/paymongo-webhook;
+       proxy_http_version 1.1;
+       
+       # Standard Proxy Headers
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       
+       # CRITICAL: Forward PayMongo signature header
+       proxy_set_header X-Paymongo-Signature $http_x_paymongo_signature;
+       
+       # Disable buffering for webhook reliability
+       proxy_buffering off;
+       
+       # Timeout settings for webhook processing
+       proxy_connect_timeout 60s;
+       proxy_send_timeout 60s;
+       proxy_read_timeout 60s;
+   }
+   ```
+
+3. **Complete Nginx Configuration Example** (with PayMongo):
+
+   ```nginx
+   server {
+       listen 80;
+       server_name yourdomain.com; # Replace with your actual domain or IP
+       client_max_body_size 10m;
+
+       # PayMongo Webhook - MUST be before location /
+       location /api/paymongo-webhook {
+           proxy_pass http://localhost:3001/api/paymongo-webhook;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           
+           # CRITICAL: Forward PayMongo signature header
+           proxy_set_header X-Paymongo-Signature $http_x_paymongo_signature;
+           proxy_buffering off;
+           
+           proxy_connect_timeout 60s;
+           proxy_send_timeout 60s;
+           proxy_read_timeout 60s;
+       }
+
+       # Main application UI (port 3001)
+       location / {
+           proxy_pass http://localhost:3001;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+           proxy_cache_bypass $http_upgrade;
+       }
+
+       # MikroTik API Backend (port 3002)
+       location /mt-api/ {
+           proxy_pass http://localhost:3002/;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+           proxy_cache_bypass $http_upgrade;
+       }
+
+       # WebSocket for Terminal (port 3002)
+       location /ws/ {
+           proxy_pass http://localhost:3002/;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+       }
+   }
+   ```
+
+4. **Test and Restart Nginx**:
+   ```bash
+   sudo nginx -t
+   sudo systemctl restart nginx
+   ```
+
+5. **Verify Nginx is Listening**:
+   ```bash
+   sudo ss -tulpn | grep :80
+   ```
+
+### 5.5: Test PayMongo Integration
+
+1. **Test Webhook Endpoint**: Open your browser and visit:
+   ```
+   https://yourdomain.com/api/paymongo-webhook-ping
+   ```
+   You should see: `{"status":"ok","message":"Webhook endpoint is reachable"}`
+
+2. **Make a Test Payment**:
+   - Go to **PPPoE** or **DHCP** section
+   - Select a client with a billing plan
+   - Click "Pay Now" or similar payment button
+   - Complete a test payment using PayMongo's test card numbers
+
+3. **Verify Webhook Logs**:
+   ```bash
+   pm2 logs mikrotik-manager --lines 100
+   ```
+   Look for `[PayMongo Webhook]` log entries showing successful payment processing.
+
+### 5.6: PayMongo Webhook Troubleshooting
+
+**Problem**: Webhook not receiving payments
+- **Check Nginx Configuration**: Ensure `proxy_set_header X-Paymongo-Signature` is present
+- **Check Webhook URL**: Must be publicly accessible (not localhost)
+- **Check Logs**: `pm2 logs mikrotik-manager` for `[PayMongo Webhook]` entries
+- **Test Connectivity**: Visit `/api/paymongo-webhook-ping` to verify endpoint is reachable
+
+**Problem**: Signature verification failed
+- **Nginx Header Forwarding**: The `X-Paymongo-Signature` header MUST be forwarded (see step 5.4)
+- **Webhook Secret**: Ensure it matches what's stored in PayMongo dashboard
+- **Check Logs**: Look for `[PayMongo Webhook] STAGE 2` entries in PM2 logs
+
+**Problem**: Payments processed but subscription not activated
+- **Check Webhook Status**: In System Settings > PayMongo, click "Check Status"
+- **Verify Events**: Webhook must have `checkout_session.payment.paid` event enabled
+- **Database Logs**: Check PM2 logs for database update errors
+
+### 5.7: Switching from Test to Live Mode
+
+1. **Get Live API Keys** from PayMongo dashboard
+2. **Update Settings**: Go to System Settings > PayMongo
+3. **Replace Keys**: 
+   - Change `pk_test_` to `pk_live_`
+   - Change `sk_test_` to `sk_live_`
+4. **Re-register Webhook**: Click "Re-register Webhook" button
+5. **Update Webhook URL**: Ensure it uses HTTPS in production
+6. **Test with Real Payment**: Make a small test payment with real card
+
+## Step 6: Access Your Panel
 
 You can now access your application directly by navigating to your Orange Pi's IP address in your browser:
 
 `http://<your_orange_pi_ip>`
 (e.g., `http://192.168.1.10`)
+
+**If PayMongo is configured**: Ensure your webhook URL uses HTTPS for production (use Let's Encrypt or Cloudflare SSL).
