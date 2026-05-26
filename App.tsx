@@ -108,12 +108,28 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     currentView === 'sales' || currentView === 'dhcp-portal' || currentView === 'pppoe'
   );
   const { items, addItem, updateItem, deleteItem } = useInventoryData(currentView === 'inventory');
-  const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData(currentView === 'inventory');
-  const { records: pisowifiIncome, addRecord: addPisowifiIncome, updateRecord: updatePisowifiIncome, deleteRecord: deletePisowifiIncome } = usePisowifiIncomeData(currentView === 'inventory');
+  const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData(currentView === 'inventory' || currentView === 'accounting' || currentView === 'payroll');
+  const { records: pisowifiIncome, addRecord: addPisowifiIncome, updateRecord: updatePisowifiIncome, deleteRecord: deletePisowifiIncome } = usePisowifiIncomeData(currentView === 'inventory' || currentView === 'accounting');
   const { resellers: pisowifiResellers, addReseller: addPisowifiReseller, updateReseller: updatePisowifiReseller, deleteReseller: deletePisowifiReseller } = usePisowifiResellersData(currentView === 'inventory');
   const payrollData = usePayrollData(currentView === 'payroll');
   const { settings: companySettings, updateSettings: updateCompanySettings, isLoading: isLoadingCompany } = useCompanySettings();
   const { t, isLoading: isLoadingLocalization } = useLocalization();
+
+  // Handler for marking payroll as paid and recording as expense
+  const handlePayrollPaid = async (periodStart: string, periodEnd: string, totalNet: number, employeeCount: number) => {
+    try {
+      await addExpense({
+        category: 'Payroll',
+        description: `Payroll: ${periodStart} to ${periodEnd} | ${employeeCount} employee${employeeCount !== 1 ? 's' : ''} | Net: ${totalNet}`,
+        amount: totalNet,
+        date: new Date().toISOString().split('T')[0]
+      });
+      console.log(`Payroll expense recorded: ${totalNet} for ${employeeCount} employees`);
+    } catch (err) {
+      console.error('Failed to record payroll expense:', err);
+      throw err;
+    }
+  };
 
   useEffect(() => {
     const initServices = async () => {
@@ -254,7 +270,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                   case 'accounting':
                       return <Accounting selectedRouter={selectedRouter} />;
                   case 'payroll':
-                      return <Payroll {...payrollData} />;
+                      return <Payroll {...payrollData} onPayrollPaid={handlePayrollPaid} />;
                   case 'hotspot':
                       return <Hotspot selectedRouter={selectedRouter} />;
                   case 'remote':
