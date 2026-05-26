@@ -1806,8 +1806,273 @@ const ServersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sele
 }
 
 
+// --- Payment Monitoring Component ---
+const PaymentMonitoring: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void> }> = ({ selectedRouter, addSale }) => {
+    const [secrets, setSecrets] = useState<PppSecret[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [filter, setFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
+    const [searchTerm, setSearchTerm] = useState('');
+
+    useEffect(() => {
+        fetchSecrets();
+    }, [selectedRouter]);
+
+    const fetchSecrets = async () => {
+        try {
+            setIsLoading(true);
+            const data = await getPppSecrets(selectedRouter);
+            setSecrets(data || []);
+        } catch (err) {
+            setError('Failed to fetch PPPoE users');
+            console.error(err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const parseDueDate = (comment: string) => {
+        try {
+            const c = JSON.parse(comment || '{}');
+            return c.dueDateTime || c.dueDate || null;
+        } catch {
+            return null;
+        }
+    };
+
+    const getPaymentStatus = (secret: PppSecret) => {
+        const dueDate = parseDueDate(secret.comment);
+        if (!dueDate) return 'unknown';
+        
+        const now = new Date();
+        const due = new Date(dueDate);
+        
+        // Check if paid for current month (due date is in the future)
+        if (due > now) return 'paid';
+        return 'unpaid';
+    };
+
+    const getCurrentMonthPayment = (secret: PppSecret) => {
+        const dueDate = parseDueDate(secret.comment);
+        if (!dueDate) return null;
+        
+        const due = new Date(dueDate);
+        const now = new Date();
+        
+        return {
+            dueDate: due,
+            isCurrentMonth: due.getMonth() === now.getMonth() && due.getFullYear() === now.getFullYear(),
+            daysRemaining: Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
+            isExpired: due < now
+        };
+    };
+
+    const filteredSecrets = useMemo(() => {
+        let filtered = secrets.filter(s => !s.disabled || s.disabled === 'false');
+        
+        // Apply payment filter
+        if (filter !== 'all') {
+            filtered = filtered.filter(s => getPaymentStatus(s) === filter);
+        }
+        
+        // Apply search filter
+        if (searchTerm) {
+            const term = searchTerm.toLowerCase();
+            filtered = filtered.filter(s => 
+                s.name.toLowerCase().includes(term) || 
+                s.profile.toLowerCase().includes(term) ||
+                (s.comment && s.comment.toLowerCase().includes(term))
+            );
+        }
+        
+        return filtered;
+    }, [secrets, filter, searchTerm]);
+
+    const stats = useMemo(() => {
+        const activeSecrets = secrets.filter(s => !s.disabled || s.disabled === 'false');
+        const paid = activeSecrets.filter(s => getPaymentStatus(s) === 'paid').length;
+        const unpaid = activeSecrets.filter(s => getPaymentStatus(s) === 'unpaid').length;
+        const unknown = activeSecrets.filter(s => getPaymentStatus(s) === 'unknown').length;
+        
+        return { total: activeSecrets.length, paid, unpaid, unknown };
+    }, [secrets]);
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center p-12">
+                <Loader />
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                <p className="text-red-600 dark:text-red-400">{error}</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+                    <div className="text-sm text-slate-500 dark:text-slate-400">Total Users</div>
+                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-200 mt-1">{stats.total}</div>
+                </div>
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                    <div className="text-sm text-green-600 dark:text-green-400">Paid This Month</div>
+                    <div className="text-2xl font-bold text-green-700 dark:text-green-300 mt-1">{stats.paid}</div>
+                </div>
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div className="text-sm text-red-600 dark:text-red-400">Unpaid This Month</div>
+                    <div className="text-2xl font-bold text-red-700 dark:text-red-300 mt-1">{stats.unpaid}</div>
+                </div>
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                    <div className="text-sm text-yellow-600 dark:text-yellow-400">No Due Date</div>
+                    <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-300 mt-1">{stats.unknown}</div>
+                </div>
+            </div>
+
+            {/* Filters */}
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+                <div className="flex flex-col md:flex-row gap-4">
+                    <div className="flex-1">
+                        <input
+                            type="text"
+                            placeholder="Search by username, profile, or comment..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setFilter('all')}
+                            className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                                filter === 'all'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                            }`}
+                        >
+                            All ({stats.total})
+                        </button>
+                        <button
+                            onClick={() => setFilter('paid')}
+                            className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                                filter === 'paid'
+                                    ? 'bg-green-600 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                            }`}
+                        >
+                            Paid ({stats.paid})
+                        </button>
+                        <button
+                            onClick={() => setFilter('unpaid')}
+                            className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                                filter === 'unpaid'
+                                    ? 'bg-red-600 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                            }`}
+                        >
+                            Unpaid ({stats.unpaid})
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Users Table */}
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full">
+                        <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Username</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Profile</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Due Date</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Days Left</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                            {filteredSecrets.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                        No users found
+                                    </td>
+                                </tr>
+                            ) : (
+                                filteredSecrets.map((secret) => {
+                                    const paymentInfo = getCurrentMonthPayment(secret);
+                                    const status = getPaymentStatus(secret);
+                                    
+                                    return (
+                                        <tr key={secret.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{secret.name}</div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="text-sm text-slate-600 dark:text-slate-400">{secret.profile}</div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="text-sm text-slate-600 dark:text-slate-400">
+                                                    {paymentInfo?.dueDate ? paymentInfo.dueDate.toLocaleDateString() : 'N/A'}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                                    status === 'paid'
+                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                                        : status === 'unpaid'
+                                                        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                                }`}>
+                                                    {status === 'paid' ? 'Paid' : status === 'unpaid' ? 'Unpaid' : 'Unknown'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className={`text-sm font-medium ${
+                                                    paymentInfo?.isExpired
+                                                        ? 'text-red-600 dark:text-red-400'
+                                                        : paymentInfo && paymentInfo.daysRemaining <= 5
+                                                        ? 'text-orange-600 dark:text-orange-400'
+                                                        : 'text-slate-600 dark:text-slate-400'
+                                                }`}>
+                                                    {paymentInfo ? (
+                                                        paymentInfo.isExpired
+                                                            ? `Expired ${Math.abs(paymentInfo.daysRemaining)} days ago`
+                                                            : `${paymentInfo.daysRemaining} days`
+                                                    ) : 'N/A'}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                <button
+                                                    onClick={() => {
+                                                        // You can add payment processing here
+                                                        console.log('Process payment for:', secret.name);
+                                                    }}
+                                                    className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 mr-3"
+                                                >
+                                                    Process Payment
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 // --- Main Container Component ---
-type PppoeTab = 'users' | 'active_users' | 'offline_users' | 'profiles' | 'servers';
+type PppoeTab = 'users' | 'active_users' | 'offline_users' | 'profiles' | 'servers' | 'payment_monitoring';
 
 export const Pppoe: React.FC<{ 
     selectedRouter: RouterConfigWithId | null;
@@ -1835,6 +2100,7 @@ export const Pppoe: React.FC<{
                     <TabButton label="Offline Users" icon={<ExclamationTriangleIcon className="w-5 h-5" />} isActive={activeTab === 'offline_users'} onClick={() => setActiveTab('offline_users')} />
                     <TabButton label={t('pppoe.profiles')} icon={<SignalIcon className="w-5 h-5" />} isActive={activeTab === 'profiles'} onClick={() => setActiveTab('profiles')} />
                     <TabButton label={t('pppoe.servers')} icon={<ServerIcon className="w-5 h-5" />} isActive={activeTab === 'servers'} onClick={() => setActiveTab('servers')} />
+                    <TabButton label="Payment Monitoring" icon={<CurrencyDollarIcon className="w-5 h-5" />} isActive={activeTab === 'payment_monitoring'} onClick={() => setActiveTab('payment_monitoring')} />
                 </nav>
             </div>
 
@@ -1843,6 +2109,7 @@ export const Pppoe: React.FC<{
             {activeTab === 'offline_users' && <OfflineUsersManager selectedRouter={selectedRouter} />}
             {activeTab === 'profiles' && <ProfilesManager selectedRouter={selectedRouter} />}
             {activeTab === 'servers' && <ServersManager selectedRouter={selectedRouter} />}
+            {activeTab === 'payment_monitoring' && <PaymentMonitoring selectedRouter={selectedRouter} addSale={addSale} />}
         </div>
     );
 };
