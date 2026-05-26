@@ -6,6 +6,7 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import type { ExpenseRecord, PisowifiIncomeRecord, SaleRecord, RouterConfigWithId } from '../types.ts';
 import { CurrencyDollarIcon, PlusIcon, TrashIcon, EditIcon, ExclamationTriangleIcon } from '../constants.tsx';
+import { dbApi } from '../services/databaseService.ts';
 
 type AccountingTab = 'overview' | 'expenses' | 'pisowifi' | 'sales';
 
@@ -17,11 +18,38 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
     const { t, formatCurrency } = useLocalization();
     const { settings } = useCompanySettings();
     const [activeTab, setActiveTab] = useState<AccountingTab>('overview');
+    const [timeFilter, setTimeFilter] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
     
     // Fetch data
     const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData();
     const { records: pisowifiRecords, addRecord: addPisowifiRecord, updateRecord: updatePisowifiRecord, deleteRecord: deletePisowifiRecord, isLoading: isLoadingPisowifi } = usePisowifiIncomeData();
     const { sales, deleteSale, isLoading: isLoadingSales } = useSalesData(selectedRouter?.id || null);
+    
+    // Fetch all sales from all routers for comprehensive view
+    const [allSales, setAllSales] = useState<SaleRecord[]>([]);
+    const [isLoadingAllSales, setIsLoadingAllSales] = useState(false);
+    const [clientInvoices, setClientInvoices] = useState<any[]>([]);
+
+    React.useEffect(() => {
+        loadAllFinancialData();
+    }, []);
+
+    const loadAllFinancialData = async () => {
+        try {
+            setIsLoadingAllSales(true);
+            // Load all sales records
+            const salesData = await dbApi.get<SaleRecord[]>('/sales');
+            setAllSales(salesData || []);
+            
+            // Load client invoices (DHCP portal payments)
+            const invoicesData = await dbApi.get<any[]>('/client-invoices');
+            setClientInvoices(invoicesData || []);
+        } catch (err) {
+            console.error('Failed to load financial data:', err);
+        } finally {
+            setIsLoadingAllSales(false);
+        }
+    };
 
     // Calculate financial summary
     const financialSummary = useMemo(() => {
@@ -38,6 +66,113 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
             netProfit: grossProfit
         };
     }, [sales, pisowifiRecords, expenses]);
+
+    // Helper function for period labels
+    const getPeriodLabel = (date: Date, filter: 'daily' | 'weekly' | 'monthly') => {
+        if (filter === 'daily') {
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        } else if (filter === 'weekly') {
+            const start = new Date(date);
+            start.setDate(date.getDate() - date.getDay());
+            return `Week of ${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+        } else {
+            return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        }
+    };
+
+    // Cash Flow Analysis by Time Period
+    const cashFlowAnalysis = useMemo(() => {
+        const now = new Date();
+        const getPeriodStart = (date: Date) => {
+            if (timeFilter === 'daily') {
+                return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+            } else if (timeFilter === 'weekly') {
+                const start = new Date(date);
+                start.setDate(date.getDate() - date.getDay());
+                start.setHours(0, 0, 0, 0);
+                return start;
+            } else {
+                return new Date(date.getFullYear(), date.getMonth(), 1);
+            }
+        };
+
+        const getPeriodEnd = (date: Date) => {
+            if (timeFilter === 'daily') {
+                const end = new Date(date);
+                end.setHours(23, 59, 59, 999);
+                return end;
+            } else if (timeFilter === 'weekly') {
+                const end = new Date(date);
+                end.setDate(date.getDate() - date.getDay() + 6);
+                end.setHours(23, 59, 59, 999);
+                return end;
+            } else {
+                return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+            }
+        };
+
+        // Calculate periods (last 6 periods)
+        const periods = [];
+        for (let i = 5; i >= 0; i--) {
+            const periodDate = new Date(now);
+            if (timeFilter === 'daily') {
+                periodDate.setDate(now.getDate() - i);
+            } else if (timeFilter === 'weekly') {
+                periodDate.setDate(now.getDate() - (i * 7));
+            } else {
+                periodDate.setMonth(now.getMonth() - i);
+            }
+            
+            const periodStart = getPeriodStart(periodDate);
+            const periodEnd = getPeriodEnd(periodDate);
+            
+            // PPPoE Sales for this period
+            const pppoeSales = allSales.filter(s => {
+                const saleDate = new Date(s.date);
+                return saleDate >= periodStart && saleDate <= periodEnd;
+            }).reduce((sum, s) => sum + (s.finalAmount || 0), 0);
+
+            // DHCP Portal Sales for this period
+            const dhcpSales = clientInvoices
+                .filter(inv => {
+                    if (inv.status !== 'PAID') return false;
+                    const paidDate = inv.paidAt || inv.updatedAt || inv.createdAt;
+                    if (!paidDate) return false;
+                    const invDate = new Date(paidDate);
+                    return invDate >= periodStart && invDate <= periodEnd;
+                })
+                .reduce((sum, inv) => sum + (inv.totalAmount || inv.amount || 0), 0);
+
+            // PisoWiFi Income for this period
+            const pwiIncome = pisowifiRecords.filter(r => {
+                const recordDate = new Date(r.createdAt);
+                return recordDate >= periodStart && recordDate <= periodEnd;
+            }).reduce((sum, r) => sum + (r.netTotal || 0), 0);
+
+            // Expenses for this period
+            const periodExpenses = expenses.filter(e => {
+                const expenseDate = new Date(e.date);
+                return expenseDate >= periodStart && expenseDate <= periodEnd;
+            }).reduce((sum, e) => sum + (e.amount || 0), 0);
+
+            const totalIncome = pppoeSales + dhcpSales + pwiIncome;
+            const netCashFlow = totalIncome - periodExpenses;
+
+            periods.push({
+                label: getPeriodLabel(periodDate, timeFilter),
+                startDate: periodStart,
+                endDate: periodEnd,
+                pppoeSales,
+                dhcpSales,
+                pwiIncome,
+                totalIncome,
+                expenses: periodExpenses,
+                netCashFlow
+            });
+        }
+
+        return periods;
+    }, [timeFilter, allSales, clientInvoices, pisowifiRecords, expenses]);
 
     return (
         <div className="space-y-6">
@@ -61,6 +196,10 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
                 <FinancialOverview 
                     summary={financialSummary}
                     formatCurrency={formatCurrency}
+                    cashFlowAnalysis={cashFlowAnalysis}
+                    timeFilter={timeFilter}
+                    onTimeFilterChange={setTimeFilter}
+                    isLoading={isLoadingAllSales}
                 />
             )}
             {activeTab === 'expenses' && (
@@ -114,9 +253,45 @@ const TabButton: React.FC<{ label: string, icon: React.ReactNode, isActive: bool
 const FinancialOverview: React.FC<{
     summary: { totalIncome: number; totalPisowifiIncome: number; totalExpenses: number; grossProfit: number; netProfit: number };
     formatCurrency: (amount: number) => string;
-}> = ({ summary, formatCurrency }) => {
+    cashFlowAnalysis: Array<{
+        label: string;
+        pppoeSales: number;
+        dhcpSales: number;
+        pwiIncome: number;
+        totalIncome: number;
+        expenses: number;
+        netCashFlow: number;
+    }>;
+    timeFilter: 'daily' | 'weekly' | 'monthly';
+    onTimeFilterChange: (filter: 'daily' | 'weekly' | 'monthly') => void;
+    isLoading: boolean;
+}> = ({ summary, formatCurrency, cashFlowAnalysis, timeFilter, onTimeFilterChange, isLoading }) => {
+    if (isLoading) {
+        return <div className="text-center p-12 text-slate-500">Loading cash flow data...</div>;
+    }
+
     return (
         <div className="space-y-6">
+            {/* Time Filter */}
+            <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Cash Flow Dashboard</h3>
+                <div className="flex gap-2">
+                    {(['daily', 'weekly', 'monthly'] as const).map((filter) => (
+                        <button
+                            key={filter}
+                            onClick={() => onTimeFilterChange(filter)}
+                            className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                                timeFilter === filter
+                                    ? 'bg-[--color-primary-600] text-white'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                            }`}
+                        >
+                            {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
@@ -139,12 +314,63 @@ const FinancialOverview: React.FC<{
                 </div>
             </div>
 
+            {/* Cash Flow Trend Table */}
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="p-6 border-b border-slate-200 dark:border-slate-700">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Cash Flow Trend (Last 6 Periods)</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full">
+                        <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                            <tr>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Period</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">PPPoE Sales</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">DHCP Sales</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">PisoWiFi</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Total Income</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Expenses</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Net Cash Flow</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                            {cashFlowAnalysis.map((period, idx) => (
+                                <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                    <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100">
+                                        {period.label}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right text-green-600 dark:text-green-400">
+                                        {formatCurrency(period.pppoeSales)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right text-blue-600 dark:text-blue-400">
+                                        {formatCurrency(period.dhcpSales)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right text-purple-600 dark:text-purple-400">
+                                        {formatCurrency(period.pwiIncome)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-semibold text-slate-900 dark:text-slate-100">
+                                        {formatCurrency(period.totalIncome)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right text-red-600 dark:text-red-400">
+                                        {formatCurrency(period.expenses)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-bold">
+                                        <span className={period.netCashFlow >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                                            {formatCurrency(period.netCashFlow)}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             {/* Income Breakdown */}
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
-                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">Income Breakdown</h3>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">Total Income Breakdown</h3>
                 <div className="space-y-3">
                     <div className="flex justify-between items-center p-3 bg-green-50 dark:bg-green-900/20 rounded">
-                        <span className="text-slate-700 dark:text-slate-300">Sales Revenue</span>
+                        <span className="text-slate-700 dark:text-slate-300">PPPoE Sales Revenue</span>
                         <span className="font-bold text-green-600 dark:text-green-400">{formatCurrency(summary.totalIncome)}</span>
                     </div>
                     <div className="flex justify-between items-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded">
