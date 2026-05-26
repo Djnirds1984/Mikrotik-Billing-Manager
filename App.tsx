@@ -34,6 +34,7 @@ const SystemSettings = React.lazy(() => import('./components/SystemSettings.tsx'
 const SalesReport = React.lazy(() => import('./components/SalesReport.tsx').then(m => ({ default: m.SalesReport })));
 const Network = React.lazy(() => import('./components/Network.tsx').then(m => ({ default: m.Network })));
 const Inventory = React.lazy(() => import('./components/Inventory.tsx').then(m => ({ default: m.Inventory })));
+const Accounting = React.lazy(() => import('./components/Accounting.tsx').then(m => ({ default: m.Accounting })));
 const Company = React.lazy(() => import('./components/Company.tsx').then(m => ({ default: m.Company })));
 const Terminal = React.lazy(() => import('./components/Terminal.tsx').then(m => ({ default: m.Terminal })));
 const Login = React.lazy(() => import('./components/Login.tsx').then(m => ({ default: m.Login })));
@@ -248,20 +249,10 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                             addItem={addItem} 
                             updateItem={updateItem} 
                             deleteItem={deleteItem}
-                            expenses={expenses}
-                            addExpense={addExpense}
-                            updateExpense={updateExpense}
-                            deleteExpense={deleteExpense}
-                            pisowifiIncome={pisowifiIncome}
-                            addPisowifiIncome={addPisowifiIncome}
-                            updatePisowifiIncome={updatePisowifiIncome}
-                            deletePisowifiIncome={deletePisowifiIncome}
-                            pisowifiResellers={pisowifiResellers}
-                            addPisowifiReseller={addPisowifiReseller}
-                            updatePisowifiReseller={updatePisowifiReseller}
-                            deletePisowifiReseller={deletePisowifiReseller}
                         />
                       );
+                  case 'accounting':
+                      return <Accounting selectedRouter={selectedRouter} />;
                   case 'payroll':
                       return <Payroll {...payrollData} />;
                   case 'hotspot':

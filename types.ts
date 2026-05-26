@@ -12,6 +12,7 @@ export type View =
   | 'billing'
   | 'sales'
   | 'inventory'
+  | 'accounting'
   | 'payroll'
   | 'hotspot'
   | 'remote'

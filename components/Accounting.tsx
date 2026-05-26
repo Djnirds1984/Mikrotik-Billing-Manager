@@ -1,0 +1,527 @@
+import React, { useState, useMemo } from 'react';
+import { useExpensesData } from '../hooks/useExpensesData.ts';
+import { usePisowifiIncomeData } from '../hooks/usePisowifiIncomeData.ts';
+import { useSalesData } from '../hooks/useSalesData.ts';
+import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { useCompanySettings } from '../hooks/useCompanySettings.ts';
+import type { ExpenseRecord, PisowifiIncomeRecord, SaleRecord, RouterConfigWithId } from '../types.ts';
+import { CurrencyDollarIcon, PlusIcon, TrashIcon, EditIcon, ExclamationTriangleIcon } from '../constants.tsx';
+
+type AccountingTab = 'overview' | 'expenses' | 'pisowifi' | 'sales';
+
+interface AccountingProps {
+    selectedRouter: RouterConfigWithId | null;
+}
+
+export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
+    const { t, formatCurrency } = useLocalization();
+    const { settings } = useCompanySettings();
+    const [activeTab, setActiveTab] = useState<AccountingTab>('overview');
+    
+    // Fetch data
+    const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData();
+    const { records: pisowifiRecords, addRecord: addPisowifiRecord, updateRecord: updatePisowifiRecord, deleteRecord: deletePisowifiRecord, isLoading: isLoadingPisowifi } = usePisowifiIncomeData();
+    const { sales, deleteSale, isLoading: isLoadingSales } = useSalesData(selectedRouter?.id || null);
+
+    // Calculate financial summary
+    const financialSummary = useMemo(() => {
+        const totalIncome = sales.reduce((sum, sale) => sum + (sale.finalAmount || 0), 0);
+        const totalPisowifiIncome = pisowifiRecords.reduce((sum, record) => sum + (record.netTotal || 0), 0);
+        const totalExpenses = expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+        const grossProfit = totalIncome + totalPisowifiIncome - totalExpenses;
+        
+        return {
+            totalIncome,
+            totalPisowifiIncome,
+            totalExpenses,
+            grossProfit,
+            netProfit: grossProfit
+        };
+    }, [sales, pisowifiRecords, expenses]);
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex justify-between items-center">
+                <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">Accounting & Expenses</h2>
+            </div>
+
+            {/* Tabs */}
+            <div className="border-b border-slate-200 dark:border-slate-700">
+                <nav className="flex space-x-2 overflow-x-auto pb-1">
+                    <TabButton label="Financial Overview" icon={<CurrencyDollarIcon className="w-5 h-5" />} isActive={activeTab === 'overview'} onClick={() => setActiveTab('overview')} />
+                    <TabButton label="Expenses" icon={<ExclamationTriangleIcon className="w-5 h-5" />} isActive={activeTab === 'expenses'} onClick={() => setActiveTab('expenses')} />
+                    <TabButton label="PisoWiFi Income" icon={<CurrencyDollarIcon className="w-5 h-5" />} isActive={activeTab === 'pisowifi'} onClick={() => setActiveTab('pisowifi')} />
+                    <TabButton label="Sales Revenue" icon={<CurrencyDollarIcon className="w-5 h-5" />} isActive={activeTab === 'sales'} onClick={() => setActiveTab('sales')} />
+                </nav>
+            </div>
+
+            {/* Tab Content */}
+            {activeTab === 'overview' && (
+                <FinancialOverview 
+                    summary={financialSummary}
+                    formatCurrency={formatCurrency}
+                />
+            )}
+            {activeTab === 'expenses' && (
+                <ExpensesManager 
+                    expenses={expenses}
+                    onAdd={addExpense}
+                    onUpdate={updateExpense}
+                    onDelete={deleteExpense}
+                    isLoading={isLoadingExpenses}
+                    formatCurrency={formatCurrency}
+                />
+            )}
+            {activeTab === 'pisowifi' && (
+                <PisoWifiIncomeManager 
+                    records={pisowifiRecords}
+                    onAdd={addPisowifiRecord}
+                    onUpdate={updatePisowifiRecord}
+                    onDelete={deletePisowifiRecord}
+                    isLoading={isLoadingPisowifi}
+                    formatCurrency={formatCurrency}
+                />
+            )}
+            {activeTab === 'sales' && (
+                <SalesRevenueView 
+                    sales={sales}
+                    onDelete={deleteSale}
+                    isLoading={isLoadingSales}
+                    formatCurrency={formatCurrency}
+                />
+            )}
+        </div>
+    );
+};
+
+// Tab Button Component
+const TabButton: React.FC<{ label: string, icon: React.ReactNode, isActive: boolean, onClick: () => void }> = ({ label, icon, isActive, onClick }) => (
+    <button
+        onClick={onClick}
+        className={`flex items-center px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors duration-200 focus:outline-none ${
+            isActive
+                ? 'border-[--color-primary-500] text-[--color-primary-500] dark:text-[--color-primary-400]'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+        }`}
+    >
+        {icon}
+        <span className="ml-2">{label}</span>
+    </button>
+);
+
+// Financial Overview Component
+const FinancialOverview: React.FC<{
+    summary: { totalIncome: number; totalPisowifiIncome: number; totalExpenses: number; grossProfit: number; netProfit: number };
+    formatCurrency: (amount: number) => string;
+}> = ({ summary, formatCurrency }) => {
+    return (
+        <div className="space-y-6">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+                    <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Total Sales Income</div>
+                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(summary.totalIncome)}</div>
+                </div>
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+                    <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">PisoWiFi Income</div>
+                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(summary.totalPisowifiIncome)}</div>
+                </div>
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+                    <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Total Expenses</div>
+                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">{formatCurrency(summary.totalExpenses)}</div>
+                </div>
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+                    <div className="text-sm text-slate-500 dark:text-slate-400 mb-2">Net Profit</div>
+                    <div className={`text-2xl font-bold ${summary.netProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {formatCurrency(summary.netProfit)}
+                    </div>
+                </div>
+            </div>
+
+            {/* Income Breakdown */}
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">Income Breakdown</h3>
+                <div className="space-y-3">
+                    <div className="flex justify-between items-center p-3 bg-green-50 dark:bg-green-900/20 rounded">
+                        <span className="text-slate-700 dark:text-slate-300">Sales Revenue</span>
+                        <span className="font-bold text-green-600 dark:text-green-400">{formatCurrency(summary.totalIncome)}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded">
+                        <span className="text-slate-700 dark:text-slate-300">PisoWiFi Revenue</span>
+                        <span className="font-bold text-blue-600 dark:text-blue-400">{formatCurrency(summary.totalPisowifiIncome)}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-purple-50 dark:bg-purple-900/20 rounded font-semibold">
+                        <span className="text-slate-900 dark:text-slate-100">Total Income</span>
+                        <span className="text-purple-600 dark:text-purple-400">{formatCurrency(summary.totalIncome + summary.totalPisowifiIncome)}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Expenses Manager Component
+const ExpensesManager: React.FC<{
+    expenses: ExpenseRecord[];
+    onAdd: (expense: Omit<ExpenseRecord, 'id'>) => Promise<void>;
+    onUpdate: (expense: ExpenseRecord) => Promise<void>;
+    onDelete: (id: string) => Promise<void>;
+    isLoading: boolean;
+    formatCurrency: (amount: number) => string;
+}> = ({ expenses, onAdd, onUpdate, onDelete, isLoading, formatCurrency }) => {
+    const [isFormOpen, setIsFormOpen] = useState(false);
+    const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
+
+    const handleSave = async (expenseData: any) => {
+        if (editingExpense) {
+            await onUpdate({ ...editingExpense, ...expenseData });
+        } else {
+            await onAdd(expenseData);
+        }
+        setIsFormOpen(false);
+        setEditingExpense(null);
+    };
+
+    const handleEdit = (expense: ExpenseRecord) => {
+        setEditingExpense(expense);
+        setIsFormOpen(true);
+    };
+
+    const handleNew = () => {
+        setEditingExpense(null);
+        setIsFormOpen(true);
+    };
+
+    if (isLoading) {
+        return <div className="text-center p-12 text-slate-500">Loading expenses...</div>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Expense Records</h3>
+                <button
+                    onClick={handleNew}
+                    className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center gap-2"
+                >
+                    <PlusIcon className="w-5 h-5" />
+                    Add Expense
+                </button>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <table className="w-full">
+                    <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Date</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Category</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Description</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Amount</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                        {expenses.length === 0 ? (
+                            <tr>
+                                <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                    No expenses recorded yet
+                                </td>
+                            </tr>
+                        ) : (
+                            expenses.map((expense) => (
+                                <tr key={expense.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 dark:text-slate-400">
+                                        {new Date(expense.date).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-slate-100">
+                                        {expense.category}
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">
+                                        {expense.description}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-red-600 dark:text-red-400">
+                                        {formatCurrency(expense.amount)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                        <button onClick={() => handleEdit(expense)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 mr-3">
+                                            <EditIcon className="w-5 h-5" />
+                                        </button>
+                                        <button onClick={() => onDelete(expense.id)} className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">
+                                            <TrashIcon className="w-5 h-5" />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+
+            {isFormOpen && (
+                <ExpenseFormModal
+                    isOpen={isFormOpen}
+                    onClose={() => { setIsFormOpen(false); setEditingExpense(null); }}
+                    onSave={handleSave}
+                    initialData={editingExpense}
+                />
+            )}
+        </div>
+    );
+};
+
+// Expense Form Modal
+const ExpenseFormModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (data: any) => void;
+    initialData: ExpenseRecord | null;
+}> = ({ isOpen, onClose, onSave, initialData }) => {
+    const [expense, setExpense] = useState({
+        date: new Date().toISOString().split('T')[0],
+        category: '',
+        description: '',
+        amount: 0
+    });
+
+    React.useEffect(() => {
+        if (isOpen) {
+            if (initialData) {
+                setExpense({
+                    date: initialData.date || new Date().toISOString().split('T')[0],
+                    category: initialData.category || '',
+                    description: initialData.description || '',
+                    amount: initialData.amount || 0
+                });
+            } else {
+                setExpense({
+                    date: new Date().toISOString().split('T')[0],
+                    category: '',
+                    description: '',
+                    amount: 0
+                });
+            }
+        }
+    }, [initialData, isOpen]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(expense);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold mb-4">{initialData ? 'Edit Expense' : 'Add New Expense'}</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Date</label>
+                                <input
+                                    type="date"
+                                    value={expense.date}
+                                    onChange={(e) => setExpense({ ...expense, date: e.target.value })}
+                                    required
+                                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
+                                <input
+                                    type="text"
+                                    value={expense.category}
+                                    onChange={(e) => setExpense({ ...expense, category: e.target.value })}
+                                    required
+                                    placeholder="e.g., Electricity, Rent, Internet"
+                                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Description</label>
+                                <textarea
+                                    value={expense.description}
+                                    onChange={(e) => setExpense({ ...expense, description: e.target.value })}
+                                    rows={3}
+                                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Amount</label>
+                                <input
+                                    type="number"
+                                    value={expense.amount}
+                                    onChange={(e) => setExpense({ ...expense, amount: parseFloat(e.target.value) || 0 })}
+                                    required
+                                    step="0.01"
+                                    className="w-full px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end space-x-3">
+                        <button type="button" onClick={onClose} className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">
+                            Cancel
+                        </button>
+                        <button type="submit" className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md hover:bg-[--color-primary-700]">
+                            {initialData ? 'Update' : 'Add'} Expense
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+// PisoWiFi Income Manager
+const PisoWifiIncomeManager: React.FC<{
+    records: PisowifiIncomeRecord[];
+    onAdd: (record: any) => Promise<void>;
+    onUpdate: (record: any) => Promise<void>;
+    onDelete: (id: string) => Promise<void>;
+    isLoading: boolean;
+    formatCurrency: (amount: number) => string;
+}> = ({ records, onAdd, onUpdate, onDelete, isLoading, formatCurrency }) => {
+    const [isFormOpen, setIsFormOpen] = useState(false);
+    const [editingRecord, setEditingRecord] = useState<PisowifiIncomeRecord | null>(null);
+
+    const handleSave = async (recordData: any) => {
+        if (editingRecord) {
+            await onUpdate({ ...editingRecord, ...recordData });
+        } else {
+            await onAdd(recordData);
+        }
+        setIsFormOpen(false);
+        setEditingRecord(null);
+    };
+
+    if (isLoading) {
+        return <div className="text-center p-12 text-slate-500">Loading PisoWiFi records...</div>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">PisoWiFi Income Records</h3>
+                <button
+                    onClick={() => { setEditingRecord(null); setIsFormOpen(true); }}
+                    className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center gap-2"
+                >
+                    <PlusIcon className="w-5 h-5" />
+                    Add Income Record
+                </button>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <table className="w-full">
+                    <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Date</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Machine</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Gross Sales</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Expenses</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Net Income</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                        {records.length === 0 ? (
+                            <tr>
+                                <td colSpan={6} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                    No PisoWiFi income recorded yet
+                                </td>
+                            </tr>
+                        ) : (
+                            records.map((record) => (
+                                <tr key={record.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 dark:text-slate-400">
+                                        {new Date(record.createdAt).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-slate-100">
+                                        {record.machineName}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 dark:text-green-400">
+                                        {formatCurrency(record.grossSales)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600 dark:text-red-400">
+                                        {formatCurrency(record.expenses)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600 dark:text-blue-400">
+                                        {formatCurrency(record.netTotal)}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                        <button onClick={() => { setEditingRecord(record); setIsFormOpen(true); }} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 mr-3">
+                                            <EditIcon className="w-5 h-5" />
+                                        </button>
+                                        <button onClick={() => onDelete(record.id)} className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">
+                                            <TrashIcon className="w-5 h-5" />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+// Sales Revenue View
+const SalesRevenueView: React.FC<{
+    sales: SaleRecord[];
+    onDelete: (id: string) => Promise<void>;
+    isLoading: boolean;
+    formatCurrency: (amount: number) => string;
+}> = ({ sales, onDelete, isLoading, formatCurrency }) => {
+    if (isLoading) {
+        return <div className="text-center p-12 text-slate-500">Loading sales records...</div>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Sales Revenue</h3>
+
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <table className="w-full">
+                    <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Date</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Client</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Plan</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                        {sales.length === 0 ? (
+                            <tr>
+                                <td colSpan={4} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                    No sales recorded yet
+                                </td>
+                            </tr>
+                        ) : (
+                            sales.map((sale) => (
+                                <tr key={sale.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 dark:text-slate-400">
+                                        {new Date(sale.date).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-slate-100">
+                                        {sale.clientName}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 dark:text-slate-400">
+                                        {sale.planName}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600 dark:text-green-400">
+                                        {formatCurrency(sale.finalAmount)}
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};

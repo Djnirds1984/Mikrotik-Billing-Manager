@@ -80,6 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'billing', label: t('sidebar.billing_plans'), icon: <SignalIcon className="w-6 h-6" /> },
     { id: 'sales', label: t('sidebar.sales_report'), icon: <CurrencyDollarIcon className="w-6 h-6" /> },
     { id: 'inventory', label: t('sidebar.inventory'), icon: <ArchiveBoxIcon className="w-6 h-6" /> },
+    { id: 'accounting', label: 'Accounting & Expenses', icon: <CurrencyDollarIcon className="w-6 h-6" /> },
     { id: 'payroll', label: t('sidebar.payroll'), icon: <CalculatorIcon className="w-6 h-6" /> },
     { id: 'hotspot', label: t('sidebar.hotspot'), icon: <WifiIcon className="w-6 h-6" /> },
     { id: 'remote', label: t('sidebar.remote'), icon: <CloudIcon className="w-6 h-6" /> },
@@ -110,7 +111,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
 
   const licensedViews: View[] = [
       'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
-      'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'repair_tickets'
+      'inventory', 'accounting', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'repair_tickets'
   ];
 
   return (
