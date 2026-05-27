@@ -1,12 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { useExpensesData } from '../hooks/useExpensesData.ts';
 import { usePisowifiIncomeData } from '../hooks/usePisowifiIncomeData.ts';
+import { usePisowifiResellersData } from '../hooks/usePisowifiResellersData.ts';
 import { useSalesData } from '../hooks/useSalesData.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
-import type { ExpenseRecord, PisowifiIncomeRecord, SaleRecord, RouterConfigWithId } from '../types.ts';
+import type { ExpenseRecord, SaleRecord, RouterConfigWithId } from '../types.ts';
 import { CurrencyDollarIcon, PlusIcon, TrashIcon, EditIcon, ExclamationTriangleIcon } from '../constants.tsx';
 import { dbApi } from '../services/databaseService.ts';
+import { PisoWifiIncomeManager } from './PisoWifiIncomeManager.tsx';
 
 type AccountingTab = 'overview' | 'expenses' | 'pisowifi' | 'sales';
 
@@ -23,6 +25,7 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
     // Fetch data
     const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData();
     const { records: pisowifiRecords, addRecord: addPisowifiRecord, updateRecord: updatePisowifiRecord, deleteRecord: deletePisowifiRecord, isLoading: isLoadingPisowifi } = usePisowifiIncomeData();
+    const { resellers: pisowifiResellers, addReseller: addPisowifiReseller, updateReseller: updatePisowifiReseller, deleteReseller: deletePisowifiReseller } = usePisowifiResellersData();
     const { sales, deleteSale, isLoading: isLoadingSales } = useSalesData(selectedRouter?.id || null);
     
     // Fetch all sales from all routers for comprehensive view
@@ -220,6 +223,10 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
                     onDelete={deletePisowifiRecord}
                     isLoading={isLoadingPisowifi}
                     formatCurrency={formatCurrency}
+                    resellers={pisowifiResellers}
+                    onAddReseller={addPisowifiReseller}
+                    onUpdateReseller={updatePisowifiReseller}
+                    onDeleteReseller={deletePisowifiReseller}
                 />
             )}
             {activeTab === 'sales' && (
@@ -596,100 +603,6 @@ const ExpenseFormModal: React.FC<{
                         </button>
                     </div>
                 </form>
-            </div>
-        </div>
-    );
-};
-
-// PisoWiFi Income Manager
-const PisoWifiIncomeManager: React.FC<{
-    records: PisowifiIncomeRecord[];
-    onAdd: (record: any) => Promise<void>;
-    onUpdate: (record: any) => Promise<void>;
-    onDelete: (id: string) => Promise<void>;
-    isLoading: boolean;
-    formatCurrency: (amount: number) => string;
-}> = ({ records, onAdd, onUpdate, onDelete, isLoading, formatCurrency }) => {
-    const [isFormOpen, setIsFormOpen] = useState(false);
-    const [editingRecord, setEditingRecord] = useState<PisowifiIncomeRecord | null>(null);
-
-    const handleSave = async (recordData: any) => {
-        if (editingRecord) {
-            await onUpdate({ ...editingRecord, ...recordData });
-        } else {
-            await onAdd(recordData);
-        }
-        setIsFormOpen(false);
-        setEditingRecord(null);
-    };
-
-    if (isLoading) {
-        return <div className="text-center p-12 text-slate-500">Loading PisoWiFi records...</div>;
-    }
-
-    return (
-        <div className="space-y-4">
-            <div className="flex justify-between items-center">
-                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">PisoWiFi Income Records</h3>
-                <button
-                    onClick={() => { setEditingRecord(null); setIsFormOpen(true); }}
-                    className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center gap-2"
-                >
-                    <PlusIcon className="w-5 h-5" />
-                    Add Income Record
-                </button>
-            </div>
-
-            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <table className="w-full">
-                    <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                        <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Date</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Machine</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Gross Sales</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Expenses</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Net Income</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                        {records.length === 0 ? (
-                            <tr>
-                                <td colSpan={6} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
-                                    No PisoWiFi income recorded yet
-                                </td>
-                            </tr>
-                        ) : (
-                            records.map((record) => (
-                                <tr key={record.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 dark:text-slate-400">
-                                        {new Date(record.createdAt).toLocaleDateString()}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-slate-100">
-                                        {record.machineName}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 dark:text-green-400">
-                                        {formatCurrency(record.grossSales)}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600 dark:text-red-400">
-                                        {formatCurrency(record.expenses)}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600 dark:text-blue-400">
-                                        {formatCurrency(record.netTotal)}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <button onClick={() => { setEditingRecord(record); setIsFormOpen(true); }} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 mr-3">
-                                            <EditIcon className="w-5 h-5" />
-                                        </button>
-                                        <button onClick={() => onDelete(record.id)} className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">
-                                            <TrashIcon className="w-5 h-5" />
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
             </div>
         </div>
     );
