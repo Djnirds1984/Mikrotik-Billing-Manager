@@ -329,6 +329,7 @@ export interface SaleRecord {
     clientEmail?: string;
     planType?: 'prepaid' | 'postpaid';
     coveredMonth?: string;
+    processedBy?: string; // Username of employee/admin who processed the payment
 }
 
 export interface InventoryItem {

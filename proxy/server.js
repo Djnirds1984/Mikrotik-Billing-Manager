@@ -188,10 +188,20 @@ async function initDb() {
         const rolesCount = await db.get("SELECT COUNT(*) as count FROM roles");
         if (rolesCount.count === 0) {
             await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_admin', 'Administrator', 'Full access to all features');
-            await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_employee', 'Employee', 'Limited access');
+            await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_employee', 'Employee', 'Can view and process payments but cannot delete or edit users');
             
             await db.run("INSERT INTO permissions (id, name, description) VALUES (?, ?, ?)", 'perm_all', '*:*', 'All Permissions');
             await db.run("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_admin', 'perm_all');
+            
+            // Employee gets all VIEW permissions but NO delete/edit permissions
+            await db.run("INSERT INTO permissions (id, name, description) VALUES (?, ?, ?)", 'perm_action_delete', 'action:delete', 'Can delete records (sales, users, etc.)');
+            await db.run("INSERT INTO permissions (id, name, description) VALUES (?, ?, ?)", 'perm_action_edit_users', 'action:edit:users', 'Can edit PPPoE/DHCP users');
+            
+            // Grant employee all view permissions
+            const viewPerms = await db.all("SELECT id FROM permissions WHERE name LIKE 'view:%'");
+            for (const perm of viewPerms) {
+                await db.run("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_employee', perm.id);
+            }
         }
 
         // Ensure sidebar/view permissions exist (idempotent)
@@ -262,7 +272,8 @@ async function initDb() {
                 clientContact TEXT,
                 clientEmail TEXT,
                 invoiceId TEXT,
-                coveredMonth TEXT
+                coveredMonth TEXT,
+                processedBy TEXT DEFAULT 'admin'
             );
             CREATE TABLE IF NOT EXISTS client_invoices (
                 id TEXT PRIMARY KEY,

@@ -32,6 +32,7 @@ const StatCard: React.FC<{ title: string, value: string | number, icon: React.Re
 export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale, clearSales, companySettings, selectedRouter }) => {
     const { hasPermission } = useAuth();
     const { formatCurrency } = useLocalization();
+    const canDelete = hasPermission('action:delete');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
@@ -340,7 +341,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                             <button onClick={() => setIsAddOpen(true)} className="px-4 py-2 text-sm text-white bg-green-600 hover:bg-green-500 rounded-lg font-semibold">
                                 Add Invoice
                             </button>
-                             {hasPermission('sales_report:delete') && (
+                             {canDelete && (
                                 <button onClick={handleClear} className="px-4 py-2 text-sm text-white bg-red-700 hover:bg-red-800 dark:bg-red-800 dark:hover:bg-red-700 rounded-lg font-semibold flex items-center gap-2">
                                     <TrashIcon className="w-5 h-5" /> Clear All
                                 </button>
@@ -515,10 +516,14 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                             </td>
                                             <td className="px-4 py-3 text-center no-print space-x-2">
                                                 <button type="button" onClick={() => setInvoiceToView(inv)} className="px-3 py-1 text-sm bg-slate-600 text-white rounded-md font-semibold hover:bg-slate-700">View</button>
-                                                <button type="button" onClick={() => openEditInvoice(inv)} className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700">Edit</button>
+                                                {canDelete && (
+                                                    <button type="button" onClick={() => openEditInvoice(inv)} className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700">Edit</button>
+                                                )}
                                                 <button type="button" onClick={() => markInvoice(inv.id, 'PAID')} className="px-3 py-1 text-sm bg-green-600 text-white rounded-md font-semibold hover:bg-green-700">Mark Paid</button>
                                                 <button type="button" onClick={() => markInvoice(inv.id, 'PENDING')} className="px-3 py-1 text-sm bg-yellow-500 text-white rounded-md font-semibold hover:bg-yellow-600">Mark Pending</button>
-                                                <button type="button" onClick={() => deleteInvoice(inv.id)} className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700">Delete</button>
+                                                {canDelete && (
+                                                    <button type="button" onClick={() => deleteInvoice(inv.id)} className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700">Delete</button>
+                                                )}
                                             </td>
                                         </tr>
                                     )) : (
@@ -553,6 +558,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                         <th className="px-4 py-3 text-right">Plan Price</th>
                                         <th className="px-4 py-3 text-right">Discount</th>
                                         <th className="px-4 py-3 text-right">Final Amount</th>
+                                        <th className="px-4 py-3">Processed By</th>
                                         <th className="px-4 py-3 text-center no-print">Actions</th>
                                     </tr>
                                 </thead>
@@ -566,6 +572,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                             <td className="px-4 py-3 text-right font-mono text-sky-600 dark:text-sky-400">{formatCurrency(sale.planPrice)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-yellow-600 dark:text-yellow-400">{formatCurrency(sale.discountAmount)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-green-600 dark:text-green-400 font-bold">{formatCurrency(sale.finalAmount)}</td>
+                                            <td className="px-4 py-3 text-sm font-medium">{sale.processedBy || 'admin'}</td>
                                             <td className="px-4 py-3 text-center no-print">
                                                 <button onClick={() => handlePrintReceipt(sale, 'normal')} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 dark:hover:text-sky-400 rounded-md" title="Print Acknowledgement Receipt (Normal)">
                                                     <PrinterIcon className="h-5 w-5" />
@@ -585,7 +592,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                                         <ArrowPathIcon className="h-5 w-5" />
                                                     )}
                                                 </button>
-                                                {hasPermission('sales_report:delete') && (
+                                                {canDelete && (
                                                     <button onClick={() => deleteSale(sale.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md" title="Delete Record">
                                                         <TrashIcon className="h-5 w-5" />
                                                     </button>
