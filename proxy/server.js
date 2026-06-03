@@ -638,6 +638,14 @@ const requireSuperadmin = (req, res, next) => {
     next();
 };
 
+const requireSuperadminOrAdmin = (req, res, next) => {
+    const roleName = req.user?.role?.name?.toLowerCase();
+    if (roleName !== 'superadmin' && roleName !== 'administrator') {
+        return res.status(403).json({ message: 'Access denied. Admin or Superadmin privileges required.' });
+    }
+    next();
+};
+
 // --- Main Application Logic ---
 async function startServer() {
     await Promise.all([initDb(), initSuperadminDb()]);
@@ -3965,7 +3973,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // Get repository information (REAL GitHub API call)
-    app.get('/api/github/repo-info', protect, requireSuperadmin, async (req, res) => {
+    app.get('/api/github/repo-info', protect, requireSuperadminOrAdmin, async (req, res) => {
         try {
             const { owner, repo } = parseGitHubRepo(req.query.owner, req.query.repo);
             const data = await githubApi(`/repos/${owner}/${repo}`);
@@ -3992,7 +4000,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // Get repository branches (REAL GitHub API call, with pagination)
-    app.get('/api/github/branches', protect, requireSuperadmin, async (req, res) => {
+    app.get('/api/github/branches', protect, requireSuperadminOrAdmin, async (req, res) => {
         try {
             const { owner, repo } = parseGitHubRepo(req.query.owner, req.query.repo);
             const all = [];
@@ -4018,7 +4026,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // Pull from repository (non-streaming, executes real git pull)
-    app.post('/api/github/pull', protect, requireSuperadmin, async (req, res) => {
+    app.post('/api/github/pull', protect, requireSuperadminOrAdmin, async (req, res) => {
         let snapshotRoot = null;
         let capturedPaths = [];
         const noopSend = (obj) => { try { console.log('[github/pull]', obj); } catch {} };
@@ -4082,7 +4090,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // Pull from repository (streaming via SSE, executes real git pull)
-    app.get('/api/github/pull-stream', protect, requireSuperadmin, (req, res) => {
+    app.get('/api/github/pull-stream', protect, requireSuperadminOrAdmin, (req, res) => {
         const { branch } = req.query;
         if (!branch || !/^[a-zA-Z0-9-_./]+$/.test(branch)) {
             return res.status(400).json({ message: 'Valid branch is required' });
@@ -4280,7 +4288,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     };
 
     // POST /api/update-app  (SSE) — backup DB, git pull, npm install, build, restart
-    app.get('/api/update-app', protect, requireSuperadmin, (req, res) => {
+    app.get('/api/update-app', protect, requireSuperadminOrAdmin, (req, res) => {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -4427,7 +4435,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // GET /api/rollback-app?backupFile=xxx.db  (SSE) — restore DB then restart
-    app.get('/api/rollback-app', protect, requireSuperadmin, (req, res) => {
+    app.get('/api/rollback-app', protect, requireSuperadminOrAdmin, (req, res) => {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -4485,7 +4493,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // GET /api/rollback-update?id=xxx (SSE) — FULL rollback (code + DB + user data)
-    app.get('/api/rollback-update', protect, requireSuperadmin, (req, res) => {
+    app.get('/api/rollback-update', protect, requireSuperadminOrAdmin, (req, res) => {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -4615,7 +4623,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // GET /api/list-update-snapshots — enumerate rollback manifests
-    app.get('/api/list-update-snapshots', protect, requireSuperadmin, async (req, res) => {
+    app.get('/api/list-update-snapshots', protect, requireSuperadminOrAdmin, async (req, res) => {
         try {
             if (!fs.existsSync(BACKUP_DIR)) return res.json([]);
             const entries = fs.readdirSync(BACKUP_DIR, { withFileTypes: true })
@@ -4648,7 +4656,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // POST /api/delete-update-snapshot { id } — remove snapshot dir + paired DB backup
-    app.post('/api/delete-update-snapshot', protect, requireSuperadmin, async (req, res) => {
+    app.post('/api/delete-update-snapshot', protect, requireSuperadminOrAdmin, async (req, res) => {
         try {
             const { id } = req.body || {};
             if (!id || typeof id !== 'string' || /[\\/]/.test(id) || id.includes('..')) {
