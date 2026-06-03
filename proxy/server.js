@@ -3812,7 +3812,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // --- Database Backups ---
-    app.get('/api/list-backups', protect, requireSuperadmin, async (req, res) => {
+    app.get('/api/list-backups', protect, requireSuperadminOrAdmin, async (req, res) => {
         try {
             const files = await fs.promises.readdir(BACKUP_DIR);
             res.json(files.filter(f => f.endsWith('.db')));
@@ -3821,7 +3821,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     });
 
-    app.get('/api/create-backup', protect, requireSuperadmin, async (req, res) => {
+    app.get('/api/create-backup', protect, requireSuperadminOrAdmin, async (req, res) => {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const backupName = `panel_backup_${timestamp}.db`;
         const backupPath = path.join(BACKUP_DIR, backupName);
@@ -3834,7 +3834,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     });
     
-    app.post('/api/delete-backup', protect, requireSuperadmin, async (req, res) => {
+    app.post('/api/delete-backup', protect, requireSuperadminOrAdmin, async (req, res) => {
         try {
             const { backupFile } = req.body;
             if (!backupFile) return res.status(400).json({ message: 'Filename required' });
