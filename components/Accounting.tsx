@@ -129,15 +129,19 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
             const periodStart = getPeriodStart(periodDate);
             const periodEnd = getPeriodEnd(periodDate);
             
-            // PPPoE Sales for this period
+            // PPPoE Sales for this period - filter by selected router
             const pppoeSales = allSales.filter(s => {
+                // Filter by router if one is selected
+                if (selectedRouter?.id && s.routerId !== selectedRouter.id) return false;
                 const saleDate = new Date(s.date);
                 return saleDate >= periodStart && saleDate <= periodEnd;
             }).reduce((sum, s) => sum + (s.finalAmount || 0), 0);
 
-            // DHCP Portal Sales for this period
+            // DHCP Portal Sales for this period - filter by selected router
             const dhcpSales = clientInvoices
                 .filter(inv => {
+                    // Filter by router if one is selected
+                    if (selectedRouter?.id && inv.routerId !== selectedRouter.id) return false;
                     if (inv.status !== 'PAID') return false;
                     const paidDate = inv.paidAt || inv.updatedAt || inv.createdAt;
                     if (!paidDate) return false;
@@ -146,13 +150,13 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
                 })
                 .reduce((sum, inv) => sum + (inv.totalAmount || inv.amount || 0), 0);
 
-            // PisoWiFi Income for this period
+            // PisoWiFi Income for this period (stays global - not router-specific)
             const pwiIncome = pisowifiRecords.filter(r => {
                 const recordDate = new Date(r.createdAt);
                 return recordDate >= periodStart && recordDate <= periodEnd;
             }).reduce((sum, r) => sum + (r.netTotal || 0), 0);
 
-            // Expenses for this period
+            // Expenses for this period - already filtered by router via hook
             const periodExpenses = expenses.filter(e => {
                 const expenseDate = new Date(e.date);
                 return expenseDate >= periodStart && expenseDate <= periodEnd;
@@ -175,7 +179,7 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
         }
 
         return periods;
-    }, [timeFilter, allSales, clientInvoices, pisowifiRecords, expenses]);
+    }, [timeFilter, allSales, clientInvoices, pisowifiRecords, expenses, selectedRouter?.id]);
 
     return (
         <div className="space-y-6">
