@@ -10,7 +10,7 @@ import { CurrencyDollarIcon, PlusIcon, TrashIcon, EditIcon, ExclamationTriangleI
 import { dbApi } from '../services/databaseService.ts';
 import { PisoWifiIncomeManager } from './PisoWifiIncomeManager.tsx';
 
-type AccountingTab = 'overview' | 'expenses' | 'pisowifi' | 'sales';
+type AccountingTab = 'overview' | 'expenses' | 'pisowifi' | 'sales' | 'all-routers-summary';
 
 interface AccountingProps {
     selectedRouter: RouterConfigWithId | null;
@@ -22,8 +22,8 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
     const [activeTab, setActiveTab] = useState<AccountingTab>('overview');
     const [timeFilter, setTimeFilter] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
     
-    // Fetch data
-    const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData();
+    // Fetch data - expenses filtered by router, PisoWiFi stays global
+    const { expenses, addExpense, updateExpense, deleteExpense, isLoading: isLoadingExpenses } = useExpensesData(selectedRouter?.id);
     const { records: pisowifiRecords, addRecord: addPisowifiRecord, updateRecord: updatePisowifiRecord, deleteRecord: deletePisowifiRecord, isLoading: isLoadingPisowifi } = usePisowifiIncomeData();
     const { resellers: pisowifiResellers, addReseller: addPisowifiReseller, updateReseller: updatePisowifiReseller, deleteReseller: deletePisowifiReseller } = usePisowifiResellersData();
     const { sales, deleteSale, isLoading: isLoadingSales } = useSalesData(selectedRouter?.id || null);
@@ -191,6 +191,7 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
                     <TabButton label="Expenses" icon={<ExclamationTriangleIcon className="w-5 h-5" />} isActive={activeTab === 'expenses'} onClick={() => setActiveTab('expenses')} />
                     <TabButton label="PisoWiFi Income" icon={<CurrencyDollarIcon className="w-5 h-5" />} isActive={activeTab === 'pisowifi'} onClick={() => setActiveTab('pisowifi')} />
                     <TabButton label="Sales Revenue" icon={<CurrencyDollarIcon className="w-5 h-5" />} isActive={activeTab === 'sales'} onClick={() => setActiveTab('sales')} />
+                    <TabButton label="All Routers Summary" icon={<CurrencyDollarIcon className="w-5 h-5" />} isActive={activeTab === 'all-routers-summary'} onClick={() => setActiveTab('all-routers-summary')} />
                 </nav>
             </div>
 
@@ -234,6 +235,15 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
                     sales={sales}
                     onDelete={deleteSale}
                     isLoading={isLoadingSales}
+                    formatCurrency={formatCurrency}
+                />
+            )}
+            {activeTab === 'all-routers-summary' && (
+                <AllRoutersSummary 
+                    allSales={allSales}
+                    allExpenses={expenses}
+                    allPisowifiRecords={pisowifiRecords}
+                    clientInvoices={clientInvoices}
                     formatCurrency={formatCurrency}
                 />
             )}
@@ -660,6 +670,154 @@ const SalesRevenueView: React.FC<{
                         )}
                     </tbody>
                 </table>
+            </div>
+        </div>
+    );
+};
+
+// All Routers Summary Component
+const StatCard: React.FC<{ title: string; value: string; icon: React.ReactNode }> = ({ title, value, icon }) => (
+    <div className="bg-white dark:bg-slate-800 p-4 rounded-lg flex items-center gap-4 border border-slate-200 dark:border-slate-700">
+        <div className="p-3 bg-slate-100 dark:bg-slate-700/50 rounded-lg">{icon}</div>
+        <div>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{title}</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{value}</p>
+        </div>
+    </div>
+);
+
+const AllRoutersSummary: React.FC<{
+    allSales: SaleRecord[];
+    allExpenses: ExpenseRecord[];
+    allPisowifiRecords: any[];
+    clientInvoices: any[];
+    formatCurrency: (amount: number) => string;
+}> = ({ allSales, allExpenses, allPisowifiRecords, clientInvoices, formatCurrency }) => {
+    // Calculate per-router breakdown (sales only, expenses are global)
+    const routerBreakdown = useMemo(() => {
+        const breakdown = new Map<string, {
+            routerName: string;
+            pppoeSales: number;
+            dhcpSales: number;
+            totalIncome: number;
+            transactionCount: number;
+        }>();
+
+        // Group PPPoE sales by router
+        allSales.forEach(sale => {
+            const routerId = sale.routerId || 'unknown';
+            const routerName = sale.routerName || 'Unknown Router';
+            if (!breakdown.has(routerId)) {
+                breakdown.set(routerId, {
+                    routerName,
+                    pppoeSales: 0,
+                    dhcpSales: 0,
+                    totalIncome: 0,
+                    transactionCount: 0
+                });
+            }
+            const data = breakdown.get(routerId)!;
+            data.pppoeSales += sale.finalAmount || 0;
+            data.transactionCount++;
+        });
+
+        // Group DHCP invoices by router
+        clientInvoices.filter(inv => inv.status === 'PAID').forEach(inv => {
+            const routerId = inv.routerId || 'unknown';
+            if (!breakdown.has(routerId)) {
+                breakdown.set(routerId, {
+                    routerName: inv.routerName || 'Unknown Router',
+                    pppoeSales: 0, dhcpSales: 0, totalIncome: 0, transactionCount: 0
+                });
+            }
+            breakdown.get(routerId)!.dhcpSales += inv.totalAmount || inv.amount || 0;
+        });
+
+        // Calculate totals for each router
+        breakdown.forEach(data => {
+            data.totalIncome = data.pppoeSales + data.dhcpSales;
+        });
+
+        return Array.from(breakdown.values()).sort((a, b) => b.totalIncome - a.totalIncome);
+    }, [allSales, clientInvoices]);
+
+    // Grand totals
+    const grandTotals = useMemo(() => {
+        const totalPPPoE = allSales.reduce((sum, s) => sum + (s.finalAmount || 0), 0);
+        const totalDHCP = clientInvoices.filter(inv => inv.status === 'PAID')
+            .reduce((sum, inv) => sum + (inv.totalAmount || inv.amount || 0), 0);
+        const totalPisoWiFi = allPisowifiRecords.reduce((sum, r) => sum + (r.netTotal || 0), 0);
+        const totalIncome = totalPPPoE + totalDHCP + totalPisoWiFi;
+        const totalExpenses = allExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+        
+        return {
+            totalPPPoE,
+            totalDHCP,
+            totalPisoWiFi,
+            totalIncome,
+            totalExpenses,
+            netProfit: totalIncome - totalExpenses,
+            totalTransactions: allSales.length + clientInvoices.filter(inv => inv.status === 'PAID').length
+        };
+    }, [allSales, clientInvoices, allExpenses, allPisowifiRecords]);
+
+    return (
+        <div className="space-y-6">
+            {/* Grand Total Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard title="Total PPPoE Sales" value={formatCurrency(grandTotals.totalPPPoE)} icon={<CurrencyDollarIcon className="w-6 h-6 text-sky-500" />} />
+                <StatCard title="Total DHCP Revenue" value={formatCurrency(grandTotals.totalDHCP)} icon={<CurrencyDollarIcon className="w-6 h-6 text-emerald-500" />} />
+                <StatCard title="Total PisoWiFi Income" value={formatCurrency(grandTotals.totalPisoWiFi)} icon={<CurrencyDollarIcon className="w-6 h-6 text-yellow-500" />} />
+                <StatCard title="Total Expenses" value={formatCurrency(grandTotals.totalExpenses)} icon={<ExclamationTriangleIcon className="w-6 h-6 text-red-500" />} />
+            </div>
+
+            {/* Net Profit Card */}
+            <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg p-6 text-white">
+                <div className="flex justify-between items-center">
+                    <div>
+                        <p className="text-sm opacity-90">Net Profit (All Routers)</p>
+                        <p className="text-3xl font-bold">{formatCurrency(grandTotals.netProfit)}</p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-sm opacity-90">Total Transactions</p>
+                        <p className="text-2xl font-bold">{grandTotals.totalTransactions}</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Per-Router Breakdown Table */}
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+                    <h3 className="text-lg font-bold">Revenue by Router</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-900/50">
+                            <tr>
+                                <th className="px-4 py-3">Router</th>
+                                <th className="px-4 py-3 text-right">PPPoE Sales</th>
+                                <th className="px-4 py-3 text-right">DHCP Revenue</th>
+                                <th className="px-4 py-3 text-right">Total Income</th>
+                                <th className="px-4 py-3 text-center">Transactions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {routerBreakdown.length === 0 ? (
+                                <tr><td colSpan={5} className="text-center py-8 text-slate-500">No sales data available</td></tr>
+                            ) : (
+                                routerBreakdown.map((router, idx) => (
+                                    <tr key={idx} className="border-b hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                        <td className="px-4 py-3 font-medium">{router.routerName}</td>
+                                        <td className="px-4 py-3 text-right font-mono">{formatCurrency(router.pppoeSales)}</td>
+                                        <td className="px-4 py-3 text-right font-mono">{formatCurrency(router.dhcpSales)}</td>
+                                        <td className="px-4 py-3 text-right font-mono font-bold text-green-600">{formatCurrency(router.totalIncome)}</td>
+                                        <td className="px-4 py-3 text-center">{router.transactionCount}</td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );

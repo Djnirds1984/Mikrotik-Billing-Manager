@@ -302,7 +302,8 @@ async function initDb() {
                 date TEXT NOT NULL,
                 category TEXT,
                 description TEXT,
-                amount REAL NOT NULL
+                amount REAL NOT NULL,
+                routerId TEXT
             );
             CREATE TABLE IF NOT EXISTS pisowifi_income (
                 id TEXT PRIMARY KEY,

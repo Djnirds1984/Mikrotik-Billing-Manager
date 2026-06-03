@@ -347,6 +347,7 @@ export interface ExpenseRecord {
     category: string;
     description: string;
     amount: number;
+    routerId?: string; // Optional: associate expense with specific router
 }
 
 export interface PisowifiIncomeRecord {

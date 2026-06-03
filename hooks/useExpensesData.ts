@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { ExpenseRecord } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
 
-export const useExpensesData = (autoLoad: boolean = true) => {
+export const useExpensesData = (routerId: string | null = null, autoLoad: boolean = true) => {
     const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -11,7 +11,8 @@ export const useExpensesData = (autoLoad: boolean = true) => {
         setIsLoading(true);
         setError(null);
         try {
-            const data = await dbApi.get<ExpenseRecord[]>('/expenses');
+            const url = routerId ? `/expenses?routerId=${routerId}` : '/expenses';
+            const data = await dbApi.get<ExpenseRecord[]>(url);
             data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
             setExpenses(data);
         } catch (err) {
@@ -20,7 +21,7 @@ export const useExpensesData = (autoLoad: boolean = true) => {
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [routerId]);
 
     useEffect(() => {
         if (!autoLoad) {
