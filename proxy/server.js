@@ -3483,6 +3483,53 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
+    // --- Fetch All PPPoE Secrets from All Routers (for Repair Ticket creation) ---
+    app.get('/api/pppoe-clients', protect, async (req, res) => {
+        try {
+            const routers = await db.all('SELECT id, name FROM routers');
+            const allClients = [];
+            
+            for (const router of routers) {
+                try {
+                    const secretsResp = await axios.get(`http://localhost:3002/${router.id}/ppp/secret/print`, { timeout: 15000 });
+                    const secrets = Array.isArray(secretsResp.data) ? secretsResp.data : [];
+                    
+                    for (const secret of secrets) {
+                        if (secret.name) {
+                            let planName = '';
+                            let dueDate = '';
+                            try {
+                                const commentData = JSON.parse(String(secret.comment || '{}'));
+                                planName = commentData.planName || commentData.plan || secret.profile || '';
+                                dueDate = commentData.due || '';
+                            } catch (_) {
+                                planName = secret.profile || '';
+                            }
+                            
+                            allClients.push({
+                                id: `pppoe_${router.id}_${secret.name}`,
+                                username: secret.name,
+                                pppoe_username: secret.name,
+                                router_id: router.id,
+                                router_name: router.name,
+                                profile: secret.profile || '',
+                                plan_name: planName,
+                                due_date: dueDate,
+                                client_type: 'pppoe'
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.error(`[PPPoE Clients] Failed to fetch from router ${router.name}:`, err.message);
+                }
+            }
+            
+            res.json(allClients);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     // --- License ---
     const licenseRouter = express.Router();
     licenseRouter.use(protect);

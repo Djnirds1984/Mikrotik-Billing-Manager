@@ -24,7 +24,11 @@ interface ClientUser {
     username: string;
     pppoe_username: string;
     router_id: string;
+    router_name?: string;
     account_number?: string;
+    profile?: string;
+    plan_name?: string;
+    client_type?: string;
 }
 
 const CATEGORIES = [
@@ -148,7 +152,9 @@ const CreateTicketModal: React.FC<{
                                 />
                                 <datalist id="client-list">
                                     {clients.map(c => (
-                                        <option key={c.id} value={c.pppoe_username || c.username}>{c.pppoe_username || c.username} ({c.account_number || c.username})</option>
+                                        <option key={c.id} value={c.pppoe_username || c.username}>
+                                            {c.pppoe_username || c.username} - {c.router_name || 'Unknown'} {c.plan_name ? `(${c.plan_name})` : ''}
+                                        </option>
                                     ))}
                                 </datalist>
                             </div>
@@ -318,12 +324,15 @@ export const RepairTickets: React.FC = () => {
 
     const fetchClients = useCallback(async () => {
         try {
-            const res = await fetch('/api/client-portal/users', { headers: authHeaders() });
+            // Fetch PPPoE clients from all routers
+            const res = await fetch('/api/pppoe-clients', { headers: authHeaders() });
             if (res.ok) {
                 const data = await res.json();
                 setClients(data);
             }
-        } catch {}
+        } catch (err) {
+            console.error('Failed to fetch PPPoE clients:', err);
+        }
     }, []);
 
     useEffect(() => { fetchTickets(); }, [fetchTickets]);
