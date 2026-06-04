@@ -10,7 +10,9 @@ import { AIFixer } from './AIFixer.tsx';
 
 // --- CONSTANTS ---
 const MAX_HISTORY_POINTS = 60;
-const POLL_INTERVAL_MS = 1000;
+const POLL_INTERVAL_MS = 2000; // Increased from 1s to 2s for more stable readings
+const EMA_SMOOTHING_FACTOR = 0.3; // 30% weight to new data, 70% to historical
+const MAX_REALISTIC_SPIKE_FACTOR = 5; // Filter readings that spike >5x from average
 
 // --- UTILITY ---
 const formatBits = (bits: number): string => {
@@ -167,6 +169,10 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
     // We use refs to store the previous byte counts to calculate rates without triggering re-renders
     const lastBytesRef = useRef<Record<string, { rx: number; tx: number; time: number }>>({});
     const isInitialLoad = useRef(true);
+    // EMA smoothed rates for stability
+    const smoothedRatesRef = useRef<Record<string, { rx: number; tx: number }>>({});
+    // Rate history for outlier detection
+    const rateHistoryRef = useRef<Record<string, { rx: number[]; tx: number[] }>>({});
 
     // --- DATA FETCHING ---
 
@@ -199,7 +205,6 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
 
             // Process Interfaces
             if (Array.isArray(interfacesData)) {
-                const now = Date.now();
                 const interfaceNames = interfacesData.map((i: any) => i.name);
                 
                 // Store full details for status checking (disabled/running state)
@@ -215,6 +220,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
 
                 // Calculate Rates
                 const newRates: Record<string, {rx: number, tx: number}> = {};
+                const now = Date.now();
 
                 interfacesData.forEach((iface: any) => {
                     const name = iface.name;
@@ -227,7 +233,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
 
                     if (lastData) {
                         const timeDiff = (now - lastData.time) / 1000; // Seconds
-                        if (timeDiff > 0) {
+                        
+                        // Only calculate if time difference is reasonable (between 0.5s and 10s)
+                        if (timeDiff >= 0.5 && timeDiff <= 10) {
                             let diffRx = bytesRx - lastData.rx;
                             let diffTx = bytesTx - lastData.tx;
 
@@ -235,15 +243,51 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                             if (diffRx < 0) diffRx = bytesRx; 
                             if (diffTx < 0) diffTx = bytesTx;
 
-                            // Calculate Bits per Second
+                            // Calculate raw Bits per Second
                             rxBps = (diffRx * 8) / timeDiff;
                             txBps = (diffTx * 8) / timeDiff;
+                            
+                            // Outlier detection: check against recent history
+                            const history = rateHistoryRef.current[name] || { rx: [], tx: [] };
+                            
+                            if (history.rx.length > 3) {
+                                // Calculate average from recent samples
+                                const avgRx = history.rx.slice(-10).reduce((a, b) => a + b, 0) / Math.min(history.rx.length, 10);
+                                const avgTx = history.tx.slice(-10).reduce((a, b) => a + b, 0) / Math.min(history.tx.length, 10);
+                                
+                                // Filter extreme spikes (>5x average)
+                                if (avgRx > 0 && rxBps > avgRx * MAX_REALISTIC_SPIKE_FACTOR) {
+                                    rxBps = avgRx * MAX_REALISTIC_SPIKE_FACTOR;
+                                }
+                                if (avgTx > 0 && txBps > avgTx * MAX_REALISTIC_SPIKE_FACTOR) {
+                                    txBps = avgTx * MAX_REALISTIC_SPIKE_FACTOR;
+                                }
+                            }
+                            
+                            // Update history (keep last 20 samples)
+                            history.rx.push(rxBps);
+                            history.tx.push(txBps);
+                            if (history.rx.length > 20) history.rx.shift();
+                            if (history.tx.length > 20) history.tx.shift();
+                            rateHistoryRef.current[name] = history;
+                            
+                            // Apply Exponential Moving Average smoothing
+                            const prevSmoothed = smoothedRatesRef.current[name] || { rx: 0, tx: 0 };
+                            rxBps = prevSmoothed.rx + EMA_SMOOTHING_FACTOR * (rxBps - prevSmoothed.rx);
+                            txBps = prevSmoothed.tx + EMA_SMOOTHING_FACTOR * (txBps - prevSmoothed.tx);
+                            
+                            // Store smoothed rates
+                            smoothedRatesRef.current[name] = { rx: rxBps, tx: txBps };
+                        } else if (timeDiff > 10) {
+                            // Too much time gap, reset smoothing
+                            smoothedRatesRef.current[name] = { rx: 0, tx: 0 };
+                            rateHistoryRef.current[name] = { rx: [], tx: [] };
                         }
                     }
 
                     // Update Ref
                     lastBytesRef.current[name] = { rx: bytesRx, tx: bytesTx, time: now };
-                    newRates[name] = { rx: rxBps, tx: txBps };
+                    newRates[name] = { rx: Math.max(0, rxBps), tx: Math.max(0, txBps) };
                 });
 
                 setCurrentRates(newRates);
@@ -293,6 +337,8 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         setCurrentRates({});
         lastBytesRef.current = {};
         isInitialLoad.current = true;
+        smoothedRatesRef.current = {};
+        rateHistoryRef.current = {};
         setError(null);
 
         // Load persisted charts for this router
