@@ -3430,6 +3430,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             return await handleBillingCommand(senderId);
         }
 
+        // Command: REPAIR, TICKET, HELP ME, ISSUE, PROBLEM
+        if (['REPAIR', 'TICKET', 'HELP ME', 'ISSUE', 'PROBLEM', 'NO INTERNET'].some(cmd => upperMessage.startsWith(cmd))) {
+            return await handleRepairTicketCommand(senderId, userMessage);
+        }
+
         // Command: HELP
         if (upperMessage === 'HELP' || upperMessage === 'MENU' || upperMessage === 'COMMANDS') {
             return getHelpMessage();
@@ -3539,10 +3544,93 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     }
 
     // ========================================
+    // Handler: REPAIR TICKET Command
+    // ========================================
+    async function handleRepairTicketCommand(senderId, userMessage) {
+        try {
+            console.log(`[Facebook Bot] Repair ticket request from Facebook user: ${senderId}`);
+
+            // Find customer by Facebook PSID
+            const customer = await db.get(
+                'SELECT * FROM customers WHERE facebook_psid = ?',
+                [senderId]
+            );
+
+            if (!customer) {
+                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo create a repair ticket, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can report internet issues via Facebook Messenger.`;
+            }
+
+            // Customer found - parse the issue description
+            const upperMessage = userMessage.toUpperCase();
+            let category = 'other';
+            let description = '';
+
+            // Extract category and description from message
+            if (upperMessage.includes('NO INTERNET') || upperMessage.includes('NOT CONNECTED') || upperMessage.includes('OFFLINE')) {
+                category = 'no_internet';
+                description = userMessage;
+            } else if (upperMessage.includes('SLOW') || upperMessage.includes('LAG') || upperMessage.includes('BUFFERING')) {
+                category = 'slow_connection';
+                description = userMessage;
+            } else if (upperMessage.includes('INTERMITTENT') || upperMessage.includes('CUTS') || upperMessage.includes('KEEPS DISCONNECTING')) {
+                category = 'intermittent';
+                description = userMessage;
+            } else if (upperMessage.includes('LINE') || upperMessage.includes('CABLE') || upperMessage.includes('WIRE')) {
+                category = 'line_issue';
+                description = userMessage;
+            } else {
+                // Check if user provided a description after the command keyword
+                const parts = userMessage.split(/\s+/);
+                // Remove command words (REPAIR, TICKET, etc.)
+                const commandWords = ['REPAIR', 'TICKET', 'HELP', 'ME', 'ISSUE', 'PROBLEM', 'NO', 'INTERNET'];
+                const descriptionParts = parts.filter(word => !commandWords.includes(word.toUpperCase()));
+                
+                if (descriptionParts.length > 0) {
+                    description = descriptionParts.join(' ');
+                    category = 'other';
+                } else {
+                    // No description provided - ask for it
+                    return `🔧 Repair Ticket - Describe Your Issue\n━━━━━━━━━━━━━━━━━━\n\n👤 Account: ${customer.accountNumber}\n📛 Name: ${customer.fullName || 'N/A'}\n\n📝 Please describe your internet problem in detail.\n\nExamples:\n• "My internet is not working since this morning"\n• "Connection is very slow, can't browse"\n• "Internet keeps disconnecting every few minutes"\n• "I think there's a problem with the line/cable"\n\n💡 Common Issues:\n• No Internet - Complete loss of connection\n• Slow Connection - Internet is working but very slow\n• Intermittent - Connection keeps dropping\n• Line Issue - Physical cable/line problem\n\n📞 For urgent issues, please call our support hotline.`;
+                }
+            }
+
+            // Create repair ticket
+            const ticketId = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const now = new Date().toISOString();
+            
+            await db.run(
+                'INSERT INTO repair_tickets (id, client_user_id, username, client_type, category, description, priority, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [ticketId, null, customer.username || customer.accountNumber, 'pppoe', category, description, 'normal', 'client', now, now]
+            );
+
+            console.log(`[Facebook Bot] Repair ticket created: ${ticketId} for account ${customer.accountNumber}`);
+
+            // Category display names
+            const categoryNames = {
+                'no_internet': '🔴 No Internet',
+                'slow_connection': '🟡 Slow Connection',
+                'intermittent': '🟠 Intermittent Connection',
+                'line_issue': '🔵 Line/Cable Issue',
+                'other': '⚪ Other Issue'
+            };
+
+            const categoryName = categoryNames[category] || '⚪ Other Issue';
+
+            // Extract ticket number (short version)
+            const ticketNumber = ticketId.split('_')[1];
+
+            return `✅ Repair Ticket Created Successfully!\n━━━━━━━━━━━━━━━━━━\n\n🎫 Ticket Details:\n• Ticket #: ${ticketNumber}\n• Account: ${customer.accountNumber}\n• Name: ${customer.fullName || 'N/A'}\n• Category: ${categoryName}\n• Status: 🟢 Open\n• Priority: Normal\n\n📝 Issue Description:\n${description}\n\n━━━━━━━━━━━━━━━━━━\n\n⏱️ What's Next?\n• Our technical team will review your ticket\n• You'll receive updates via this messenger\n• Typical response time: 1-4 hours\n\n📞 For urgent emergencies, please call our support hotline.\n\n💡 You can check your ticket status anytime by sending: STATUS`;
+        } catch (err) {
+            console.error('[Facebook Bot] Repair ticket creation error:', err.message);
+            return "❌ Sorry, an error occurred while creating your repair ticket. Please try again later or contact our support team directly.";
+        }
+    }
+
+    // ========================================
     // Helper: Help Message
     // ========================================
     function getHelpMessage() {
-        return `🤖 CityConnect Billing Bot - Help Menu\n━━━━━━━━━━━━━━━━━━\n\n📝 Available Commands:\n\n1️⃣ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2️⃣ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3️⃣ HELP / MENU\n   Show this help message\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Quick Start:\nSend: REGISTER <your_account_number>\n\n📞 Need assistance? Contact our support team or visit our office.\n\n🌐 Powered by CityConnect Billing Manager`;
+        return `🤖 CityConnect Billing Bot - Help Menu\n━━━━━━━━━━━━━━━━━━\n\n📝 Available Commands:\n\n1️⃣ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2️⃣ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3️⃣ REPAIR / TICKET\n   Report internet issues & create support ticket\n   Example: REPAIR My internet is not working\n\n4️⃣ HELP / MENU\n   Show this help message\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Quick Start:\nSend: REGISTER <your_account_number>\n\n🔧 Common Repair Commands:\n• REPAIR - Report an issue\n• NO INTERNET - Complete loss of connection\n• SLOW - Internet is very slow\n• INTERMITTENT - Connection keeps dropping\n\n📞 Need assistance? Contact our support team or visit our office.\n\n🌐 Powered by CityConnect Billing Manager`;
     }
 
     // Helper function to send messages via Facebook Graph API
