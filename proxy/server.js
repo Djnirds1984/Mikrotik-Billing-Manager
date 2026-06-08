@@ -552,6 +552,9 @@ async function initDb() {
             if (!salesColNames.includes('payment_method')) {
                 await db.exec("ALTER TABLE sales_records ADD COLUMN payment_method TEXT DEFAULT 'manual'");
             }
+            if (!salesColNames.includes('processedBy')) {
+                await db.exec("ALTER TABLE sales_records ADD COLUMN processedBy TEXT DEFAULT 'admin'");
+            }
         } catch (_) {}
         try {
             const pwiCols = await db.all("PRAGMA table_info(pisowifi_income)");
