@@ -3646,10 +3646,41 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             // Get customer's plan details
             const planName = customer.planName || 'Subscription';
-            const planPrice = customer.planPrice || 0;
+            let planPrice = customer.planPrice || 0;
+
+            // If planPrice is not in customer record, try to get it from billing_plans
+            if (!planPrice || planPrice <= 0) {
+                try {
+                    // Try to find plan by name
+                    if (customer.planName) {
+                        const plan = await db.get(
+                            'SELECT price FROM billing_plans WHERE name = ? LIMIT 1',
+                            [customer.planName]
+                        );
+                        if (plan && plan.price) {
+                            planPrice = plan.price;
+                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans: ₱${planPrice}`);
+                        }
+                    }
+                    
+                    // Fallback: try to get from planId if available
+                    if (!planPrice && customer.planId) {
+                        const plan = await db.get(
+                            'SELECT price FROM billing_plans WHERE id = ? LIMIT 1',
+                            [customer.planId]
+                        );
+                        if (plan && plan.price) {
+                            planPrice = plan.price;
+                            console.log(`[Facebook Bot] Retrieved plan price by ID: ₱${planPrice}`);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[Facebook Bot] Failed to lookup plan price:', err.message);
+                }
+            }
 
             if (!planPrice || planPrice <= 0) {
-                return `⚠️ Unable to determine your plan price.\n\nPlease contact our support for assistance.\n\n📞 Support Hotline: [Your number here]`;
+                return `⚠️ Unable to determine your plan price.\n\nYour account may not have a plan assigned yet.\n\n📞 Please contact our support for assistance.`;
             }
 
             // Check PayMongo availability
@@ -3722,10 +3753,41 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             // Get customer's plan details
             const planName = customer.planName || 'Subscription';
-            const planPrice = customer.planPrice || 0;
+            let planPrice = customer.planPrice || 0;
+
+            // If planPrice is not in customer record, try to get it from billing_plans
+            if (!planPrice || planPrice <= 0) {
+                try {
+                    // Try to find plan by name
+                    if (customer.planName) {
+                        const plan = await db.get(
+                            'SELECT price FROM billing_plans WHERE name = ? LIMIT 1',
+                            [customer.planName]
+                        );
+                        if (plan && plan.price) {
+                            planPrice = plan.price;
+                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans: ₱${planPrice}`);
+                        }
+                    }
+                    
+                    // Fallback: try to get from planId if available
+                    if (!planPrice && customer.planId) {
+                        const plan = await db.get(
+                            'SELECT price FROM billing_plans WHERE id = ? LIMIT 1',
+                            [customer.planId]
+                        );
+                        if (plan && plan.price) {
+                            planPrice = plan.price;
+                            console.log(`[Facebook Bot] Retrieved plan price by ID: ₱${planPrice}`);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[Facebook Bot] Failed to lookup plan price:', err.message);
+                }
+            }
 
             if (!planPrice || planPrice <= 0) {
-                return `⚠️ Unable to determine your plan price.\n\nPlease contact our support for assistance.`;
+                return `⚠️ Unable to determine your plan price.\n\nYour account may not have a plan assigned yet.\n\n📞 Please contact our support for assistance.`;
             }
 
             // Calculate amount with convenience fee if enabled
@@ -3844,10 +3906,41 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             // Get plan details
             const planName = customer.planName || 'Subscription';
-            const planPrice = customer.planPrice || 0;
+            let planPrice = customer.planPrice || 0;
+            
+            // If planPrice is not in customer record, try to get it from billing_plans
+            if (!planPrice || planPrice <= 0) {
+                try {
+                    // Try to find plan by name
+                    if (customer.planName) {
+                        const plan = await db.get(
+                            'SELECT price FROM billing_plans WHERE name = ? LIMIT 1',
+                            [customer.planName]
+                        );
+                        if (plan && plan.price) {
+                            planPrice = plan.price;
+                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans: ₱${planPrice}`);
+                        }
+                    }
+                    
+                    // Fallback: try to get from planId if available
+                    if (!planPrice && customer.planId) {
+                        const plan = await db.get(
+                            'SELECT price FROM billing_plans WHERE id = ? LIMIT 1',
+                            [customer.planId]
+                        );
+                        if (plan && plan.price) {
+                            planPrice = plan.price;
+                            console.log(`[Facebook Bot] Retrieved plan price by ID: ₱${planPrice}`);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[Facebook Bot] Failed to lookup plan price:', err.message);
+                }
+            }
 
             if (!planPrice || planPrice <= 0) {
-                return `⚠️ Unable to determine your plan price.\n\nPlease contact our support for assistance.`;
+                return `⚠️ Unable to determine your plan price.\n\nYour account may not have a plan assigned yet.\n\n📞 Please contact our support for assistance.`;
             }
 
             // Get company GCash settings
