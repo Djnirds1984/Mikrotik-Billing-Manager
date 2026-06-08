@@ -542,6 +542,7 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
 
     const [isTesting, setIsTesting] = useState(false);
     const [testMessage, setTestMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [isValidating, setIsValidating] = useState(false);
 
     const handleGenerateToken = () => {
         const randomToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -586,6 +587,29 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
             setTimeout(() => setTestMessage(null), 3000);
         } catch (err) {
             setTestMessage({ type: 'error', text: 'Failed to copy URL' });
+        }
+    };
+
+    const handleValidateConfig = async () => {
+        setIsValidating(true);
+        setTestMessage(null);
+        try {
+            const res = await fetch('/api/facebook-validate', {
+                headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            
+            if (data.valid) {
+                setTestMessage({ type: 'success', text: '✅ Configuration looks good! All required fields are set.' });
+            } else {
+                const issuesText = data.issues.join('\n');
+                const warningsText = data.warnings.length > 0 ? '\n\nWarnings:\n' + data.warnings.join('\n') : '';
+                setTestMessage({ type: 'error', text: `❌ Issues found:\n${issuesText}${warningsText}` });
+            }
+        } catch (err) {
+            setTestMessage({ type: 'error', text: `Validation failed: ${(err as Error).message}` });
+        } finally {
+            setIsValidating(false);
         }
     };
 
@@ -660,17 +684,26 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
 
                 {/* Test Connection Button */}
                 <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                    <button 
-                        onClick={handleTestConnection} 
-                        disabled={isTesting || !facebook.pageAccessToken || !facebook.pageId} 
-                        className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isTesting ? 'Sending...' : 'Send Test Message'}
-                    </button>
+                    <div className="flex gap-3">
+                        <button 
+                            onClick={handleValidateConfig} 
+                            disabled={isValidating}
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isValidating ? 'Validating...' : 'Validate Configuration'}
+                        </button>
+                        <button 
+                            onClick={handleTestConnection} 
+                            disabled={isTesting || !facebook.pageAccessToken || !facebook.pageId} 
+                            className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isTesting ? 'Sending...' : 'Send Test Message'}
+                        </button>
+                    </div>
                     
                     {/* Test Result Message */}
                     {testMessage && (
-                        <div className={`mt-3 p-3 rounded-md text-sm ${
+                        <div className={`mt-3 p-3 rounded-md text-sm whitespace-pre-line ${
                             testMessage.type === 'success'
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
                                 : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'

@@ -3384,7 +3384,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                 console.log(`[Facebook Webhook] Message from ${senderId}: ${message.text}`);
                                 
                                 // Echo the message back (you can customize this logic)
-                                await sendFacebookMessage(senderId, `You said: "${message.text}"`, fbSettings.pageAccessToken);
+                                try {
+                                    await sendFacebookMessage(senderId, `You said: "${message.text}"`, fbSettings.pageAccessToken);
+                                } catch (sendErr) {
+                                    console.error('[Facebook Webhook] Failed to send echo message:', sendErr.message);
+                                    // Don't crash - continue processing other messages
+                                }
                             }
                         }
                     }
@@ -3403,21 +3408,29 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // Helper function to send messages via Facebook Graph API
     async function sendFacebookMessage(recipientId, messageText, pageAccessToken) {
         try {
+            console.log('[Facebook Webhook] Sending message to:', recipientId);
+            console.log('[Facebook Webhook] Token starts with:', pageAccessToken?.substring(0, 10) + '...');
+            
             const response = await axios.post(
                 'https://graph.facebook.com/v18.0/me/messages',
                 {
                     recipient: { id: recipientId },
-                    message: { text: messageText }
+                    message: { text: messageText },
+                    messaging_type: 'RESPONSE'
                 },
                 {
                     params: { access_token: pageAccessToken },
                     timeout: 10000
                 }
             );
-            console.log(`[Facebook Webhook] Message sent to ${recipientId}`);
+            console.log('[Facebook Webhook] Message sent successfully:', response.data);
             return response.data;
         } catch (err) {
             console.error('[Facebook Webhook] Send message error:', err.message);
+            if (err.response) {
+                console.error('[Facebook Webhook] Response status:', err.response.status);
+                console.error('[Facebook Webhook] Response data:', JSON.stringify(err.response.data, null, 2));
+            }
             throw err;
         }
     }
@@ -3426,20 +3439,122 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     app.post('/api/facebook-test', protect, async (req, res) => {
         try {
             const { pageAccessToken, recipientId } = req.body;
-            if (!pageAccessToken || !recipientId) {
-                return res.status(400).json({ success: false, message: 'pageAccessToken and recipientId are required' });
+            
+            if (!pageAccessToken) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Page Access Token is required. Please enter it in the Messenger settings.' 
+                });
             }
+            
+            if (!recipientId) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Page ID is required. Please enter it in the Messenger settings.' 
+                });
+            }
+
+            // Validate token format (should start with specific patterns)
+            if (!pageAccessToken.startsWith('EAAG') && !pageAccessToken.startsWith('EAA')) {
+                console.warn('[Facebook Test] Token format looks invalid. Should start with EAAG or EAA');
+            }
+
+            console.log('[Facebook Test] Attempting to send test message...');
+            console.log('[Facebook Test] Recipient ID:', recipientId);
+            console.log('[Facebook Test] Token length:', pageAccessToken.length);
 
             await sendFacebookMessage(
                 recipientId,
-                'Test message from MikroTik Billing Manager',
+                '✅ Test message from MikroTik Billing Manager - Facebook Messenger integration is working!',
                 pageAccessToken
             );
 
-            res.json({ success: true, message: 'Test message sent successfully' });
+            res.json({ success: true, message: 'Test message sent successfully! Check your Facebook Page.' });
         } catch (err) {
             console.error('[Facebook Test] Error:', err.message);
-            res.status(500).json({ success: false, message: err.message });
+            
+            let errorMessage = err.message;
+            if (err.response?.data?.error) {
+                // Extract Facebook's detailed error message
+                const fbError = err.response.data.error;
+                errorMessage = `Facebook API Error: ${fbError.message || 'Unknown error'} (Code: ${fbError.code || 'N/A'})`;
+                
+                if (fbError.fbtrace_id) {
+                    errorMessage += `\nTrace ID: ${fbError.fbtrace_id}`;
+                }
+                
+                // Provide helpful hints based on error code
+                if (fbError.code === 190) {
+                    errorMessage += '\n\n💡 Hint: Your access token is invalid or expired. Generate a new one from Facebook Developers Console.';
+                } else if (fbError.code === 100) {
+                    errorMessage += '\n\n💡 Hint: Invalid parameters. Check that your Page ID is correct.';
+                } else if (fbError.code === 200) {
+                    errorMessage += '\n\n💡 Hint: Permission denied. Make sure your app has pages_messaging permission.';
+                }
+            }
+            
+            res.status(500).json({ 
+                success: false, 
+                message: errorMessage 
+            });
+        }
+    });
+
+    // Endpoint to validate Facebook configuration
+    app.get('/api/facebook-validate', protect, async (req, res) => {
+        try {
+            const settings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            let fbSettings = {};
+            try {
+                fbSettings = JSON.parse(settings?.facebookSettings || '{}');
+            } catch (_) {}
+
+            const issues = [];
+            const warnings = [];
+
+            // Check enabled status
+            if (!fbSettings.enabled) {
+                issues.push('Facebook Messenger is not enabled');
+            }
+
+            // Check Page ID
+            if (!fbSettings.pageId) {
+                issues.push('Page ID is missing');
+            } else if (isNaN(fbSettings.pageId)) {
+                warnings.push('Page ID should be a numeric value');
+            }
+
+            // Check Access Token
+            if (!fbSettings.pageAccessToken) {
+                issues.push('Page Access Token is missing');
+            } else if (fbSettings.pageAccessToken.length < 50) {
+                warnings.push('Access Token seems too short (may be invalid)');
+            } else if (!fbSettings.pageAccessToken.startsWith('EAAG') && !fbSettings.pageAccessToken.startsWith('EAA')) {
+                warnings.push('Access Token format looks unusual (should start with EAAG or EAA)');
+            }
+
+            // Check Verify Token
+            if (!fbSettings.verifyToken) {
+                warnings.push('Verify Token is not set (needed for webhook verification)');
+            } else if (fbSettings.verifyToken.length < 10) {
+                warnings.push('Verify Token is too short (use at least 16 characters)');
+            }
+
+            const isValid = issues.length === 0;
+            res.json({
+                valid: isValid,
+                issues,
+                warnings,
+                config: {
+                    enabled: fbSettings.enabled || false,
+                    hasPageId: !!fbSettings.pageId,
+                    hasToken: !!fbSettings.pageAccessToken,
+                    hasVerifyToken: !!fbSettings.verifyToken,
+                    tokenLength: fbSettings.pageAccessToken?.length || 0
+                }
+            });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
         }
     });
 
