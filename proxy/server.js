@@ -1962,6 +1962,148 @@ async function startServer() {
                 [dueDateStr, 'Active', payment.customer_account_number]
             );
             
+            // CRITICAL: Update MikroTik PPPoE secret with new due date (same as PayMongo)
+            try {
+                const router = await db.get('SELECT * FROM routers WHERE id = ?', [payment.customer_router_id]);
+                
+                if (router) {
+                    const axios = require('axios');
+                    const apiBase = `http://${router.host}:${router.port}`;
+                    const authHeader = `Basic ${Buffer.from(`${router.user}:${router.password}`).toString('base64')}`;
+                    
+                    // Get PPP secret
+                    const secretRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                        params: { name: payment.customer_username },
+                        headers: { Authorization: authHeader },
+                        timeout: 10000
+                    });
+                    
+                    const secrets = Array.isArray(secretRes.data) ? secretRes.data : [secretRes.data];
+                    const secret = secrets.find(s => s.name === payment.customer_username) || secrets[0];
+                    
+                    if (secret) {
+                        // Parse existing comment
+                        let comment = {};
+                        try { comment = JSON.parse(secret.comment || '{}'); } catch (e) { comment = {}; }
+                        
+                        // Calculate new due date with time
+                        const newDueDateTime = new Date();
+                        newDueDateTime.setDate(newDueDateTime.getDate() + 30);
+                        const newDueDateTimeStr = newDueDateTime.toISOString().replace('T', ' ').substring(0, 16);
+                        
+                        // Find active profile from billing plan
+                        let activeProfile = secret.profile;
+                        try {
+                            const billingPlan = await db.get(
+                                'SELECT pppoeProfile, name FROM billing_plans WHERE pppoeProfile = ? OR name = ? LIMIT 1',
+                                [secret.profile, payment.plan_name]
+                            );
+                            if (billingPlan) {
+                                activeProfile = billingPlan.pppoeProfile || activeProfile;
+                            }
+                        } catch (planErr) {
+                            console.error('[Manual Payments] Billing plan lookup error:', planErr.message);
+                        }
+                        
+                        // Update PPP secret comment with new due date
+                        const updatedComment = JSON.stringify({
+                            ...comment,
+                            planName: payment.plan_name || comment.planName,
+                            planPrice: payment.plan_price || comment.planPrice,
+                            dueDate: dueDateStr,
+                            dueDateTime: newDueDateTimeStr,
+                            planType: 'Postpaid',
+                            accountNumber: payment.customer_account_number,
+                            customerName: payment.customer_full_name || comment.customerName,
+                            fullName: payment.customer_full_name || comment.fullName
+                        });
+                        
+                        await axios.patch(`${apiBase}/rest/ppp/secret/${secret['.id']}`, {
+                            profile: activeProfile,
+                            comment: updatedComment
+                        }, {
+                            headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                            timeout: 10000
+                        });
+                        
+                        console.log('[Manual Payments] ✓ PPP secret updated with new due date:', newDueDateTimeStr);
+                        console.log('[Manual Payments] ✓ Profile set to:', activeProfile);
+                        
+                        // Kick active session for reconnection
+                        try {
+                            const activeRes = await axios.get(`${apiBase}/rest/ppp/active`, {
+                                params: { name: payment.customer_username },
+                                headers: { Authorization: authHeader },
+                                timeout: 5000
+                            });
+                            
+                            const sessions = Array.isArray(activeRes.data) ? activeRes.data : [];
+                            for (const session of sessions) {
+                                if (session['.id'] && session.name === payment.customer_username) {
+                                    await axios.post(`${apiBase}/rest/ppp/active/remove`, { '.id': session['.id'] }, {
+                                        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                        timeout: 5000
+                                    });
+                                    console.log('[Manual Payments] ✓ Kicked active session');
+                                }
+                            }
+                        } catch (kickErr) {
+                            console.error('[Manual Payments] Session kick error:', kickErr.message);
+                        }
+                        
+                        // Create scheduler to auto-expire on due date
+                        try {
+                            const schedulerName = `ppp-auto-kick-${payment.customer_username}`;
+                            
+                            // Remove existing scheduler
+                            try {
+                                const existingRes = await axios.get(`${apiBase}/rest/system/scheduler`, {
+                                    headers: { Authorization: authHeader },
+                                    timeout: 10000
+                                });
+                                const schedulers = Array.isArray(existingRes.data) ? existingRes.data : [];
+                                for (const sched of schedulers) {
+                                    if (sched.name === schedulerName && sched['.id']) {
+                                        await axios.post(`${apiBase}/rest/system/scheduler/remove`, { '.id': sched['.id'] }, {
+                                            headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                            timeout: 10000
+                                        });
+                                        console.log('[Manual Payments] ✓ Removed old scheduler');
+                                    }
+                                }
+                            } catch (delErr) {
+                                console.error('[Manual Payments] Old scheduler cleanup error:', delErr.message);
+                            }
+                            
+                            // Create new scheduler
+                            const startDate = `${newDueDateTime.getFullYear()}-${String(newDueDateTime.getMonth() + 1).padStart(2, '0')}-${String(newDueDateTime.getDate()).padStart(2, '0')}`;
+                            const startTime = `${String(newDueDateTime.getHours()).padStart(2, '0')}:${String(newDueDateTime.getMinutes()).padStart(2, '0')}:00`;
+                            
+                            const onEvent = `/log info message="PPPoE auto-kick: ${payment.customer_username}";\n:do { /ppp active remove [find name="${payment.customer_username}"] } on-error={};\n/ppp secret set [find name="${payment.customer_username}"] profile="Non-Payment"`;
+                            
+                            await axios.post(`${apiBase}/rest/system/scheduler/add`, {
+                                name: schedulerName,
+                                interval: '0s',
+                                'start-date': startDate,
+                                'start-time': startTime,
+                                'on-event': onEvent,
+                                comment: `Auto-expire ${payment.customer_username} to Non-Payment on ${dueDateStr}`
+                            }, {
+                                headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                timeout: 10000
+                            });
+                            
+                            console.log('[Manual Payments] ✓ Scheduler created: Non-Payment on', dueDateStr);
+                        } catch (schedErr) {
+                            console.error('[Manual Payments] Scheduler creation error:', schedErr.message);
+                        }
+                    }
+                }
+            } catch (mikrotikErr) {
+                console.error('[Manual Payments] MikroTik update error:', mikrotikErr.message);
+                // Don't fail the payment if MikroTik update fails
+            }
+            
             console.log(`[Manual Payments] Payment ${paymentId} approved for ${payment.customer_account_number}`);
             
             // Send Facebook notification to customer
