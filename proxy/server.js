@@ -3539,6 +3539,91 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // ========================================
+    // Plan Management - Cleanup Unused Plans
+    // ========================================
+    
+    // GET: Find unused/orphaned plans
+    app.get('/api/db/plans/unused', async (req, res) => {
+        try {
+            const { routerId } = req.query;
+            
+            // Get all plans for this router
+            const allPlans = routerId
+                ? await db.all('SELECT * FROM billing_plans WHERE routerId = ?', [routerId])
+                : await db.all('SELECT * FROM billing_plans');
+            
+            // Get all unique plan names used by customers
+            const usedPlans = routerId
+                ? await db.all('SELECT DISTINCT planName FROM customers WHERE routerId = ? AND planName IS NOT NULL', [routerId])
+                : await db.all('SELECT DISTINCT planName FROM customers WHERE planName IS NOT NULL');
+            
+            const usedPlanNames = new Set(usedPlans.map(p => p.planName));
+            
+            // Find plans that are NOT used by any customer
+            const unusedPlans = allPlans.filter(plan => !usedPlanNames.has(plan.name));
+            
+            res.json({
+                total: allPlans.length,
+                used: usedPlans.length,
+                unused: unusedPlans.length,
+                unusedPlans: unusedPlans
+            });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+    
+    // POST: Delete unused plans
+    app.post('/api/db/plans/cleanup', async (req, res) => {
+        try {
+            const { routerId, deleteAll } = req.body;
+            
+            if (deleteAll) {
+                // Delete ALL unused plans
+                const allPlans = routerId
+                    ? await db.all('SELECT * FROM billing_plans WHERE routerId = ?', [routerId])
+                    : await db.all('SELECT * FROM billing_plans');
+                
+                const usedPlans = routerId
+                    ? await db.all('SELECT DISTINCT planName FROM customers WHERE routerId = ? AND planName IS NOT NULL', [routerId])
+                    : await db.all('SELECT DISTINCT planName FROM customers WHERE planName IS NOT NULL');
+                
+                const usedPlanNames = new Set(usedPlans.map(p => p.planName));
+                const unusedPlans = allPlans.filter(plan => !usedPlanNames.has(plan.name));
+                
+                let deletedCount = 0;
+                for (const plan of unusedPlans) {
+                    await db.run('DELETE FROM billing_plans WHERE id = ?', [plan.id]);
+                    deletedCount++;
+                }
+                
+                res.json({ message: `Deleted ${deletedCount} unused plans`, deletedCount });
+            } else {
+                // Delete specific plan
+                const { planId } = req.body;
+                if (!planId) {
+                    return res.status(400).json({ message: 'planId is required' });
+                }
+                
+                // Check if plan is used by any customer
+                const usage = await db.get('SELECT COUNT(*) as count FROM customers WHERE planName = (SELECT name FROM billing_plans WHERE id = ?)', [planId]);
+                
+                if (usage.count > 0) {
+                    return res.status(400).json({ 
+                        message: `Cannot delete plan: ${usage.count} customer(s) are using this plan`,
+                        usage: usage.count 
+                    });
+                }
+                
+                await db.run('DELETE FROM billing_plans WHERE id = ?', [planId]);
+                res.json({ message: 'Plan deleted successfully' });
+            }
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // ========================================
     // Facebook Messenger Webhook Routes
     // ========================================
 
@@ -3917,10 +4002,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         const baseUrl = `http://${router.host}:${router.port}`;
                         const auth = { username: router.user, password: router.password };
                         
-                        // Get PPPoE secret
-                        const secretResponse = await axios.get(`${baseUrl}/ppp/secret`, {
+                        // Get PPPoE secret - correct REST API path
+                        const secretResponse = await axios.get(`${baseUrl}/rest/ppp/secret`, {
                             auth,
-                            params: { name: customer.username },
+                            params: { '.id': '*all', name: customer.username },
                             timeout: 10000
                         });
                         
@@ -3959,10 +4044,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                     console.warn(`[Facebook Bot] Failed to parse PPPoE secret comment:`, e.message);
                                 }
                             }
+                        } else {
+                            console.warn(`[Facebook Bot] PPPoE secret not found for: ${customer.username}`);
                         }
                     }
                 } catch (err) {
-                    console.warn(`[Facebook Bot] Failed to get plan from MikroTik:`, err.message);
+                    console.warn(`[Facebook Bot] Failed to get plan from MikroTik:`, err.response?.status || err.message);
                     // Continue with customer record data as fallback
                 }
             }
