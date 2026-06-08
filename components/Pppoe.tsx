@@ -453,8 +453,31 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     
     const combinedUsers = useMemo(() => {
         return secrets.map(secret => {
-            const customer = customers.find(c => c.username === secret.name);
-            let subscription = { plan: 'N/A', dueDate: 'No Info', planType: 'prepaid' as 'prepaid' | 'postpaid' };
+            // Try multiple matching strategies to find the customer
+            let customer = customers.find(c => c.username === secret.name);
+            
+            // Fallback 1: Try matching by parsing accountNumber from secret.comment
+            if (!customer && secret.comment) {
+                try {
+                    const parsedComment = JSON.parse(secret.comment);
+                    if (parsedComment.accountNumber) {
+                        customer = customers.find(c => c.accountNumber === parsedComment.accountNumber);
+                    }
+                } catch (e) { /* ignore parse errors */ }
+            }
+            
+            // Fallback 2: Try matching by fullName if stored in comment
+            if (!customer && secret.comment) {
+                try {
+                    const parsedComment = JSON.parse(secret.comment);
+                    if (parsedComment.customerName || parsedComment.fullName) {
+                        const nameToMatch = parsedComment.customerName || parsedComment.fullName;
+                        customer = customers.find(c => c.fullName === nameToMatch);
+                    }
+                } catch (e) { /* ignore parse errors */ }
+            }
+            
+            let subscription: { plan: string; dueDate: string; planType: 'prepaid' | 'postpaid'; planId?: string } = { plan: 'N/A', dueDate: 'No Info', planType: 'prepaid' };
             if (secret.comment) {
                 try { 
                     const parsedComment = JSON.parse(secret.comment);
@@ -471,8 +494,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     }
                     const pt = String(parsedComment.planType || '').toLowerCase().trim();
                     subscription.planType = pt === 'postpaid' ? 'postpaid' : 'prepaid';
-                } catch (e) { /* ignore */ }
-            }
+                } catch (e) { /* ignore */ } }
             return {
                 ...secret,
                 customer,
