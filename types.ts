@@ -475,6 +475,7 @@ export interface PayMongoSettings {
     webhookSecret: string;
     webhookUrl?: string;
     passFeesToCustomer?: boolean;
+    paymentMethods?: string[];  // Array of payment method IDs: ['qrph', 'gcash', 'card', etc.]
 }
 
 export interface FacebookMessengerSettings {

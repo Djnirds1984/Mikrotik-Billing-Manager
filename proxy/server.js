@@ -4020,7 +4020,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             amount: Math.round(totalAmount * 100),
                             currency: 'PHP',
                             description: checkoutData.description,
-                            payment_method_types: ['card', 'gcash', 'paymaya', 'grab_pay'],
+                            payment_method_types: paymongoSettings.paymentMethods || ['qrph'],
                             success_url: checkoutData.successUrl,
                             cancel_url: checkoutData.cancelUrl,
                             metadata: checkoutData.metadata,

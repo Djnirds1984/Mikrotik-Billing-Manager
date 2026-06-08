@@ -372,6 +372,57 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                     </p>
                 </div>
 
+                {/* Payment Methods Selection */}
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">Available Payment Methods</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2">Select which payment methods to offer customers</p>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                        {[
+                            { id: 'qrph', label: 'QRPH (QR Code)', icon: '📱' },
+                            { id: 'gcash', label: 'GCash', icon: '💙' },
+                            { id: 'paymaya', label: 'PayMaya', icon: '💜' },
+                            { id: 'grab_pay', label: 'GrabPay', icon: '💚' },
+                            { id: 'card', label: 'Credit/Debit Card', icon: '💳' },
+                            { id: 'dob', label: 'DOB (Bank Transfer)', icon: '🏦' },
+                            { id: 'brankas', label: 'Brankas (Online Banking)', icon: '🏛️' },
+                            { id: 'seven_eleven', label: '7-Eleven (Cash)', icon: '🏪' },
+                            { id: 'rd_pawnshop', label: 'RD Pawnshop', icon: '🏪' },
+                            { id: 'countryside', label: 'Countryside Bank', icon: '🏦' },
+                        ].map(method => {
+                            const methods = paymongo.paymentMethods || ['qrph'];
+                            const isChecked = methods.includes(method.id);
+                            return (
+                                <label
+                                    key={method.id}
+                                    className="flex items-center gap-2 p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                            const currentMethods = paymongo.paymentMethods || ['qrph'];
+                                            const newMethods = e.target.checked
+                                                ? [...currentMethods, method.id]
+                                                : currentMethods.filter(m => m !== method.id);
+                                            update('paymentMethods', newMethods);
+                                        }}
+                                        className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
+                                    />
+                                    <span className="text-lg">{method.icon}</span>
+                                    <span className="text-sm text-slate-700 dark:text-slate-300">{method.label}</span>
+                                </label>
+                            );
+                        })}
+                    </div>
+                    
+                    {(paymongo.paymentMethods || ['qrph']).length === 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                            ⚠️ At least one payment method must be selected
+                        </p>
+                    )}
+                </div>
+
                 {/* Webhook Diagnostics Section */}
                 <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-4">
                     <h4 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
