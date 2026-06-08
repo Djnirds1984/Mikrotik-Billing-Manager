@@ -150,6 +150,9 @@ async function initDb() {
         if (!columnNames.includes('licenseCache')) await db.exec("ALTER TABLE settings ADD COLUMN licenseCache TEXT");
         if (!columnNames.includes('licenseCacheAt')) await db.exec("ALTER TABLE settings ADD COLUMN licenseCacheAt TEXT");
         if (!columnNames.includes('deviceId')) await db.exec("ALTER TABLE settings ADD COLUMN deviceId TEXT");
+        
+        // Facebook Messenger Bot settings (safe migration with defaults)
+        if (!columnNames.includes('facebookSettings')) await db.exec("ALTER TABLE settings ADD COLUMN facebookSettings TEXT");
 
         // Hotfix: ensure chat notifications route to Captive Chat in Admin
         try {
@@ -3306,6 +3309,138 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             return res.status(200).json({ received: true, error: 'internal_error' });
         }
     });
+
+    // ========================================
+    // Facebook Messenger Webhook Routes
+    // ========================================
+
+    // GET: Facebook Webhook Verification Endpoint
+    app.get('/api/facebook-webhook', async (req, res) => {
+        try {
+            console.log('[Facebook Webhook] Verification request received');
+            
+            // Read Facebook settings from database
+            const settings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            let fbSettings = { enabled: false, verifyToken: '' };
+            try {
+                fbSettings = JSON.parse(settings?.facebookSettings || '{}');
+            } catch (_) {}
+
+            // Check if Facebook Messenger is enabled
+            if (!fbSettings.enabled) {
+                console.log('[Facebook Webhook] Rejected: Facebook Messenger is disabled');
+                return res.status(403).json({ error: 'Facebook Messenger is not enabled' });
+            }
+
+            // Verify the token
+            const verifyToken = req.query['hub.verify_token'];
+            const challenge = req.query['hub.challenge'];
+
+            if (verifyToken && verifyToken === fbSettings.verifyToken) {
+                console.log('[Facebook Webhook] Verification successful');
+                return res.status(200).send(String(challenge));
+            } else {
+                console.log('[Facebook Webhook] Verification failed: token mismatch');
+                return res.status(403).json({ error: 'Verification token mismatch' });
+            }
+        } catch (err) {
+            console.error('[Facebook Webhook] Verification error:', err.message);
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+
+    // POST: Facebook Webhook Message Receiver
+    app.post('/api/facebook-webhook', async (req, res) => {
+        try {
+            console.log('[Facebook Webhook] Message event received');
+            
+            // Read Facebook settings from database
+            const settings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            let fbSettings = { enabled: false, pageAccessToken: '' };
+            try {
+                fbSettings = JSON.parse(settings?.facebookSettings || '{}');
+            } catch (_) {}
+
+            // Check if Facebook Messenger is enabled
+            if (!fbSettings.enabled) {
+                console.log('[Facebook Webhook] Rejected: Facebook Messenger is disabled');
+                return res.status(200).json({ error: 'Facebook Messenger is not enabled' });
+            }
+
+            const body = req.body;
+
+            // Iterate over each entry in case there are multiple
+            if (body.object && body.entry && Array.isArray(body.entry)) {
+                for (const entry of body.entry) {
+                    // Handle messaging events
+                    if (entry.messaging && Array.isArray(entry.messaging)) {
+                        for (const event of entry.messaging) {
+                            const senderId = event.sender?.id;
+                            const message = event.message;
+
+                            if (senderId && message && message.text) {
+                                console.log(`[Facebook Webhook] Message from ${senderId}: ${message.text}`);
+                                
+                                // Echo the message back (you can customize this logic)
+                                await sendFacebookMessage(senderId, `You said: "${message.text}"`, fbSettings.pageAccessToken);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Always return 200 OK to Facebook
+            res.status(200).json({ received: true });
+        } catch (err) {
+            console.error('[Facebook Webhook] Message handling error:', err.message);
+            // Always return 200 to prevent Facebook from retrying
+            res.status(200).json({ received: true, error: 'handled' });
+        }
+    });
+
+    // Helper function to send messages via Facebook Graph API
+    async function sendFacebookMessage(recipientId, messageText, pageAccessToken) {
+        try {
+            const response = await axios.post(
+                'https://graph.facebook.com/v18.0/me/messages',
+                {
+                    recipient: { id: recipientId },
+                    message: { text: messageText }
+                },
+                {
+                    params: { access_token: pageAccessToken },
+                    timeout: 10000
+                }
+            );
+            console.log(`[Facebook Webhook] Message sent to ${recipientId}`);
+            return response.data;
+        } catch (err) {
+            console.error('[Facebook Webhook] Send message error:', err.message);
+            throw err;
+        }
+    }
+
+    // Endpoint to test Facebook connection
+    app.post('/api/facebook-test', protect, async (req, res) => {
+        try {
+            const { pageAccessToken, recipientId } = req.body;
+            if (!pageAccessToken || !recipientId) {
+                return res.status(400).json({ success: false, message: 'pageAccessToken and recipientId are required' });
+            }
+
+            await sendFacebookMessage(
+                recipientId,
+                'Test message from MikroTik Billing Manager',
+                pageAccessToken
+            );
+
+            res.json({ success: true, message: 'Test message sent successfully' });
+        } catch (err) {
+            console.error('[Facebook Test] Error:', err.message);
+            res.status(500).json({ success: false, message: err.message });
+        }
+    });
+
 
     // Landing Page Advertising Image Downloader
     app.post('/api/landing/ad-image-download', protect, async (req, res) => {

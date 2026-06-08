@@ -474,6 +474,13 @@ export interface PayMongoSettings {
     passFeesToCustomer?: boolean;
 }
 
+export interface FacebookMessengerSettings {
+    enabled: boolean;
+    pageId: string;
+    pageAccessToken: string;
+    verifyToken: string;
+}
+
 export interface LandingPagePage {
     id: string;
     label: string;
@@ -553,6 +560,7 @@ export interface PanelSettings {
     };
     telegramSettings?: TelegramSettings;
     paymongoSettings?: PayMongoSettings;
+    facebookSettings?: FacebookMessengerSettings;
     landingPageConfig?: LandingPageConfig;
 }
 

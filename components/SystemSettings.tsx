@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import type { PanelSettings, TelegramSettings, PayMongoSettings } from '../types.ts';
+import type { PanelSettings, TelegramSettings, PayMongoSettings, FacebookMessengerSettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
@@ -15,6 +15,12 @@ const MoonIcon: React.FC<{ className?: string }> = ({ className }) => <svg class
 const ComputerDesktopIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>;
 const MessageIcon: React.FC<{ className?: string }> = ({ className }) => ( <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.76 9.76 0 01-2.53-.405m-3.038-5.858a2.25 2.25 0 00-3.75-3.75C3.302 4.03 7.056 2.25 12 2.25c4.97 0 9 3.694 9 8.25z" /></svg>);
 const PayMongoIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>);
+
+const FacebookIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z" />
+    </svg>
+);
 
 const TabButton: React.FC<{
     label: string;
@@ -528,6 +534,156 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
     );
 };
 
+const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
+    const facebook = settings.facebookSettings || {} as FacebookMessengerSettings;
+    const update = (field: keyof FacebookMessengerSettings, value: any) => {
+        setSettings(s => ({ ...s, facebookSettings: { ...s.facebookSettings, [field]: value } as FacebookMessengerSettings }));
+    };
+
+    const [isTesting, setIsTesting] = useState(false);
+    const [testMessage, setTestMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+    const handleGenerateToken = () => {
+        const randomToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        update('verifyToken', randomToken);
+    };
+
+    const handleTestConnection = async () => {
+        if (!facebook.pageAccessToken) {
+            setTestMessage({ type: 'error', text: 'Please enter a Page Access Token first.' });
+            return;
+        }
+
+        setIsTesting(true);
+        setTestMessage(null);
+        try {
+            const res = await fetch('/api/facebook-test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+                body: JSON.stringify({
+                    pageAccessToken: facebook.pageAccessToken,
+                    recipientId: facebook.pageId || ''
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                throw new Error(data.message || 'Test failed');
+            }
+            setTestMessage({ type: 'success', text: 'Test message sent successfully! Check your Facebook Page.' });
+        } catch (err) {
+            setTestMessage({ type: 'error', text: `Test failed: ${(err as Error).message}` });
+        } finally {
+            setIsTesting(false);
+        }
+    };
+
+    const callbackUrl = `${window.location.origin}/api/facebook-webhook`;
+
+    const handleCopyUrl = async () => {
+        try {
+            await navigator.clipboard.writeText(callbackUrl);
+            setTestMessage({ type: 'success', text: 'Callback URL copied to clipboard!' });
+            setTimeout(() => setTestMessage(null), 3000);
+        } catch (err) {
+            setTestMessage({ type: 'error', text: 'Failed to copy URL' });
+        }
+    };
+
+    return (
+        <SettingsSection title="Facebook Messenger Bot">
+            <Toggle label="Enable Facebook Messenger" checked={facebook.enabled || false} onChange={c => update('enabled', c)} />
+            <div className={`space-y-4 ${!facebook.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                
+                {/* Callback URL (Read-Only with Copy) */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Callback URL</label>
+                    <div className="mt-1 flex gap-2">
+                        <input
+                            type="text"
+                            readOnly
+                            value={callbackUrl}
+                            className="flex-1 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white cursor-not-allowed"
+                        />
+                        <button
+                            onClick={handleCopyUrl}
+                            className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md text-sm font-medium whitespace-nowrap"
+                        >
+                            Copy
+                        </button>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Use this URL when configuring your Facebook App Webhook</p>
+                </div>
+
+                {/* Verify Token with Generate Button */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Verify Token</label>
+                    <div className="mt-1 flex gap-2">
+                        <input
+                            type="text"
+                            value={facebook.verifyToken || ''}
+                            onChange={e => update('verifyToken', e.target.value)}
+                            className="flex-1 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                            placeholder="Enter or generate a verification token"
+                        />
+                        <button
+                            onClick={handleGenerateToken}
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-sm font-medium whitespace-nowrap"
+                        >
+                            Generate
+                        </button>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">This token must match what you enter in Facebook's webhook configuration</p>
+                </div>
+
+                {/* Facebook Page ID */}
+                <TextInput 
+                    label="Facebook Page ID" 
+                    name="pageId" 
+                    value={facebook.pageId || ''} 
+                    onChange={e => update('pageId', e.target.value)} 
+                    placeholder="Your Facebook Page ID"
+                    info="Find this in your Facebook Page settings"
+                />
+
+                {/* Page Access Token */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Page Access Token</label>
+                    <textarea
+                        value={facebook.pageAccessToken || ''}
+                        onChange={e => update('pageAccessToken', e.target.value)}
+                        className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        placeholder="EAAG... (long token from Facebook developers)"
+                        rows={3}
+                    />
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Generate this from Facebook Developers Console with pages_messaging permission</p>
+                </div>
+
+                {/* Test Connection Button */}
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <button 
+                        onClick={handleTestConnection} 
+                        disabled={isTesting || !facebook.pageAccessToken || !facebook.pageId} 
+                        className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isTesting ? 'Sending...' : 'Send Test Message'}
+                    </button>
+                    
+                    {/* Test Result Message */}
+                    {testMessage && (
+                        <div className={`mt-3 p-3 rounded-md text-sm ${
+                            testMessage.type === 'success'
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
+                        }`}>
+                            {testMessage.text}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </SettingsSection>
+    );
+};
+
 const GlobeIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 2c2.21 0 4.21.896 5.656 2.344A8 8 0 0112 20a8 8 0 01-5.656-13.656A7.976 7.976 0 0112 4zm0 2c-1.657 0-3 3.134-3 6s1.343 6 3 6 3-3.134 3-6-1.343-6-3-6zm-8 6c0-.69.111-1.353.316-1.972A9.964 9.964 0 004 12c0 .69.111 1.353.316 1.972A9.964 9.964 0 004 12zm16 0c0-.69-.111-1.353-.316-1.972.205.619.316 1.282.316 1.972 0 .69-.111 1.353-.316 1.972.205-.619.316-1.282.316-1.972z"/>
@@ -934,7 +1090,7 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
     );
 };
 
-type Tab = 'panel' | 'ai' | 'telegram' | 'paymongo' | 'landing-page';
+type Tab = 'panel' | 'ai' | 'telegram' | 'paymongo' | 'facebook' | 'landing-page';
 
 export const SystemSettings: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('panel');
@@ -1000,6 +1156,7 @@ export const SystemSettings: React.FC = () => {
         { id: 'ai', label: 'AI', icon: <KeyIcon className="w-5 h-5" /> },
         { id: 'telegram', label: 'Telegram', icon: <MessageIcon className="w-5 h-5" /> },
         { id: 'paymongo', label: 'PayMongo', icon: <PayMongoIcon className="w-5 h-5" /> },
+        { id: 'facebook', label: 'Messenger', icon: <FacebookIcon className="w-5 h-5" /> },
         { id: 'landing-page', label: 'Landing Page', icon: <GlobeIcon className="w-5 h-5" /> },
     ];
     
@@ -1012,6 +1169,7 @@ export const SystemSettings: React.FC = () => {
             case 'ai': return <AiTab settings={settings} setSettings={setSettings} />;
             case 'telegram': return <TelegramTab settings={settings} setSettings={setSettings} onTest={handleTestTelegram} isTesting={isTesting} />;
             case 'paymongo': return <PayMongoTab settings={settings} setSettings={setSettings} />;
+            case 'facebook': return <FacebookMessengerTab settings={settings} setSettings={setSettings} />;
             case 'landing-page': return <LandingPageTab settings={settings} setSettings={setSettings} />;
             default: return null;
         }
