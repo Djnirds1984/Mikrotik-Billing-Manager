@@ -157,6 +157,36 @@ async function initDb() {
         // Company settings JSON column (for GCash and other config)
         if (!columnNames.includes('companySettings')) await db.exec("ALTER TABLE settings ADD COLUMN companySettings TEXT");
 
+        // Manual payment requests table (for existing databases)
+        try {
+            await db.exec(`
+                CREATE TABLE IF NOT EXISTS manual_payment_requests (
+                    id TEXT PRIMARY KEY,
+                    customer_account_number TEXT NOT NULL,
+                    customer_username TEXT,
+                    customer_full_name TEXT,
+                    customer_facebook_psid TEXT,
+                    customer_router_id TEXT,
+                    plan_name TEXT,
+                    plan_price REAL NOT NULL,
+                    gcash_reference_number TEXT NOT NULL,
+                    customer_mobile_number TEXT NOT NULL,
+                    customer_name_on_gcash TEXT,
+                    payment_screenshot_url TEXT,
+                    status TEXT DEFAULT 'pending',
+                    admin_notes TEXT,
+                    approved_by TEXT,
+                    approved_at TEXT,
+                    rejected_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT
+                )
+            `);
+            console.log('[Migration] manual_payment_requests table ensured');
+        } catch (err) {
+            console.warn('[Migration] manual_payment_requests table creation skipped:', err.message);
+        }
+
         // Hotfix: ensure chat notifications route to Captive Chat in Admin
         try {
             await db.exec("UPDATE notifications SET link_to='captive_chat' WHERE type IN ('client-chat','admin-reply') AND (link_to IS NULL OR link_to <> 'captive_chat')");
