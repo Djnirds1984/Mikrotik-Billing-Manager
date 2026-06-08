@@ -2871,7 +2871,6 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         line_items: [{
                             name: planName || description || 'Internet Subscription',
                             amount: Math.round(totalAmount * 100), // PayMongo uses centavos
-                            currency: 'PHP',
                             quantity: 1
                         }],
                         payment_method_types: allowedMethods,
@@ -4007,9 +4006,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log(`[Facebook Bot] PayMongo settings paymentMethods:`, paymongoSettings.paymentMethods);
             console.log(`[Facebook Bot] PayMongo request payload:`, JSON.stringify({
                 amount: Math.round(totalAmount * 100),
-                currency: 'PHP',
                 description: checkoutData.description,
-                payment_method_types: ['card', 'gcash', 'paymaya', 'grab_pay'],
+                payment_method_types: paymongoSettings.paymentMethods || ['qrph'],
                 line_items: [{ name: planName, amount: Math.round(totalAmount * 100), quantity: 1 }]
             }, null, 2));
 
