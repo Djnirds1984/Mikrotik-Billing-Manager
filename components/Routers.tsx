@@ -5,6 +5,31 @@ import type { RouterConfig, RouterConfigWithId } from '../types.ts';
 import { testRouterConnection } from '../services/mikrotikService.ts';
 import { EditIcon, TrashIcon, RouterIcon } from '../constants.tsx';
 
+// Copy to clipboard helper
+const CopyButton: React.FC<{ text: string }> = ({ text }) => {
+    const [copied, setCopied] = useState(false);
+    
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy:', err);
+        }
+    };
+    
+    return (
+        <button
+            onClick={handleCopy}
+            className="ml-2 px-2 py-1 text-xs bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 rounded hover:bg-sky-200 dark:hover:bg-sky-900/50 transition-colors"
+            title="Copy Router ID"
+        >
+            {copied ? '✓ Copied!' : '📋 Copy'}
+        </button>
+    );
+};
+
 interface RouterFormProps {
     onSave: (routerConfig: RouterConfig | RouterConfigWithId) => void;
     onCancel: () => void;
@@ -217,6 +242,13 @@ export const Routers: React.FC<RoutersProps> = ({ routers, onAddRouter, onUpdate
                                     <div>
                                         <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{router.name}</p>
                                         <p className="text-sm text-slate-500 dark:text-slate-400 font-mono">{router.user}@{router.host}:{router.port}</p>
+                                        <div className="mt-1 flex items-center gap-2">
+                                            <span className="text-xs text-slate-400 dark:text-slate-500">ID:</span>
+                                            <code className="text-xs font-mono bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded text-slate-700 dark:text-slate-300">
+                                                {router.id}
+                                            </code>
+                                            <CopyButton text={router.id} />
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="flex items-center space-x-2">
