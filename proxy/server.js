@@ -3901,64 +3901,67 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             // Get customer's plan details
             const planName = customer.planName || 'Subscription';
             let planPrice = customer.planPrice || 0;
+            
+            console.log(`[Facebook Bot] Customer plan info: planName="${customer.planName}", planPrice=${customer.planPrice}`);
 
-            // If planPrice is not in customer record, try to get it from billing_plans - ROUTER SCOPED
-            if (!planPrice || planPrice <= 0) {
-                try {
-                    // Try to find plan by name (case-insensitive) - ROUTER SCOPED
-                    if (customer.planName) {
-                        const plan = routerId
-                            ? await db.get(
-                                'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) AND routerId = ? LIMIT 1',
-                                [customer.planName, routerId]
-                              )
-                            : await db.get(
-                                'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) LIMIT 1',
-                                [customer.planName]
-                              );
-                        if (plan && plan.price) {
-                            planPrice = plan.price;
-                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans by name: ₱${planPrice} for "${customer.planName}"`);
-                        } else {
-                            console.warn(`[Facebook Bot] Plan not found in billing_plans for name: "${customer.planName}"`);
-                            // List all available plans for debugging - ROUTER SCOPED
-                            const allPlans = routerId
-                                ? await db.all('SELECT id, name, price FROM billing_plans WHERE routerId = ? LIMIT 10', [routerId])
-                                : await db.all('SELECT id, name, price FROM billing_plans LIMIT 10');
-                            console.log(`[Facebook Bot] Available plans in database:`, allPlans);
-                        }
+            // ALWAYS try to get fresh price from billing_plans (customer.planPrice might be outdated)
+            console.log(`[Facebook Bot] Attempting to lookup plan price from billing_plans...`);
+            let planLookupFailed = false;
+            
+            try {
+                // Try to find plan by name (case-insensitive) - ROUTER SCOPED
+                if (customer.planName) {
+                    const plan = routerId
+                        ? await db.get(
+                            'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) AND routerId = ? LIMIT 1',
+                            [customer.planName, routerId]
+                          )
+                        : await db.get(
+                            'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) LIMIT 1',
+                            [customer.planName]
+                          );
+                    if (plan && plan.price) {
+                        planPrice = plan.price;
+                        console.log(`[Facebook Bot] ✅ Retrieved plan price from billing_plans: ₱${planPrice} for "${customer.planName}"`);
+                    } else {
+                        console.warn(`[Facebook Bot] ⚠️ Plan "${customer.planName}" not found in billing_plans`);
+                        planLookupFailed = true;
                     }
-                    
-                    // Fallback: try to get from planId if available
-                    if (!planPrice && customer.planId) {
-                        const plan = await db.get(
-                            'SELECT price FROM billing_plans WHERE id = ? LIMIT 1',
-                            [customer.planId]
-                        );
-                        if (plan && plan.price) {
-                            planPrice = plan.price;
-                            console.log(`[Facebook Bot] Retrieved plan price by ID: ₱${planPrice}`);
-                        }
-                    }
-                    
-                    // Second fallback: try to find any plan with matching name for this router
-                    if (!planPrice && customer.routerId) {
-                        const plan = await db.get(
-                            'SELECT price FROM billing_plans WHERE routerId = ? AND LOWER(name) = LOWER(?) LIMIT 1',
-                            [customer.routerId, customer.planName]
-                        );
-                        if (plan && plan.price) {
-                            planPrice = plan.price;
-                            console.log(`[Facebook Bot] Retrieved plan price by router+name: ₱${planPrice}`);
-                        }
-                    }
-                } catch (err) {
-                    console.warn('[Facebook Bot] Failed to lookup plan price:', err.message);
                 }
+                
+                // Fallback: try to get from planId if available
+                if ((!planPrice || planPrice <= 0) && customer.planId) {
+                    const plan = await db.get(
+                        'SELECT price FROM billing_plans WHERE id = ? LIMIT 1',
+                        [customer.planId]
+                    );
+                    if (plan && plan.price) {
+                        planPrice = plan.price;
+                        console.log(`[Facebook Bot] ✅ Retrieved plan price by ID: ₱${planPrice}`);
+                        planLookupFailed = false;
+                    }
+                }
+            } catch (err) {
+                console.warn('[Facebook Bot] Failed to lookup plan price:', err.message);
+                planLookupFailed = true;
+            }
+            
+            // If plan lookup failed but customer has a stored price, use it as fallback
+            if (planLookupFailed && (!planPrice || planPrice <= 0) && customer.planPrice && customer.planPrice > 0) {
+                planPrice = customer.planPrice;
+                console.log(`[Facebook Bot] ⚠️ Using customer's stored planPrice as fallback: ₱${planPrice}`);
             }
 
+            // If still no price after all lookups, error
             if (!planPrice || planPrice <= 0) {
-                return `⚠️ Unable to determine your plan price.\n\nYour account may not have a plan assigned yet.\n\n📞 Please contact our support for assistance.`;
+                console.error(`[Facebook Bot] CRITICAL: Cannot determine price for customer ${customer.accountNumber}`);
+                
+                // Show available plans to help debugging
+                const allPlans = routerId
+                    ? await db.all('SELECT name, price FROM billing_plans WHERE routerId = ?', [routerId])
+                    : await db.all('SELECT name, price FROM billing_plans LIMIT 10');
+                
+                return `⚠️ Unable to determine your plan price.\n\nYour account shows: "${customer.planName || 'N/A'}"\nBut this plan doesn't exist in our system.\n\n📋 Available plans:\n${allPlans.map(p => `• ${p.name} (₱${p.price})`).join('\n')}\n\n📞 Please contact support to update your plan.`;
             }
 
             // Check PayMongo availability
