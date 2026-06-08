@@ -464,6 +464,9 @@ async function initDb() {
             if (!customerColNames.includes('password')) {
                 await db.exec("ALTER TABLE customers ADD COLUMN password TEXT");
             }
+            if (!customerColNames.includes('facebook_psid')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN facebook_psid TEXT");
+            }
         } catch (_) {}
         try {
             const clientUserCols = await db.all("PRAGMA table_info(client_users)");
@@ -3351,7 +3354,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     });
 
-    // POST: Facebook Webhook Message Receiver
+    // POST: Facebook Webhook Message Receiver - Full Billing Bot
     app.post('/api/facebook-webhook', async (req, res) => {
         try {
             console.log('[Facebook Webhook] Message event received');
@@ -3381,13 +3384,19 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             const message = event.message;
 
                             if (senderId && message && message.text) {
-                                console.log(`[Facebook Webhook] Message from ${senderId}: ${message.text}`);
+                                const userMessage = message.text.trim();
+                                console.log(`[Facebook Bot] Message from ${senderId}: "${userMessage}"`);
                                 
-                                // Echo the message back (you can customize this logic)
                                 try {
-                                    await sendFacebookMessage(senderId, `You said: "${message.text}"`, fbSettings.pageAccessToken);
+                                    // Process the message and get response
+                                    const response = await processFacebookBotMessage(senderId, userMessage, fbSettings.pageAccessToken);
+                                    
+                                    // Send response if there is one
+                                    if (response) {
+                                        await sendFacebookMessage(senderId, response, fbSettings.pageAccessToken);
+                                    }
                                 } catch (sendErr) {
-                                    console.error('[Facebook Webhook] Failed to send echo message:', sendErr.message);
+                                    console.error('[Facebook Bot] Failed to send response:', sendErr.message);
                                     // Don't crash - continue processing other messages
                                 }
                             }
@@ -3404,6 +3413,137 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             res.status(200).json({ received: true, error: 'handled' });
         }
     });
+
+    // ========================================
+    // Facebook Bot Message Processor
+    // ========================================
+    async function processFacebookBotMessage(senderId, userMessage, pageAccessToken) {
+        const upperMessage = userMessage.toUpperCase();
+
+        // Command: REGISTER <account_no>
+        if (upperMessage.startsWith('REGISTER') || upperMessage.startsWith('REG')) {
+            return await handleRegisterCommand(senderId, userMessage);
+        }
+
+        // Command: BILL, BALANCE, STATUS, ACCOUNT
+        if (['BILL', 'BALANCE', 'STATUS', 'ACCOUNT', 'BILLING', 'INFO'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
+            return await handleBillingCommand(senderId);
+        }
+
+        // Command: HELP
+        if (upperMessage === 'HELP' || upperMessage === 'MENU' || upperMessage === 'COMMANDS') {
+            return getHelpMessage();
+        }
+
+        // Default: Show help menu
+        return getHelpMessage();
+    }
+
+    // ========================================
+    // Handler: REGISTER Command
+    // ========================================
+    async function handleRegisterCommand(senderId, userMessage) {
+        try {
+            // Extract account number (remove "REGISTER" or "REG" keyword)
+            const parts = userMessage.split(/\s+/);
+            const accountNumber = parts.slice(1).join(' ').trim();
+
+            if (!accountNumber) {
+                return "⚠️ Please provide your account number.\n\nUsage: `REGISTER <account_number>`\nExample: `REGISTER 20240001`";
+            }
+
+            console.log(`[Facebook Bot] Registration attempt for account: ${accountNumber}`);
+
+            // Check if account exists in database
+            const customer = await db.get(
+                'SELECT * FROM customers WHERE accountNumber = ? OR username = ?',
+                [accountNumber, accountNumber]
+            );
+
+            if (!customer) {
+                return `❌ Account "${accountNumber}" not found in our system.\n\nPlease check your account number and try again.\n\nIf you don't have an account yet, please visit our office or contact support.`;
+            }
+
+            // Check if this account is already linked to another Facebook account
+            if (customer.facebook_psid && customer.facebook_psid !== senderId) {
+                return `⚠️ This account is already linked to another Facebook account.\n\nIf this is a mistake, please contact our support team for assistance.`;
+            }
+
+            // Link Facebook PSID to customer account
+            await db.run(
+                'UPDATE customers SET facebook_psid = ? WHERE id = ?',
+                [senderId, customer.id]
+            );
+
+            console.log(`[Facebook Bot] Successfully linked Facebook user ${senderId} to account ${customer.accountNumber}`);
+
+            // Get customer's billing info for confirmation message
+            const planName = customer.planName || 'Not specified';
+            const dueDate = customer.dueDate || 'Not set';
+
+            return `✅ Success! Your Facebook account is now linked!\n\n📋 Account Details:\n• Account #: ${customer.accountNumber}\n• Name: ${customer.fullName || 'N/A'}\n• Plan: ${planName}\n• Due Date: ${dueDate}\n\nYou can now check your billing status by sending:\n• BILL - View your current bill\n• STATUS - Check your account status\n• HELP - Show all commands`;
+        } catch (err) {
+            console.error('[Facebook Bot] Registration error:', err.message);
+            return "❌ Sorry, an error occurred while processing your registration. Please try again later or contact support.";
+        }
+    }
+
+    // ========================================
+    // Handler: BILL/BALANCE/STATUS Command
+    // ========================================
+    async function handleBillingCommand(senderId) {
+        try {
+            console.log(`[Facebook Bot] Billing inquiry from Facebook user: ${senderId}`);
+
+            // Find customer by Facebook PSID
+            const customer = await db.get(
+                'SELECT * FROM customers WHERE facebook_psid = ?',
+                [senderId]
+            );
+
+            if (!customer) {
+                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo check your billing information, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nYou can find your account number on your billing statement or contact our support for assistance.`;
+            }
+
+            // Customer found - prepare billing details
+            const planName = customer.planName || 'Not specified';
+            const dueDate = customer.dueDate || 'Not set';
+            const status = customer.planType || 'Active';
+            const fullName = customer.fullName || 'Valued Customer';
+            const address = customer.address || 'Not provided';
+
+            // Calculate days until due (if dueDate exists)
+            let daysRemaining = '';
+            if (dueDate && dueDate !== 'Not set') {
+                const due = new Date(dueDate);
+                const now = new Date();
+                const diffTime = due - now;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                
+                if (diffDays < 0) {
+                    daysRemaining = `\n⚠️ OVERDUE by ${Math.abs(diffDays)} days`;
+                } else if (diffDays === 0) {
+                    daysRemaining = `\n⚠️ DUE TODAY!`;
+                } else {
+                    daysRemaining = `\n⏰ ${diffDays} days remaining`;
+                }
+            }
+
+            const receipt = `📊 Billing Statement\n━━━━━━━━━━━━━━━━━━\n\n👤 Account Information:\n• Name: ${fullName}\n• Account #: ${customer.accountNumber}\n• Address: ${address}\n\n💰 Plan Details:\n• Plan: ${planName}\n• Status: ${status}\n• Due Date: ${dueDate}${daysRemaining}\n\n━━━━━━━━━━━━━━━━━━\n\nNeed help? Send HELP for all commands.\nTo update your info, visit our office or contact support.`;
+
+            return receipt;
+        } catch (err) {
+            console.error('[Facebook Bot] Billing inquiry error:', err.message);
+            return "❌ Sorry, an error occurred while retrieving your billing information. Please try again later or contact support.";
+        }
+    }
+
+    // ========================================
+    // Helper: Help Message
+    // ========================================
+    function getHelpMessage() {
+        return `🤖 CityConnect Billing Bot - Help Menu\n━━━━━━━━━━━━━━━━━━\n\n📝 Available Commands:\n\n1️⃣ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2️⃣ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3️⃣ HELP / MENU\n   Show this help message\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Quick Start:\nSend: REGISTER <your_account_number>\n\n📞 Need assistance? Contact our support team or visit our office.\n\n🌐 Powered by CityConnect Billing Manager`;
+    }
 
     // Helper function to send messages via Facebook Graph API
     async function sendFacebookMessage(recipientId, messageText, pageAccessToken) {
