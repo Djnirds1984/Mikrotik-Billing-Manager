@@ -570,7 +570,7 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
             if (!res.ok || !data.success) {
                 throw new Error(data.message || 'Test failed');
             }
-            setTestMessage({ type: 'success', text: 'Test message sent successfully! Check your Facebook Page.' });
+            setTestMessage({ type: 'success', text: data.message });
         } catch (err) {
             setTestMessage({ type: 'error', text: `Test failed: ${(err as Error).message}` });
         } finally {
@@ -694,10 +694,10 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
                         </button>
                         <button 
                             onClick={handleTestConnection} 
-                            disabled={isTesting || !facebook.pageAccessToken || !facebook.pageId} 
+                            disabled={isTesting || !facebook.pageAccessToken} 
                             className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {isTesting ? 'Sending...' : 'Send Test Message'}
+                            {isTesting ? 'Validating...' : 'Validate Token'}
                         </button>
                     </div>
                     

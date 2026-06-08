@@ -3459,17 +3459,27 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 console.warn('[Facebook Test] Token format looks invalid. Should start with EAAG or EAA');
             }
 
-            console.log('[Facebook Test] Attempting to send test message...');
-            console.log('[Facebook Test] Recipient ID:', recipientId);
+            console.log('[Facebook Test] Attempting to validate token...');
+            console.log('[Facebook Test] Page ID:', recipientId);
             console.log('[Facebook Test] Token length:', pageAccessToken.length);
 
-            await sendFacebookMessage(
-                recipientId,
-                '✅ Test message from MikroTik Billing Manager - Facebook Messenger integration is working!',
-                pageAccessToken
-            );
+            // First, validate the token by getting Page info
+            const pageInfo = await axios.get('https://graph.facebook.com/v18.0/me', {
+                params: {
+                    access_token: pageAccessToken,
+                    fields: 'id,name'
+                },
+                timeout: 10000
+            });
 
-            res.json({ success: true, message: 'Test message sent successfully! Check your Facebook Page.' });
+            console.log('[Facebook Test] Token is valid! Page:', pageInfo.data.name, '(ID:', pageInfo.data.id + ')');
+
+            // The test endpoint can only validate the token, not send messages
+            // because you need a PSID (user ID) to send to, not a Page ID
+            res.json({ 
+                success: true, 
+                message: `✅ Token validated successfully! Connected to page: "${pageInfo.data.name}" (ID: ${pageInfo.data.id}).\n\nNote: To send test messages, a user must message your Page first. Facebook will then provide their PSID (Page-Scoped ID) in the webhook. You cannot initiate conversations - only respond to users who message you.` 
+            });
         } catch (err) {
             console.error('[Facebook Test] Error:', err.message);
             
