@@ -3651,15 +3651,20 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             // If planPrice is not in customer record, try to get it from billing_plans
             if (!planPrice || planPrice <= 0) {
                 try {
-                    // Try to find plan by name
+                    // Try to find plan by name (case-insensitive)
                     if (customer.planName) {
                         const plan = await db.get(
-                            'SELECT price FROM billing_plans WHERE name = ? LIMIT 1',
+                            'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) LIMIT 1',
                             [customer.planName]
                         );
                         if (plan && plan.price) {
                             planPrice = plan.price;
-                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans: ₱${planPrice}`);
+                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans by name: ₱${planPrice} for "${customer.planName}"`);
+                        } else {
+                            console.warn(`[Facebook Bot] Plan not found in billing_plans for name: "${customer.planName}"`);
+                            // List all available plans for debugging
+                            const allPlans = await db.all('SELECT id, name, price FROM billing_plans LIMIT 10');
+                            console.log(`[Facebook Bot] Available plans in database:`, allPlans);
                         }
                     }
                     
@@ -3672,6 +3677,18 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         if (plan && plan.price) {
                             planPrice = plan.price;
                             console.log(`[Facebook Bot] Retrieved plan price by ID: ₱${planPrice}`);
+                        }
+                    }
+                    
+                    // Second fallback: try to find any plan with matching name for this router
+                    if (!planPrice && customer.routerId) {
+                        const plan = await db.get(
+                            'SELECT price FROM billing_plans WHERE routerId = ? AND LOWER(name) = LOWER(?) LIMIT 1',
+                            [customer.routerId, customer.planName]
+                        );
+                        if (plan && plan.price) {
+                            planPrice = plan.price;
+                            console.log(`[Facebook Bot] Retrieved plan price by router+name: ₱${planPrice}`);
                         }
                     }
                 } catch (err) {
