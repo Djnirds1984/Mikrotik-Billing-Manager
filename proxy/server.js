@@ -1952,9 +1952,32 @@ async function startServer() {
                 [saleId, payment.customer_router_id, now, payment.customer_full_name, payment.plan_name, payment.plan_price, payment.plan_price, 'manual_gcash', 'admin']
             );
             
-            // Update customer due date (extend by 30 days)
-            const newDueDate = new Date();
-            newDueDate.setDate(newDueDate.getDate() + 30);
+            // Update customer due date (extend by 30 days from CURRENT due date, not today)
+            const customer = await db.get('SELECT * FROM customers WHERE accountNumber = ?', [payment.customer_account_number]);
+            const currentDate = new Date();
+            let newDueDate;
+            
+            // If customer has existing due date in the future, extend from that date
+            if (customer && customer.dueDate) {
+                const existingDueDate = new Date(customer.dueDate);
+                if (existingDueDate > currentDate) {
+                    // Extend from existing due date
+                    newDueDate = new Date(existingDueDate);
+                    newDueDate.setDate(newDueDate.getDate() + 30);
+                    console.log(`[Manual Payments] Extending from existing due date: ${customer.dueDate} -> ${newDueDate.toISOString().split('T')[0]}`);
+                } else {
+                    // Due date is in the past, extend from today
+                    newDueDate = new Date(currentDate);
+                    newDueDate.setDate(newDueDate.getDate() + 30);
+                    console.log(`[Manual Payments] Due date expired, extending from today: ${newDueDate.toISOString().split('T')[0]}`);
+                }
+            } else {
+                // No existing due date, start from today
+                newDueDate = new Date(currentDate);
+                newDueDate.setDate(newDueDate.getDate() + 30);
+                console.log(`[Manual Payments] No due date, starting from today: ${newDueDate.toISOString().split('T')[0]}`);
+            }
+            
             const dueDateStr = newDueDate.toISOString().split('T')[0];
             
             await db.run(
@@ -1986,9 +2009,9 @@ async function startServer() {
                         let comment = {};
                         try { comment = JSON.parse(secret.comment || '{}'); } catch (e) { comment = {}; }
                         
-                        // Calculate new due date with time
-                        const newDueDateTime = new Date();
-                        newDueDateTime.setDate(newDueDateTime.getDate() + 30);
+                        // Calculate new due date with time (use the same newDueDate from above)
+                        const newDueDateTime = new Date(newDueDate);
+                        newDueDateTime.setHours(newDueDateTime.getHours(), newDueDateTime.getMinutes(), 0, 0);
                         const newDueDateTimeStr = newDueDateTime.toISOString().replace('T', ' ').substring(0, 16);
                         
                         // Find active profile from billing plan
