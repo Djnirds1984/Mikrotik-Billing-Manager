@@ -1722,6 +1722,7 @@ async function startServer() {
             if(s) {
                 try { s.telegramSettings = JSON.parse(s.telegramSettings); } catch(e) {}
                 try { s.paymongoSettings = JSON.parse(s.paymongoSettings); } catch(e) {}
+                try { s.facebookSettings = JSON.parse(s.facebookSettings); } catch(e) {}
                 try { s.notificationSettings = JSON.parse(s.notificationSettings); } catch(e) {}
                 try { s.landingPageConfig = JSON.parse(s.landingPageConfig); } catch(e) {}
             }
@@ -1757,6 +1758,7 @@ async function startServer() {
             const data = { ...req.body };
             if (data.telegramSettings) data.telegramSettings = JSON.stringify(data.telegramSettings);
             if (data.paymongoSettings) data.paymongoSettings = JSON.stringify(data.paymongoSettings);
+            if (data.facebookSettings) data.facebookSettings = JSON.stringify(data.facebookSettings);
             if (data.notificationSettings) data.notificationSettings = JSON.stringify(data.notificationSettings);
             if (data.landingPageConfig) data.landingPageConfig = JSON.stringify(data.landingPageConfig);
             
