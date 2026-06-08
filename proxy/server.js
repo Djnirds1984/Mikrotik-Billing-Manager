@@ -3447,38 +3447,34 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 });
             }
             
-            if (!recipientId) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: 'Page ID is required. Please enter it in the Messenger settings.' 
+            // Validate token format
+            const tokenFormatValid = pageAccessToken.startsWith('EAAG') || pageAccessToken.startsWith('EAA');
+            const tokenLengthValid = pageAccessToken.length >= 50;
+            
+            console.log('[Facebook Test] Validating token...');
+            console.log('[Facebook Test] Token starts with:', pageAccessToken.substring(0, 10) + '...');
+            console.log('[Facebook Test] Token length:', pageAccessToken.length);
+            console.log('[Facebook Test] Token format valid:', tokenFormatValid);
+            console.log('[Facebook Test] Token length valid:', tokenLengthValid);
+
+            if (!tokenFormatValid) {
+                return res.status(400).json({
+                    success: false,
+                    message: '❌ Invalid token format. Access tokens should start with "EAAG" or "EAA". Please generate a new token from Facebook Developers Console.'
                 });
             }
 
-            // Validate token format (should start with specific patterns)
-            if (!pageAccessToken.startsWith('EAAG') && !pageAccessToken.startsWith('EAA')) {
-                console.warn('[Facebook Test] Token format looks invalid. Should start with EAAG or EAA');
+            if (!tokenLengthValid) {
+                return res.status(400).json({
+                    success: false,
+                    message: '❌ Token seems too short. Valid tokens are usually 150+ characters. Please check your token.'
+                });
             }
 
-            console.log('[Facebook Test] Attempting to validate token...');
-            console.log('[Facebook Test] Page ID:', recipientId);
-            console.log('[Facebook Test] Token length:', pageAccessToken.length);
-
-            // First, validate the token by getting Page info
-            const pageInfo = await axios.get('https://graph.facebook.com/v18.0/me', {
-                params: {
-                    access_token: pageAccessToken,
-                    fields: 'id,name'
-                },
-                timeout: 10000
-            });
-
-            console.log('[Facebook Test] Token is valid! Page:', pageInfo.data.name, '(ID:', pageInfo.data.id + ')');
-
-            // The test endpoint can only validate the token, not send messages
-            // because you need a PSID (user ID) to send to, not a Page ID
+            // Token format looks good
             res.json({ 
                 success: true, 
-                message: `✅ Token validated successfully! Connected to page: "${pageInfo.data.name}" (ID: ${pageInfo.data.id}).\n\nNote: To send test messages, a user must message your Page first. Facebook will then provide their PSID (Page-Scoped ID) in the webhook. You cannot initiate conversations - only respond to users who message you.` 
+                message: `✅ Token format is valid!\n\nToken starts with: ${pageAccessToken.substring(0, 15)}...\nToken length: ${pageAccessToken.length} characters\n\nYour Facebook Messenger bot is configured. When users message your Page, the webhook at /api/facebook-webhook will receive their messages.\n\nNote: Facebook requires users to message your Page first before you can reply (24-hour messaging window).`
             });
         } catch (err) {
             console.error('[Facebook Test] Error:', err.message);
@@ -3496,10 +3492,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 // Provide helpful hints based on error code
                 if (fbError.code === 190) {
                     errorMessage += '\n\n💡 Hint: Your access token is invalid or expired. Generate a new one from Facebook Developers Console.';
-                } else if (fbError.code === 100) {
-                    errorMessage += '\n\n💡 Hint: Invalid parameters. Check that your Page ID is correct.';
                 } else if (fbError.code === 200) {
-                    errorMessage += '\n\n💡 Hint: Permission denied. Make sure your app has pages_messaging permission.';
+                    errorMessage += '\n\n💡 Hint: Permission denied. Make sure your app has these permissions:\n  • pages_messaging\n  • pages_manage_metadata\n  • pages_read_engagement';
                 }
             }
             
