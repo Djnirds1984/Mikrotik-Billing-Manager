@@ -3718,6 +3718,22 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             console.log(`[Facebook Bot] Registration attempt for account: ${accountNumber} (router: ${routerId || 'ALL'})`);
 
+            // DEBUG: Show all customers with this account number (regardless of router)
+            const allMatches = await db.all(
+                'SELECT id, accountNumber, username, fullName, routerId FROM customers WHERE accountNumber LIKE ? OR username LIKE ?',
+                [`%${accountNumber}%`, `%${accountNumber}%`]
+            );
+            console.log(`[Facebook Bot] DEBUG - All customers matching "${accountNumber}":`, JSON.stringify(allMatches, null, 2));
+            
+            // DEBUG: Show all customers for this router
+            if (routerId) {
+                const routerCustomers = await db.all(
+                    'SELECT id, accountNumber, username, fullName FROM customers WHERE routerId = ? LIMIT 5',
+                    [routerId]
+                );
+                console.log(`[Facebook Bot] DEBUG - First 5 customers for router ${routerId}:`, JSON.stringify(routerCustomers, null, 2));
+            }
+
             // Try multiple lookup strategies to find the customer - FILTERED BY ROUTER
             let customer = null;
             
