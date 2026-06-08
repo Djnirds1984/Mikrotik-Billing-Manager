@@ -3750,6 +3750,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             return await handleRegisterCommand(senderId, userMessage, routerId);
         }
 
+        // Command: UNREGISTER, UNLINK, DISCONNECT
+        if (['UNREGISTER', 'UNLINK', 'DISCONNECT', 'UNREG', 'REMOVE'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
+            return await handleUnregisterCommand(senderId, routerId);
+        }
+
         // Command: BILL, BALANCE, STATUS, ACCOUNT
         if (['BILL', 'BALANCE', 'STATUS', 'ACCOUNT', 'BILLING', 'INFO'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
             return await handleBillingCommand(senderId, routerId);
@@ -3876,9 +3881,24 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 return `❌ Account "${accountNumber}" not found in our system.\n\nPlease check your account number and try again.\n\nIf you don't have an account yet, please visit our office or contact support.`;
             }
 
-            // Check if this account is already linked to another Facebook account
+            // Check if this Facebook account is already linked to a customer
+            const existingLink = await db.get(
+                'SELECT * FROM customers WHERE facebook_psid = ?',
+                [senderId]
+            );
+            
+            if (existingLink) {
+                // Already linked - check if it's the same account
+                if (existingLink.accountNumber === customer.accountNumber || existingLink.username === customer.username) {
+                    return `ℹ️ Your Facebook account is already linked to ${existingLink.accountNumber}.\n\n📋 Current Account:\n• Account #: ${existingLink.accountNumber}\n• Name: ${existingLink.fullName || 'N/A'}\n• Plan: ${existingLink.planName || 'N/A'}\n\nTo register a different account, first send:\nUNREGISTER\n\nThen register your new account.`;
+                } else {
+                    return `⚠️ Your Facebook account is already linked to a different account!\n\n📋 Currently Linked:\n• Account #: ${existingLink.accountNumber}\n• Name: ${existingLink.fullName || 'N/A'}\n\nTo link to ${accountNumber}, you must first unregister:\n\n📝 Send: UNREGISTER\n\nThen register your new account:\n📝 Send: REGISTER ${accountNumber}`;
+                }
+            }
+
+            // Check if this account number is already linked to ANOTHER Facebook account
             if (customer.facebook_psid && customer.facebook_psid !== senderId) {
-                return `⚠️ This account is already linked to another Facebook account.\n\nIf this is a mistake, please contact our support team for assistance.`;
+                return `⚠️ This account (${accountNumber}) is already linked to another Facebook account.\n\nPlease contact our support if you need to transfer the account to your Facebook.`;
             }
 
             // Link Facebook PSID to customer account
@@ -3893,10 +3913,41 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const planName = customer.planName || 'Not specified';
             const dueDate = customer.dueDate || 'Not set';
 
-            return `✅ Success! Your Facebook account is now linked!\n\n📋 Account Details:\n• Account #: ${customer.accountNumber}\n• Name: ${customer.fullName || 'N/A'}\n• Plan: ${planName}\n• Due Date: ${dueDate}\n\nYou can now check your billing status by sending:\n• BILL - View your current bill\n• STATUS - Check your account status\n• HELP - Show all commands`;
+            return `✅ Success! Your Facebook account is now linked!\n\n📋 Account Details:\n• Account #: ${customer.accountNumber}\n• Name: ${customer.fullName || 'N/A'}\n• Plan: ${planName}\n• Due Date: ${dueDate}\n\n💡 You can now check your billing status by sending:\n• BILL - View your current bill\n• STATUS - Check your account status\n• PAY - Make a payment\n• HELP - Show all commands\n\nTo unlink this account, send: UNREGISTER`;
         } catch (err) {
             console.error('[Facebook Bot] Registration error:', err.message);
             return "❌ Sorry, an error occurred while processing your registration. Please try again later or contact support.";
+        }
+    }
+
+    // ========================================
+    // Handler: UNREGISTER Command
+    // ========================================
+    async function handleUnregisterCommand(senderId, routerId) {
+        try {
+            console.log(`[Facebook Bot] Unregister request from Facebook user: ${senderId}`);
+
+            // Find customer linked to this Facebook account
+            const customer = routerId
+                ? await db.get('SELECT * FROM customers WHERE facebook_psid = ? AND routerId = ?', [senderId, routerId])
+                : await db.get('SELECT * FROM customers WHERE facebook_psid = ?', [senderId]);
+
+            if (!customer) {
+                return `ℹ️ Your Facebook account is not currently linked to any account.\n\nTo register, send:\n📝 REGISTER <your_account_number>\nExample: REGISTER 20240001`;
+            }
+
+            // Remove Facebook PSID from customer
+            await db.run(
+                'UPDATE customers SET facebook_psid = NULL WHERE id = ?',
+                [customer.id]
+            );
+
+            console.log(`[Facebook Bot] Unlinked Facebook user ${senderId} from account ${customer.accountNumber}`);
+
+            return `✅ Account Unlinked Successfully\n\n📋 Unlinked Account:\n• Account #: ${customer.accountNumber}\n• Name: ${customer.fullName || 'N/A'}\n\nYour Facebook account is no longer linked to this account.\n\nTo register a new account, send:\n📝 REGISTER <your_account_number>`;
+        } catch (err) {
+            console.error('[Facebook Bot] Unregister error:', err.message);
+            return "❌ Sorry, an error occurred while processing your request. Please try again later or contact support.";
         }
     }
 
