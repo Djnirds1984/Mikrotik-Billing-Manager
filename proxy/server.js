@@ -3650,30 +3650,39 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // ========================================
     async function processFacebookBotMessage(senderId, userMessage, pageAccessToken) {
         const upperMessage = userMessage.toUpperCase();
+        
+        // Get routerId from Facebook settings
+        const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+        const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+        const routerId = fbConfig.routerId;
+        
+        if (!routerId) {
+            console.warn('[Facebook Bot] WARNING: No routerId configured in Facebook settings! Bot will search across ALL routers.');
+        }
 
         // Command: REGISTER <account_no>
         if (upperMessage.startsWith('REGISTER') || upperMessage.startsWith('REG')) {
-            return await handleRegisterCommand(senderId, userMessage);
+            return await handleRegisterCommand(senderId, userMessage, routerId);
         }
 
         // Command: BILL, BALANCE, STATUS, ACCOUNT
         if (['BILL', 'BALANCE', 'STATUS', 'ACCOUNT', 'BILLING', 'INFO'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
-            return await handleBillingCommand(senderId);
+            return await handleBillingCommand(senderId, routerId);
         }
 
         // Command: PAY, PAYMENT, BAYAD
         if (['PAY', 'PAYMENT', 'BAYAD'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
-            return await handlePaymentCommand(senderId);
+            return await handlePaymentCommand(senderId, routerId);
         }
 
         // Command: PAY ONLINE, 1, ONLINE
         if (upperMessage === 'PAY ONLINE' || upperMessage === '1' || upperMessage === 'ONLINE') {
-            return await handlePayOnlineCommand(senderId);
+            return await handlePayOnlineCommand(senderId, routerId);
         }
 
         // Command: PAY MANUAL, 2, MANUAL, GCASH
         if (upperMessage === 'PAY MANUAL' || upperMessage === '2' || upperMessage === 'MANUAL' || upperMessage === 'GCASH') {
-            return await handlePayManualCommand(senderId);
+            return await handlePayManualCommand(senderId, routerId);
         }
 
         // Command: REPAIR, TICKET, HELP ME, ISSUE, PROBLEM
@@ -3697,7 +3706,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // ========================================
     // Handler: REGISTER Command
     // ========================================
-    async function handleRegisterCommand(senderId, userMessage) {
+    async function handleRegisterCommand(senderId, userMessage, routerId) {
         try {
             // Extract account number (remove "REGISTER" or "REG" keyword)
             const parts = userMessage.split(/\s+/);
@@ -3707,43 +3716,57 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 return "⚠️ Please provide your account number.\n\nUsage: `REGISTER <account_number>`\nExample: `REGISTER 20240001`";
             }
 
-            console.log(`[Facebook Bot] Registration attempt for account: ${accountNumber}`);
+            console.log(`[Facebook Bot] Registration attempt for account: ${accountNumber} (router: ${routerId || 'ALL'})`);
 
-            // Try multiple lookup strategies to find the customer
+            // Try multiple lookup strategies to find the customer - FILTERED BY ROUTER
             let customer = null;
             
-            // Strategy 1: Search by accountNumber or username in customers table
-            customer = await db.get(
-                'SELECT * FROM customers WHERE accountNumber = ? OR username = ?',
-                [accountNumber, accountNumber]
-            );
+            // Strategy 1: Search by accountNumber or username in customers table - ROUTER SCOPED
+            if (routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE (accountNumber = ? OR username = ?) AND routerId = ?',
+                    [accountNumber, accountNumber, routerId]
+                );
+            } else {
+                // Fallback to unscoped search if no routerId configured
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE accountNumber = ? OR username = ?',
+                    [accountNumber, accountNumber]
+                );
+            }
             
             if (customer) {
                 console.log(`[Facebook Bot] Found customer by accountNumber/username: ${customer.accountNumber || customer.username}`);
             } else {
                 console.log(`[Facebook Bot] Customer not found in customers table, trying fallback lookups...`);
                 
-                // Strategy 2: Try partial match on accountNumber (remove ACC- prefix if present)
-                const cleanNumber = accountNumber.replace(/^ACC[-]?/i, '');
-                customer = await db.get(
-                    'SELECT * FROM customers WHERE accountNumber LIKE ? OR username LIKE ?',
-                    [`%${cleanNumber}%`, `%${cleanNumber}%`]
-                );
-                
-                if (customer) {
-                    console.log(`[Facebook Bot] Found customer by partial match: ${customer.accountNumber}`);
-                } else {
-                    // Strategy 3: Search by fullName in case they entered their name instead
+                // Strategy 2: Try partial match on accountNumber (remove ACC- prefix if present) - ROUTER SCOPED
+                if (routerId) {
+                    const cleanNumber = accountNumber.replace(/^ACC[-]?/i, '');
                     customer = await db.get(
-                        'SELECT * FROM customers WHERE fullName = ?',
-                        [accountNumber]
+                        'SELECT * FROM customers WHERE (accountNumber LIKE ? OR username LIKE ?) AND routerId = ?',
+                        [`%${cleanNumber}%`, `%${cleanNumber}%`, routerId]
+                    );
+                    
+                    if (customer) {
+                        console.log(`[Facebook Bot] Found customer by partial match: ${customer.accountNumber}`);
+                    }
+                }
+                
+                // Strategy 3: Search by fullName in case they entered their name instead - ROUTER SCOPED
+                if (!customer && routerId) {
+                    customer = await db.get(
+                        'SELECT * FROM customers WHERE fullName = ? AND routerId = ?',
+                        [accountNumber, routerId]
                     );
                     
                     if (customer) {
                         console.log(`[Facebook Bot] Found customer by fullName: ${customer.fullName}`);
-                    } else {
-                        console.log(`[Facebook Bot] All lookup strategies failed for: ${accountNumber}`);
                     }
+                }
+                
+                if (!customer) {
+                    console.log(`[Facebook Bot] All lookup strategies failed for: ${accountNumber}`);
                 }
             }
 
@@ -3779,15 +3802,23 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // ========================================
     // Handler: BILL/BALANCE/STATUS Command
     // ========================================
-    async function handleBillingCommand(senderId) {
+    async function handleBillingCommand(senderId, routerId) {
         try {
-            console.log(`[Facebook Bot] Billing inquiry from Facebook user: ${senderId}`);
+            console.log(`[Facebook Bot] Billing inquiry from Facebook user: ${senderId} (router: ${routerId || 'ALL'})`);
 
-            // Find customer by Facebook PSID
-            const customer = await db.get(
-                'SELECT * FROM customers WHERE facebook_psid = ?',
-                [senderId]
-            );
+            // Find customer by Facebook PSID - ROUTER SCOPED
+            let customer;
+            if (routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ? AND routerId = ?',
+                    [senderId, routerId]
+                );
+            } else {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ?',
+                    [senderId]
+                );
+            }
 
             if (!customer) {
                 return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo check your billing information, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nYou can find your account number on your billing statement or contact our support for assistance.`;
@@ -3829,15 +3860,23 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // ========================================
     // Handler: PAY Command - Show Payment Options
     // ========================================
-    async function handlePaymentCommand(senderId) {
+    async function handlePaymentCommand(senderId, routerId) {
         try {
-            console.log(`[Facebook Bot] Payment request from Facebook user: ${senderId}`);
+            console.log(`[Facebook Bot] Payment request from Facebook user: ${senderId} (router: ${routerId || 'ALL'})`);
 
-            // Find customer by Facebook PSID
-            const customer = await db.get(
-                'SELECT * FROM customers WHERE facebook_psid = ?',
-                [senderId]
-            );
+            // Find customer by Facebook PSID - ROUTER SCOPED
+            let customer;
+            if (routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ? AND routerId = ?',
+                    [senderId, routerId]
+                );
+            } else {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ?',
+                    [senderId]
+                );
+            }
 
             if (!customer) {
                 return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can pay your subscription via Facebook Messenger.`;
@@ -3847,22 +3886,29 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const planName = customer.planName || 'Subscription';
             let planPrice = customer.planPrice || 0;
 
-            // If planPrice is not in customer record, try to get it from billing_plans
+            // If planPrice is not in customer record, try to get it from billing_plans - ROUTER SCOPED
             if (!planPrice || planPrice <= 0) {
                 try {
-                    // Try to find plan by name (case-insensitive)
+                    // Try to find plan by name (case-insensitive) - ROUTER SCOPED
                     if (customer.planName) {
-                        const plan = await db.get(
-                            'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) LIMIT 1',
-                            [customer.planName]
-                        );
+                        const plan = routerId
+                            ? await db.get(
+                                'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) AND routerId = ? LIMIT 1',
+                                [customer.planName, routerId]
+                              )
+                            : await db.get(
+                                'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) LIMIT 1',
+                                [customer.planName]
+                              );
                         if (plan && plan.price) {
                             planPrice = plan.price;
                             console.log(`[Facebook Bot] Retrieved plan price from billing_plans by name: ₱${planPrice} for "${customer.planName}"`);
                         } else {
                             console.warn(`[Facebook Bot] Plan not found in billing_plans for name: "${customer.planName}"`);
-                            // List all available plans for debugging
-                            const allPlans = await db.all('SELECT id, name, price FROM billing_plans LIMIT 10');
+                            // List all available plans for debugging - ROUTER SCOPED
+                            const allPlans = routerId
+                                ? await db.all('SELECT id, name, price FROM billing_plans WHERE routerId = ? LIMIT 10', [routerId])
+                                : await db.all('SELECT id, name, price FROM billing_plans LIMIT 10');
                             console.log(`[Facebook Bot] Available plans in database:`, allPlans);
                         }
                     }
@@ -3942,15 +3988,23 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // ========================================
     // Handler: PAY ONLINE Command (PayMongo Integration)
     // ========================================
-    async function handlePayOnlineCommand(senderId) {
+    async function handlePayOnlineCommand(senderId, routerId) {
         try {
-            console.log(`[Facebook Bot] Online payment request from Facebook user: ${senderId}`);
+            console.log(`[Facebook Bot] Online payment request from Facebook user: ${senderId} (router: ${routerId || 'ALL'})`);
 
-            // Find customer by Facebook PSID
-            const customer = await db.get(
-                'SELECT * FROM customers WHERE facebook_psid = ?',
-                [senderId]
-            );
+            // Find customer by Facebook PSID - ROUTER SCOPED
+            let customer;
+            if (routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ? AND routerId = ?',
+                    [senderId, routerId]
+                );
+            } else {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ?',
+                    [senderId]
+                );
+            }
 
             if (!customer) {
                 return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001`;
@@ -4128,15 +4182,23 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // ========================================
     // Handler: PAY MANUAL Command - Multi-Step Collection
     // ========================================
-    async function handlePayManualCommand(senderId) {
+    async function handlePayManualCommand(senderId, routerId) {
         try {
-            console.log(`[Facebook Bot] Manual payment request from Facebook user: ${senderId}`);
+            console.log(`[Facebook Bot] Manual payment request from Facebook user: ${senderId} (router: ${routerId || 'ALL'})`);
 
-            // Find customer by Facebook PSID
-            const customer = await db.get(
-                'SELECT * FROM customers WHERE facebook_psid = ?',
-                [senderId]
-            );
+            // Find customer by Facebook PSID - ROUTER SCOPED
+            let customer;
+            if (routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ? AND routerId = ?',
+                    [senderId, routerId]
+                );
+            } else {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ?',
+                    [senderId]
+                );
+            }
 
             if (!customer) {
                 return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001`;

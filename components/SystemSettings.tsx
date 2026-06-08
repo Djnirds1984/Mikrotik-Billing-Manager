@@ -735,6 +735,26 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">This token must match what you enter in Facebook's webhook configuration</p>
                 </div>
 
+                {/* Router ID - IMPORTANT for multi-router isolation */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Router ID <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                        type="text"
+                        value={facebook.routerId || ''}
+                        onChange={e => update('routerId', e.target.value)}
+                        className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        placeholder="router_xxxxxxxxxx_xxxxxxx (from Routers page)"
+                    />
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400 font-semibold">
+                        ⚠️ CRITICAL: This isolates Facebook Bot to YOUR router only. Customers from other routers won't be accessible.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Find this in the Routers page → Copy the ID of this router
+                    </p>
+                </div>
+
                 {/* Facebook Page ID */}
                 <TextInput 
                     label="Facebook Page ID" 

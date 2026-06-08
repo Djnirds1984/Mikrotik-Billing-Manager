@@ -483,6 +483,7 @@ export interface FacebookMessengerSettings {
     pageId: string;
     pageAccessToken: string;
     verifyToken: string;
+    routerId?: string; // Which router this Facebook page is associated with
 }
 
 export interface LandingPagePage {
