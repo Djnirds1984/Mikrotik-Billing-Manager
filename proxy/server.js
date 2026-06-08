@@ -153,6 +153,9 @@ async function initDb() {
         
         // Facebook Messenger Bot settings (safe migration with defaults)
         if (!columnNames.includes('facebookSettings')) await db.exec("ALTER TABLE settings ADD COLUMN facebookSettings TEXT");
+        
+        // Company settings JSON column (for GCash and other config)
+        if (!columnNames.includes('companySettings')) await db.exec("ALTER TABLE settings ADD COLUMN companySettings TEXT");
 
         // Hotfix: ensure chat notifications route to Captive Chat in Admin
         try {
