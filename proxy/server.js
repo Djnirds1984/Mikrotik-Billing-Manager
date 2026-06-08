@@ -3827,53 +3827,62 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             // Try multiple lookup strategies to find the customer - FILTERED BY ROUTER
             let customer = null;
             
-            // Strategy 1: Search by accountNumber or username in customers table - ROUTER SCOPED
+            // Strategy 1: EXACT match by accountNumber - ROUTER SCOPED (HIGHEST PRIORITY)
             if (routerId) {
                 customer = await db.get(
-                    'SELECT * FROM customers WHERE (accountNumber = ? OR username = ?) AND routerId = ?',
-                    [accountNumber, accountNumber, routerId]
+                    'SELECT * FROM customers WHERE accountNumber = ? AND routerId = ?',
+                    [accountNumber, routerId]
                 );
-            } else {
-                // Fallback to unscoped search if no routerId configured
-                customer = await db.get(
-                    'SELECT * FROM customers WHERE accountNumber = ? OR username = ?',
-                    [accountNumber, accountNumber]
-                );
+                
+                if (customer) {
+                    console.log(`[Facebook Bot] ✅ Found by EXACT accountNumber: ${customer.accountNumber}`);
+                }
             }
             
-            if (customer) {
-                console.log(`[Facebook Bot] Found customer by accountNumber/username: ${customer.accountNumber || customer.username}`);
-            } else {
-                console.log(`[Facebook Bot] Customer not found in customers table, trying fallback lookups...`);
+            // Strategy 2: EXACT match by username - ROUTER SCOPED
+            if (!customer && routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE username = ? AND routerId = ?',
+                    [accountNumber, routerId]
+                );
                 
-                // Strategy 2: Try partial match on accountNumber (remove ACC- prefix if present) - ROUTER SCOPED
-                if (routerId) {
-                    const cleanNumber = accountNumber.replace(/^ACC[-]?/i, '');
-                    customer = await db.get(
-                        'SELECT * FROM customers WHERE (accountNumber LIKE ? OR username LIKE ?) AND routerId = ?',
-                        [`%${cleanNumber}%`, `%${cleanNumber}%`, routerId]
-                    );
-                    
-                    if (customer) {
-                        console.log(`[Facebook Bot] Found customer by partial match: ${customer.accountNumber}`);
-                    }
+                if (customer) {
+                    console.log(`[Facebook Bot] ✅ Found by EXACT username: ${customer.username}`);
                 }
+            }
+            
+            // Strategy 3: Partial match (remove ACC- prefix) - ROUTER SCOPED
+            if (!customer && routerId) {
+                const cleanNumber = accountNumber.replace(/^ACC[-]?/i, '');
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE (accountNumber LIKE ? OR username LIKE ?) AND routerId = ?',
+                    [`%${cleanNumber}%`, `%${cleanNumber}%`, routerId]
+                );
                 
-                // Strategy 3: Search by fullName in case they entered their name instead - ROUTER SCOPED
-                if (!customer && routerId) {
-                    customer = await db.get(
-                        'SELECT * FROM customers WHERE fullName = ? AND routerId = ?',
-                        [accountNumber, routerId]
-                    );
-                    
-                    if (customer) {
-                        console.log(`[Facebook Bot] Found customer by fullName: ${customer.fullName}`);
-                    }
+                if (customer) {
+                    console.log(`[Facebook Bot] ✅ Found by partial match: ${customer.accountNumber}`);
                 }
+            }
+            
+            // Strategy 4: Search by fullName - ROUTER SCOPED
+            if (!customer && routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE fullName = ? AND routerId = ?',
+                    [accountNumber, routerId]
+                );
                 
-                if (!customer) {
-                    console.log(`[Facebook Bot] All lookup strategies failed for: ${accountNumber}`);
+                if (customer) {
+                    console.log(`[Facebook Bot] ✅ Found by fullName: ${customer.fullName}`);
                 }
+            }
+            
+            // Fallback: If NO routerId configured, search without router scope
+            if (!customer && !routerId) {
+                console.warn('[Facebook Bot] ⚠️ No routerId! Searching ALL routers (may find wrong accounts)');
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE accountNumber = ? LIMIT 1',
+                    [accountNumber]
+                );
             }
 
             if (!customer) {
