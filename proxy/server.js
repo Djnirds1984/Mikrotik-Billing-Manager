@@ -1894,6 +1894,142 @@ async function startServer() {
 
     app.use('/api/db', dbRouter);
 
+    // Manual Payment Requests API (Public - Admin Panel Access)
+    app.get('/api/public/manual-payments', async (req, res) => {
+        try {
+            const { status } = req.query;
+            let query = 'SELECT * FROM manual_payment_requests WHERE 1=1';
+            const params = [];
+            
+            if (status) {
+                query += ' AND status = ?';
+                params.push(status);
+            }
+            
+            query += ' ORDER BY created_at DESC';
+            
+            const payments = await db.all(query, params);
+            res.json(payments);
+        } catch (e) {
+            console.error('[Manual Payments] Error fetching payments:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.post('/api/public/manual-payments/:id/approve', async (req, res) => {
+        try {
+            const { admin_notes } = req.body;
+            const paymentId = req.params.id;
+            
+            const payment = await db.get('SELECT * FROM manual_payment_requests WHERE id = ?', [paymentId]);
+            
+            if (!payment) {
+                return res.status(404).json({ message: 'Payment request not found' });
+            }
+            
+            if (payment.status !== 'pending') {
+                return res.status(400).json({ message: 'Payment already processed' });
+            }
+            
+            const now = new Date().toISOString();
+            
+            // Update payment status
+            await db.run(
+                'UPDATE manual_payment_requests SET status = ?, admin_notes = ?, approved_by = ?, approved_at = ?, updated_at = ? WHERE id = ?',
+                ['approved', admin_notes || '', 'admin', now, now, paymentId]
+            );
+            
+            // Record as sale in sales_records
+            const saleId = `sale_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await db.run(
+                'INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, finalAmount, payment_method, processedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [saleId, payment.customer_router_id, now, payment.customer_full_name, payment.plan_name, payment.plan_price, payment.plan_price, 'manual_gcash', 'admin']
+            );
+            
+            // Update customer due date (extend by 30 days)
+            const newDueDate = new Date();
+            newDueDate.setDate(newDueDate.getDate() + 30);
+            const dueDateStr = newDueDate.toISOString().split('T')[0];
+            
+            await db.run(
+                'UPDATE customers SET dueDate = ?, planType = ? WHERE accountNumber = ?',
+                [dueDateStr, 'Active', payment.customer_account_number]
+            );
+            
+            console.log(`[Manual Payments] Payment ${paymentId} approved for ${payment.customer_account_number}`);
+            
+            // Send Facebook notification to customer
+            try {
+                if (payment.customer_facebook_psid) {
+                    const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                    const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+                    
+                    if (fbConfig.enabled && fbConfig.pageAccessToken) {
+                        const message = `✅ Payment Approved!\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentId.split('_')[2].toUpperCase()}\n💰 Amount: ₱${payment.plan_price.toFixed(2)}\n\n✅ Your payment has been verified!\n\n📊 Account Status: ACTIVE\n📅 New Due Date: ${dueDateStr}\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Thank you for your payment!\n\n📞 Need help? Contact our support.`;
+                        
+                        await sendFacebookMessage(payment.customer_facebook_psid, message, fbConfig.pageAccessToken);
+                        console.log(`[Manual Payments] Facebook notification sent to ${payment.customer_account_number}`);
+                    }
+                }
+            } catch (fbErr) {
+                console.error('[Manual Payments] Failed to send Facebook notification:', fbErr.message);
+            }
+            
+            res.json({ message: 'Payment approved and account activated' });
+        } catch (e) {
+            console.error('[Manual Payments] Error approving payment:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.post('/api/public/manual-payments/:id/reject', async (req, res) => {
+        try {
+            const { admin_notes } = req.body;
+            const paymentId = req.params.id;
+            
+            const payment = await db.get('SELECT * FROM manual_payment_requests WHERE id = ?', [paymentId]);
+            
+            if (!payment) {
+                return res.status(404).json({ message: 'Payment request not found' });
+            }
+            
+            if (payment.status !== 'pending') {
+                return res.status(400).json({ message: 'Payment already processed' });
+            }
+            
+            const now = new Date().toISOString();
+            
+            await db.run(
+                'UPDATE manual_payment_requests SET status = ?, admin_notes = ?, rejected_at = ?, updated_at = ? WHERE id = ?',
+                ['rejected', admin_notes || '', now, now, paymentId]
+            );
+            
+            console.log(`[Manual Payments] Payment ${paymentId} rejected for ${payment.customer_account_number}`);
+            
+            // Send Facebook notification to customer
+            try {
+                if (payment.customer_facebook_psid) {
+                    const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                    const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+                    
+                    if (fbConfig.enabled && fbConfig.pageAccessToken) {
+                        const message = `❌ Payment Request Rejected\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentId.split('_')[2].toUpperCase()}\n\n❌ Your payment could not be verified.\n\nReason: ${admin_notes || 'Payment not found in our GCash account'}\n\n━━━━━━━━━━━━━━━━━━\n\n📋 What to do:\n• Verify your GCash transaction\n• Ensure correct amount was sent\n• Contact support with your GCash receipt\n\n📞 Need help? Contact our support.`;
+                        
+                        await sendFacebookMessage(payment.customer_facebook_psid, message, fbConfig.pageAccessToken);
+                        console.log(`[Manual Payments] Rejection notification sent to ${payment.customer_account_number}`);
+                    }
+                }
+            } catch (fbErr) {
+                console.error('[Manual Payments] Failed to send rejection notification:', fbErr.message);
+            }
+            
+            res.json({ message: 'Payment rejected' });
+        } catch (e) {
+            console.error('[Manual Payments] Error rejecting payment:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     app.get('/api/public/landing-page', async (req, res) => {
         try {
             const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
@@ -4653,148 +4789,6 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             await db.run('DELETE FROM repair_tickets WHERE id = ?', [req.params.id]);
             res.json({ message: 'Ticket deleted' });
         } catch (e) { res.status(500).json({ message: e.message }); }
-    });
-
-    // ========================================
-    // Manual Payment Requests API Routes (Public - Admin Panel Access)
-    // ========================================
-
-    // Get all manual payment requests
-    app.get('/api/db/manual-payments', async (req, res) => {
-        try {
-            const { status } = req.query;
-            let query = 'SELECT * FROM manual_payment_requests WHERE 1=1';
-            const params = [];
-            
-            if (status) {
-                query += ' AND status = ?';
-                params.push(status);
-            }
-            
-            query += ' ORDER BY created_at DESC';
-            
-            const payments = await db.all(query, params);
-            res.json(payments);
-        } catch (e) {
-            console.error('[Manual Payments] Error fetching payments:', e.message);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
-    // Approve manual payment
-    app.post('/api/db/manual-payments/:id/approve', async (req, res) => {
-        try {
-            const { admin_notes } = req.body;
-            const paymentId = req.params.id;
-            
-            const payment = await db.get('SELECT * FROM manual_payment_requests WHERE id = ?', [paymentId]);
-            
-            if (!payment) {
-                return res.status(404).json({ message: 'Payment request not found' });
-            }
-            
-            if (payment.status !== 'pending') {
-                return res.status(400).json({ message: 'Payment already processed' });
-            }
-            
-            const now = new Date().toISOString();
-            
-            // Update payment status
-            await db.run(
-                'UPDATE manual_payment_requests SET status = ?, admin_notes = ?, approved_by = ?, approved_at = ?, updated_at = ? WHERE id = ?',
-                ['approved', admin_notes || '', 'admin', now, now, paymentId]
-            );
-            
-            // Record as sale in sales_records
-            const saleId = `sale_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            await db.run(
-                'INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, finalAmount, payment_method, processedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [saleId, payment.customer_router_id, now, payment.customer_full_name, payment.plan_name, payment.plan_price, payment.plan_price, 'manual_gcash', 'admin']
-            );
-            
-            // Update customer due date (extend by 30 days)
-            const newDueDate = new Date();
-            newDueDate.setDate(newDueDate.getDate() + 30);
-            const dueDateStr = newDueDate.toISOString().split('T')[0];
-            
-            await db.run(
-                'UPDATE customers SET dueDate = ?, planType = ? WHERE accountNumber = ?',
-                [dueDateStr, 'Active', payment.customer_account_number]
-            );
-            
-            console.log(`[Manual Payments] Payment ${paymentId} approved for ${payment.customer_account_number}`);
-            
-            // Send Facebook notification to customer
-            try {
-                if (payment.customer_facebook_psid) {
-                    const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
-                    const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
-                    
-                    if (fbConfig.enabled && fbConfig.pageAccessToken) {
-                        const message = `✅ Payment Approved!\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentId.split('_')[2].toUpperCase()}\n💰 Amount: ₱${payment.plan_price.toFixed(2)}\n\n✅ Your payment has been verified!\n\n📊 Account Status: ACTIVE\n📅 New Due Date: ${dueDateStr}\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Thank you for your payment!\n\n📞 Need help? Contact our support.`;
-                        
-                        await sendFacebookMessage(payment.customer_facebook_psid, message, fbConfig.pageAccessToken);
-                        console.log(`[Manual Payments] Facebook notification sent to ${payment.customer_account_number}`);
-                    }
-                }
-            } catch (fbErr) {
-                console.error('[Manual Payments] Failed to send Facebook notification:', fbErr.message);
-            }
-            
-            res.json({ message: 'Payment approved and account activated' });
-        } catch (e) {
-            console.error('[Manual Payments] Error approving payment:', e.message);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
-    // Reject manual payment
-    app.post('/api/db/manual-payments/:id/reject', async (req, res) => {
-        try {
-            const { admin_notes } = req.body;
-            const paymentId = req.params.id;
-            
-            const payment = await db.get('SELECT * FROM manual_payment_requests WHERE id = ?', [paymentId]);
-            
-            if (!payment) {
-                return res.status(404).json({ message: 'Payment request not found' });
-            }
-            
-            if (payment.status !== 'pending') {
-                return res.status(400).json({ message: 'Payment already processed' });
-            }
-            
-            const now = new Date().toISOString();
-            
-            await db.run(
-                'UPDATE manual_payment_requests SET status = ?, admin_notes = ?, rejected_at = ?, updated_at = ? WHERE id = ?',
-                ['rejected', admin_notes || '', now, now, paymentId]
-            );
-            
-            console.log(`[Manual Payments] Payment ${paymentId} rejected for ${payment.customer_account_number}`);
-            
-            // Send Facebook notification to customer
-            try {
-                if (payment.customer_facebook_psid) {
-                    const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
-                    const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
-                    
-                    if (fbConfig.enabled && fbConfig.pageAccessToken) {
-                        const message = `❌ Payment Request Rejected\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentId.split('_')[2].toUpperCase()}\n\n❌ Your payment could not be verified.\n\nReason: ${admin_notes || 'Payment not found in our GCash account'}\n\n━━━━━━━━━━━━━━━━━━\n\n📋 What to do:\n• Verify your GCash transaction\n• Ensure correct amount was sent\n• Contact support with your GCash receipt\n\n📞 Need help? Contact our support.`;
-                        
-                        await sendFacebookMessage(payment.customer_facebook_psid, message, fbConfig.pageAccessToken);
-                        console.log(`[Manual Payments] Rejection notification sent to ${payment.customer_account_number}`);
-                    }
-                }
-            } catch (fbErr) {
-                console.error('[Manual Payments] Failed to send rejection notification:', fbErr.message);
-            }
-            
-            res.json({ message: 'Payment rejected' });
-        } catch (e) {
-            console.error('[Manual Payments] Error rejecting payment:', e.message);
-            res.status(500).json({ message: e.message });
-        }
     });
 
     // --- Repair Tickets (Public - Client Portal) ---
