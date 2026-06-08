@@ -3709,13 +3709,46 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             console.log(`[Facebook Bot] Registration attempt for account: ${accountNumber}`);
 
-            // Check if account exists in database
-            const customer = await db.get(
+            // Try multiple lookup strategies to find the customer
+            let customer = null;
+            
+            // Strategy 1: Search by accountNumber or username in customers table
+            customer = await db.get(
                 'SELECT * FROM customers WHERE accountNumber = ? OR username = ?',
                 [accountNumber, accountNumber]
             );
+            
+            if (customer) {
+                console.log(`[Facebook Bot] Found customer by accountNumber/username: ${customer.accountNumber || customer.username}`);
+            } else {
+                console.log(`[Facebook Bot] Customer not found in customers table, trying fallback lookups...`);
+                
+                // Strategy 2: Try partial match on accountNumber (remove ACC- prefix if present)
+                const cleanNumber = accountNumber.replace(/^ACC[-]?/i, '');
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE accountNumber LIKE ? OR username LIKE ?',
+                    [`%${cleanNumber}%`, `%${cleanNumber}%`]
+                );
+                
+                if (customer) {
+                    console.log(`[Facebook Bot] Found customer by partial match: ${customer.accountNumber}`);
+                } else {
+                    // Strategy 3: Search by fullName in case they entered their name instead
+                    customer = await db.get(
+                        'SELECT * FROM customers WHERE fullName = ?',
+                        [accountNumber]
+                    );
+                    
+                    if (customer) {
+                        console.log(`[Facebook Bot] Found customer by fullName: ${customer.fullName}`);
+                    } else {
+                        console.log(`[Facebook Bot] All lookup strategies failed for: ${accountNumber}`);
+                    }
+                }
+            }
 
             if (!customer) {
+                console.log(`[Facebook Bot] Account lookup failed for: ${accountNumber}`);
                 return `❌ Account "${accountNumber}" not found in our system.\n\nPlease check your account number and try again.\n\nIf you don't have an account yet, please visit our office or contact support.`;
             }
 
