@@ -2871,7 +2871,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         line_items: [{
                             name: planName || description || 'Internet Subscription',
                             amount: Math.round(totalAmount * 100), // PayMongo uses centavos
-                            quantity: 1
+                            quantity: 1,
+                            currency: 'PHP'  // REQUIRED inside line_items!
                         }],
                         payment_method_types: allowedMethods,
                         description: `${description}|${pppoeUsername}`,
@@ -4019,8 +4020,6 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const payload = {
                 data: {
                     attributes: {
-                        amount: Math.round(totalAmount * 100),
-                        currency: 'PHP',  // Required at top level for QRPH
                         description: checkoutData.description,
                         payment_method_types: paymongoSettings.paymentMethods || ['qrph'],
                         success_url: checkoutData.successUrl,
@@ -4030,8 +4029,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             {
                                 name: planName,
                                 amount: Math.round(totalAmount * 100),
-                                quantity: 1
-                                // NO currency here - only at top level
+                                quantity: 1,
+                                currency: 'PHP'  // REQUIRED inside line_items!
                             }
                         ]
                     }
