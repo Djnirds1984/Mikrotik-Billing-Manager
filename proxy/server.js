@@ -4011,27 +4011,38 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 line_items: [{ name: planName, amount: Math.round(totalAmount * 100), quantity: 1 }]
             }, null, 2));
 
+            console.log(`[Facebook Bot] === PAYMONGO DEBUG ===`);
+            console.log(`[Facebook Bot] paymongoSettings.paymentMethods:`, paymongoSettings.paymentMethods);
+            console.log(`[Facebook Bot] totalAmount:`, totalAmount);
+            console.log(`[Facebook Bot] checkoutData.amount:`, checkoutData.amount);
+            
+            const payload = {
+                data: {
+                    attributes: {
+                        amount: Math.round(totalAmount * 100),
+                        description: checkoutData.description,
+                        payment_method_types: paymongoSettings.paymentMethods || ['qrph'],
+                        success_url: checkoutData.successUrl,
+                        cancel_url: checkoutData.cancelUrl,
+                        metadata: checkoutData.metadata,
+                        line_items: [
+                            {
+                                name: planName,
+                                amount: Math.round(totalAmount * 100),
+                                quantity: 1
+                            }
+                        ]
+                    }
+                }
+            };
+            
+            console.log(`[Facebook Bot] ACTUAL PAYMONGO PAYLOAD:`, JSON.stringify(payload, null, 2));
+            console.log(`[Facebook Bot] line_items[0] keys:`, Object.keys(payload.data.attributes.line_items[0]));
+            console.log(`[Facebook Bot] === END DEBUG ===`);
+
             const response = await require('axios').post(
                 'https://api.paymongo.com/v1/checkout_sessions',
-                {
-                    data: {
-                        attributes: {
-                            amount: Math.round(totalAmount * 100),
-                            description: checkoutData.description,
-                            payment_method_types: paymongoSettings.paymentMethods || ['qrph'],
-                            success_url: checkoutData.successUrl,
-                            cancel_url: checkoutData.cancelUrl,
-                            metadata: checkoutData.metadata,
-                            line_items: [
-                                {
-                                    name: planName,
-                                    amount: Math.round(totalAmount * 100),
-                                    quantity: 1
-                                }
-                            ]
-                        }
-                    }
-                },
+                payload,
                 {
                     headers: {
                         'Content-Type': 'application/json',
