@@ -4004,13 +4004,20 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             };
 
             console.log(`[Facebook Bot] Creating PayMongo checkout for ${customer.accountNumber}, amount: ₱${totalAmount}`);
+            console.log(`[Facebook Bot] PayMongo request payload:`, JSON.stringify({
+                amount: Math.round(totalAmount * 100),
+                currency: 'PHP',
+                description: checkoutData.description,
+                payment_method_types: ['card', 'gcash', 'paymaya', 'grab_pay'],
+                line_items: [{ name: planName, amount: Math.round(totalAmount * 100), quantity: 1 }]
+            }, null, 2));
 
             const response = await require('axios').post(
                 'https://api.paymongo.com/v1/checkout_sessions',
                 {
                     data: {
                         attributes: {
-                            amount: checkoutData.amount,
+                            amount: Math.round(totalAmount * 100),
                             currency: 'PHP',
                             description: checkoutData.description,
                             payment_method_types: ['card', 'gcash', 'paymaya', 'grab_pay'],
@@ -4020,7 +4027,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             line_items: [
                                 {
                                     name: planName,
-                                    amount: checkoutData.amount,
+                                    amount: Math.round(totalAmount * 100),
                                     quantity: 1
                                 }
                             ]
@@ -4062,6 +4069,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             return paymentMessage;
         } catch (err) {
             console.error('[Facebook Bot] Payment creation error:', err.message);
+            if (err.response) {
+                console.error('[Facebook Bot] PayMongo error response status:', err.response.status);
+                console.error('[Facebook Bot] PayMongo error response data:', JSON.stringify(err.response.data, null, 2));
+            }
             return "❌ Sorry, an error occurred while creating your payment link. Please try again later or contact our support team.";
         }
     }
