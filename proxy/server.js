@@ -4011,6 +4011,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     data: {
                         attributes: {
                             amount: checkoutData.amount,
+                            currency: 'PHP',
                             description: checkoutData.description,
                             payment_method_types: ['card', 'gcash', 'paymaya', 'grab_pay'],
                             success_url: checkoutData.successUrl,
@@ -4019,7 +4020,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             line_items: [
                                 {
                                     name: planName,
-                                    amount: Math.round(planPrice * 100),
+                                    amount: checkoutData.amount,
                                     quantity: 1
                                 }
                             ]
