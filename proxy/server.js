@@ -4004,6 +4004,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             };
 
             console.log(`[Facebook Bot] Creating PayMongo checkout for ${customer.accountNumber}, amount: ₱${totalAmount}`);
+            console.log(`[Facebook Bot] PayMongo settings paymentMethods:`, paymongoSettings.paymentMethods);
             console.log(`[Facebook Bot] PayMongo request payload:`, JSON.stringify({
                 amount: Math.round(totalAmount * 100),
                 currency: 'PHP',
