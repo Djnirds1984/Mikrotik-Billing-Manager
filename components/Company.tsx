@@ -104,6 +104,23 @@ export const Company: React.FC<CompanyProps> = ({ settings, onSave }) => {
                             <label htmlFor="address" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Address</label>
                             <textarea name="address" id="address" value={formState.address || ''} onChange={handleChange} rows={3} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"></textarea>
                         </div>
+                        
+                        {/* GCash Payment Settings */}
+                        <div className="pt-6 border-t border-slate-200 dark:border-slate-700">
+                            <h4 className="text-base font-semibold text-slate-800 dark:text-slate-200 mb-4">💳 GCash Payment Settings</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label htmlFor="gcashNumber" className="block text-sm font-medium text-slate-700 dark:text-slate-300">GCash Number</label>
+                                    <input type="text" name="gcashNumber" id="gcashNumber" value={formState.gcashNumber || ''} onChange={handleChange} placeholder="09171234567" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                    <p className="mt-1 text-xs text-slate-500">Your GCash number for receiving payments</p>
+                                </div>
+                                <div>
+                                    <label htmlFor="gcashAccountName" className="block text-sm font-medium text-slate-700 dark:text-slate-300">GCash Account Name</label>
+                                    <input type="text" name="gcashAccountName" id="gcashAccountName" value={formState.gcashAccountName || ''} onChange={handleChange} placeholder="Juan Dela Cruz" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                    <p className="mt-1 text-xs text-slate-500">Name registered on your GCash account</p>
+                                </div>
+                            </div>
+                        </div>
                          
                         {status && (
                             <div className={`mt-4 text-sm p-3 rounded-md ${status.type === 'success' ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300'}`}>

@@ -276,7 +276,29 @@ async function initDb() {
                 clientEmail TEXT,
                 invoiceId TEXT,
                 coveredMonth TEXT,
-                processedBy TEXT DEFAULT 'admin'
+                processedBy TEXT DEFAULT 'admin',
+                payment_method TEXT DEFAULT 'manual'
+            );
+            CREATE TABLE IF NOT EXISTS manual_payment_requests (
+                id TEXT PRIMARY KEY,
+                customer_account_number TEXT NOT NULL,
+                customer_username TEXT,
+                customer_full_name TEXT,
+                customer_facebook_psid TEXT,
+                customer_router_id TEXT,
+                plan_name TEXT,
+                plan_price REAL NOT NULL,
+                gcash_reference_number TEXT NOT NULL,
+                customer_mobile_number TEXT NOT NULL,
+                customer_name_on_gcash TEXT,
+                payment_screenshot_url TEXT,
+                status TEXT DEFAULT 'pending',
+                admin_notes TEXT,
+                approved_by TEXT,
+                approved_at TEXT,
+                rejected_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT
             );
             CREATE TABLE IF NOT EXISTS client_invoices (
                 id TEXT PRIMARY KEY,
@@ -3388,12 +3410,20 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                 console.log(`[Facebook Bot] Message from ${senderId}: "${userMessage}"`);
                                 
                                 try {
-                                    // Process the message and get response
-                                    const response = await processFacebookBotMessage(senderId, userMessage, fbSettings.pageAccessToken);
+                                    // First, check if user is in manual payment flow
+                                    const manualPaymentResponse = await processManualPaymentSteps(senderId, userMessage);
                                     
-                                    // Send response if there is one
-                                    if (response) {
-                                        await sendFacebookMessage(senderId, response, fbSettings.pageAccessToken);
+                                    // If in manual payment flow, use that response
+                                    if (manualPaymentResponse) {
+                                        await sendFacebookMessage(senderId, manualPaymentResponse, fbSettings.pageAccessToken);
+                                    } else {
+                                        // Otherwise, process normal bot commands
+                                        const response = await processFacebookBotMessage(senderId, userMessage, fbSettings.pageAccessToken);
+                                        
+                                        // Send response if there is one
+                                        if (response) {
+                                            await sendFacebookMessage(senderId, response, fbSettings.pageAccessToken);
+                                        }
                                     }
                                 } catch (sendErr) {
                                     console.error('[Facebook Bot] Failed to send response:', sendErr.message);
@@ -3433,6 +3463,16 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         // Command: PAY, PAYMENT, BAYAD
         if (['PAY', 'PAYMENT', 'BAYAD'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
             return await handlePaymentCommand(senderId);
+        }
+
+        // Command: PAY ONLINE, 1, ONLINE
+        if (upperMessage === 'PAY ONLINE' || upperMessage === '1' || upperMessage === 'ONLINE') {
+            return await handlePayOnlineCommand(senderId);
+        }
+
+        // Command: PAY MANUAL, 2, MANUAL, GCASH
+        if (upperMessage === 'PAY MANUAL' || upperMessage === '2' || upperMessage === 'MANUAL' || upperMessage === 'GCASH') {
+            return await handlePayManualCommand(senderId);
         }
 
         // Command: REPAIR, TICKET, HELP ME, ISSUE, PROBLEM
@@ -3553,7 +3593,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     }
 
     // ========================================
-    // Handler: PAY Command (PayMongo Integration)
+    // Handler: PAY Command - Show Payment Options
     // ========================================
     async function handlePaymentCommand(senderId) {
         try {
@@ -3569,17 +3609,6 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can pay your subscription via Facebook Messenger.`;
             }
 
-            // Check if PayMongo is configured
-            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
-            let paymongoSettings = {};
-            try {
-                paymongoSettings = JSON.parse(settings?.paymongoSettings || '{}');
-            } catch (_) {}
-
-            if (!paymongoSettings.enabled || !paymongoSettings.secretKey) {
-                return `⚠️ Online payment is currently unavailable.\n\nPlease visit our office or contact support to make a payment.\n\n📞 Support Hotline: [Your number here]`;
-            }
-
             // Get customer's plan details
             const planName = customer.planName || 'Subscription';
             const planPrice = customer.planPrice || 0;
@@ -3588,12 +3617,87 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 return `⚠️ Unable to determine your plan price.\n\nPlease contact our support for assistance.\n\n📞 Support Hotline: [Your number here]`;
             }
 
+            // Check PayMongo availability
+            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            let paymongoSettings = {};
+            try {
+                paymongoSettings = JSON.parse(settings?.paymongoSettings || '{}');
+            } catch (_) {}
+
+            const paymongoAvailable = paymongoSettings.enabled && paymongoSettings.secretKey;
+
+            // Get company GCash settings
+            const companySettings = await db.get('SELECT companySettings FROM settings WHERE id = 1');
+            let companyInfo = {};
+            try {
+                companyInfo = JSON.parse(companySettings?.companySettings || '{}');
+            } catch (_) {}
+
+            let message = `💳 Payment Options\n━━━━━━━━━━━━━━━━━━\n\n👤 Account: ${customer.accountNumber}\n📛 Name: ${customer.fullName || 'N/A'}\n💰 Amount: ₱${planPrice.toFixed(2)}\n\nChoose your payment method:\n\n`;
+
+            if (paymongoAvailable) {
+                message += `1️⃣ ONLINE PAYMENT (PayMongo)\n   • GCash, PayMaya, Cards\n   • Automatic activation\n   • Send: PAY ONLINE\n\n`;
+            }
+
+            if (companyInfo.gcashNumber) {
+                message += `2️⃣ MANUAL GCASH PAYMENT\n   • Send directly to our GCash\n   • Admin verification required\n   • Send: PAY MANUAL\n\n`;
+            }
+
+            if (!paymongoAvailable && !companyInfo.gcashNumber) {
+                message += `⚠️ No payment methods available.\n\nPlease visit our office or contact support.\n\n📞 Support: [Your number]`;
+                return message;
+            }
+
+            message += `💡 Reply with option number (1 or 2)`;
+
+            return message;
+        } catch (err) {
+            console.error('[Facebook Bot] Payment options error:', err.message);
+            return "❌ Sorry, an error occurred. Please try again later or contact support.";
+        }
+    }
+
+    // ========================================
+    // Handler: PAY ONLINE Command (PayMongo Integration)
+    // ========================================
+    async function handlePayOnlineCommand(senderId) {
+        try {
+            console.log(`[Facebook Bot] Online payment request from Facebook user: ${senderId}`);
+
+            // Find customer by Facebook PSID
+            const customer = await db.get(
+                'SELECT * FROM customers WHERE facebook_psid = ?',
+                [senderId]
+            );
+
+            if (!customer) {
+                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001`;
+            }
+
+            // Check if PayMongo is configured
+            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            let paymongoSettings = {};
+            try {
+                paymongoSettings = JSON.parse(settings?.paymongoSettings || '{}');
+            } catch (_) {}
+
+            if (!paymongoSettings.enabled || !paymongoSettings.secretKey) {
+                return `⚠️ Online payment is currently unavailable.\n\nPlease try Manual GCash Payment instead or visit our office.`;
+            }
+
+            // Get customer's plan details
+            const planName = customer.planName || 'Subscription';
+            const planPrice = customer.planPrice || 0;
+
+            if (!planPrice || planPrice <= 0) {
+                return `⚠️ Unable to determine your plan price.\n\nPlease contact our support for assistance.`;
+            }
+
             // Calculate amount with convenience fee if enabled
             let totalAmount = planPrice;
             let feeDescription = '';
             
             if (paymongoSettings.passFeesToCustomer) {
-                // PayMongo fees: 2.5% + ₱15
                 const fee = Math.ceil(planPrice * 0.025) + 15;
                 totalAmount = planPrice + fee;
                 feeDescription = `\n• Convenience Fee: ₱${fee.toFixed(2)}`;
@@ -3604,7 +3708,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             // Create PayMongo checkout session
             const checkoutData = {
-                amount: totalAmount * 100, // Convert to cents
+                amount: totalAmount * 100,
                 description: `${planName}|${customer.username || customer.accountNumber}`,
                 pppoeUsername: customer.username || customer.accountNumber,
                 planName: planName,
@@ -3678,6 +3782,132 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         } catch (err) {
             console.error('[Facebook Bot] Payment creation error:', err.message);
             return "❌ Sorry, an error occurred while creating your payment link. Please try again later or contact our support team.";
+        }
+    }
+
+    // ========================================
+    // Manual Payment Session Store (In-Memory)
+    // ========================================
+    const pendingManualPayments = new Map();
+
+    // ========================================
+    // Handler: PAY MANUAL Command - Multi-Step Collection
+    // ========================================
+    async function handlePayManualCommand(senderId) {
+        try {
+            console.log(`[Facebook Bot] Manual payment request from Facebook user: ${senderId}`);
+
+            // Find customer by Facebook PSID
+            const customer = await db.get(
+                'SELECT * FROM customers WHERE facebook_psid = ?',
+                [senderId]
+            );
+
+            if (!customer) {
+                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001`;
+            }
+
+            // Get plan details
+            const planName = customer.planName || 'Subscription';
+            const planPrice = customer.planPrice || 0;
+
+            if (!planPrice || planPrice <= 0) {
+                return `⚠️ Unable to determine your plan price.\n\nPlease contact our support for assistance.`;
+            }
+
+            // Get company GCash settings
+            const companySettings = await db.get('SELECT companySettings FROM settings WHERE id = 1');
+            let companyInfo = {};
+            try {
+                companyInfo = JSON.parse(companySettings?.companySettings || '{}');
+            } catch (_) {}
+
+            if (!companyInfo.gcashNumber) {
+                return `⚠️ Manual GCash payment is currently unavailable.\n\nPlease try Online Payment or visit our office.`;
+            }
+
+            // Initialize payment session
+            pendingManualPayments.set(senderId, {
+                step: 'awaiting_reference',
+                customerAccountNumber: customer.accountNumber,
+                customerUsername: customer.username,
+                customerFullName: customer.fullName,
+                customerFacebookPsid: senderId,
+                customerRouterId: customer.routerId,
+                planName: planName,
+                planPrice: planPrice,
+                createdAt: Date.now()
+            });
+
+            const message = `📱 Manual GCash Payment\n━━━━━━━━━━━━━━━━━━\n\n💰 Amount to Pay: ₱${planPrice.toFixed(2)}\n\n📲 Send payment to our GCash:\nGCash Number: ${companyInfo.gcashNumber}\nName: ${companyInfo.gcashAccountName || companyInfo.companyName || 'N/A'}\n\nAfter sending payment, please provide:\n\n1️⃣ GCash Reference Number\n2️⃣ Your mobile number\n3️⃣ Name on your GCash account\n\n📝 Reply with your GCash Reference Number:\n(Example: 1234567890)`;
+
+            return message;
+        } catch (err) {
+            console.error('[Facebook Bot] Manual payment initiation error:', err.message);
+            return "❌ Sorry, an error occurred. Please try again later or contact support.";
+        }
+    }
+
+    // ========================================
+    // Handler: Process Manual Payment Steps
+    // ========================================
+    async function processManualPaymentSteps(senderId, userMessage) {
+        try {
+            const session = pendingManualPayments.get(senderId);
+            
+            if (!session) return null; // Not in manual payment flow
+
+            // Check if session expired (5 minutes)
+            if (Date.now() - session.createdAt > 5 * 60 * 1000) {
+                pendingManualPayments.delete(senderId);
+                return "⏱️ Payment session expired. Please send PAY to start again.";
+            }
+
+            if (session.step === 'awaiting_reference') {
+                session.gcashReference = userMessage.trim();
+                session.step = 'awaiting_mobile';
+                pendingManualPayments.set(senderId, session);
+                
+                return `✅ Reference number received.\n\n📱 Now, please send your mobile number:\n(Example: 09171234567)`;
+            }
+
+            if (session.step === 'awaiting_mobile') {
+                session.mobileNumber = userMessage.trim();
+                session.step = 'awaiting_name';
+                pendingManualPayments.set(senderId, session);
+                
+                return `✅ Mobile number received.\n\n👤 Finally, please send the name on your GCash account:\n(Example: Juan Dela Cruz)`;
+            }
+
+            if (session.step === 'awaiting_name') {
+                session.gcashName = userMessage.trim();
+                
+                // Create manual payment request in database
+                const paymentId = `manual_pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const now = new Date().toISOString();
+                
+                await db.run(
+                    'INSERT INTO manual_payment_requests (id, customer_account_number, customer_username, customer_full_name, customer_facebook_psid, customer_router_id, plan_name, plan_price, gcash_reference_number, customer_mobile_number, customer_name_on_gcash, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    [paymentId, session.customerAccountNumber, session.customerUsername, session.customerFullName, session.customerFacebookPsid, session.customerRouterId, session.planName, session.planPrice, session.gcashReference, session.mobileNumber, session.gcashName, 'pending', now, now]
+                );
+
+                console.log(`[Facebook Bot] Manual payment request created: ${paymentId} for account ${session.customerAccountNumber}`);
+                
+                // Clear session
+                pendingManualPayments.delete(senderId);
+                
+                // Extract short payment number
+                const paymentNumber = paymentId.split('_')[2].toUpperCase();
+                
+                // Send confirmation
+                return `✅ Manual Payment Request Submitted!\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentNumber}\n💰 Amount: ₱${session.planPrice.toFixed(2)}\n📱 GCash Ref: ${session.gcashReference}\n📱 Mobile: ${session.mobileNumber}\n👤 GCash Name: ${session.gcashName}\n\n⏱️ Status: Pending Verification\n\n📋 What's Next?\n• Our admin will verify your payment\n• You'll receive confirmation via Messenger\n• Verification time: 5-30 minutes\n\n💡 Keep your GCash receipt for reference.\n\n📞 Questions? Contact our support.`;
+            }
+
+            return null;
+        } catch (err) {
+            console.error('[Facebook Bot] Manual payment step processing error:', err.message);
+            pendingManualPayments.delete(senderId);
+            return "❌ Sorry, an error occurred. Please send PAY to start again or contact support.";
         }
     }
 
@@ -3866,7 +4096,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // Helper: Help Message
     // ========================================
     function getHelpMessage() {
-        return `🤖 CityConnect Billing Bot - Help Menu\n━━━━━━━━━━━━━━━━━━\n\n📝 Available Commands:\n\n1️⃣ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2️⃣ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3️⃣ PAY / PAYMENT / BAYAD\n   Pay your subscription via PayMongo\n   Supports: GCash, PayMaya, Card\n\n4️⃣ REPAIR / TICKET\n   Report internet issues & create support ticket\n   Example: REPAIR My internet is not working\n\n5️⃣ TICKET STATUS / TICKETS\n   Check your repair ticket status\n   Shows recent tickets & updates\n\n6️⃣ HELP / MENU\n   Show this help message\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Quick Start:\nSend: REGISTER <your_account_number>\n\n💳 Payment Commands:\n• PAY - Create payment link\n• BAYAD - Filipino term for payment\n\n🔧 Ticket Commands:\n• TICKET STATUS - View your tickets\n• TICKETS - Same as TICKET STATUS\n• REPAIR - Report an issue\n• NO INTERNET - Complete loss of connection\n• SLOW - Internet is very slow\n• INTERMITTENT - Connection keeps dropping\n\n📞 Need assistance? Contact our support team or visit our office.\n\n🌐 Powered by CityConnect Billing Manager`;
+        return `🤖 CityConnect Billing Bot - Help Menu\n━━━━━━━━━━━━━━━━━━\n\n📝 Available Commands:\n\n1️⃣ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2️⃣ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3️⃣ PAY / PAYMENT / BAYAD\n   Choose payment method (Online or Manual)\n   • PAY ONLINE - PayMongo (Auto-activate)\n   • PAY MANUAL - GCash (Admin verify)\n\n4️⃣ REPAIR / TICKET\n   Report internet issues & create support ticket\n   Example: REPAIR My internet is not working\n\n5️⃣ TICKET STATUS / TICKETS\n   Check your repair ticket status\n   Shows recent tickets & updates\n\n6️⃣ HELP / MENU\n   Show this help message\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Quick Start:\nSend: REGISTER <your_account_number>\n\n💳 Payment Commands:\n• PAY - Choose payment method\n• PAY ONLINE - Pay via PayMongo (GCash, Cards)\n• PAY MANUAL - Pay via GCash manual transfer\n• BAYAD - Filipino term for payment\n\n🔧 Ticket Commands:\n• TICKET STATUS - View your tickets\n• TICKETS - Same as TICKET STATUS\n• REPAIR - Report an issue\n• NO INTERNET - Complete loss of connection\n• SLOW - Internet is very slow\n• INTERMITTENT - Connection keeps dropping\n\n📞 Need assistance? Contact our support team or visit our office.\n\n🌐 Powered by CityConnect Billing Manager`;
     }
 
     // Helper function to send messages via Facebook Graph API
@@ -4248,6 +4478,148 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             await db.run('DELETE FROM repair_tickets WHERE id = ?', [req.params.id]);
             res.json({ message: 'Ticket deleted' });
         } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // ========================================
+    // Manual Payment Requests API Routes
+    // ========================================
+
+    // Get all manual payment requests
+    app.get('/api/manual-payments', protect, async (req, res) => {
+        try {
+            const { status } = req.query;
+            let query = 'SELECT * FROM manual_payment_requests WHERE 1=1';
+            const params = [];
+            
+            if (status) {
+                query += ' AND status = ?';
+                params.push(status);
+            }
+            
+            query += ' ORDER BY created_at DESC';
+            
+            const payments = await db.all(query, params);
+            res.json(payments);
+        } catch (e) {
+            console.error('[Manual Payments] Error fetching payments:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Approve manual payment
+    app.post('/api/manual-payments/:id/approve', protect, async (req, res) => {
+        try {
+            const { admin_notes } = req.body;
+            const paymentId = req.params.id;
+            
+            const payment = await db.get('SELECT * FROM manual_payment_requests WHERE id = ?', [paymentId]);
+            
+            if (!payment) {
+                return res.status(404).json({ message: 'Payment request not found' });
+            }
+            
+            if (payment.status !== 'pending') {
+                return res.status(400).json({ message: 'Payment already processed' });
+            }
+            
+            const now = new Date().toISOString();
+            
+            // Update payment status
+            await db.run(
+                'UPDATE manual_payment_requests SET status = ?, admin_notes = ?, approved_by = ?, approved_at = ?, updated_at = ? WHERE id = ?',
+                ['approved', admin_notes || '', req.user?.username || 'admin', now, now, paymentId]
+            );
+            
+            // Record as sale in sales_records
+            const saleId = `sale_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await db.run(
+                'INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, finalAmount, payment_method, processedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [saleId, payment.customer_router_id, now, payment.customer_full_name, payment.plan_name, payment.plan_price, payment.plan_price, 'manual_gcash', req.user?.username || 'admin']
+            );
+            
+            // Update customer due date (extend by 30 days)
+            const newDueDate = new Date();
+            newDueDate.setDate(newDueDate.getDate() + 30);
+            const dueDateStr = newDueDate.toISOString().split('T')[0];
+            
+            await db.run(
+                'UPDATE customers SET dueDate = ?, planType = ? WHERE accountNumber = ?',
+                [dueDateStr, 'Active', payment.customer_account_number]
+            );
+            
+            console.log(`[Manual Payments] Payment ${paymentId} approved for ${payment.customer_account_number}`);
+            
+            // Send Facebook notification to customer
+            try {
+                if (payment.customer_facebook_psid) {
+                    const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                    const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+                    
+                    if (fbConfig.enabled && fbConfig.pageAccessToken) {
+                        const message = `✅ Payment Approved!\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentId.split('_')[2].toUpperCase()}\n💰 Amount: ₱${payment.plan_price.toFixed(2)}\n\n✅ Your payment has been verified!\n\n📊 Account Status: ACTIVE\n📅 New Due Date: ${dueDateStr}\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Thank you for your payment!\n\n📞 Need help? Contact our support.`;
+                        
+                        await sendFacebookMessage(payment.customer_facebook_psid, message, fbConfig.pageAccessToken);
+                        console.log(`[Manual Payments] Facebook notification sent to ${payment.customer_account_number}`);
+                    }
+                }
+            } catch (fbErr) {
+                console.error('[Manual Payments] Failed to send Facebook notification:', fbErr.message);
+            }
+            
+            res.json({ message: 'Payment approved and account activated' });
+        } catch (e) {
+            console.error('[Manual Payments] Error approving payment:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Reject manual payment
+    app.post('/api/manual-payments/:id/reject', protect, async (req, res) => {
+        try {
+            const { admin_notes } = req.body;
+            const paymentId = req.params.id;
+            
+            const payment = await db.get('SELECT * FROM manual_payment_requests WHERE id = ?', [paymentId]);
+            
+            if (!payment) {
+                return res.status(404).json({ message: 'Payment request not found' });
+            }
+            
+            if (payment.status !== 'pending') {
+                return res.status(400).json({ message: 'Payment already processed' });
+            }
+            
+            const now = new Date().toISOString();
+            
+            await db.run(
+                'UPDATE manual_payment_requests SET status = ?, admin_notes = ?, rejected_at = ?, updated_at = ? WHERE id = ?',
+                ['rejected', admin_notes || '', now, now, paymentId]
+            );
+            
+            console.log(`[Manual Payments] Payment ${paymentId} rejected for ${payment.customer_account_number}`);
+            
+            // Send Facebook notification to customer
+            try {
+                if (payment.customer_facebook_psid) {
+                    const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                    const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+                    
+                    if (fbConfig.enabled && fbConfig.pageAccessToken) {
+                        const message = `❌ Payment Request Rejected\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentId.split('_')[2].toUpperCase()}\n\n❌ Your payment could not be verified.\n\nReason: ${admin_notes || 'Payment not found in our GCash account'}\n\n━━━━━━━━━━━━━━━━━━\n\n📋 What to do:\n• Verify your GCash transaction\n• Ensure correct amount was sent\n• Contact support with your GCash receipt\n\n📞 Need help? Contact our support.`;
+                        
+                        await sendFacebookMessage(payment.customer_facebook_psid, message, fbConfig.pageAccessToken);
+                        console.log(`[Manual Payments] Rejection notification sent to ${payment.customer_account_number}`);
+                    }
+                }
+            } catch (fbErr) {
+                console.error('[Manual Payments] Failed to send rejection notification:', fbErr.message);
+            }
+            
+            res.json({ message: 'Payment rejected' });
+        } catch (e) {
+            console.error('[Manual Payments] Error rejecting payment:', e.message);
+            res.status(500).json({ message: e.message });
+        }
     });
 
     // --- Repair Tickets (Public - Client Portal) ---

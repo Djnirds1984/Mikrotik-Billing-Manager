@@ -30,7 +30,8 @@ export type View =
   | 'repair_tickets'
   | 'notifications'
   | 'captive_chat'
-  | 'application_form';
+  | 'application_form'
+  | 'manual_payments';
 
 export interface Notification {
   id: string;
@@ -377,6 +378,8 @@ export interface CompanySettings {
     contactNumber?: string;
     email?: string;
     logoBase64?: string;
+    gcashNumber?: string;
+    gcashAccountName?: string;
 }
 
 export interface Application {

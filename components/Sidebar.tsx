@@ -90,6 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'panel_roles', label: t('sidebar.panel_roles'), icon: <KeyIcon className="w-6 h-6" /> },
     { id: 'client_portal_users', label: t('sidebar.client_portal_users'), icon: <ShieldCheckIcon className="w-6 h-6" /> },
     { id: 'repair_tickets', label: t('sidebar.repair_tickets') || 'Repair Tickets', icon: <CogIcon className="w-6 h-6" /> },
+    { id: 'manual_payments', label: 'Manual Payments', icon: <CurrencyDollarIcon className="w-6 h-6" /> },
     { id: 'updater', label: t('sidebar.updater'), icon: <UpdateIcon className="w-6 h-6" /> },
     { id: 'logs', label: t('sidebar.logs'), icon: <CodeBracketIcon className="w-6 h-6" /> },
     { id: 'license', label: t('sidebar.license'), icon: <KeyIcon className="w-6 h-6" /> },
