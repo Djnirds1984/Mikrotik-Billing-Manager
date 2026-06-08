@@ -549,6 +549,9 @@ async function initDb() {
             if (!salesColNames.includes('coveredMonth')) {
                 await db.exec("ALTER TABLE sales_records ADD COLUMN coveredMonth TEXT");
             }
+            if (!salesColNames.includes('payment_method')) {
+                await db.exec("ALTER TABLE sales_records ADD COLUMN payment_method TEXT DEFAULT 'manual'");
+            }
         } catch (_) {}
         try {
             const pwiCols = await db.all("PRAGMA table_info(pisowifi_income)");
@@ -3733,6 +3736,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // ========================================
     // Facebook Bot Message Processor
     // ========================================
+    
+    // In-memory conversation state storage (for multi-step flows)
+    const conversationStates = new Map();
+    
     async function processFacebookBotMessage(senderId, userMessage, pageAccessToken) {
         const upperMessage = userMessage.toUpperCase();
         
@@ -3753,6 +3760,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         // Command: UNREGISTER, UNLINK, DISCONNECT
         if (['UNREGISTER', 'UNLINK', 'DISCONNECT', 'UNREG', 'REMOVE'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
             return await handleUnregisterCommand(senderId, routerId);
+        }
+
+        // Command: END, STOP, EXIT, MAIN, MENU
+        if (['END', 'STOP', 'EXIT', 'MAIN', 'MENU', 'HOME', 'BACK'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
+            return await handleEndCommand(senderId);
         }
 
         // Command: BILL, BALANCE, STATUS, ACCOUNT
@@ -3917,6 +3929,26 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         } catch (err) {
             console.error('[Facebook Bot] Registration error:', err.message);
             return "❌ Sorry, an error occurred while processing your registration. Please try again later or contact support.";
+        }
+    }
+
+    // ========================================
+    // Handler: END Command - Return to Main Menu
+    // ========================================
+    async function handleEndCommand(senderId) {
+        try {
+            console.log(`[Facebook Bot] End conversation request from: ${senderId}`);
+            
+            // Clear any in-progress conversation state (if using session storage)
+            // This will reset any multi-step flows like payment collection
+            conversationStates.delete(senderId);
+            
+            console.log(`[Facebook Bot] Cleared conversation state for ${senderId}`);
+            
+            return `👋 Conversation Ended\n\nYou have returned to the main menu.\n\n📋 Available Commands:\n\n🔍 Account:\n• REGISTER <acct#> - Link your account\n• UNREGISTER - Unlink account\n• BILL - View billing\n• STATUS - Check status\n\n💳 Payments:\n• PAY - Payment options\n• PAY ONLINE - Online payment\n• PAY MANUAL - Manual/GCash\n\n🔧 Support:\n• REPAIR - Create ticket\n• TICKET STATUS - Check tickets\n• HELP - Show all commands\n\n💡 Type END anytime to return here.`;
+        } catch (err) {
+            console.error('[Facebook Bot] End command error:', err.message);
+            return "❌ Error occurred. Please try again or contact support.";
         }
     }
 
