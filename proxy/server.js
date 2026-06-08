@@ -4656,11 +4656,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // ========================================
-    // Manual Payment Requests API Routes
+    // Manual Payment Requests API Routes (Public - Admin Panel Access)
     // ========================================
 
     // Get all manual payment requests
-    dbRouter.get('/manual-payments', async (req, res) => {
+    app.get('/api/db/manual-payments', async (req, res) => {
         try {
             const { status } = req.query;
             let query = 'SELECT * FROM manual_payment_requests WHERE 1=1';
@@ -4682,7 +4682,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // Approve manual payment
-    dbRouter.post('/manual-payments/:id/approve', async (req, res) => {
+    app.post('/api/db/manual-payments/:id/approve', async (req, res) => {
         try {
             const { admin_notes } = req.body;
             const paymentId = req.params.id;
@@ -4749,7 +4749,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // Reject manual payment
-    dbRouter.post('/manual-payments/:id/reject', async (req, res) => {
+    app.post('/api/db/manual-payments/:id/reject', async (req, res) => {
         try {
             const { admin_notes } = req.body;
             const paymentId = req.params.id;
