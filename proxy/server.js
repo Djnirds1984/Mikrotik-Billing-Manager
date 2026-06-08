@@ -3430,8 +3430,17 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             return await handleBillingCommand(senderId);
         }
 
+        // Command: PAY, PAYMENT, BAYAD
+        if (['PAY', 'PAYMENT', 'BAYAD'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
+            return await handlePaymentCommand(senderId);
+        }
+
         // Command: REPAIR, TICKET, HELP ME, ISSUE, PROBLEM
         if (['REPAIR', 'TICKET', 'HELP ME', 'ISSUE', 'PROBLEM', 'NO INTERNET'].some(cmd => upperMessage.startsWith(cmd))) {
+            // Check if it's TICKET STATUS
+            if (upperMessage === 'TICKET STATUS' || upperMessage === 'TICKETS' || upperMessage === 'MY TICKETS') {
+                return await handleTicketStatusCommand(senderId);
+            }
             return await handleRepairTicketCommand(senderId, userMessage);
         }
 
@@ -3534,12 +3543,141 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 }
             }
 
-            const receipt = `📊 Billing Statement\n━━━━━━━━━━━━━━━━━━\n\n👤 Account Information:\n• Name: ${fullName}\n• Account #: ${customer.accountNumber}\n• Address: ${address}\n\n💰 Plan Details:\n• Plan: ${planName}\n• Status: ${status}\n• Due Date: ${dueDate}${daysRemaining}\n\n━━━━━━━━━━━━━━━━━━\n\nNeed help? Send HELP for all commands.\nTo update your info, visit our office or contact support.`;
+            const receipt = `📊 Billing Statement\n━━━━━━━━━━━━━━━━━━\n\n👤 Account Information:\n• Name: ${fullName}\n• Account #: ${customer.accountNumber}\n• Address: ${address}\n\n💰 Plan Details:\n• Plan: ${planName}\n• Status: ${status}\n• Due Date: ${dueDate}${daysRemaining}\n\n━━━━━━━━━━━━━━━━━━\n\n💳 To pay your bill, send: PAY\n\nNeed help? Send HELP for all commands.\nTo update your info, visit our office or contact support.`;
 
             return receipt;
         } catch (err) {
             console.error('[Facebook Bot] Billing inquiry error:', err.message);
             return "❌ Sorry, an error occurred while retrieving your billing information. Please try again later or contact support.";
+        }
+    }
+
+    // ========================================
+    // Handler: PAY Command (PayMongo Integration)
+    // ========================================
+    async function handlePaymentCommand(senderId) {
+        try {
+            console.log(`[Facebook Bot] Payment request from Facebook user: ${senderId}`);
+
+            // Find customer by Facebook PSID
+            const customer = await db.get(
+                'SELECT * FROM customers WHERE facebook_psid = ?',
+                [senderId]
+            );
+
+            if (!customer) {
+                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can pay your subscription via Facebook Messenger.`;
+            }
+
+            // Check if PayMongo is configured
+            const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+            let paymongoSettings = {};
+            try {
+                paymongoSettings = JSON.parse(settings?.paymongoSettings || '{}');
+            } catch (_) {}
+
+            if (!paymongoSettings.enabled || !paymongoSettings.secretKey) {
+                return `⚠️ Online payment is currently unavailable.\n\nPlease visit our office or contact support to make a payment.\n\n📞 Support Hotline: [Your number here]`;
+            }
+
+            // Get customer's plan details
+            const planName = customer.planName || 'Subscription';
+            const planPrice = customer.planPrice || 0;
+
+            if (!planPrice || planPrice <= 0) {
+                return `⚠️ Unable to determine your plan price.\n\nPlease contact our support for assistance.\n\n📞 Support Hotline: [Your number here]`;
+            }
+
+            // Calculate amount with convenience fee if enabled
+            let totalAmount = planPrice;
+            let feeDescription = '';
+            
+            if (paymongoSettings.passFeesToCustomer) {
+                // PayMongo fees: 2.5% + ₱15
+                const fee = Math.ceil(planPrice * 0.025) + 15;
+                totalAmount = planPrice + fee;
+                feeDescription = `\n• Convenience Fee: ₱${fee.toFixed(2)}`;
+            }
+
+            // Generate invoice number
+            const invoiceNo = `INV-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+            // Create PayMongo checkout session
+            const checkoutData = {
+                amount: totalAmount * 100, // Convert to cents
+                description: `${planName}|${customer.username || customer.accountNumber}`,
+                pppoeUsername: customer.username || customer.accountNumber,
+                planName: planName,
+                successUrl: `${process.env.PANEL_URL || 'https://billing.ajcvendosystem.com'}/payment/success`,
+                cancelUrl: `${process.env.PANEL_URL || 'https://billing.ajcvendosystem.com'}/payment/failed`,
+                metadata: {
+                    pppoe_username: customer.username || customer.accountNumber,
+                    plan_name: planName,
+                    invoice_no: invoiceNo,
+                    router_id: customer.routerId || '',
+                    duration_days: '30'
+                }
+            };
+
+            console.log(`[Facebook Bot] Creating PayMongo checkout for ${customer.accountNumber}, amount: ₱${totalAmount}`);
+
+            const response = await require('axios').post(
+                'https://api.paymongo.com/v1/checkout_sessions',
+                {
+                    data: {
+                        attributes: {
+                            amount: checkoutData.amount,
+                            description: checkoutData.description,
+                            payment_method_types: ['card', 'gcash', 'paymaya', 'grab_pay'],
+                            success_url: checkoutData.successUrl,
+                            cancel_url: checkoutData.cancelUrl,
+                            metadata: checkoutData.metadata,
+                            line_items: [
+                                {
+                                    name: planName,
+                                    amount: Math.round(planPrice * 100),
+                                    quantity: 1
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Basic ${Buffer.from(paymongoSettings.secretKey + ':').toString('base64')}`
+                    },
+                    timeout: 30000
+                }
+            );
+
+            const checkoutSession = response.data?.data;
+            if (!checkoutSession || !checkoutSession.attributes?.checkout_url) {
+                throw new Error('PayMongo did not return a checkout URL');
+            }
+
+            const checkoutUrl = checkoutSession.attributes.checkout_url;
+            const sessionId = checkoutSession.id;
+
+            // Store session in DB for tracking
+            try {
+                await db.run(
+                    'INSERT OR IGNORE INTO paymongo_sessions (session_id, invoice_no, pppoe_username, router_id, plan_name, amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [sessionId, invoiceNo, customer.username || customer.accountNumber, customer.routerId || '', planName, totalAmount, 'pending', new Date().toISOString()]
+                );
+            } catch (dbErr) {
+                console.warn('[Facebook Bot] Failed to store payment session:', dbErr.message);
+            }
+
+            console.log(`[Facebook Bot] Payment link created for ${customer.accountNumber}: ${checkoutUrl}`);
+
+            // Format payment message
+            const paymentMessage = `💳 Payment Request\n━━━━━━━━━━━━━━━━━━\n\n👤 Account Details:\n• Name: ${customer.fullName || 'Valued Customer'}\n• Account #: ${customer.accountNumber}\n• Plan: ${planName}\n\n💰 Payment Details:\n• Plan Price: ₱${planPrice.toFixed(2)}${feeDescription}\n• Total Amount: ₱${totalAmount.toFixed(2)}\n• Invoice #: ${invoiceNo}\n\n━━━━━━━━━━━━━━━━━━\n\n🔗 Click the link below to pay:\n${checkoutUrl}\n\n━━━━━━━━━━━━━━━━━━\n\n✅ Payment Methods:\n• GCash\n• PayMaya\n• GrabPay\n• Credit/Debit Card\n\n⏱️ Link expires in 24 hours.\n\n💡 After payment, your account will be activated automatically within 5 minutes.\n\n📞 Need help? Contact our support team.`;
+
+            return paymentMessage;
+        } catch (err) {
+            console.error('[Facebook Bot] Payment creation error:', err.message);
+            return "❌ Sorry, an error occurred while creating your payment link. Please try again later or contact our support team.";
         }
     }
 
@@ -3627,10 +3765,108 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     }
 
     // ========================================
+    // Handler: TICKET STATUS Command
+    // ========================================
+    async function handleTicketStatusCommand(senderId) {
+        try {
+            console.log(`[Facebook Bot] Ticket status request from Facebook user: ${senderId}`);
+
+            // Find customer by Facebook PSID
+            const customer = await db.get(
+                'SELECT * FROM customers WHERE facebook_psid = ?',
+                [senderId]
+            );
+
+            if (!customer) {
+                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo check your ticket status, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can track your repair tickets via Facebook Messenger.`;
+            }
+
+            // Get all tickets for this customer (by PPPoE username)
+            const tickets = await db.all(
+                'SELECT * FROM repair_tickets WHERE username = ? ORDER BY created_at DESC LIMIT 5',
+                [customer.username || customer.accountNumber]
+            );
+
+            if (!tickets || tickets.length === 0) {
+                return `📋 Ticket Status\n━━━━━━━━━━━━━━━━━━\n\nYou don't have any repair tickets yet.\n\n🔧 To report an issue, send:\nREPAIR <your issue description>\n\nExample: REPAIR My internet is not working\n\n━━━━━━━━━━━━━━━━━━\n\n📞 Need help? Contact our support team.`;
+            }
+
+            // Format ticket list
+            let message = `📋 Your Recent Tickets\n━━━━━━━━━━━━━━━━━━\n\n👤 Account: ${customer.accountNumber}\n📛 Name: ${customer.fullName || 'N/A'}\n\n`;
+
+            tickets.forEach((ticket, index) => {
+                const ticketNumber = ticket.id.split('_')[1];
+                
+                // Status icons
+                const statusIcons = {
+                    'open': '🟢',
+                    'in_progress': '🔵',
+                    'resolved': '✅',
+                    'closed': '⚫'
+                };
+                
+                // Priority icons
+                const priorityIcons = {
+                    'low': '🟢',
+                    'normal': '🟡',
+                    'high': '🟠',
+                    'urgent': '🔴'
+                };
+
+                // Category display
+                const categoryNames = {
+                    'no_internet': 'No Internet',
+                    'slow_connection': 'Slow Connection',
+                    'intermittent': 'Intermittent',
+                    'line_issue': 'Line Issue',
+                    'other': 'Other'
+                };
+
+                const statusIcon = statusIcons[ticket.status] || '⚪';
+                const priorityIcon = priorityIcons[ticket.priority] || '🟡';
+                const categoryName = categoryNames[ticket.category] || ticket.category;
+
+                // Format dates
+                const createdDate = new Date(ticket.created_at).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                message += `${index + 1}️⃣ Ticket #${ticketNumber}\n`;
+                message += `${statusIcon} Status: ${ticket.status.replace('_', ' ').toUpperCase()}\n`;
+                message += `${priorityIcon} Priority: ${ticket.priority.toUpperCase()}\n`;
+                message += `📂 Category: ${categoryName}\n`;
+                message += `📝 Issue: ${ticket.description.substring(0, 50)}${ticket.description.length > 50 ? '...' : ''}\n`;
+                message += `📅 Created: ${createdDate}\n`;
+                
+                if (ticket.admin_notes) {
+                    message += `💬 Admin Note: ${ticket.admin_notes.substring(0, 50)}${ticket.admin_notes.length > 50 ? '...' : ''}\n`;
+                }
+                
+                if (ticket.assigned_to) {
+                    message += `👨‍🔧 Assigned to: ${ticket.assigned_to}\n`;
+                }
+                
+                message += `\n`;
+            });
+
+            message += `━━━━━━━━━━━━━━━━━━\n\n💡 Need updates?\n• Our team will notify you via Messenger\n• Or send TICKET STATUS anytime\n\n📞 For urgent issues, call our support hotline.`;
+
+            return message;
+        } catch (err) {
+            console.error('[Facebook Bot] Ticket status error:', err.message);
+            return "❌ Sorry, an error occurred while retrieving your ticket status. Please try again later or contact support.";
+        }
+    }
+
+    // ========================================
     // Helper: Help Message
     // ========================================
     function getHelpMessage() {
-        return `🤖 CityConnect Billing Bot - Help Menu\n━━━━━━━━━━━━━━━━━━\n\n📝 Available Commands:\n\n1️⃣ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2️⃣ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3️⃣ REPAIR / TICKET\n   Report internet issues & create support ticket\n   Example: REPAIR My internet is not working\n\n4️⃣ HELP / MENU\n   Show this help message\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Quick Start:\nSend: REGISTER <your_account_number>\n\n🔧 Common Repair Commands:\n• REPAIR - Report an issue\n• NO INTERNET - Complete loss of connection\n• SLOW - Internet is very slow\n• INTERMITTENT - Connection keeps dropping\n\n📞 Need assistance? Contact our support team or visit our office.\n\n🌐 Powered by CityConnect Billing Manager`;
+        return `🤖 CityConnect Billing Bot - Help Menu\n━━━━━━━━━━━━━━━━━━\n\n📝 Available Commands:\n\n1️⃣ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2️⃣ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3️⃣ PAY / PAYMENT / BAYAD\n   Pay your subscription via PayMongo\n   Supports: GCash, PayMaya, Card\n\n4️⃣ REPAIR / TICKET\n   Report internet issues & create support ticket\n   Example: REPAIR My internet is not working\n\n5️⃣ TICKET STATUS / TICKETS\n   Check your repair ticket status\n   Shows recent tickets & updates\n\n6️⃣ HELP / MENU\n   Show this help message\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Quick Start:\nSend: REGISTER <your_account_number>\n\n💳 Payment Commands:\n• PAY - Create payment link\n• BAYAD - Filipino term for payment\n\n🔧 Ticket Commands:\n• TICKET STATUS - View your tickets\n• TICKETS - Same as TICKET STATUS\n• REPAIR - Report an issue\n• NO INTERNET - Complete loss of connection\n• SLOW - Internet is very slow\n• INTERMITTENT - Connection keeps dropping\n\n📞 Need assistance? Contact our support team or visit our office.\n\n🌐 Powered by CityConnect Billing Manager`;
     }
 
     // Helper function to send messages via Facebook Graph API
@@ -3928,10 +4164,81 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
             const now = new Date().toISOString();
             const resolved_at = status === 'resolved' ? now : ticket.resolved_at;
+            
+            // Check if status is changing
+            const statusChanged = status && status !== ticket.status;
+            const oldStatus = ticket.status;
+            
             await db.run(
                 'UPDATE repair_tickets SET status = ?, priority = ?, admin_notes = ?, assigned_to = ?, resolved_at = ?, updated_at = ? WHERE id = ?',
                 [status || ticket.status, priority || ticket.priority, admin_notes ?? ticket.admin_notes, assigned_to ?? ticket.assigned_to, resolved_at, now, req.params.id]
             );
+            
+            // Send Facebook notification to customer if ticket was created by Facebook user
+            if (statusChanged) {
+                try {
+                    // Find customer by PPPoE username
+                    const customer = await db.get(
+                        'SELECT facebook_psid FROM customers WHERE username = ? OR accountNumber = ?',
+                        [ticket.username, ticket.username]
+                    );
+                    
+                    if (customer && customer.facebook_psid) {
+                        // Get Facebook settings
+                        const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                        let fbConfig = {};
+                        try {
+                            fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+                        } catch (_) {}
+                        
+                        if (fbConfig.enabled && fbConfig.pageAccessToken) {
+                            // Build notification message
+                            const statusIcons = {
+                                'open': '🟢',
+                                'in_progress': '🔵',
+                                'resolved': '✅',
+                                'closed': '⚫'
+                            };
+                            
+                            const statusIcon = statusIcons[status] || '⚪';
+                            const ticketNumber = ticket.id.split('_')[1];
+                            
+                            let notificationMessage = `${statusIcon} Ticket Update\n━━━━━━━━━━━━━━━━━━\n\n🎫 Ticket #${ticketNumber}\n\n`;
+                            notificationMessage += `📊 Status Changed:\n`;
+                            notificationMessage += `From: ${oldStatus.replace('_', ' ').toUpperCase()}\n`;
+                            notificationMessage += `To: ${status.replace('_', ' ').toUpperCase()}\n\n`;
+                            
+                            if (admin_notes) {
+                                notificationMessage += `💬 Admin Note:\n${admin_notes}\n\n`;
+                            }
+                            
+                            if (assigned_to) {
+                                notificationMessage += `👨‍🔧 Assigned to: ${assigned_to}\n\n`;
+                            }
+                            
+                            notificationMessage += `━━━━━━━━━━━━━━━━━━\n\n`;
+                            
+                            if (status === 'resolved') {
+                                notificationMessage += `✅ Your issue has been resolved!\n`;
+                                notificationMessage += `If you're still experiencing problems, please contact us.\n\n`;
+                            } else if (status === 'in_progress') {
+                                notificationMessage += `🔧 Our team is working on your issue.\n`;
+                                notificationMessage += `We'll update you once it's resolved.\n\n`;
+                            }
+                            
+                            notificationMessage += `📞 Need help? Contact our support team.`;
+                            
+                            // Send notification via Facebook
+                            await sendFacebookMessage(customer.facebook_psid, notificationMessage, fbConfig.pageAccessToken);
+                            console.log(`[Repair Ticket] Facebook notification sent to ${ticket.username} for ticket #${ticketNumber}`);
+                        }
+                    }
+                } catch (fbErr) {
+                    console.error('[Repair Ticket] Failed to send Facebook notification:', fbErr.message);
+                    // Don't fail the update if notification fails
+                }
+            }
+            
             res.json({ message: 'Ticket updated' });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
