@@ -353,6 +353,31 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
 
     return (
         <SettingsSection title="PayMongo Payment Gateway">
+            {/* Test Mode Warning */}
+            {(paymongo.publicKey?.includes('_test_') || paymongo.secretKey?.includes('_test_')) && (
+                <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border-2 border-red-500 rounded-lg">
+                    <div className="flex items-start gap-3">
+                        <span className="text-2xl">⚠️</span>
+                        <div>
+                            <h4 className="font-bold text-red-800 dark:text-red-300 text-lg">TEST MODE DETECTED</h4>
+                            <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+                                You are using <strong>TEST API KEYS</strong>. All payments will be <strong>SIMULATED</strong> and no real money will be processed.
+                            </p>
+                            <p className="text-sm text-red-700 dark:text-red-400 mt-2">
+                                To accept <strong>REAL PAYMENTS</strong>, you must use <strong>LIVE API KEYS</strong> from your PayMongo dashboard:
+                            </p>
+                            <ul className="text-xs text-red-600 dark:text-red-500 mt-2 list-disc list-inside space-y-1">
+                                <li>Live Public Key starts with: <code className="bg-red-100 dark:bg-red-900 px-2 rounded">pk_live_...</code></li>
+                                <li>Live Secret Key starts with: <code className="bg-red-100 dark:bg-red-900 px-2 rounded">sk_live_...</code></li>
+                            </ul>
+                            <p className="text-xs text-red-600 dark:text-red-500 mt-2 font-semibold">
+                                🚨 DANGER: Test mode shows "SIMULATED PAYMENT" banner to customers and cannot process real transactions!
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
             <Toggle label="Enable PayMongo Payments" checked={paymongo.enabled || false} onChange={c => update('enabled', c)} />
             <div className={`space-y-4 ${!paymongo.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
                 <TextInput label="Public Key" name="publicKey" value={paymongo.publicKey || ''} onChange={e => update('publicKey', e.target.value)} type="password" />
