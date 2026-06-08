@@ -1759,8 +1759,18 @@ async function startServer() {
 
     dbRouter.get('/company-settings', async (req, res) => {
         try {
-            const s = await db.get('SELECT companyName, address, contactNumber, email, logoBase64 FROM settings WHERE id = 1');
-            res.json(s || {});
+            const s = await db.get('SELECT companyName, address, contactNumber, email, logoBase64, companySettings FROM settings WHERE id = 1');
+            if (s && s.companySettings) {
+                try {
+                    const companySettings = JSON.parse(s.companySettings);
+                    // Merge companySettings JSON with direct columns
+                    res.json({ ...s, ...companySettings });
+                } catch (e) {
+                    res.json(s);
+                }
+            } else {
+                res.json(s || {});
+            }
         } catch (e) {
             res.status(500).json({ message: e.message });
         }
@@ -1768,10 +1778,32 @@ async function startServer() {
 
     dbRouter.post('/company-settings', async (req, res) => {
         try {
-            const keys = Object.keys(req.body);
-            const values = Object.values(req.body);
+            // Extract GCash fields and store them in companySettings JSON
+            const { gcashNumber, gcashAccountName, ...directFields } = req.body;
+            
+            // Get existing companySettings
+            const existing = await db.get('SELECT companySettings FROM settings WHERE id = 1');
+            let companySettings = {};
+            if (existing && existing.companySettings) {
+                try {
+                    companySettings = JSON.parse(existing.companySettings);
+                } catch (e) {}
+            }
+            
+            // Update with new GCash fields
+            if (gcashNumber !== undefined) companySettings.gcashNumber = gcashNumber;
+            if (gcashAccountName !== undefined) companySettings.gcashAccountName = gcashAccountName;
+            
+            // Save direct fields as columns
+            const keys = Object.keys(directFields);
+            const values = Object.values(directFields);
             const setClause = keys.map(k => `${k} = ?`).join(',');
-            await db.run(`UPDATE settings SET ${setClause} WHERE id = 1`, values);
+            
+            // Also save companySettings as JSON
+            const finalSetClause = setClause ? `${setClause}, companySettings = ?` : 'companySettings = ?';
+            const finalValues = setClause ? [...values, JSON.stringify(companySettings)] : [JSON.stringify(companySettings)];
+            
+            await db.run(`UPDATE settings SET ${finalSetClause} WHERE id = 1`, finalValues);
             res.json({ message: 'Company settings saved' });
         } catch (e) {
             res.status(500).json({ message: e.message });
