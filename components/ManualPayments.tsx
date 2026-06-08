@@ -35,13 +35,13 @@ export const ManualPayments: React.FC = () => {
     const fetchPayments = async () => {
         try {
             setIsLoading(true);
-            const response = await fetch(`/api/manual-payments${filter ? `?status=${filter}` : ''}`);
+            const response = await fetch(`/api/db/manual-payments${filter ? `?status=${filter}` : ''}`);
             if (!response.ok) throw new Error('Failed to fetch payments');
             const data = await response.json();
             setPayments(data);
             
             // Fetch pending count for badge
-            const pendingResponse = await fetch('/api/manual-payments?status=pending');
+            const pendingResponse = await fetch('/api/db/manual-payments?status=pending');
             if (pendingResponse.ok) {
                 const pendingData = await pendingResponse.json();
                 setPendingCount(pendingData.length);
@@ -64,7 +64,7 @@ export const ManualPayments: React.FC = () => {
         if (!selectedPayment) return;
         
         try {
-            const response = await fetch(`/api/manual-payments/${selectedPayment.id}/approve`, {
+            const response = await fetch(`/api/db/manual-payments/${selectedPayment.id}/approve`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ admin_notes: adminNotes })
@@ -89,7 +89,7 @@ export const ManualPayments: React.FC = () => {
         if (!selectedPayment) return;
         
         try {
-            const response = await fetch(`/api/manual-payments/${selectedPayment.id}/reject`, {
+            const response = await fetch(`/api/db/manual-payments/${selectedPayment.id}/reject`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ admin_notes: adminNotes })

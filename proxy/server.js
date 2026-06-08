@@ -4660,7 +4660,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // ========================================
 
     // Get all manual payment requests
-    app.get('/api/manual-payments', protect, async (req, res) => {
+    dbRouter.get('/manual-payments', async (req, res) => {
         try {
             const { status } = req.query;
             let query = 'SELECT * FROM manual_payment_requests WHERE 1=1';
@@ -4682,7 +4682,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // Approve manual payment
-    app.post('/api/manual-payments/:id/approve', protect, async (req, res) => {
+    dbRouter.post('/manual-payments/:id/approve', async (req, res) => {
         try {
             const { admin_notes } = req.body;
             const paymentId = req.params.id;
@@ -4702,14 +4702,14 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             // Update payment status
             await db.run(
                 'UPDATE manual_payment_requests SET status = ?, admin_notes = ?, approved_by = ?, approved_at = ?, updated_at = ? WHERE id = ?',
-                ['approved', admin_notes || '', req.user?.username || 'admin', now, now, paymentId]
+                ['approved', admin_notes || '', 'admin', now, now, paymentId]
             );
             
             // Record as sale in sales_records
             const saleId = `sale_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             await db.run(
                 'INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, finalAmount, payment_method, processedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [saleId, payment.customer_router_id, now, payment.customer_full_name, payment.plan_name, payment.plan_price, payment.plan_price, 'manual_gcash', req.user?.username || 'admin']
+                [saleId, payment.customer_router_id, now, payment.customer_full_name, payment.plan_name, payment.plan_price, payment.plan_price, 'manual_gcash', 'admin']
             );
             
             // Update customer due date (extend by 30 days)
@@ -4749,7 +4749,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // Reject manual payment
-    app.post('/api/manual-payments/:id/reject', protect, async (req, res) => {
+    dbRouter.post('/manual-payments/:id/reject', async (req, res) => {
         try {
             const { admin_notes } = req.body;
             const paymentId = req.params.id;
