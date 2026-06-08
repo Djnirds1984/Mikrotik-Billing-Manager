@@ -4020,6 +4020,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 data: {
                     attributes: {
                         amount: Math.round(totalAmount * 100),
+                        currency: 'PHP',  // Required at top level for QRPH
                         description: checkoutData.description,
                         payment_method_types: paymongoSettings.paymentMethods || ['qrph'],
                         success_url: checkoutData.successUrl,
@@ -4030,6 +4031,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                 name: planName,
                                 amount: Math.round(totalAmount * 100),
                                 quantity: 1
+                                // NO currency here - only at top level
                             }
                         ]
                     }
