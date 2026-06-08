@@ -3899,60 +3899,98 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             // Get customer's plan details
-            const planName = customer.planName || 'Subscription';
+            let planName = customer.planName || 'Subscription';
             let planPrice = customer.planPrice || 0;
             
-            console.log(`[Facebook Bot] Customer plan info: planName="${customer.planName}", planPrice=${customer.planPrice}`);
-
-            // ALWAYS try to get fresh price from billing_plans (customer.planPrice might be outdated)
-            console.log(`[Facebook Bot] Attempting to lookup plan price from billing_plans...`);
-            let planLookupFailed = false;
+            console.log(`[Facebook Bot] Customer record: planName="${customer.planName}", planPrice=${customer.planPrice}`);
             
-            try {
-                // Try to find plan by name (case-insensitive) - ROUTER SCOPED
-                if (customer.planName) {
+            // CRITICAL: Try to get ACTUAL plan from MikroTik PPPoE secret comment (more up-to-date than customers table)
+            if (routerId && customer.username) {
+                try {
+                    console.log(`[Facebook Bot] Attempting to get plan from MikroTik PPPoE secret: ${customer.username}`);
+                    
+                    // Get router config
+                    const router = await db.get('SELECT * FROM routers WHERE id = ?', [routerId]);
+                    
+                    if (router) {
+                        const axios = require('axios');
+                        const baseUrl = `http://${router.host}:${router.port}`;
+                        const auth = { username: router.user, password: router.password };
+                        
+                        // Get PPPoE secret
+                        const secretResponse = await axios.get(`${baseUrl}/ppp/secret`, {
+                            auth,
+                            params: { name: customer.username },
+                            timeout: 10000
+                        });
+                        
+                        if (secretResponse.data && secretResponse.data.length > 0) {
+                            const secret = secretResponse.data[0];
+                            console.log(`[Facebook Bot] Found PPPoE secret for ${customer.username}`);
+                            
+                            // Parse comment to get plan info
+                            if (secret.comment) {
+                                try {
+                                    const commentData = JSON.parse(secret.comment);
+                                    
+                                    // Use plan from comment if available
+                                    if (commentData.planName) {
+                                        planName = commentData.planName;
+                                        console.log(`[Facebook Bot] ✅ Got planName from MikroTik secret: "${planName}"`);
+                                    }
+                                    
+                                    if (commentData.planPrice) {
+                                        planPrice = commentData.planPrice;
+                                        console.log(`[Facebook Bot] ✅ Got planPrice from MikroTik secret: ₱${planPrice}`);
+                                    }
+                                    
+                                    // If we have plan name but no price, lookup in billing_plans
+                                    if (planName && (!planPrice || planPrice <= 0)) {
+                                        const plan = await db.get(
+                                            'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) AND routerId = ? LIMIT 1',
+                                            [planName, routerId]
+                                        );
+                                        if (plan && plan.price) {
+                                            planPrice = plan.price;
+                                            console.log(`[Facebook Bot] ✅ Got price from billing_plans: ₱${planPrice}`);
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.warn(`[Facebook Bot] Failed to parse PPPoE secret comment:`, e.message);
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`[Facebook Bot] Failed to get plan from MikroTik:`, err.message);
+                    // Continue with customer record data as fallback
+                }
+            }
+            
+            // Fallback: If still no price, try billing_plans lookup with current planName
+            if (!planPrice || planPrice <= 0) {
+                console.log(`[Facebook Bot] No price yet, trying billing_plans lookup for: "${planName}"`);
+                try {
                     const plan = routerId
                         ? await db.get(
                             'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) AND routerId = ? LIMIT 1',
-                            [customer.planName, routerId]
+                            [planName, routerId]
                           )
                         : await db.get(
                             'SELECT price FROM billing_plans WHERE LOWER(name) = LOWER(?) LIMIT 1',
-                            [customer.planName]
+                            [planName]
                           );
+                    
                     if (plan && plan.price) {
                         planPrice = plan.price;
-                        console.log(`[Facebook Bot] ✅ Retrieved plan price from billing_plans: ₱${planPrice} for "${customer.planName}"`);
-                    } else {
-                        console.warn(`[Facebook Bot] ⚠️ Plan "${customer.planName}" not found in billing_plans`);
-                        planLookupFailed = true;
+                        console.log(`[Facebook Bot] ✅ Got price from billing_plans: ₱${planPrice}`);
                     }
+                } catch (err) {
+                    console.warn('[Facebook Bot] Failed billing_plans lookup:', err.message);
                 }
-                
-                // Fallback: try to get from planId if available
-                if ((!planPrice || planPrice <= 0) && customer.planId) {
-                    const plan = await db.get(
-                        'SELECT price FROM billing_plans WHERE id = ? LIMIT 1',
-                        [customer.planId]
-                    );
-                    if (plan && plan.price) {
-                        planPrice = plan.price;
-                        console.log(`[Facebook Bot] ✅ Retrieved plan price by ID: ₱${planPrice}`);
-                        planLookupFailed = false;
-                    }
-                }
-            } catch (err) {
-                console.warn('[Facebook Bot] Failed to lookup plan price:', err.message);
-                planLookupFailed = true;
-            }
-            
-            // If plan lookup failed but customer has a stored price, use it as fallback
-            if (planLookupFailed && (!planPrice || planPrice <= 0) && customer.planPrice && customer.planPrice > 0) {
-                planPrice = customer.planPrice;
-                console.log(`[Facebook Bot] ⚠️ Using customer's stored planPrice as fallback: ₱${planPrice}`);
             }
 
-            // If still no price after all lookups, error
+            // If still no price after all attempts, error
             if (!planPrice || planPrice <= 0) {
                 console.error(`[Facebook Bot] CRITICAL: Cannot determine price for customer ${customer.accountNumber}`);
                 
@@ -3961,7 +3999,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     ? await db.all('SELECT name, price FROM billing_plans WHERE routerId = ?', [routerId])
                     : await db.all('SELECT name, price FROM billing_plans LIMIT 10');
                 
-                return `⚠️ Unable to determine your plan price.\n\nYour account shows: "${customer.planName || 'N/A'}"\nBut this plan doesn't exist in our system.\n\n📋 Available plans:\n${allPlans.map(p => `• ${p.name} (₱${p.price})`).join('\n')}\n\n📞 Please contact support to update your plan.`;
+                return `⚠️ Unable to determine your plan price.\n\nYour account shows: "${planName}"\nBut this plan doesn't exist in our system.\n\n📋 Available plans:\n${allPlans.map(p => `• ${p.name} (₱${p.price})`).join('\n')}\n\n📞 Please contact support to update your plan.`;
             }
 
             // Check PayMongo availability
