@@ -3808,22 +3808,6 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             console.log(`[Facebook Bot] Registration attempt for account: ${accountNumber} (router: ${routerId || 'ALL'})`);
 
-            // DEBUG: Show all customers with this account number (regardless of router)
-            const allMatches = await db.all(
-                'SELECT id, accountNumber, username, fullName, routerId FROM customers WHERE accountNumber LIKE ? OR username LIKE ?',
-                [`%${accountNumber}%`, `%${accountNumber}%`]
-            );
-            console.log(`[Facebook Bot] DEBUG - All customers matching "${accountNumber}":`, JSON.stringify(allMatches, null, 2));
-            
-            // DEBUG: Show all customers for this router
-            if (routerId) {
-                const routerCustomers = await db.all(
-                    'SELECT id, accountNumber, username, fullName FROM customers WHERE routerId = ? LIMIT 5',
-                    [routerId]
-                );
-                console.log(`[Facebook Bot] DEBUG - First 5 customers for router ${routerId}:`, JSON.stringify(routerCustomers, null, 2));
-            }
-
             // Try multiple lookup strategies to find the customer - FILTERED BY ROUTER
             let customer = null;
             
@@ -3886,22 +3870,29 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             if (!customer) {
-                console.log(`[Facebook Bot] Account lookup failed for: ${accountNumber}`);
+                console.log(`[Facebook Bot] ❌ Account lookup failed for: ${accountNumber}`);
                 return `❌ Account "${accountNumber}" not found in our system.\n\nPlease check your account number and try again.\n\nIf you don't have an account yet, please visit our office or contact support.`;
             }
-
-            // Check if this Facebook account is already linked to a customer
+            
+            // CRITICAL: Check if this Facebook account is already linked to ANY customer (across all routers)
             const existingLink = await db.get(
                 'SELECT * FROM customers WHERE facebook_psid = ?',
                 [senderId]
             );
-            
+                        
             if (existingLink) {
-                // Already linked - check if it's the same account
+                // Already linked - check if it's the SAME account
                 if (existingLink.accountNumber === customer.accountNumber || existingLink.username === customer.username) {
                     return `ℹ️ Your Facebook account is already linked to ${existingLink.accountNumber}.\n\n📋 Current Account:\n• Account #: ${existingLink.accountNumber}\n• Name: ${existingLink.fullName || 'N/A'}\n• Plan: ${existingLink.planName || 'N/A'}\n\nTo register a different account, first send:\nUNREGISTER\n\nThen register your new account.`;
                 } else {
-                    return `⚠️ Your Facebook account is already linked to a different account!\n\n📋 Currently Linked:\n• Account #: ${existingLink.accountNumber}\n• Name: ${existingLink.fullName || 'N/A'}\n\nTo link to ${accountNumber}, you must first unregister:\n\n📝 Send: UNREGISTER\n\nThen register your new account:\n📝 Send: REGISTER ${accountNumber}`;
+                    // Linked to DIFFERENT account - clear the old linkage automatically
+                    console.log(`[Facebook Bot] ⚠️ Facebook account was linked to ${existingLink.accountNumber}, clearing old linkage...`);
+                    await db.run(
+                        'UPDATE customers SET facebook_psid = NULL WHERE id = ?',
+                        [existingLink.id]
+                    );
+                    console.log(`[Facebook Bot] ✅ Cleared old linkage from ${existingLink.accountNumber}`);
+                    // Continue with new registration below
                 }
             }
 
