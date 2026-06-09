@@ -20,6 +20,7 @@ interface FacebookClient {
 const FacebookClients: React.FC = () => {
   const [clients, setClients] = useState<FacebookClient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   const [bulkSending, setBulkSending] = useState(false);
   const [filter, setFilter] = useState<'all' | 'overdue' | 'due-today' | 'due-soon' | 'upcoming'>('all');
@@ -29,6 +30,9 @@ const FacebookClients: React.FC = () => {
 
   useEffect(() => {
     loadRouters();
+  }, []);
+
+  useEffect(() => {
     loadClients();
   }, [selectedRouter]);
 
@@ -44,11 +48,14 @@ const FacebookClients: React.FC = () => {
   const loadClients = async () => {
     try {
       setLoading(true);
+      setError(null);
       const params = selectedRouter ? `?routerId=${selectedRouter}` : '';
       const response = await dbApi.get<any[]>(`/api/facebook/clients${params}`);
       setClients(response || []);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load Facebook clients:', err);
+      setError(err.message || 'Failed to load clients');
+      setClients([]);
     } finally {
       setLoading(false);
     }
@@ -217,7 +224,19 @@ const FacebookClients: React.FC = () => {
       </div>
 
       {/* Clients Table */}
-      {loading ? (
+      {error ? (
+        <div className="text-center py-12 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+          <div className="text-6xl mb-4">❌</div>
+          <h3 className="text-lg font-semibold text-red-900 dark:text-red-200">Error Loading Clients</h3>
+          <p className="text-red-700 dark:text-red-300 mt-2">{error}</p>
+          <button
+            onClick={loadClients}
+            className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+          >
+            🔄 Retry
+          </button>
+        </div>
+      ) : loading ? (
         <div className="text-center py-12">
           <div className="animate-spin text-4xl">⏳</div>
           <p className="text-slate-600 dark:text-slate-400 mt-4">Loading clients...</p>
