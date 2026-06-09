@@ -8,10 +8,12 @@ interface FacebookClient {
   fullName: string;
   facebook_psid: string;
   planName: string;
-  planPrice: number;
   dueDate: string;
   planType: string;
   routerId: string;
+  contactNumber?: string;
+  email?: string;
+  address?: string;
 }
 
 export const FacebookClients: React.FC = () => {
@@ -247,9 +249,6 @@ export const FacebookClients: React.FC = () => {
                   <td className="px-4 py-3">
                     <div className="text-sm text-slate-900 dark:text-white">
                       {client.planName || 'N/A'}
-                    </div>
-                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      ₱{client.planPrice ? client.planPrice.toFixed(2) : '0.00'}
                     </div>
                   </td>
                   <td className="px-4 py-3">

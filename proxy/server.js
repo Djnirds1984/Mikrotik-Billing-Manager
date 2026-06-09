@@ -3704,14 +3704,14 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log('[Facebook Clients] Fetching clients...');
             const { routerId } = req.query;
             
-            // Get all customers with Facebook PSID
+            // Get all customers with Facebook PSID (only select columns that exist)
             const fbClients = routerId
                 ? await db.all(
-                    'SELECT id, accountNumber, username, fullName, facebook_psid, planName, planPrice, dueDate, planType, routerId, contactNumber, email, address FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" AND routerId = ? ORDER BY dueDate ASC',
+                    'SELECT id, accountNumber, username, fullName, facebook_psid, planName, dueDate, planType, routerId, contactNumber, email, address FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" AND routerId = ? ORDER BY dueDate ASC',
                     [routerId]
                   )
                 : await db.all(
-                    'SELECT id, accountNumber, username, fullName, facebook_psid, planName, planPrice, dueDate, planType, routerId, contactNumber, email, address FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" ORDER BY dueDate ASC'
+                    'SELECT id, accountNumber, username, fullName, facebook_psid, planName, dueDate, planType, routerId, contactNumber, email, address FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" ORDER BY dueDate ASC'
                   );
             
             console.log(`[Facebook Clients] Found ${fbClients.length} clients`);
