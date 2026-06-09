@@ -77,6 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'network', label: t('sidebar.network'), icon: <ShareIcon className="w-6 h-6" /> },
     { id: 'dhcp-portal', label: t('sidebar.dhcp-portal'), icon: <ServerIcon className="w-6 h-6" /> },
     { id: 'pppoe', label: t('sidebar.pppoe'), icon: <UsersIcon className="w-6 h-6" /> },
+    { id: 'facebook-clients', label: 'Facebook Clients', icon: <ChatBubbleLeftRightIcon className="w-6 h-6" /> },
     { id: 'billing', label: t('sidebar.billing_plans'), icon: <SignalIcon className="w-6 h-6" /> },
     { id: 'sales', label: t('sidebar.sales_report'), icon: <CurrencyDollarIcon className="w-6 h-6" /> },
     { id: 'inventory', label: t('sidebar.inventory'), icon: <ArchiveBoxIcon className="w-6 h-6" /> },
@@ -111,7 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
   }, [navItems, user, hasPermission]);
 
   const licensedViews: View[] = [
-      'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
+      'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'facebook-clients', 'billing', 'sales',
       'inventory', 'accounting', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'repair_tickets'
   ];
 

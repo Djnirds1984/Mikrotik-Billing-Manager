@@ -3710,6 +3710,179 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     });
 
     // ========================================
+    // Facebook Bot Client Management
+    // ========================================
+    
+    // GET: Get all Facebook-linked customers
+    app.get('/api/facebook/clients', async (req, res) => {
+        try {
+            const { routerId } = req.query;
+            
+            // Get all customers with Facebook PSID
+            const fbClients = routerId
+                ? await db.all(
+                    'SELECT id, accountNumber, username, fullName, facebook_psid, planName, planPrice, dueDate, planType, routerId, contactNumber, email, address FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" AND routerId = ? ORDER BY dueDate ASC',
+                    [routerId]
+                  )
+                : await db.all(
+                    'SELECT id, accountNumber, username, fullName, facebook_psid, planName, planPrice, dueDate, planType, routerId, contactNumber, email, address FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" ORDER BY dueDate ASC'
+                  );
+            
+            res.json(fbClients);
+        } catch (e) {
+            console.error('[Facebook Clients] Error fetching clients:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+    
+    // POST: Send manual payment reminder to Facebook client
+    app.post('/api/facebook/clients/:id/remind', async (req, res) => {
+        try {
+            const customerId = req.params.id;
+            
+            // Get customer
+            const customer = await db.get('SELECT * FROM customers WHERE id = ?', [customerId]);
+            
+            if (!customer || !customer.facebook_psid) {
+                return res.status(404).json({ message: 'Customer not found or not linked to Facebook' });
+            }
+            
+            // Get Facebook settings
+            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            
+            if (!fbConfig.enabled || !fbConfig.pageAccessToken) {
+                return res.status(400).json({ message: 'Facebook Messenger not configured' });
+            }
+            
+            // Calculate days until due
+            const now = new Date();
+            const dueDate = new Date(customer.dueDate);
+            const daysUntilDue = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
+            
+            let message;
+            if (daysUntilDue < 0) {
+                message = `⚠️ OVERDUE PAYMENT NOTICE\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\n⚠️ Your internet service may be suspended.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+            } else if (daysUntilDue === 0) {
+                message = `🔴 PAYMENT DUE TODAY\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: TODAY\n\n⏰ Please make your payment today to avoid service interruption.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+            } else if (daysUntilDue <= 3) {
+                message = `⏰ PAYMENT REMINDER\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''})\n\n💡 This is a friendly reminder to make your payment on time.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+            } else {
+                message = `📅 PAYMENT NOTIFICATION\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Pay via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+            }
+            
+            // Send Facebook message
+            const axios = require('axios');
+            const fbResponse = await axios.post(
+                `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                {
+                    messaging_type: 'UPDATE',
+                    recipient: { id: customer.facebook_psid },
+                    message: { text: message }
+                },
+                { timeout: 10000 }
+            );
+            
+            console.log(`[Facebook Clients] Reminder sent to ${customer.accountNumber} (${customer.facebook_psid})`);
+            
+            res.json({ 
+                message: 'Reminder sent successfully',
+                facebook_message_id: fbResponse.data.message_id,
+                days_until_due: daysUntilDue
+            });
+        } catch (e) {
+            console.error('[Facebook Clients] Error sending reminder:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+    
+    // POST: Send bulk reminders to all due/overdue clients
+    app.post('/api/facebook/clients/remind-bulk', async (req, res) => {
+        try {
+            const { daysBefore, routerId } = req.body;
+            const daysThreshold = daysBefore || 3; // Default: 3 days before
+            
+            // Get clients due within threshold
+            const now = new Date();
+            const thresholdDate = new Date(now);
+            thresholdDate.setDate(thresholdDate.getDate() + daysThreshold);
+            
+            const clients = routerId
+                ? await db.all(
+                    'SELECT * FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" AND routerId = ? AND dueDate <= ? AND (planType = "Postpaid" OR planType = "Active")',
+                    [routerId, thresholdDate.toISOString().split('T')[0]]
+                  )
+                : await db.all(
+                    'SELECT * FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" AND dueDate <= ? AND (planType = "Postpaid" OR planType = "Active")',
+                    [thresholdDate.toISOString().split('T')[0]]
+                  );
+            
+            // Get Facebook settings
+            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            
+            if (!fbConfig.enabled || !fbConfig.pageAccessToken) {
+                return res.status(400).json({ message: 'Facebook Messenger not configured' });
+            }
+            
+            const results = [];
+            const axios = require('axios');
+            
+            for (const customer of clients) {
+                try {
+                    const daysUntilDue = Math.ceil((new Date(customer.dueDate) - now) / (1000 * 60 * 60 * 24));
+                    
+                    let message;
+                    if (daysUntilDue < 0) {
+                        message = `⚠️ OVERDUE: ₱${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber}\nDue: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\nPay now to avoid suspension!\nSend PAY to this bot to pay.`;
+                    } else if (daysUntilDue === 0) {
+                        message = `🔴 DUE TODAY: ₱${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber}\n\nPlease pay today to avoid service interruption.\nSend PAY to this bot.`;
+                    } else {
+                        message = `⏰ Reminder: ₱${(customer.planPrice || 0).toFixed(2)} due in ${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''}\nAccount: ${customer.accountNumber}\nDue: ${customer.dueDate}\n\nSend PAY to this bot to pay.`;
+                    }
+                    
+                    await axios.post(
+                        `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                        {
+                            messaging_type: 'UPDATE',
+                            recipient: { id: customer.facebook_psid },
+                            message: { text: message }
+                        },
+                        { timeout: 10000 }
+                    );
+                    
+                    results.push({
+                        account: customer.accountNumber,
+                        facebook_psid: customer.facebook_psid,
+                        status: 'sent',
+                        days_until_due: daysUntilDue
+                    });
+                } catch (err) {
+                    results.push({
+                        account: customer.accountNumber,
+                        facebook_psid: customer.facebook_psid,
+                        status: 'failed',
+                        error: err.message
+                    });
+                }
+            }
+            
+            console.log(`[Facebook Clients] Bulk reminders sent: ${results.filter(r => r.status === 'sent').length}/${clients.length}`);
+            
+            res.json({ 
+                message: `Reminders sent to ${results.filter(r => r.status === 'sent').length} clients`,
+                total: clients.length,
+                sent: results.filter(r => r.status === 'sent').length,
+                failed: results.filter(r => r.status === 'failed').length,
+                results
+            });
+        } catch (e) {
+            console.error('[Facebook Clients] Error sending bulk reminders:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // ========================================
     // Plan Management - Cleanup Unused Plans
     // ========================================
     
@@ -7134,6 +7307,9 @@ WantedBy=multi-user.target`;
             console.warn('[PayMongo Webhook] Startup registration failed (non-fatal):', err.message);
         });
     });
+    
+    // Start Facebook payment reminder scheduler
+    startFacebookReminderScheduler();
 
     // --- CAPTIVE PORTAL SERVER ---
     const CAPTIVE_PORT = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
@@ -7185,6 +7361,112 @@ WantedBy=multi-user.target`;
     captiveApp.listen(CAPTIVE_PORT, () => {
         console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
     });
+}
+
+// ========================================
+// Automated Facebook Payment Reminder Scheduler
+// ========================================
+function startFacebookReminderScheduler() {
+    console.log('[Facebook Reminders] Auto-reminder scheduler initialized (runs daily at 9:00 AM)');
+    
+    // Calculate time until next 9:00 AM
+    function getTimeUntilNextRun() {
+        const now = new Date();
+        const nextRun = new Date(now);
+        nextRun.setHours(9, 0, 0, 0);
+        
+        // If it's already past 9 AM today, schedule for tomorrow
+        if (now >= nextRun) {
+            nextRun.setDate(nextRun.getDate() + 1);
+        }
+        
+        return nextRun.getTime() - now.getTime();
+    }
+    
+    // Send reminders to clients due within 3 days
+    async function sendPaymentReminders() {
+        try {
+            console.log('[Facebook Reminders] Running scheduled payment reminder job...');
+            
+            const now = new Date();
+            const thresholdDate = new Date(now);
+            thresholdDate.setDate(thresholdDate.getDate() + 3); // 3 days before
+            
+            // Get all clients with Facebook due within 3 days
+            const clients = await db.all(
+                'SELECT * FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" AND dueDate <= ? AND (planType = "Postpaid" OR planType = "Active")',
+                [thresholdDate.toISOString().split('T')[0]]
+            );
+            
+            if (clients.length === 0) {
+                console.log('[Facebook Reminders] No clients due within 3 days');
+                return;
+            }
+            
+            console.log(`[Facebook Reminders] Found ${clients.length} clients due within 3 days`);
+            
+            // Get Facebook settings
+            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            
+            if (!fbConfig.enabled || !fbConfig.pageAccessToken) {
+                console.warn('[Facebook Reminders] Facebook Messenger not configured, skipping reminders');
+                return;
+            }
+            
+            const axios = require('axios');
+            let sentCount = 0;
+            let failedCount = 0;
+            
+            for (const customer of clients) {
+                try {
+                    const daysUntilDue = Math.ceil((new Date(customer.dueDate) - now) / (1000 * 60 * 60 * 24));
+                    
+                    let message;
+                    if (daysUntilDue < 0) {
+                        message = `⚠️ OVERDUE PAYMENT\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\n⚠️ Service may be suspended!\n\n💳 Send PAY to pay now.`;
+                    } else if (daysUntilDue === 0) {
+                        message = `🔴 DUE TODAY\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n\n⏰ Please pay today!\n\n💳 Send PAY to pay now.`;
+                    } else if (daysUntilDue === 1) {
+                        message = `⏰ PAYMENT DUE TOMORROW\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate}\n\n💳 Send PAY to pay now.`;
+                    } else {
+                        message = `⏰ Payment Reminder\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Send PAY to pay now.`;
+                    }
+                    
+                    await axios.post(
+                        `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                        {
+                            messaging_type: 'UPDATE',
+                            recipient: { id: customer.facebook_psid },
+                            message: { text: message }
+                        },
+                        { timeout: 10000 }
+                    );
+                    
+                    sentCount++;
+                    console.log(`[Facebook Reminders] ✓ Sent to ${customer.accountNumber} (${daysUntilDue} days)`);
+                } catch (err) {
+                    failedCount++;
+                    console.error(`[Facebook Reminders] ✗ Failed for ${customer.accountNumber}:`, err.message);
+                }
+            }
+            
+            console.log(`[Facebook Reminders] Job complete: ${sentCount} sent, ${failedCount} failed`);
+        } catch (err) {
+            console.error('[Facebook Reminders] Scheduler error:', err.message);
+        }
+    }
+    
+    // Schedule first run
+    const timeUntilFirstRun = getTimeUntilNextRun();
+    console.log(`[Facebook Reminders] First run in ${Math.round(timeUntilFirstRun / 1000 / 60 / 60)} hours`);
+    
+    setTimeout(() => {
+        sendPaymentReminders();
+        
+        // Then run every 24 hours
+        setInterval(sendPaymentReminders, 24 * 60 * 60 * 1000);
+    }, timeUntilFirstRun);
 }
 
 startServer();
