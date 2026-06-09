@@ -3869,6 +3869,97 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             res.status(500).json({ message: e.message });
         }
     });
+    
+    // POST: Send announcement/broadcast to ALL Facebook-linked clients
+    app.post('/api/facebook/clients/broadcast', async (req, res) => {
+        try {
+            const { message, routerId } = req.body;
+            
+            if (!message || message.trim() === '') {
+                return res.status(400).json({ message: 'Message is required' });
+            }
+            
+            console.log('[Facebook Broadcast] Sending announcement to all clients...');
+            
+            // Get all Facebook-linked clients
+            const fbClients = routerId
+                ? await db.all(
+                    'SELECT id, accountNumber, fullName, facebook_psid FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" AND routerId = ?',
+                    [routerId]
+                  )
+                : await db.all(
+                    'SELECT id, accountNumber, fullName, facebook_psid FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != ""'
+                  );
+            
+            if (fbClients.length === 0) {
+                return res.status(404).json({ message: 'No Facebook-linked clients found' });
+            }
+            
+            console.log(`[Facebook Broadcast] Found ${fbClients.length} clients to notify`);
+            
+            // Get Facebook settings
+            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            
+            if (!fbConfig.enabled || !fbConfig.pageAccessToken) {
+                return res.status(400).json({ message: 'Facebook Messenger not configured' });
+            }
+            
+            const axios = require('axios');
+            let sentCount = 0;
+            let failedCount = 0;
+            const results = [];
+            
+            for (const client of fbClients) {
+                try {
+                    // Personalize message with customer name
+                    const personalizedMessage = message
+                        .replace('{name}', client.fullName || 'Valued Customer')
+                        .replace('{account}', client.accountNumber);
+                    
+                    await axios.post(
+                        `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                        {
+                            messaging_type: 'UPDATE',
+                            recipient: { id: client.facebook_psid },
+                            message: { text: personalizedMessage }
+                        },
+                        { timeout: 10000 }
+                    );
+                    
+                    sentCount++;
+                    console.log(`[Facebook Broadcast] ✓ Sent to ${client.accountNumber} (${client.fullName})`);
+                    results.push({
+                        accountNumber: client.accountNumber,
+                        facebook_psid: client.facebook_psid,
+                        status: 'sent'
+                    });
+                } catch (err) {
+                    failedCount++;
+                    console.error(`[Facebook Broadcast] ✗ Failed for ${client.accountNumber}:`, err.message);
+                    results.push({
+                        accountNumber: client.accountNumber,
+                        facebook_psid: client.facebook_psid,
+                        status: 'failed',
+                        error: err.message
+                    });
+                }
+            }
+            
+            console.log(`[Facebook Broadcast] Complete: ${sentCount} sent, ${failedCount} failed out of ${fbClients.length} total`);
+            
+            res.json({
+                message: 'Broadcast sent',
+                total: fbClients.length,
+                sent: sentCount,
+                failed: failedCount,
+                results
+            });
+        } catch (e) {
+            console.error('[Facebook Broadcast] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
 
     // ========================================
     // Plan Management - Cleanup Unused Plans
