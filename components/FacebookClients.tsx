@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { dbApi } from '../services/databaseService.ts';
 
 interface FacebookClient {
   id: string;
@@ -34,8 +34,8 @@ const FacebookClients: React.FC = () => {
 
   const loadRouters = async () => {
     try {
-      const response = await axios.get('/api/routers');
-      setRouters(response.data || []);
+      const response = await dbApi.get<any[]>('/api/routers');
+      setRouters(response || []);
     } catch (err) {
       console.error('Failed to load routers:', err);
     }
@@ -44,9 +44,9 @@ const FacebookClients: React.FC = () => {
   const loadClients = async () => {
     try {
       setLoading(true);
-      const params = selectedRouter ? { routerId: selectedRouter } : {};
-      const response = await axios.get('/api/facebook/clients', { params });
-      setClients(response.data || []);
+      const params = selectedRouter ? `?routerId=${selectedRouter}` : '';
+      const response = await dbApi.get<any[]>(`/api/facebook/clients${params}`);
+      setClients(response || []);
     } catch (err) {
       console.error('Failed to load Facebook clients:', err);
     } finally {
@@ -57,11 +57,11 @@ const FacebookClients: React.FC = () => {
   const sendReminder = async (clientId: string) => {
     try {
       setSendingReminder(clientId);
-      await axios.post(`/api/facebook/clients/${clientId}/remind`);
+      await dbApi.post(`/api/facebook/clients/${clientId}/remind`, {});
       alert('✅ Payment reminder sent successfully!');
     } catch (err: any) {
       console.error('Failed to send reminder:', err);
-      alert('❌ Failed to send reminder: ' + (err.response?.data?.message || err.message));
+      alert('❌ Failed to send reminder: ' + (err.message || 'Unknown error'));
     } finally {
       setSendingReminder(null);
     }
@@ -72,15 +72,15 @@ const FacebookClients: React.FC = () => {
     
     try {
       setBulkSending(true);
-      const response = await axios.post('/api/facebook/clients/remind-bulk', {
+      const response = await dbApi.post('/api/facebook/clients/remind-bulk', {
         daysBefore: 3,
         routerId: selectedRouter || undefined
       });
       
-      alert(`✅ Reminders sent!\n\nTotal: ${response.data.total}\nSent: ${response.data.sent}\nFailed: ${response.data.failed}`);
+      alert(`✅ Reminders sent!\n\nTotal: ${(response as any).total}\nSent: ${(response as any).sent}\nFailed: ${(response as any).failed}`);
     } catch (err: any) {
       console.error('Failed to send bulk reminders:', err);
-      alert('❌ Failed to send bulk reminders: ' + (err.response?.data?.message || err.message));
+      alert('❌ Failed to send bulk reminders: ' + (err.message || 'Unknown error'));
     } finally {
       setBulkSending(false);
     }
