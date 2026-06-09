@@ -498,31 +498,16 @@ async function initDb() {
         try {
             const customerCols = await db.all("PRAGMA table_info(customers)");
             const customerColNames = customerCols.map(c => c.name);
-            if (!customerColNames.includes('accountNumber')) {
-                await db.exec("ALTER TABLE customers ADD COLUMN accountNumber TEXT");
-            }
-            if (!customerColNames.includes('gps')) {
-                await db.exec("ALTER TABLE customers ADD COLUMN gps TEXT");
-            }
-            if (!customerColNames.includes('applicationId')) {
-                await db.exec("ALTER TABLE customers ADD COLUMN applicationId TEXT");
-            }
-            if (!customerColNames.includes('dueDate')) {
-                await db.exec("ALTER TABLE customers ADD COLUMN dueDate TEXT");
-            }
-            if (!customerColNames.includes('planName')) {
-                await db.exec("ALTER TABLE customers ADD COLUMN planName TEXT");
-            }
-            if (!customerColNames.includes('planType')) {
-                await db.exec("ALTER TABLE customers ADD COLUMN planType TEXT");
-            }
-            if (!customerColNames.includes('password')) {
-                await db.exec("ALTER TABLE customers ADD COLUMN password TEXT");
-            }
+            console.log('[Migration] Customers table columns:', customerColNames);
+            
             if (!customerColNames.includes('facebook_psid')) {
+                console.log('[Migration] Adding facebook_psid column to customers table...');
                 await db.exec("ALTER TABLE customers ADD COLUMN facebook_psid TEXT");
+                console.log('[Migration] ✓ facebook_psid column added');
             }
-        } catch (_) {}
+        } catch (err) {
+            console.error('[Migration] Customer table migration error:', err.message);
+        }
         try {
             const clientUserCols = await db.all("PRAGMA table_info(client_users)");
             const clientUserColNames = clientUserCols.map(c => c.name);
@@ -3716,6 +3701,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // GET: Get all Facebook-linked customers
     app.get('/api/facebook/clients', async (req, res) => {
         try {
+            console.log('[Facebook Clients] Fetching clients...');
             const { routerId } = req.query;
             
             // Get all customers with Facebook PSID
@@ -3728,10 +3714,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     'SELECT id, accountNumber, username, fullName, facebook_psid, planName, planPrice, dueDate, planType, routerId, contactNumber, email, address FROM customers WHERE facebook_psid IS NOT NULL AND facebook_psid != "" ORDER BY dueDate ASC'
                   );
             
+            console.log(`[Facebook Clients] Found ${fbClients.length} clients`);
             res.json(fbClients);
         } catch (e) {
             console.error('[Facebook Clients] Error fetching clients:', e.message);
-            res.status(500).json({ message: e.message });
+            console.error('[Facebook Clients] Stack:', e.stack);
+            res.status(500).json({ message: e.message, error: e.stack });
         }
     });
     
