@@ -8,6 +8,7 @@ export type View =
   | 'network'
   | 'terminal'
   | 'pppoe'
+  | 'facebook-clients'
   | 'users'
   | 'billing'
   | 'sales'
