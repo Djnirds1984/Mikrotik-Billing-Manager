@@ -93,14 +93,17 @@ const FacebookClients: React.FC = () => {
     }
   };
 
-  const getDaysUntilDue = (dueDate: string): number => {
+  const getDaysUntilDue = (dueDate: string | undefined): number => {
+    if (!dueDate) return 999;
     const now = new Date();
     const due = new Date(dueDate);
+    if (isNaN(due.getTime())) return 999;
     return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
   };
 
-  const getDueStatus = (dueDate: string): { label: string; color: string; bg: string } => {
+  const getDueStatus = (dueDate: string | undefined): { label: string; color: string; bg: string } => {
     const days = getDaysUntilDue(dueDate);
+    if (days >= 999) return { label: 'No Date', color: 'text-slate-700 dark:text-slate-300', bg: 'bg-slate-100 dark:bg-slate-900/30' };
     if (days < 0) return { label: `${Math.abs(days)}d Overdue`, color: 'text-red-700 dark:text-red-300', bg: 'bg-red-100 dark:bg-red-900/30' };
     if (days === 0) return { label: 'Due Today', color: 'text-orange-700 dark:text-orange-300', bg: 'bg-orange-100 dark:bg-orange-900/30' };
     if (days === 1) return { label: 'Due Tomorrow', color: 'text-yellow-700 dark:text-yellow-300', bg: 'bg-yellow-100 dark:bg-yellow-900/30' };
@@ -109,9 +112,11 @@ const FacebookClients: React.FC = () => {
   };
 
   const filteredClients = clients.filter(client => {
+    if (!client) return false;
+    
     // Search filter
     const matchesSearch = searchTerm === '' || 
-      client.accountNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      client.accountNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       client.fullName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       client.username?.toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -128,9 +133,9 @@ const FacebookClients: React.FC = () => {
 
   const stats = {
     total: clients.length,
-    overdue: clients.filter(c => getDaysUntilDue(c.dueDate) < 0).length,
-    dueToday: clients.filter(c => getDaysUntilDue(c.dueDate) === 0).length,
-    dueSoon: clients.filter(c => { const d = getDaysUntilDue(c.dueDate); return d >= 1 && d <= 3; }).length,
+    overdue: clients.filter(c => c && getDaysUntilDue(c.dueDate) < 0).length,
+    dueToday: clients.filter(c => c && getDaysUntilDue(c.dueDate) === 0).length,
+    dueSoon: clients.filter(c => c && getDaysUntilDue(c.dueDate) >= 1 && getDaysUntilDue(c.dueDate) <= 3).length,
   };
 
   return (
