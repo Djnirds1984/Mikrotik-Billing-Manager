@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { dbApi } from '../services/databaseService.ts';
 import { Loader } from './Loader.tsx';
 
 interface FacebookClient {
@@ -27,9 +26,21 @@ export const FacebookClients: React.FC = () => {
   const loadClients = async () => {
     setLoading(true);
     try {
-      const data = await dbApi.get<FacebookClient[]>('/api/facebook/clients');
-      setClients(data || []);
-    } catch (error) {
+      const response = await fetch('/api/facebook/clients', {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('[Facebook Clients] Loaded clients:', data);
+      setClients(Array.isArray(data) ? data : []);
+    } catch (error: any) {
       console.error('Failed to load clients:', error);
       setClients([]);
     } finally {
@@ -40,7 +51,19 @@ export const FacebookClients: React.FC = () => {
   const handleSendReminder = async (client: FacebookClient) => {
     setSendingId(client.id);
     try {
-      await dbApi.post(`/api/facebook/clients/${client.id}/remind`, {});
+      const response = await fetch(`/api/facebook/clients/${client.id}/remind`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({})
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       alert(`Payment reminder sent to ${client.accountNumber}`);
     } catch (error: any) {
       alert(`Failed to send reminder: ${error.message}`);
@@ -55,8 +78,21 @@ export const FacebookClients: React.FC = () => {
     }
 
     try {
-      const result = await dbApi.post('/api/facebook/clients/remind-bulk', { daysBefore: 3 });
-      alert(`Reminders sent successfully!`);
+      const response = await fetch('/api/facebook/clients/remind-bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ daysBefore: 3 })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      alert(`Reminders sent successfully! Sent: ${result.sent || 0}, Failed: ${result.failed || 0}`);
       loadClients();
     } catch (error: any) {
       alert(`Failed to send bulk reminders: ${error.message}`);
