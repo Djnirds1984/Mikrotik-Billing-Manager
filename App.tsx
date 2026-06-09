@@ -26,7 +26,6 @@ const Scripting = React.lazy(() => import('./components/Scripting.tsx').then(m =
 const Routers = React.lazy(() => import('./components/Routers.tsx').then(m => ({ default: m.Routers })));
 const Updater = React.lazy(() => import('./components/Updater.tsx').then(m => ({ default: m.Updater })));
 const Pppoe = React.lazy(() => import('./components/Pppoe.tsx').then(m => ({ default: m.Pppoe })));
-const FacebookClients = React.lazy(() => import('./components/FacebookClients.tsx').then(m => ({ default: m.FacebookClients })));
 const Billing = React.lazy(() => import('./components/Billing.tsx').then(m => ({ default: m.Billing })));
 const Remote = React.lazy(() => import('./components/Remote.tsx').then(m => ({ default: m.Remote })));
 const Hotspot = React.lazy(() => import('./components/Hotspot.tsx').then(m => ({ default: m.Hotspot })));
@@ -256,8 +255,6 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                       return <DhcpPortal selectedRouter={selectedRouter} addSale={addSale} />;
                   case 'pppoe':
                       return <Pppoe selectedRouter={selectedRouter} addSale={addSale} />;
-                  case 'facebook-clients':
-                      return <FacebookClients />;
                   case 'billing':
                       return <Billing selectedRouter={selectedRouter} />;
                   case 'sales':
