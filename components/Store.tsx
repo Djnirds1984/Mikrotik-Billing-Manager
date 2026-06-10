@@ -36,14 +36,37 @@ export const Store: React.FC = () => {
   const [gcashRef, setGcashRef] = useState('');
   const [filter, setFilter] = useState<'all' | 'pppoe' | 'dhcp'>('all');
 
+  // Restore session on mount
   useEffect(() => {
-    loadPlans();
-  }, [filter]);
+    const savedSession = sessionStorage.getItem('storeSession');
+    if (savedSession) {
+      try {
+        const sessionData = JSON.parse(savedSession);
+        setCustomer(sessionData);
+      } catch (e) {
+        console.error('Failed to restore session:', e);
+      }
+    }
+  }, []);
 
-  const loadPlans = async () => {
+  useEffect(() => {
+    if (customer) {
+      // After login, load plans for customer's router
+      loadPlans(customer.routerId);
+    } else {
+      // Before login, load all plans (for browsing)
+      loadPlans();
+    }
+  }, [filter, customer]);
+
+  const loadPlans = async (routerId?: string) => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/public/store/plans?type=${filter}`);
+      const url = routerId 
+        ? `/api/public/store/plans?type=${filter}&routerId=${routerId}`
+        : `/api/public/store/plans?type=${filter}`;
+      
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
         setPlans(Array.isArray(data) ? data : []);
@@ -78,6 +101,9 @@ export const Store: React.FC = () => {
 
       setCustomer(data);
       sessionStorage.setItem('storeSession', JSON.stringify(data));
+      
+      // Reload plans for this customer's router
+      loadPlans(data.routerId);
     } catch (error) {
       setLoginError('Login failed. Please try again.');
     }
