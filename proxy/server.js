@@ -2060,11 +2060,49 @@ async function startServer() {
                     console.log(`[Manual Payments] Found secrets: ${secrets.length}, Selected secret: ${secret?.name || 'none'}`);
                     console.log(`[Manual Payments] Payment customer_username: "${payment.customer_username}"`);
                     
-                    // Also lookup customer record to get their actual PPPoE username
-                    const customerRecord = await db.get('SELECT username, pppoeUsername, accountNumber FROM customers WHERE accountNumber = ?', [payment.customer_account_number]);
-                    console.log(`[Manual Payments] Customer record - username: "${customerRecord?.username}", pppoeUsername: "${customerRecord?.pppoeUsername}"`);
+                    // Also lookup customer record to check username fields
+                    const customerRecord = await db.get('SELECT username, accountNumber FROM customers WHERE accountNumber = ?', [payment.customer_account_number]);
+                    console.log(`[Manual Payments] Customer record - username: "${customerRecord?.username}", accountNumber: "${customerRecord?.accountNumber}"`);
                     
-                    if (secret) {
+                    // If no secret found with customer_username, try ALL secrets and find matching one
+                    if (!secret || secret.name !== payment.customer_username) {
+                        console.log(`[Manual Payments] Secret not found with exact match, fetching ALL secrets to search...`);
+                        try {
+                            const allSecretsRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                                headers: { Authorization: authHeader },
+                                timeout: 10000
+                            });
+                            const allSecrets = Array.isArray(allSecretsRes.data) ? allSecretsRes.data : [];
+                            console.log(`[Manual Payments] Total PPP secrets on router: ${allSecrets.length}`);
+                            
+                            // Try to find matching secret by:
+                            // 1. customer_username (already tried)
+                            // 2. account_number
+                            // 3. comment field containing account_number
+                            const accountNumber = payment.customer_account_number;
+                            const foundSecret = allSecrets.find(s => 
+                                s.name === payment.customer_username || 
+                                s.name === accountNumber ||
+                                (s.comment && s.comment.includes(accountNumber))
+                            );
+                            
+                            if (foundSecret) {
+                                console.log(`[Manual Payments] ✓ Found matching secret: "${foundSecret.name}" (matched by account number or comment)`);
+                                // Use this secret instead
+                                Object.assign(secret, foundSecret);
+                            } else {
+                                console.error(`[Manual Payments] ✗ No matching secret found in ${allSecrets.length} total secrets`);
+                                console.error(`[Manual Payments] Looking for: "${payment.customer_username}" or "${accountNumber}"`);
+                                // Log first 5 secret names for debugging
+                                const sampleNames = allSecrets.slice(0, 5).map(s => s.name).join(', ');
+                                console.error(`[Manual Payments] Sample secret names: ${sampleNames}`);
+                            }
+                        } catch (err) {
+                            console.error(`[Manual Payments] Error fetching all secrets: ${err.message}`);
+                        }
+                    }
+                    
+                    if (secret && secret.name) {
                         // Parse existing comment
                         let comment = {};
                         try { comment = JSON.parse(secret.comment || '{}'); } catch (e) { comment = {}; }
