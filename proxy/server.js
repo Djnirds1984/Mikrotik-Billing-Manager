@@ -2038,14 +2038,25 @@ async function startServer() {
                     console.log(`[Manual Payments] Looking for PPP secret: ${payment.customer_username}`);
                     
                     // Get PPP secret
-                    const secretRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
-                        params: { name: payment.customer_username },
-                        headers: { Authorization: authHeader },
-                        timeout: 10000
-                    });
+                    let secretRes;
+                    try {
+                        secretRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                            params: { name: payment.customer_username },
+                            headers: { Authorization: authHeader },
+                            timeout: 10000
+                        });
+                        console.log(`[Manual Payments] PPP secret API response status: ${secretRes.status}`);
+                    } catch (apiErr) {
+                        console.error(`[Manual Payments] PPP secret API call failed: ${apiErr.message}`);
+                        console.error(`[Manual Payments] API URL: ${apiBase}/rest/ppp/secret`);
+                        console.error(`[Manual Payments] API params:`, { name: payment.customer_username });
+                        throw apiErr; // Re-throw to be caught by outer catch
+                    }
                     
                     const secrets = Array.isArray(secretRes.data) ? secretRes.data : [secretRes.data];
                     const secret = secrets.find(s => s.name === payment.customer_username) || secrets[0];
+                    
+                    console.log(`[Manual Payments] Found secrets: ${secrets.length}, Selected secret: ${secret?.name || 'none'}`);
                     
                     if (secret) {
                         // Parse existing comment
@@ -2165,6 +2176,9 @@ async function startServer() {
                             console.error('[Manual Payments] Scheduler creation error:', schedErr.message);
                             console.error('[Manual Payments] Scheduler error stack:', schedErr.stack);
                         }
+                    } else {
+                        console.error(`[Manual Payments] PPP secret NOT found for username: ${payment.customer_username}`);
+                        console.error(`[Manual Payments] Available secrets:`, secrets.map(s => s.name).join(', '));
                     }
                 } else {
                     console.error(`[Manual Payments] Router NOT found with ID: ${payment.customer_router_id}`);
