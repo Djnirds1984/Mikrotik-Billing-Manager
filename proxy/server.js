@@ -2088,8 +2088,12 @@ async function startServer() {
                             
                             if (foundSecret) {
                                 console.log(`[Manual Payments] ✓ Found matching secret: "${foundSecret.name}" (matched by account number or comment)`);
-                                // Use this secret instead
-                                Object.assign(secret, foundSecret);
+                                // Use this secret instead - create new object if secret is undefined
+                                if (!secret) {
+                                    secret = { ...foundSecret };
+                                } else {
+                                    Object.assign(secret, foundSecret);
+                                }
                             } else {
                                 console.error(`[Manual Payments] ✗ No matching secret found in ${allSecrets.length} total secrets`);
                                 console.error(`[Manual Payments] Looking for: "${payment.customer_username}" or "${accountNumber}"`);
@@ -2489,6 +2493,13 @@ async function startServer() {
                 const paymentId = `manual_pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 const now = new Date().toISOString();
                 
+                // CRITICAL: Use the PPPoE username from clientUser, NOT customer.username
+                // The PPPoE secret name on MikroTik is clientUser.pppoe_username
+                const pppoeUsername = clientUser.pppoe_username || customer.username;
+                const accountNumber = customer.accountNumber || clientUser.account_number || '';
+                
+                console.log(`[Store] Manual payment - pppoeUsername: "${pppoeUsername}", accountNumber: "${accountNumber}"`);
+                
                 await db.run(
                     `INSERT INTO manual_payment_requests (
                         id, customer_account_number, customer_username, customer_full_name,
@@ -2498,8 +2509,8 @@ async function startServer() {
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
                     [
                         paymentId,
-                        customer.accountNumber,
-                        customer.username,
+                        accountNumber,
+                        pppoeUsername,  // Use PPPoE username (MikroTik secret name)
                         customer.fullName,
                         routerId,
                         plan.name,
