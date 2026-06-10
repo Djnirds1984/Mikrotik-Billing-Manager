@@ -58,6 +58,7 @@ const CaptiveChatAdmin = React.lazy(() => import('./components/CaptiveChatAdmin.
 const LandingPage = React.lazy(() => import('./components/LandingPage.tsx').then(m => ({ default: m.LandingPage })));
 const ApplicationForm = React.lazy(() => import('./components/ApplicationForm.tsx').then(m => ({ default: m.ApplicationForm })));
 const ManualPayments = React.lazy(() => import('./components/ManualPayments.tsx').then(m => ({ default: m.ManualPayments })));
+const Store = React.lazy(() => import('./components/Store.tsx').then(m => ({ default: m.Store })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -459,6 +460,18 @@ const AppRouter: React.FC = () => {
                 <LocalizationProvider>
                     <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
                         <ClientPortal selectedRouter={null} />
+                    </Suspense>
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
+    if (path.startsWith('/store')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <Store />
                     </Suspense>
                 </LocalizationProvider>
             </ThemeProvider>

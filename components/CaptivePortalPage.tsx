@@ -198,6 +198,14 @@ export const CaptivePortalPage: React.FC = () => {
                         <p className="mt-4 text-center text-slate-600 dark:text-slate-300">
                             Contact the administrator for renewal and re-activation.
                         </p>
+                        <div className="mt-6 text-center">
+                            <a 
+                                href="/store" 
+                                className="inline-block px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                            >
+                                🛒 Visit Store to Renew Your Plan
+                            </a>
+                        </div>
                         <div className="mt-6 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-md p-4 text-sm">
                             <h3 className="font-semibold text-slate-800 dark:text-slate-200 mb-2">Contact Information</h3>
                             {companySettings.companyName && <p className="text-slate-700 dark:text-slate-300">{companySettings.companyName}</p>}

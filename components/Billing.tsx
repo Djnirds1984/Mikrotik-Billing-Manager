@@ -16,7 +16,7 @@ const PlanForm: React.FC<{
 }> = ({ onSave, onCancel, initialData, profiles, isLoadingProfiles }) => {
     // FIX: Add currency to plan state and handle it during initialization.
     const { t, currency } = useLocalization();
-    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', pppoeProfile: '', description: '', currency };
+    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', pppoeProfile: '', description: '', currency, store_enabled: 1 };
     const [plan, setPlan] = useState<BillingPlan>(initialData || defaultPlanState);
     
     useEffect(() => {
@@ -75,6 +75,18 @@ const PlanForm: React.FC<{
                 <div>
                     <label htmlFor="description" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.description')}</label>
                     <textarea name="description" value={plan.description} onChange={handleChange} rows={2} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]" placeholder={t('billing.description_placeholder')}></textarea>
+                </div>
+                <div className="flex items-center">
+                    <label className="flex items-center cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            name="store_enabled"
+                            checked={plan.store_enabled !== 0}
+                            onChange={(e) => setPlan(prev => ({ ...prev, store_enabled: e.target.checked ? 1 : 0 }))}
+                            className="mr-2 h-4 w-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Show in Customer Store</span>
+                    </label>
                 </div>
                 <div className="flex items-center justify-end space-x-4 pt-4">
                     <button type="button" onClick={onCancel} className="px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium rounded-lg shadow-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700">{t('common.cancel')}</button>

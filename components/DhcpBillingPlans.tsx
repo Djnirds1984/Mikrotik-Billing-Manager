@@ -15,7 +15,7 @@ const DhcpPlanForm: React.FC<{
     const [plan, setPlan] = useState<Partial<DhcpBillingPlanWithId>>({});
     
     useEffect(() => {
-        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency };
+        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency, store_enabled: 1 };
         setPlan(initialData ? { ...initialData } : defaults);
     }, [initialData, currency]);
 
@@ -52,6 +52,18 @@ const DhcpPlanForm: React.FC<{
                         <label className="block text-sm font-medium">Speed Limit (Mbps)</label>
                         <input type="number" name="speedLimit" value={plan.speedLimit || ''} onChange={handleChange} placeholder="e.g., 5 for 5Mbps" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                     </div>
+                </div>
+                <div className="flex items-center">
+                    <label className="flex items-center cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            name="store_enabled"
+                            checked={plan.store_enabled !== 0}
+                            onChange={(e) => setPlan(prev => ({ ...prev, store_enabled: e.target.checked ? 1 : 0 }))}
+                            className="mr-2 h-4 w-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium">Show in Customer Store</span>
+                    </label>
                 </div>
                 <div className="flex justify-end gap-4 pt-4">
                     <button type="button" onClick={onCancel} className="px-4 py-2 text-sm rounded-md">Cancel</button>

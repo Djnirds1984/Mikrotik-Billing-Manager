@@ -215,6 +215,7 @@ export interface BillingPlan {
     description: string;
     currency: string;
     routerId?: string;
+    store_enabled?: number;
 }
 
 export interface BillingPlanWithId extends BillingPlan {
@@ -241,6 +242,7 @@ export interface DhcpBillingPlan {
     cycle_days: number;
     speedLimit?: string;
     currency: string;
+    store_enabled?: number;
 }
 
 export interface DhcpBillingPlanWithId extends DhcpBillingPlan {

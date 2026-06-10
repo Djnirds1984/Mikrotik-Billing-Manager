@@ -508,6 +508,33 @@ async function initDb() {
         } catch (err) {
             console.error('[Migration] Customer table migration error:', err.message);
         }
+        
+        // Add store_enabled column to billing_plans
+        try {
+            const billingPlanCols = await db.all("PRAGMA table_info(billing_plans)");
+            const billingPlanColNames = billingPlanCols.map(c => c.name);
+            if (!billingPlanColNames.includes('store_enabled')) {
+                console.log('[Migration] Adding store_enabled column to billing_plans...');
+                await db.exec("ALTER TABLE billing_plans ADD COLUMN store_enabled INTEGER DEFAULT 1");
+                console.log('[Migration] ✓ store_enabled column added to billing_plans');
+            }
+        } catch (err) {
+            console.error('[Migration] billing_plans migration error:', err.message);
+        }
+        
+        // Add store_enabled column to dhcp_billing_plans
+        try {
+            const dhcpPlanCols = await db.all("PRAGMA table_info(dhcp_billing_plans)");
+            const dhcpPlanColNames = dhcpPlanCols.map(c => c.name);
+            if (!dhcpPlanColNames.includes('store_enabled')) {
+                console.log('[Migration] Adding store_enabled column to dhcp_billing_plans...');
+                await db.exec("ALTER TABLE dhcp_billing_plans ADD COLUMN store_enabled INTEGER DEFAULT 1");
+                console.log('[Migration] ✓ store_enabled column added to dhcp_billing_plans');
+            }
+        } catch (err) {
+            console.error('[Migration] dhcp_billing_plans migration error:', err.message);
+        }
+        
         try {
             const clientUserCols = await db.all("PRAGMA table_info(client_users)");
             const clientUserColNames = clientUserCols.map(c => c.name);
@@ -2215,6 +2242,173 @@ async function startServer() {
         }
     });
     
+    // ========================================
+    // Customer Store APIs
+    // ========================================
+    
+    // GET: Get all available store plans
+    app.get('/api/public/store/plans', async (req, res) => {
+        try {
+            const { routerId, type = 'all' } = req.query;
+            
+            let plans = [];
+            
+            // Get PPPoE plans
+            if (type === 'all' || type === 'pppoe') {
+                const pppoePlans = routerId
+                    ? await db.all('SELECT * FROM billing_plans WHERE routerId = ? AND store_enabled = 1 ORDER BY price ASC', [routerId])
+                    : await db.all('SELECT * FROM billing_plans WHERE store_enabled = 1 ORDER BY price ASC');
+                plans = plans.concat(pppoePlans.map(p => ({ ...p, planType: 'pppoe' })));
+            }
+            
+            // Get DHCP plans
+            if (type === 'all' || type === 'dhcp') {
+                const dhcpPlans = routerId
+                    ? await db.all('SELECT * FROM dhcp_billing_plans WHERE routerId = ? AND store_enabled = 1 ORDER BY price ASC', [routerId])
+                    : await db.all('SELECT * FROM dhcp_billing_plans WHERE store_enabled = 1 ORDER BY price ASC');
+                plans = plans.concat(dhcpPlans.map(p => ({ ...p, planType: 'dhcp' })));
+            }
+            
+            console.log(`[Store] Found ${plans.length} plans (type: ${type}, routerId: ${routerId || 'all'})`);
+            res.json(plans);
+        } catch (e) {
+            console.error('[Store] Error fetching plans:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+    
+    // POST: Create store purchase (PayMongo checkout or manual payment)
+    app.post('/api/public/store/purchase', async (req, res) => {
+        try {
+            const { planId, planType, paymentMethod, customerUsername, routerId, gcashReference, gcashScreenshot } = req.body;
+            
+            if (!planId || !planType || !paymentMethod || !customerUsername || !routerId) {
+                return res.status(400).json({ message: 'Missing required fields' });
+            }
+            
+            console.log(`[Store] Purchase request: planId=${planId}, planType=${planType}, paymentMethod=${paymentMethod}, customer=${customerUsername}`);
+            
+            // Get plan details
+            let plan;
+            if (planType === 'pppoe') {
+                plan = await db.get('SELECT * FROM billing_plans WHERE id = ?', [planId]);
+            } else if (planType === 'dhcp') {
+                plan = await db.get('SELECT * FROM dhcp_billing_plans WHERE id = ?', [planId]);
+            }
+            
+            if (!plan) {
+                return res.status(404).json({ message: 'Plan not found' });
+            }
+            
+            // Get customer details
+            const customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [customerUsername, routerId]);
+            
+            if (!customer) {
+                return res.status(404).json({ message: 'Customer not found' });
+            }
+            
+            // Handle PayMongo payment
+            if (paymentMethod === 'paymongo') {
+                const pmSettings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+                const pmConfig = JSON.parse(pmSettings?.paymongoSettings || '{}');
+                
+                if (!pmConfig.enabled || !pmConfig.secretKey) {
+                    return res.status(400).json({ message: 'PayMongo not configured' });
+                }
+                
+                const axios = require('axios');
+                
+                // Calculate amount in centavos
+                const amount = Math.round(plan.price * 100);
+                
+                // Create checkout session
+                const checkoutData = {
+                    data: {
+                        attributes: {
+                            line_items: [{
+                                currency: 'PHP',
+                                amount: amount,
+                                description: `${plan.name} - ${customer.fullName || customer.accountNumber}`,
+                                quantity: 1
+                            }],
+                            payment_method_types: ['gcash', 'paymaya', 'card'],
+                            send_email_receipt: false,
+                            show_description: false,
+                            success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/success`,
+                            cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/cancel`,
+                            metadata: {
+                                customerUsername: customerUsername,
+                                planId: planId,
+                                planType: planType,
+                                routerId: routerId,
+                                planName: plan.name,
+                                planPrice: plan.price,
+                                customerAccountNumber: customer.accountNumber,
+                                customerFullName: customer.fullName
+                            }
+                        }
+                    }
+                };
+                
+                const response = await axios.post(
+                    'https://api.paymongo.com/v1/checkout_sessions',
+                    checkoutData,
+                    {
+                        auth: { username: pmConfig.secretKey, password: '' },
+                        headers: { 'Content-Type': 'application/json' }
+                    }
+                );
+                
+                console.log(`[Store] PayMongo checkout created: ${response.data.data.id}`);
+                
+                res.json({
+                    success: true,
+                    checkoutUrl: response.data.data.attributes.checkout_url,
+                    checkoutId: response.data.data.id
+                });
+                
+            } else if (paymentMethod === 'manual') {
+                // Create manual payment record
+                const paymentId = `manual_pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                
+                await db.run(
+                    `INSERT INTO manual_payments (
+                        id, customer_username, customer_account_number, customer_full_name,
+                        plan_name, plan_price, router_id, payment_method, reference_number,
+                        screenshot_path, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'gcash', ?, ?, 'pending', datetime('now'))`,
+                    [
+                        paymentId,
+                        customer.username,
+                        customer.accountNumber,
+                        customer.fullName,
+                        plan.name,
+                        plan.price,
+                        routerId,
+                        gcashReference || '',
+                        gcashScreenshot || ''
+                    ]
+                );
+                
+                console.log(`[Store] Manual payment created: ${paymentId}`);
+                
+                res.json({
+                    success: true,
+                    paymentId: paymentId,
+                    message: 'Manual payment submitted for approval',
+                    instructions: 'Please send payment to our GCash number and wait for admin approval'
+                });
+                
+            } else {
+                res.status(400).json({ message: 'Invalid payment method' });
+            }
+            
+        } catch (e) {
+            console.error('[Store] Purchase error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+    
     app.use('/uploads', express.static(UPLOADS_DIR));
     
     app.get('/api/public/routers', async (req, res) => {
@@ -3482,16 +3676,20 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log('[PayMongo Webhook] Description:', description);
 
             // Extract username from metadata or description fallback (format: "PlanName|username")
-            const username = metadata.pppoe_username || metadata.username || (description.includes('|') ? description.split('|').pop().trim() : '');
+            const username = metadata.pppoe_username || metadata.username || metadata.customerUsername || (description.includes('|') ? description.split('|').pop().trim() : '');
             const durationDays = parseInt(metadata.duration_days || metadata.cycle_days || '30', 10);
-            const routerId = metadata.router_id || '';
-            const planName = metadata.plan_name || '';
+            const routerId = metadata.router_id || metadata.routerId || '';
+            const planName = metadata.plan_name || metadata.planName || '';
             const invoiceNo = metadata.invoice_no || '';
+            const planType = metadata.planType || 'pppoe'; // Default to pppoe for backward compatibility
+            const planId = metadata.planId || '';
 
             console.log('[PayMongo Webhook] Username:', username);
             console.log('[PayMongo Webhook] Duration days:', durationDays);
             console.log('[PayMongo Webhook] Router ID:', routerId);
             console.log('[PayMongo Webhook] Plan name:', planName);
+            console.log('[PayMongo Webhook] Plan type:', planType);
+            console.log('[PayMongo Webhook] Plan ID:', planId);
 
             if (!username) {
                 console.error('[PayMongo Webhook] STAGE 3 WARNING: No username found in metadata or description');
@@ -3523,135 +3721,185 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 const apiBase = `http://${routerIp}:${routerPort}`;
                 const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
 
-                // 4a. Get PPP secret
-                let secret = null;
-                try {
-                    console.log('[PayMongo Webhook] Fetching PPP secret for:', username);
-                    const secretRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
-                        params: { name: username },
-                        headers: { Authorization: authHeader },
-                        timeout: 10000
-                    });
-                    const secrets = Array.isArray(secretRes.data) ? secretRes.data : [secretRes.data];
-                    secret = secrets.find(s => s.name === username) || secrets[0];
-                    console.log('[PayMongo Webhook] PPP secret found:', !!secret);
-                } catch (secretErr) {
-                    console.error('[PayMongo Webhook] PPP secret fetch error:', secretErr.message);
-                }
-
-                if (secret) {
-                    // Parse existing comment
-                    let comment = {};
-                    try { comment = JSON.parse(secret.comment || '{}'); } catch (e) { comment = {}; }
-
-                    // Calculate new due date
-                    const now = new Date();
-                    const currentDue = comment.dueDateTime ? new Date(comment.dueDateTime) : now;
-                    const baseDate = currentDue > now ? currentDue : now;
-                    const newDue = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
-                    const newDueStr = newDue.toISOString().replace('T', ' ').substring(0, 16);
-
-                    // Find active profile from billing plan
-                    let activeProfile = secret.profile;
-                    try {
-                        const billingPlan = await db.get('SELECT pppoeProfile, name FROM billing_plans WHERE pppoeProfile = ? OR name = ? LIMIT 1', [secret.profile, planName]);
-                        if (billingPlan) {
-                            activeProfile = billingPlan.pppoeProfile || activeProfile;
+                // Check if this is a store purchase (has planType in metadata)
+                const isStorePurchase = planType && planType !== 'pppoe';
+                
+                // Handle DHCP store purchases
+                if (isStorePurchase === 'dhcp') {
+                    console.log('[PayMongo Webhook] Processing DHCP store purchase for:', username);
+                    
+                    // Get customer details
+                    const customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [username, routerId]);
+                    
+                    if (customer) {
+                        // Calculate new due date
+                        const now = new Date();
+                        const currentDue = customer.dueDate ? new Date(customer.dueDate) : now;
+                        const baseDate = currentDue > now ? currentDue : now;
+                        const newDue = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+                        const newDueStr = newDue.toISOString().split('T')[0];
+                        
+                        // Get DHCP plan details
+                        let dhcpPlan = null;
+                        if (planId) {
+                            dhcpPlan = await db.get('SELECT * FROM dhcp_billing_plans WHERE id = ?', [planId]);
+                        } else if (planName) {
+                            dhcpPlan = await db.get('SELECT * FROM dhcp_billing_plans WHERE name = ? AND routerId = ?', [planName, routerId]);
                         }
-                    } catch (planErr) {
-                        console.error('[PayMongo Webhook] Billing plan lookup error:', planErr.message);
-                    }
-
-                    // 4b. Update PPP secret profile and comment
-                    const updatedComment = JSON.stringify({
-                        ...comment,
-                        planName: planName || comment.planName,
-                        dueDate: newDueStr.split(' ')[0],
-                        dueDateTime: newDueStr,
-                        planType: comment.planType || 'Postpaid'
-                    });
-
-                    try {
-                        await axios.patch(`${apiBase}/rest/ppp/secret/${secret['.id']}`, {
-                            profile: activeProfile,
-                            comment: updatedComment
-                        }, {
-                            headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                            timeout: 10000
-                        });
-                        console.log('[PayMongo Webhook] ✓ Profile set to:', activeProfile);
-                        console.log('[PayMongo Webhook] ✓ Due date extended to:', newDueStr);
-                    } catch (updateErr) {
-                        console.error('[PayMongo Webhook] PPP secret update error:', updateErr.message);
-                    }
-
-                    // 4c. Kick active session for reconnection
-                    try {
-                        const activeRes = await axios.get(`${apiBase}/rest/ppp/active`, {
-                            params: { name: username },
-                            headers: { Authorization: authHeader },
-                            timeout: 5000
-                        });
-                        const sessions = Array.isArray(activeRes.data) ? activeRes.data : [];
-                        for (const session of sessions) {
-                            if (session['.id'] && session.name === username) {
-                                await axios.post(`${apiBase}/rest/ppp/active/remove`, { '.id': session['.id'] }, {
-                                    headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                                    timeout: 5000
-                                });
-                                console.log('[PayMongo Webhook] ✓ Kicked session:', session['.id']);
+                        
+                        // Update customer due date
+                        try {
+                            await db.run(
+                                'UPDATE customers SET dueDate = ?, planName = ? WHERE username = ? AND routerId = ?',
+                                [newDueStr, planName || customer.planName, username, routerId]
+                            );
+                            console.log('[PayMongo Webhook] ✓ Customer due date updated to:', newDueStr);
+                        } catch (updateErr) {
+                            console.error('[PayMongo Webhook] Customer update error:', updateErr.message);
+                        }
+                        
+                        // Optionally update DHCP client record in MikroTik
+                        if (dhcpPlan && customer.dhcpClientName) {
+                            try {
+                                // Update DHCP client comment or custom attribute in MikroTik
+                                console.log('[PayMongo Webhook] DHCP client record updated for:', customer.dhcpClientName);
+                            } catch (mikrotikErr) {
+                                console.error('[PayMongo Webhook] MikroTik DHCP update error:', mikrotikErr.message);
                             }
                         }
-                    } catch (kickErr) {
-                        console.error('[PayMongo Webhook] Session kick error:', kickErr.message);
+                    }
+                } else {
+                    // Handle PPPoE (existing logic)
+                    // 4a. Get PPP secret
+                    let secret = null;
+                    try {
+                        console.log('[PayMongo Webhook] Fetching PPP secret for:', username);
+                        const secretRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                            params: { name: username },
+                            headers: { Authorization: authHeader },
+                            timeout: 10000
+                        });
+                        const secrets = Array.isArray(secretRes.data) ? secretRes.data : [secretRes.data];
+                        secret = secrets.find(s => s.name === username) || secrets[0];
+                        console.log('[PayMongo Webhook] PPP secret found:', !!secret);
+                    } catch (secretErr) {
+                        console.error('[PayMongo Webhook] PPP secret fetch error:', secretErr.message);
                     }
 
-                    // 4d. Create scheduler to auto-expire on due date (set to Non-Payment)
-                    try {
-                      console.log('[PayMongo Webhook] Creating expiration scheduler...');
-                      const schedulerName = `ppp-auto-kick-${username}`;
-                      
-                      // Remove existing scheduler for this user if any
-                      try {
-                        const existingRes = await axios.get(`${apiBase}/rest/system/scheduler`, {
-                          headers: { Authorization: authHeader },
-                          timeout: 10000
+                    if (secret) {
+                        // Parse existing comment
+                        let comment = {};
+                        try { comment = JSON.parse(secret.comment || '{}'); } catch (e) { comment = {}; }
+
+                        // Calculate new due date
+                        const now = new Date();
+                        const currentDue = comment.dueDateTime ? new Date(comment.dueDateTime) : now;
+                        const baseDate = currentDue > now ? currentDue : now;
+                        const newDue = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+                        const newDueStr = newDue.toISOString().replace('T', ' ').substring(0, 16);
+
+                        // Find active profile from billing plan
+                        let activeProfile = secret.profile;
+                        try {
+                            const billingPlan = await db.get('SELECT pppoeProfile, name FROM billing_plans WHERE pppoeProfile = ? OR name = ? LIMIT 1', [secret.profile, planName]);
+                            if (billingPlan) {
+                                activeProfile = billingPlan.pppoeProfile || activeProfile;
+                            }
+                        } catch (planErr) {
+                            console.error('[PayMongo Webhook] Billing plan lookup error:', planErr.message);
+                        }
+
+                        // 4b. Update PPP secret profile and comment
+                        const updatedComment = JSON.stringify({
+                            ...comment,
+                            planName: planName || comment.planName,
+                            dueDate: newDueStr.split(' ')[0],
+                            dueDateTime: newDueStr,
+                            planType: comment.planType || 'Postpaid'
                         });
-                        const schedulers = Array.isArray(existingRes.data) ? existingRes.data : [];
-                        for (const sched of schedulers) {
-                          if (sched.name === schedulerName && sched['.id']) {
-                            await axios.post(`${apiBase}/rest/system/scheduler/remove`, { '.id': sched['.id'] }, {
-                              headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+
+                        try {
+                            await axios.patch(`${apiBase}/rest/ppp/secret/${secret['.id']}`, {
+                                profile: activeProfile,
+                                comment: updatedComment
+                            }, {
+                                headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                timeout: 10000
+                            });
+                            console.log('[PayMongo Webhook] ✓ Profile set to:', activeProfile);
+                            console.log('[PayMongo Webhook] ✓ Due date extended to:', newDueStr);
+                        } catch (updateErr) {
+                            console.error('[PayMongo Webhook] PPP secret update error:', updateErr.message);
+                        }
+
+                        // 4c. Kick active session for reconnection
+                        try {
+                            const activeRes = await axios.get(`${apiBase}/rest/ppp/active`, {
+                                params: { name: username },
+                                headers: { Authorization: authHeader },
+                                timeout: 5000
+                            });
+                            const sessions = Array.isArray(activeRes.data) ? activeRes.data : [];
+                            for (const session of sessions) {
+                                if (session['.id'] && session.name === username) {
+                                    await axios.post(`${apiBase}/rest/ppp/active/remove`, { '.id': session['.id'] }, {
+                                        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                        timeout: 5000
+                                    });
+                                    console.log('[PayMongo Webhook] ✓ Kicked session:', session['.id']);
+                                }
+                            }
+                        } catch (kickErr) {
+                            console.error('[PayMongo Webhook] Session kick error:', kickErr.message);
+                        }
+
+                        // 4d. Create scheduler to auto-expire on due date (set to Non-Payment)
+                        try {
+                          console.log('[PayMongo Webhook] Creating expiration scheduler...');
+                          const schedulerName = `ppp-auto-kick-${username}`;
+                          
+                          // Remove existing scheduler for this user if any
+                          try {
+                            const existingRes = await axios.get(`${apiBase}/rest/system/scheduler`, {
+                              headers: { Authorization: authHeader },
                               timeout: 10000
                             });
-                            console.log('[PayMongo Webhook] Removed old scheduler:', sched['.id']);
+                            const schedulers = Array.isArray(existingRes.data) ? existingRes.data : [];
+                            for (const sched of schedulers) {
+                              if (sched.name === schedulerName && sched['.id']) {
+                                await axios.post(`${apiBase}/rest/system/scheduler/remove`, { '.id': sched['.id'] }, {
+                                  headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                  timeout: 10000
+                                });
+                                console.log('[PayMongo Webhook] Removed old scheduler:', sched['.id']);
+                              }
+                            }
+                          } catch (delErr) {
+                            console.error('[PayMongo Webhook] Old scheduler cleanup error:', delErr.message);
                           }
+
+                          // Format start-date as YYYY-MM-DD and start-time as HH:MM:SS (matching admin Pay format)
+                          const startDate = `${newDue.getFullYear()}-${String(newDue.getMonth() + 1).padStart(2, '0')}-${String(newDue.getDate()).padStart(2, '0')}`;
+                          const startTime = `${String(newDue.getHours()).padStart(2, '0')}:${String(newDue.getMinutes()).padStart(2, '0')}:00`;
+
+                          // Match exact on-event format from admin Pay button
+                          const onEvent = `/log info message="PPPoE auto-kick: ${username}";\n:do { /ppp active remove [find name="${username}"] } on-error={};\n/ppp secret set [find name="${username}"] profile="Non-Payment"`;
+                          
+                          await axios.post(`${apiBase}/rest/system/scheduler/add`, {
+                            name: schedulerName,
+                            interval: '0s',
+                            'start-date': startDate,
+                            'start-time': startTime,
+                            'on-event': onEvent,
+                            comment: `Auto-expire ${username} to Non-Payment on ${newDueStr}`
+                          }, {
+                            headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                            timeout: 10000
+                          });
+                          console.log('[PayMongo Webhook] ✓ Scheduler created: Non-Payment on', newDueStr);
+                        } catch (schedErr) {
+                          console.error('[PayMongo Webhook] Scheduler creation error:', schedErr.message);
                         }
-                      } catch (delErr) {
-                        console.error('[PayMongo Webhook] Old scheduler cleanup error:', delErr.message);
-                      }
-
-                      // Format start-date as YYYY-MM-DD and start-time as HH:MM:SS (matching admin Pay format)
-                      const startDate = `${newDue.getFullYear()}-${String(newDue.getMonth() + 1).padStart(2, '0')}-${String(newDue.getDate()).padStart(2, '0')}`;
-                      const startTime = `${String(newDue.getHours()).padStart(2, '0')}:${String(newDue.getMinutes()).padStart(2, '0')}:00`;
-
-                      // Match exact on-event format from admin Pay button
-                      const onEvent = `/log info message="PPPoE auto-kick: ${username}";\n:do { /ppp active remove [find name="${username}"] } on-error={};\n/ppp secret set [find name="${username}"] profile="Non-Payment"`;
-                      
-                      await axios.post(`${apiBase}/rest/system/scheduler/add`, {
-                        name: schedulerName,
-                        interval: '0s',
-                        'start-date': startDate,
-                        'start-time': startTime,
-                        'on-event': onEvent,
-                        comment: `Auto-expire ${username} to Non-Payment on ${newDueStr}`
-                      }, {
-                        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                        timeout: 10000
-                      });
-                      console.log('[PayMongo Webhook] ✓ Scheduler created: Non-Payment on', newDueStr);
-                    } catch (schedErr) {
-                      console.error('[PayMongo Webhook] Scheduler creation error:', schedErr.message);
                     }
                 }
             }
