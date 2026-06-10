@@ -1714,9 +1714,25 @@ async function startServer() {
                 query += ` WHERE routerId = ?`;
                 params.push(routerId);
             }
+            console.log(`[Customers GET] Query: ${query}`);
+            console.log(`[Customers GET] Params:`, params);
+            console.log(`[Customers GET] Database file: ${DB_PATH}`);
+            
             const rows = await db.all(query, params);
+            console.log(`[Customers GET] Found ${rows.length} customers`);
+            if (rows.length > 0) {
+                console.log(`[Customers GET] First customer:`, rows[0]);
+            }
+            
+            // Diagnostic: Count all customers regardless of routerId
+            const totalCount = await db.get('SELECT COUNT(*) as count FROM customers');
+            console.log(`[Customers GET] Total customers in database (all routers): ${totalCount.count}`);
+            
             res.json(rows);
-        } catch (e) { res.status(500).json({ message: e.message }); }
+        } catch (e) { 
+            console.error(`[Customers GET] Error:`, e.message);
+            res.status(500).json({ message: e.message }); 
+        }
     });
 
     dbRouter.post('/customers', async (req, res) => {
@@ -1775,6 +1791,14 @@ async function startServer() {
             const { id } = req.params;
             console.log(`[Customers PATCH] Updating customer id=${id}`, req.body);
             
+            // First, check if customer exists
+            const existingCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
+            if (!existingCustomer) {
+                console.error(`[Customers PATCH] Customer id=${id} NOT FOUND in database!`);
+                return res.status(404).json({ message: 'Customer not found' });
+            }
+            console.log(`[Customers PATCH] Found existing customer:`, existingCustomer);
+            
             if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
                 const current = await db.get('SELECT accountNumber FROM customers WHERE id = ?', [id]);
                 if (!current?.accountNumber) {
@@ -1784,8 +1808,13 @@ async function startServer() {
             }
             const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
             const values = [...Object.values(req.body), id];
+            console.log(`[Customers PATCH] Executing: UPDATE customers SET ${updates} WHERE id = ?`, values);
             await db.run(`UPDATE customers SET ${updates} WHERE id = ?`, values);
             console.log(`[Customers PATCH] Successfully updated customer id=${id}`);
+            
+            // Verify the update
+            const verifyCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
+            console.log(`[Customers PATCH] Verified customer after update:`, verifyCustomer);
             
             // Sync to Supabase
             const updatedCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);

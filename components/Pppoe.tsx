@@ -607,7 +607,21 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         setIsSubmitting(true);
         try {
             // Find existing customer by username AND routerId (more precise)
-            const existingCustomer = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
+            let existingCustomer = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
+            
+            // If not found in local array, try to fetch from backend directly
+            if (!existingCustomer) {
+                try {
+                    const allCustomers = await dbApi.get<any[]>(`/customers?routerId=${selectedRouter.id}`);
+                    existingCustomer = allCustomers.find(c => c.username === secretData.name);
+                    if (existingCustomer) {
+                        console.log(`[PPPoE Save] Found existing customer from backend: ${existingCustomer.id}`);
+                    }
+                } catch (e) {
+                    console.warn('[PPPoE Save] Failed to fetch customers from backend:', e);
+                }
+            }
+            
             const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
 
             // Preserve existing account number if form doesn't provide one
