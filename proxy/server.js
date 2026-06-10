@@ -2301,10 +2301,33 @@ async function startServer() {
             }
             
             // Get customer details
-            const customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [customerUsername, routerId]);
+            // First, get client_user to find the linked customer
+            const clientUser = await db.get('SELECT * FROM client_users WHERE username = ? AND router_id = ?', [customerUsername, routerId]);
+            
+            if (!clientUser) {
+                console.error(`[Store] Client user not found: username=${customerUsername}, routerId=${routerId}`);
+                return res.status(404).json({ message: 'Customer account not found. Please contact support.' });
+            }
+            
+            // Get the actual customer record using the client user's pppoe_username or account_number
+            let customer = null;
+            if (clientUser.pppoe_username) {
+                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [clientUser.pppoe_username, routerId]);
+            }
+            
+            // Fallback: try account_number
+            if (!customer && clientUser.account_number) {
+                customer = await db.get('SELECT * FROM customers WHERE accountNumber = ? AND routerId = ?', [clientUser.account_number, routerId]);
+            }
+            
+            // Last resort: use username directly
+            if (!customer) {
+                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [customerUsername, routerId]);
+            }
             
             if (!customer) {
-                return res.status(404).json({ message: 'Customer not found' });
+                console.error(`[Store] Customer not found for client_user: ${customerUsername}`);
+                return res.status(404).json({ message: 'Customer profile not found. Please contact support to link your account.' });
             }
             
             // Handle PayMongo payment
