@@ -215,7 +215,7 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
 }
 
 // --- User Form Modal ---
-const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, profiles, isSubmitting }) => {
+const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, profiles, isSubmitting, selectedRouterId }) => {
     const [secret, setSecret] = useState({ name: '', password: '', profile: '' }); // profile is plan ID
     const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', gps: '' });
     const [showPass, setShowPass] = useState(false);
@@ -242,34 +242,50 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         }
 
         if (initialData) {
-            // Try to find customer from local array first
-            let linkedCustomer = customers.find(c => c.username === initialData.name);
-            const linkedPlan = plans.find(p => p.pppoeProfile === initialData.profile);
+            // DIRECT APPROACH: Always extract from MikroTik comment first (it's the source of truth)
+            let accountNumber = '';
+            let fullName = '';
+            let address = '';
+            let contactNumber = '';
+            let email = '';
+            let gps = '';
             
-            // If not found in local array, try to extract from MikroTik comment
-            let accountNumberFromComment = '';
             if (initialData.comment) {
                 try {
-                    const parsedComment = JSON.parse(initialData.comment);
-                    accountNumberFromComment = parsedComment.accountNumber || parsedComment.customer?.accountNumber || '';
-                    if (accountNumberFromComment) {
-                        console.log(`[UserFormModal] Extracted account number from MikroTik comment: ${accountNumberFromComment}`);
+                    const commentData = JSON.parse(initialData.comment);
+                    // Extract account number - THIS IS THE MOST RELIABLE SOURCE
+                    accountNumber = commentData.accountNumber || commentData.customer?.accountNumber || '';
+                    
+                    // Extract customer info
+                    if (commentData.customer) {
+                        fullName = commentData.customer.fullName || '';
+                        address = commentData.customer.address || '';
+                        contactNumber = commentData.customer.contactNumber || '';
+                        email = commentData.customer.email || '';
+                        gps = commentData.customer.gps || '';
+                    }
+                    
+                    if (accountNumber) {
+                        console.log(`[UserFormModal] ✓ Using account number from MikroTik: ${accountNumber}`);
                     }
                 } catch (e) {
-                    console.warn('[UserFormModal] Failed to parse comment:', e);
+                    console.error('[UserFormModal] Failed to parse comment:', e);
                 }
             }
             
+            const linkedPlan = plans.find(p => p.pppoeProfile === initialData.profile);
+            
             setSecret({ name: initialData.name, password: '', profile: linkedPlan?.id || '' });
             setCustomer({ 
-                fullName: linkedCustomer?.fullName || '', 
-                address: linkedCustomer?.address || '', 
-                contactNumber: linkedCustomer?.contactNumber || '', 
-                email: linkedCustomer?.email || '',
-                accountNumber: linkedCustomer?.accountNumber || accountNumberFromComment || '',
-                gps: linkedCustomer?.gps || ''
+                fullName: fullName,
+                address: address,
+                contactNumber: contactNumber,
+                email: email,
+                accountNumber: accountNumber, // This will ALWAYS have the value from MikroTik
+                gps: gps
             });
             
+            // Set due date and plan type from comment
             try {
                 const commentData = JSON.parse(initialData.comment);
                 if (commentData.dueDateTime) {
@@ -282,16 +298,6 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 }
                 const pt = String(commentData.planType || '').toLowerCase().trim();
                 setPlanType(pt === 'postpaid' ? 'postpaid' : 'prepaid');
-                const gps = commentData.customer?.gps || '';
-                if (gps) {
-                    setCustomer(c => ({ ...c, gps }));
-                } else {
-                    const lat = commentData.customer?.latitude || '';
-                    const lng = commentData.customer?.longitude || '';
-                    if (lat || lng) {
-                        setCustomer(c => ({ ...c, gps: [lat, lng].filter(Boolean).join(', ') }));
-                    }
-                }
             } catch (e) {
                 setDueDate('');
                 setPlanType('prepaid');
@@ -854,6 +860,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 customers={customers}
                 profiles={profiles}
                 isSubmitting={isSubmitting}
+                selectedRouterId={selectedRouter?.id}
             />
             <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />
             <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} profiles={profiles} onSave={handleGraceSave} />
