@@ -2024,12 +2024,18 @@ async function startServer() {
             
             // CRITICAL: Update MikroTik PPPoE secret with new due date (same as PayMongo)
             try {
+                console.log(`[Manual Payments] Looking up router with ID: ${payment.customer_router_id}`);
                 const router = await db.get('SELECT * FROM routers WHERE id = ?', [payment.customer_router_id]);
+                
+                console.log(`[Manual Payments] Router found: ${!!router}, host: ${router?.host}, port: ${router?.port}`);
                 
                 if (router) {
                     const axios = require('axios');
                     const apiBase = `http://${router.host}:${router.port}`;
                     const authHeader = `Basic ${Buffer.from(`${router.user}:${router.password}`).toString('base64')}`;
+                    
+                    console.log(`[Manual Payments] Connecting to MikroTik at: ${apiBase}`);
+                    console.log(`[Manual Payments] Looking for PPP secret: ${payment.customer_username}`);
                     
                     // Get PPP secret
                     const secretRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
@@ -2160,9 +2166,12 @@ async function startServer() {
                             console.error('[Manual Payments] Scheduler error stack:', schedErr.stack);
                         }
                     }
+                } else {
+                    console.error(`[Manual Payments] Router NOT found with ID: ${payment.customer_router_id}`);
                 }
             } catch (mikrotikErr) {
                 console.error('[Manual Payments] MikroTik update error:', mikrotikErr.message);
+                console.error('[Manual Payments] MikroTik error stack:', mikrotikErr.stack);
                 // Don't fail the payment if MikroTik update fails
             }
             
