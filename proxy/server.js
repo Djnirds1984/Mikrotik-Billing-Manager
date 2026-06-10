@@ -4414,7 +4414,9 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // POST: Facebook Webhook Message Receiver - Full Billing Bot
     app.post('/api/facebook-webhook', async (req, res) => {
         try {
+            console.log('[Facebook Webhook] ========================================');
             console.log('[Facebook Webhook] Message event received');
+            console.log('[Facebook Webhook] Request body:', JSON.stringify(req.body, null, 2).substring(0, 500));
             
             // Read Facebook settings from database
             const settings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
@@ -4428,6 +4430,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 console.log('[Facebook Webhook] Rejected: Facebook Messenger is disabled');
                 return res.status(200).json({ error: 'Facebook Messenger is not enabled' });
             }
+            
+            console.log('[Facebook Webhook] Facebook is enabled, token exists:', !!fbSettings.pageAccessToken);
 
             const body = req.body;
 
