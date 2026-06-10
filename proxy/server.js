@@ -1970,14 +1970,19 @@ async function startServer() {
             const billingPlan = await db.get('SELECT * FROM billing_plans WHERE name = ? AND routerId = ?', [payment.plan_name, payment.customer_router_id]);
             const dhcpPlan = await db.get('SELECT * FROM dhcp_billing_plans WHERE name = ? AND routerId = ?', [payment.plan_name, payment.customer_router_id]);
             
+            console.log(`[Manual Payments] Plan lookup - billingPlan found: ${!!billingPlan}, dhcpPlan found: ${!!dhcpPlan}`);
+            console.log(`[Manual Payments] Plan name: "${payment.plan_name}", Router ID: "${payment.customer_router_id}"`);
+            
             if (billingPlan) {
                 // PPPoE plan - convert cycle to days
                 if (billingPlan.cycle === 'Monthly') durationDays = 30;
                 else if (billingPlan.cycle === 'Quarterly') durationDays = 90;
                 else if (billingPlan.cycle === 'Yearly') durationDays = 365;
+                console.log(`[Manual Payments] PPPoE plan detected: ${billingPlan.cycle} = ${durationDays} days`);
             } else if (dhcpPlan) {
                 // DHCP plan - use cycle_days directly
                 durationDays = dhcpPlan.cycle_days || 30;
+                console.log(`[Manual Payments] DHCP plan detected: ${durationDays} days`);
             }
             
             console.log(`[Manual Payments] Using duration: ${durationDays} days for plan: ${payment.plan_name}`);
@@ -2010,23 +2015,12 @@ async function startServer() {
             
             const dueDateStr = newDueDate.toISOString().split('T')[0];
             
-            // Determine if this is a DHCP or PPPoE customer
-            const isDhcpCustomer = dhcpPlan && !billingPlan;
-            
-            if (isDhcpCustomer) {
-                // Handle DHCP customer - just update customer record
-                console.log(`[Manual Payments] Updating DHCP customer record`);
-                await db.run(
-                    'UPDATE customers SET dueDate = ?, planType = ? WHERE accountNumber = ?',
-                    [dueDateStr, 'Active', payment.customer_account_number]
-                );
-                console.log(`[Manual Payments] ✓ DHCP customer due date updated to: ${dueDateStr}`);
-            } else {
-                // Handle PPPoE customer - update customer AND MikroTik PPP secret
-                await db.run(
-                    'UPDATE customers SET dueDate = ?, planType = ? WHERE accountNumber = ?',
-                    [dueDateStr, 'Active', payment.customer_account_number]
-                );
+            // ALWAYS update customer AND MikroTik PPP secret (same as Facebook bot)
+            console.log(`[Manual Payments] Updating PPPoE customer record and MikroTik secret`);
+            await db.run(
+                'UPDATE customers SET dueDate = ?, planType = ? WHERE accountNumber = ?',
+                [dueDateStr, 'Active', payment.customer_account_number]
+            );
             
             // CRITICAL: Update MikroTik PPPoE secret with new due date (same as PayMongo)
             try {
@@ -2171,7 +2165,6 @@ async function startServer() {
                 console.error('[Manual Payments] MikroTik update error:', mikrotikErr.message);
                 // Don't fail the payment if MikroTik update fails
             }
-            } // Close the else block for PPPoE customers
             
             console.log(`[Manual Payments] Payment ${paymentId} approved for ${payment.customer_account_number}`);
             
