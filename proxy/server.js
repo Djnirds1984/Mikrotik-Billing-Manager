@@ -576,31 +576,6 @@ async function initDb() {
             }
         } catch (_) {}
         
-        // Create manual_payments table for store purchases
-        try {
-            await db.exec(`
-                CREATE TABLE IF NOT EXISTS manual_payments (
-                    id TEXT PRIMARY KEY,
-                    customer_username TEXT,
-                    customer_account_number TEXT,
-                    customer_full_name TEXT,
-                    plan_name TEXT,
-                    plan_price REAL,
-                    router_id TEXT,
-                    payment_method TEXT DEFAULT 'gcash',
-                    reference_number TEXT,
-                    screenshot_path TEXT,
-                    status TEXT DEFAULT 'pending',
-                    admin_notes TEXT,
-                    created_at TEXT,
-                    processed_at TEXT
-                )
-            `);
-            console.log('[Migration] ✓ manual_payments table created');
-        } catch (err) {
-            console.error('[Migration] manual_payments table creation error:', err.message);
-        }
-        
         try {
             const resellerNames = await db.all("SELECT DISTINCT TRIM(resellerName) AS name FROM pisowifi_income WHERE resellerName IS NOT NULL AND TRIM(resellerName) <> ''");
             for (const row of resellerNames) {
@@ -2417,25 +2392,27 @@ async function startServer() {
                 });
                 
             } else if (paymentMethod === 'manual') {
-                // Create manual payment record
+                // Create manual payment record in the same table as Facebook bot
                 const paymentId = `manual_pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const now = new Date().toISOString();
                 
                 await db.run(
-                    `INSERT INTO manual_payments (
-                        id, customer_username, customer_account_number, customer_full_name,
-                        plan_name, plan_price, router_id, payment_method, reference_number,
-                        screenshot_path, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'gcash', ?, ?, 'pending', datetime('now'))`,
+                    `INSERT INTO manual_payment_requests (
+                        id, customer_account_number, customer_username, customer_full_name,
+                        customer_router_id, plan_name, plan_price, gcash_reference_number,
+                        status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
                     [
                         paymentId,
-                        customer.username,
                         customer.accountNumber,
+                        customer.username,
                         customer.fullName,
+                        routerId,
                         plan.name,
                         plan.price,
-                        routerId,
                         gcashReference || '',
-                        gcashScreenshot || ''
+                        now,
+                        now
                     ]
                 );
                 
