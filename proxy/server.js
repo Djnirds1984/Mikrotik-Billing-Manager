@@ -575,6 +575,32 @@ async function initDb() {
                 await db.exec("ALTER TABLE pisowifi_income ADD COLUMN resellerId TEXT");
             }
         } catch (_) {}
+        
+        // Create manual_payments table for store purchases
+        try {
+            await db.exec(`
+                CREATE TABLE IF NOT EXISTS manual_payments (
+                    id TEXT PRIMARY KEY,
+                    customer_username TEXT,
+                    customer_account_number TEXT,
+                    customer_full_name TEXT,
+                    plan_name TEXT,
+                    plan_price REAL,
+                    router_id TEXT,
+                    payment_method TEXT DEFAULT 'gcash',
+                    reference_number TEXT,
+                    screenshot_path TEXT,
+                    status TEXT DEFAULT 'pending',
+                    admin_notes TEXT,
+                    created_at TEXT,
+                    processed_at TEXT
+                )
+            `);
+            console.log('[Migration] ✓ manual_payments table created');
+        } catch (err) {
+            console.error('[Migration] manual_payments table creation error:', err.message);
+        }
+        
         try {
             const resellerNames = await db.all("SELECT DISTINCT TRIM(resellerName) AS name FROM pisowifi_income WHERE resellerName IS NOT NULL AND TRIM(resellerName) <> ''");
             for (const row of resellerNames) {
