@@ -1721,11 +1721,16 @@ async function startServer() {
 
     dbRouter.post('/customers', async (req, res) => {
         try {
-            const { username } = req.body;
+            const { username, routerId } = req.body;
             if (!username) return res.status(400).json({ message: 'Username required' });
 
-            // Check existence
-            const existing = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
+            // Check existence by username AND routerId (multi-tenant support)
+            const existing = await db.get(
+                'SELECT * FROM customers WHERE username = ? AND routerId = ?',
+                [username, routerId]
+            );
+            
+            console.log(`[Customers POST] username=${username}, routerId=${routerId}, existing=${!!existing}`);
             
             if (existing) {
                 // Update existing
@@ -1734,6 +1739,7 @@ async function startServer() {
                 if (keys.length > 0) {
                     const setClause = keys.map(k => `${k} = ?`).join(',');
                     await db.run(`UPDATE customers SET ${setClause} WHERE id = ?`, [...values, existing.id]);
+                    console.log(`[Customers POST] Updated existing customer id=${existing.id}`);
                 }
                 
                 // Sync to Supabase
@@ -1750,14 +1756,16 @@ async function startServer() {
                 const values = Object.values(req.body);
                 const placeholders = keys.map(() => '?').join(',');
                 await db.run(`INSERT INTO customers (${keys.join(',')}) VALUES (${placeholders})`, values);
+                console.log(`[Customers POST] Inserted new customer username=${username}, routerId=${routerId}, accountNumber=${req.body.accountNumber}`);
                 
                 // Sync to Supabase
-                const newCustomer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
+                const newCustomer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [username, routerId]);
                 await syncCustomerToSupabase(newCustomer);
 
                 res.json({ message: 'Created new customer' });
             }
         } catch (e) {
+            console.error(`[Customers POST] Error:`, e.message);
             res.status(500).json({ message: e.message });
         }
     });
@@ -1765,22 +1773,29 @@ async function startServer() {
     dbRouter.patch('/customers/:id', async (req, res) => {
         try {
             const { id } = req.params;
+            console.log(`[Customers PATCH] Updating customer id=${id}`, req.body);
+            
             if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
                 const current = await db.get('SELECT accountNumber FROM customers WHERE id = ?', [id]);
                 if (!current?.accountNumber) {
                     req.body.accountNumber = await generateAccountNumber();
+                    console.log(`[Customers PATCH] Generated account number: ${req.body.accountNumber}`);
                 }
             }
             const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
             const values = [...Object.values(req.body), id];
             await db.run(`UPDATE customers SET ${updates} WHERE id = ?`, values);
+            console.log(`[Customers PATCH] Successfully updated customer id=${id}`);
             
             // Sync to Supabase
             const updatedCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
             await syncCustomerToSupabase(updatedCustomer);
 
             res.json({ message: 'Updated' });
-        } catch (e) { res.status(500).json({ message: e.message }); }
+        } catch (e) { 
+            console.error(`[Customers PATCH] Error:`, e.message);
+            res.status(500).json({ message: e.message }); 
+        }
     });
 
     dbRouter.delete('/customers/:id', async (req, res) => {
@@ -5809,17 +5824,22 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 return res.status(400).json({ message: 'routerId and pppoeUsername are required' });
             }
             
+            console.log(`[Client Portal Lookup] Searching for routerId=${routerId}, pppoeUsername=${pppoeUsername}`);
+            
             const customer = await db.get(
                 'SELECT accountNumber FROM customers WHERE routerId = ? AND username = ?',
                 [routerId, pppoeUsername]
             );
             
             if (customer && customer.accountNumber) {
+                console.log(`[Client Portal Lookup] ✓ Found account number: ${customer.accountNumber}`);
                 res.json({ accountNumber: customer.accountNumber, found: true });
             } else {
+                console.log(`[Client Portal Lookup] ✗ Account number not found`);
                 res.json({ accountNumber: null, found: false, message: 'Account number not found for this PPPoE user' });
             }
         } catch (e) { 
+            console.error(`[Client Portal Lookup] Error:`, e.message);
             res.status(500).json({ message: e.message }); 
         }
     });
