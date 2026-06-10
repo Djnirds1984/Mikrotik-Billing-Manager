@@ -4445,23 +4445,32 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                 console.log(`[Facebook Bot] Message from ${senderId}: "${userMessage}"`);
                                 
                                 try {
+                                    console.log(`[Facebook Bot] Processing message from ${senderId}: "${userMessage}"`);
+                                    
                                     // First, check if user is in manual payment flow
                                     const manualPaymentResponse = await processManualPaymentSteps(senderId, userMessage);
                                     
                                     // If in manual payment flow, use that response
                                     if (manualPaymentResponse) {
+                                        console.log(`[Facebook Bot] Using manual payment flow response`);
                                         await sendFacebookMessage(senderId, manualPaymentResponse, fbSettings.pageAccessToken);
                                     } else {
                                         // Otherwise, process normal bot commands
+                                        console.log(`[Facebook Bot] Processing normal bot command`);
                                         const response = await processFacebookBotMessage(senderId, userMessage, fbSettings.pageAccessToken);
+                                        
+                                        console.log(`[Facebook Bot] Response generated: ${response ? response.substring(0, 50) + '...' : 'null'}`);
                                         
                                         // Send response if there is one
                                         if (response) {
                                             await sendFacebookMessage(senderId, response, fbSettings.pageAccessToken);
+                                        } else {
+                                            console.warn(`[Facebook Bot] No response generated for message: "${userMessage}"`);
                                         }
                                     }
                                 } catch (sendErr) {
                                     console.error('[Facebook Bot] Failed to send response:', sendErr.message);
+                                    console.error('[Facebook Bot] Error stack:', sendErr.stack);
                                     // Don't crash - continue processing other messages
                                 }
                             }
@@ -4487,16 +4496,17 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     const conversationStates = new Map();
     
     async function processFacebookBotMessage(senderId, userMessage, pageAccessToken) {
-        const upperMessage = userMessage.toUpperCase();
-        
-        // Get routerId from Facebook settings
-        const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
-        const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
-        const routerId = fbConfig.routerId;
-        
-        if (!routerId) {
-            console.warn('[Facebook Bot] WARNING: No routerId configured in Facebook settings! Bot will search across ALL routers.');
-        }
+        try {
+            const upperMessage = userMessage.toUpperCase();
+            
+            // Get routerId from Facebook settings
+            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            const routerId = fbConfig.routerId;
+            
+            if (!routerId) {
+                console.warn('[Facebook Bot] WARNING: No routerId configured in Facebook settings! Bot will search across ALL routers.');
+            }
 
         // Command: REGISTER <account_no>
         if (upperMessage.startsWith('REGISTER') || upperMessage.startsWith('REG')) {
@@ -4549,6 +4559,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
         // Default: Show help menu
         return getHelpMessage();
+        } catch (err) {
+            console.error('[Facebook Bot] processFacebookBotMessage error:', err.message);
+            console.error('[Facebook Bot] Error stack:', err.stack);
+            return `⚠️ Sorry, an error occurred. Please try again or contact support.`;
+        }
     }
 
     // ========================================
