@@ -444,6 +444,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             ]);
             setSecrets(secretsData);
             setProfiles(profilesData);
+            
+            // Debug logging
+            console.log(`[PPPoE Users] Loaded ${secretsData.length} secrets from MikroTik`);
+            console.log(`[PPPoE Users] Loaded ${customers.length} customers from database for router ${selectedRouter.id}`);
         } catch (err) {
             setError(`Failed to fetch PPPoE users: ${(err as Error).message}`);
         } finally {
@@ -458,7 +462,12 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             // Try multiple matching strategies to find the customer
             let customer = customers.find(c => c.username === secret.name);
             
-            // Fallback 1: Try matching by parsing accountNumber from secret.comment
+            // Fallback 1: Try matching by username AND routerId (more precise)
+            if (!customer) {
+                customer = customers.find(c => c.username === secret.name && c.routerId === selectedRouter.id);
+            }
+            
+            // Fallback 2: Try matching by parsing accountNumber from secret.comment
             if (!customer && secret.comment) {
                 try {
                     const parsedComment = JSON.parse(secret.comment);
@@ -468,7 +477,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 } catch (e) { /* ignore parse errors */ }
             }
             
-            // Fallback 2: Try matching by fullName if stored in comment
+            // Fallback 3: Try matching by fullName if stored in comment
             if (!customer && secret.comment) {
                 try {
                     const parsedComment = JSON.parse(secret.comment);
@@ -503,7 +512,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 subscription
             };
         });
-    }, [secrets, customers]);
+    }, [secrets, customers, selectedRouter.id]);
     
     // Sorting Logic
     const sortedUsers = useMemo(() => {
@@ -597,21 +606,30 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string; planId: string; planType?: 'prepaid' | 'postpaid' }) => {
         setIsSubmitting(true);
         try {
-            const existingCustomer = customers.find(c => c.username === secretData.name);
+            // Find existing customer by username AND routerId (more precise)
+            const existingCustomer = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
             const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
 
+            // Preserve existing account number if form doesn't provide one
+            const existingAccountNumber = existingCustomer?.accountNumber || '';
+            
             // Force generate account number if not provided
             let enrichedCustomerData = {
                 ...customerData,
                 dueDate: subscriptionData.dueDate,
                 planType: subscriptionData.planType,
                 planName: selectedPlan?.name,
-                password: secretData.password // Save password to customer record
+                password: secretData.password, // Save password to customer record
+                // Preserve existing account number if form data doesn't have one
+                accountNumber: customerData.accountNumber || existingAccountNumber
             };
             
-            // Ensure account number is always present
+            // Ensure account number is always present as last resort
             if (!enrichedCustomerData.accountNumber || String(enrichedCustomerData.accountNumber).trim() === '') {
                 enrichedCustomerData.accountNumber = `ACC-${String(Date.now()).slice(-6)}`;
+                console.log(`[PPPoE Save] Generated new account number: ${enrichedCustomerData.accountNumber} for user ${secretData.name}`);
+            } else {
+                console.log(`[PPPoE Save] Using account number: ${enrichedCustomerData.accountNumber} for user ${secretData.name}`);
             }
 
             // Construct comment based on subscription and customer data
@@ -666,17 +684,20 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
 
             // Update local customer DB - always save even if only username exists
             if (existingCustomer) {
+                console.log(`[PPPoE Save] Updating existing customer: ${existingCustomer.id} with accountNumber: ${enrichedCustomerData.accountNumber}`);
                 await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
             } else {
                 // Always create customer record with at least username and account number
                 const alreadyExists = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
                 if (!alreadyExists) {
+                    console.log(`[PPPoE Save] Creating new customer with accountNumber: ${enrichedCustomerData.accountNumber}`);
                     await addCustomer({ 
                         routerId: selectedRouter.id, 
                         username: secretData.name, 
                         ...enrichedCustomerData 
                     });
                 } else {
+                    console.log(`[PPPoE Save] Customer already exists, updating with accountNumber: ${enrichedCustomerData.accountNumber}`);
                     await updateCustomer({ ...alreadyExists, ...enrichedCustomerData });
                 }
             }
@@ -1087,7 +1108,20 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                         </p>
                                     </td>
                                     <td className="text-center">
-                                        <HighlightText text={user.customer?.accountNumber || ''} highlight={searchTerm} />
+                                        {(() => {
+                                            // Try to get account number from customer first
+                                            let accNum = user.customer?.accountNumber;
+                                            
+                                            // Fallback: Extract from MikroTik comment if not in customer record
+                                            if (!accNum && user.comment) {
+                                                try {
+                                                    const parsedComment = JSON.parse(user.comment);
+                                                    accNum = parsedComment.accountNumber || parsedComment.customer?.accountNumber;
+                                                } catch (e) { /* ignore */ }
+                                            }
+                                            
+                                            return <HighlightText text={accNum || ''} highlight={searchTerm} />;
+                                        })()}
                                     </td>
                                     <td className="text-center">
                                         <HighlightText text={user.profile || ''} highlight={searchTerm} />
