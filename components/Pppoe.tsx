@@ -242,8 +242,23 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         }
 
         if (initialData) {
-            const linkedCustomer = customers.find(c => c.username === initialData.name);
+            // Try to find customer from local array first
+            let linkedCustomer = customers.find(c => c.username === initialData.name);
             const linkedPlan = plans.find(p => p.pppoeProfile === initialData.profile);
+            
+            // If not found in local array, try to extract from MikroTik comment
+            let accountNumberFromComment = '';
+            if (initialData.comment) {
+                try {
+                    const parsedComment = JSON.parse(initialData.comment);
+                    accountNumberFromComment = parsedComment.accountNumber || parsedComment.customer?.accountNumber || '';
+                    if (accountNumberFromComment) {
+                        console.log(`[UserFormModal] Extracted account number from MikroTik comment: ${accountNumberFromComment}`);
+                    }
+                } catch (e) {
+                    console.warn('[UserFormModal] Failed to parse comment:', e);
+                }
+            }
             
             setSecret({ name: initialData.name, password: '', profile: linkedPlan?.id || '' });
             setCustomer({ 
@@ -251,9 +266,10 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 address: linkedCustomer?.address || '', 
                 contactNumber: linkedCustomer?.contactNumber || '', 
                 email: linkedCustomer?.email || '',
-                accountNumber: linkedCustomer?.accountNumber || '',
+                accountNumber: linkedCustomer?.accountNumber || accountNumberFromComment || '',
                 gps: linkedCustomer?.gps || ''
             });
+            
             try {
                 const commentData = JSON.parse(initialData.comment);
                 if (commentData.dueDateTime) {
@@ -612,39 +628,37 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             // If not found in local array, try to fetch from backend directly
             if (!existingCustomer) {
                 try {
+                    console.log(`[PPPoE Save] Customer not in local array, fetching from backend for user: ${secretData.name}`);
                     const allCustomers = await dbApi.get<any[]>(`/customers?routerId=${selectedRouter.id}`);
+                    console.log(`[PPPoE Save] Backend returned ${allCustomers.length} customers`);
                     existingCustomer = allCustomers.find(c => c.username === secretData.name);
                     if (existingCustomer) {
-                        console.log(`[PPPoE Save] Found existing customer from backend: ${existingCustomer.id}`);
+                        console.log(`[PPPoE Save] ✓ Found existing customer from backend: ${existingCustomer.id}, accountNumber: ${existingCustomer.accountNumber}`);
+                    } else {
+                        console.log(`[PPPoE Save] ✗ Customer not found in backend either`);
                     }
                 } catch (e) {
-                    console.warn('[PPPoE Save] Failed to fetch customers from backend:', e);
+                    console.error('[PPPoE Save] Failed to fetch customers from backend:', e);
                 }
             }
             
             const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
 
-            // Preserve existing account number if form doesn't provide one
+            // CRITICAL: Preserve existing account number - NEVER generate new one if customer exists
             const existingAccountNumber = existingCustomer?.accountNumber || '';
             
-            // Force generate account number if not provided
+            // Build enriched customer data
             let enrichedCustomerData = {
                 ...customerData,
                 dueDate: subscriptionData.dueDate,
                 planType: subscriptionData.planType,
                 planName: selectedPlan?.name,
-                password: secretData.password, // Save password to customer record
-                // Preserve existing account number if form data doesn't have one
-                accountNumber: customerData.accountNumber || existingAccountNumber
+                password: secretData.password,
+                // ALWAYS use existing account number if available, only generate if truly new customer
+                accountNumber: existingAccountNumber || customerData.accountNumber || `ACC-${String(Date.now()).slice(-6)}`
             };
             
-            // Ensure account number is always present as last resort
-            if (!enrichedCustomerData.accountNumber || String(enrichedCustomerData.accountNumber).trim() === '') {
-                enrichedCustomerData.accountNumber = `ACC-${String(Date.now()).slice(-6)}`;
-                console.log(`[PPPoE Save] Generated new account number: ${enrichedCustomerData.accountNumber} for user ${secretData.name}`);
-            } else {
-                console.log(`[PPPoE Save] Using account number: ${enrichedCustomerData.accountNumber} for user ${secretData.name}`);
-            }
+            console.log(`[PPPoE Save] Final account number: ${enrichedCustomerData.accountNumber} (existing: ${existingAccountNumber}, from form: ${customerData.accountNumber})`);
 
             // Construct comment based on subscription and customer data
             let commentJson: any = {};
