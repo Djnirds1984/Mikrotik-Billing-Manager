@@ -2400,8 +2400,9 @@ async function startServer() {
                     `INSERT INTO manual_payment_requests (
                         id, customer_account_number, customer_username, customer_full_name,
                         customer_router_id, plan_name, plan_price, gcash_reference_number,
+                        customer_mobile_number, customer_name_on_gcash,
                         status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
                     [
                         paymentId,
                         customer.accountNumber,
@@ -2411,6 +2412,8 @@ async function startServer() {
                         plan.name,
                         plan.price,
                         gcashReference || '',
+                        customer.contactNumber || '',  // Get from customer record
+                        customer.fullName || '',       // Use full name as GCash name
                         now,
                         now
                     ]
