@@ -2046,6 +2046,7 @@ async function startServer() {
                             timeout: 10000
                         });
                         console.log(`[Manual Payments] PPP secret API response status: ${secretRes.status}`);
+                        console.log(`[Manual Payments] PPP secret API response data:`, JSON.stringify(secretRes.data).substring(0, 500));
                     } catch (apiErr) {
                         console.error(`[Manual Payments] PPP secret API call failed: ${apiErr.message}`);
                         console.error(`[Manual Payments] API URL: ${apiBase}/rest/ppp/secret`);
@@ -2057,6 +2058,11 @@ async function startServer() {
                     const secret = secrets.find(s => s.name === payment.customer_username) || secrets[0];
                     
                     console.log(`[Manual Payments] Found secrets: ${secrets.length}, Selected secret: ${secret?.name || 'none'}`);
+                    console.log(`[Manual Payments] Payment customer_username: "${payment.customer_username}"`);
+                    
+                    // Also lookup customer record to get their actual PPPoE username
+                    const customerRecord = await db.get('SELECT username, pppoeUsername, accountNumber FROM customers WHERE accountNumber = ?', [payment.customer_account_number]);
+                    console.log(`[Manual Payments] Customer record - username: "${customerRecord?.username}", pppoeUsername: "${customerRecord?.pppoeUsername}"`);
                     
                     if (secret) {
                         // Parse existing comment
