@@ -45,10 +45,50 @@ export const ClientPortalUsers: React.FC = () => {
         fetchData();
     }, []);
 
+    // Auto-fetch account number when pppoeUsername or routerId changes
+    useEffect(() => {
+        const fetchAccountNumber = async () => {
+            if (!routerId || !pppoeUsername) {
+                setAccountNumber('');
+                return;
+            }
+            
+            try {
+                const res = await fetch(
+                    `/api/client-portal/lookup-account?routerId=${encodeURIComponent(routerId)}&pppoeUsername=${encodeURIComponent(pppoeUsername)}`,
+                    {
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                    }
+                );
+                
+                if (!res.ok) {
+                    console.error('Failed to fetch account number');
+                    return;
+                }
+                
+                const data = await res.json();
+                if (data.found && data.accountNumber) {
+                    setAccountNumber(data.accountNumber);
+                } else {
+                    setAccountNumber('');
+                    console.warn('Account number not found for this PPPoE user');
+                }
+            } catch (e) {
+                console.error('Error fetching account number:', e);
+            }
+        };
+        
+        fetchAccountNumber();
+    }, [routerId, pppoeUsername]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!username || !password || !routerId || !pppoeUsername) {
-            alert('All fields are required');
+            alert('Portal Username, Password, Router, and PPPoE Username are required');
+            return;
+        }
+        if (!accountNumber) {
+            alert('Account number not found for this PPPoE user. Please ensure the PPPoE user exists in the system.');
             return;
         }
         setIsSubmitting(true);
@@ -145,11 +185,15 @@ export const ClientPortalUsers: React.FC = () => {
                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Account Number</label>
                         <input 
                             value={accountNumber} 
-                            onChange={e => setAccountNumber(e.target.value)} 
-                            className="mt-1 w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600" 
-                            placeholder="e.g. ACC-000123"
+                            readOnly
+                            className="mt-1 w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600 bg-slate-100 dark:bg-slate-800 cursor-not-allowed" 
+                            placeholder="Auto-filled from PPPoE user"
                         />
-                        <p className="text-xs text-slate-500 mt-1">Unique identifier for this client.</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                            {accountNumber 
+                                ? '✓ Fetched from PPPoE user database' 
+                                : 'Enter PPPoE username to auto-fetch account number'}
+                        </p>
                     </div>
                     <div className="md:col-span-2">
                         <button 

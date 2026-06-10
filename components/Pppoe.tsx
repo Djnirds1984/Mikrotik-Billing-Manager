@@ -283,7 +283,9 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
 
         } else {
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
-            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', gps: '' });
+            // Force generate account number for new users
+            const generatedAccNum = `ACC-${String(Date.now()).slice(-6)}`;
+            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: generatedAccNum, gps: '' });
             setDueDate('');
             setPlanType('prepaid');
         }
@@ -596,6 +598,21 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         setIsSubmitting(true);
         try {
             const existingCustomer = customers.find(c => c.username === secretData.name);
+            const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
+
+            // Force generate account number if not provided
+            let enrichedCustomerData = {
+                ...customerData,
+                dueDate: subscriptionData.dueDate,
+                planType: subscriptionData.planType,
+                planName: selectedPlan?.name,
+                password: secretData.password // Save password to customer record
+            };
+            
+            // Ensure account number is always present
+            if (!enrichedCustomerData.accountNumber || String(enrichedCustomerData.accountNumber).trim() === '') {
+                enrichedCustomerData.accountNumber = `ACC-${String(Date.now()).slice(-6)}`;
+            }
 
             // Construct comment based on subscription and customer data
             let commentJson: any = {};
@@ -605,6 +622,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 }
             } catch (e) { /* ignore malformed comment */ }
 
+            // Always include accountNumber in the comment
+            commentJson.accountNumber = enrichedCustomerData.accountNumber;
+
             if (subscriptionData.dueDate) {
                 commentJson.dueDate = subscriptionData.dueDate.split('T')[0];
                 commentJson.dueDateTime = subscriptionData.dueDate;
@@ -613,7 +633,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 delete commentJson.dueDateTime;
             }
             
-            const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
             if (selectedPlan) {
                 secretData.profile = selectedPlan.pppoeProfile; // Set the actual profile on the secret
                 commentJson.plan = selectedPlan.name;
@@ -626,16 +645,14 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             }
             // Persist customer info in comment on the secret
             if (customerData) {
-                const hasCustomerInfo = Object.values(customerData).some(val => val && String(val).trim() !== '');
-                if (hasCustomerInfo) {
-                    commentJson.customer = {
-                        fullName: customerData.fullName || '',
-                        address: customerData.address || '',
-                        contactNumber: customerData.contactNumber || '',
-                        email: customerData.email || '',
-                        gps: customerData.gps || ''
-                    };
-                }
+                commentJson.customer = {
+                    fullName: customerData.fullName || '',
+                    address: customerData.address || '',
+                    contactNumber: customerData.contactNumber || '',
+                    email: customerData.email || '',
+                    gps: customerData.gps || '',
+                    accountNumber: enrichedCustomerData.accountNumber
+                };
             }
             secretData.comment = JSON.stringify(commentJson);
 
@@ -644,40 +661,28 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 initialSecret: selectedSecret,
                 secretData,
                 subscriptionData,
-                customerData,
+                customerData: enrichedCustomerData,
             });
 
-            // Update local customer DB
-            const enrichedCustomerData = {
-                ...customerData,
-                dueDate: subscriptionData.dueDate,
-                planType: subscriptionData.planType,
-                planName: selectedPlan?.name,
-                password: secretData.password // Save password to customer record
-            };
-
+            // Update local customer DB - always save even if only username exists
             if (existingCustomer) {
                 await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
             } else {
-                const hasCustomerInfo = Object.values(customerData).some(val => val && String(val).trim() !== '');
-                if (hasCustomerInfo) {
-                    // Check if a customer with this username already exists (defensive check)
-                    const alreadyExists = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
-                    if (!alreadyExists) {
-                        await addCustomer({ 
-                            routerId: selectedRouter.id, 
-                            username: secretData.name, 
-                            ...enrichedCustomerData 
-                        });
-                    } else {
-                        await updateCustomer({ ...alreadyExists, ...enrichedCustomerData });
-                    }
+                // Always create customer record with at least username and account number
+                const alreadyExists = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
+                if (!alreadyExists) {
+                    await addCustomer({ 
+                        routerId: selectedRouter.id, 
+                        username: secretData.name, 
+                        ...enrichedCustomerData 
+                    });
+                } else {
+                    await updateCustomer({ ...alreadyExists, ...enrichedCustomerData });
                 }
             }
 
             // Generate PDF application form
             try {
-                const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
                 const planData = selectedPlan ? {
                     name: selectedPlan.name,
                     price: selectedPlan.price,
@@ -696,18 +701,16 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 const applicationResult = await generateApplicationForm({
                     userData: {
                         name: secretData.name,
-                        password: secretData.password,
-                        service: secretData.service,
-                        profile: secretData.profile,
-                        comment: secretData.comment
+                        phone: enrichedCustomerData.contactNumber || '',
+                        email: enrichedCustomerData.email || ''
                     },
                     customerData: {
-                        fullName: customerData.fullName || '',
-                        address: customerData.address || '',
-                        contactNumber: customerData.contactNumber || '',
-                        email: customerData.email || '',
-                        accountNumber: customerData.accountNumber || '',
-                        gps: customerData.gps || ''
+                        fullName: enrichedCustomerData.fullName || '',
+                        address: enrichedCustomerData.address || '',
+                        contactNumber: enrichedCustomerData.contactNumber || '',
+                        email: enrichedCustomerData.email || '',
+                        accountNumber: enrichedCustomerData.accountNumber || '',
+                        gps: enrichedCustomerData.gps || ''
                     },
                     planData,
                     companySettings,

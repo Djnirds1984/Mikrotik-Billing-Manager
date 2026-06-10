@@ -5763,14 +5763,30 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     clientPortalRouter.post('/users', protect, async (req, res) => {
         const { username, password, routerId, pppoeUsername, accountNumber } = req.body;
         if (!username || !password) return res.status(400).json({ message: 'Username and password required' });
+        if (!pppoeUsername) return res.status(400).json({ message: 'PPPoE username is required' });
         try {
+            // First, try to fetch account number from customers table based on pppoeUsername and routerId
+            let fetchedAccountNumber = null;
+            if (routerId && pppoeUsername) {
+                const customer = await db.get(
+                    'SELECT accountNumber FROM customers WHERE routerId = ? AND username = ?',
+                    [routerId, pppoeUsername]
+                );
+                if (customer && customer.accountNumber) {
+                    fetchedAccountNumber = customer.accountNumber;
+                    console.log(`[Client Portal] Fetched account number ${fetchedAccountNumber} for PPPoE user ${pppoeUsername}`);
+                }
+            }
+            
+            // Use fetched account number, or provided one, or generate as last resort
+            const acc = fetchedAccountNumber || (accountNumber && String(accountNumber).trim() !== '' ? accountNumber : await generateAccountNumber());
+            
             const salt = crypto.randomBytes(16).toString('hex');
             const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
             const id = `u_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const acc = accountNumber && String(accountNumber).trim() !== '' ? accountNumber : await generateAccountNumber();
             await db.run('INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, account_number, created_at) VALUES (?,?,?,?,?,?,?,?)',
                 [id, username, hash, salt, routerId, pppoeUsername, acc, new Date().toISOString()]);
-            res.json({ message: 'User created', id });
+            res.json({ message: 'User created', id, accountNumber: acc });
         } catch (e) {
             if (e.message.includes('UNIQUE constraint failed')) return res.status(409).json({ message: 'Username already exists' });
             res.status(500).json({ message: e.message });
@@ -5783,6 +5799,29 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const users = await db.all('SELECT id, username, router_id, pppoe_username, account_number, created_at FROM client_users ORDER BY created_at DESC');
             res.json(users);
         } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Fetch account number for a PPPoE user (Protected)
+    clientPortalRouter.get('/lookup-account', protect, async (req, res) => {
+        try {
+            const { routerId, pppoeUsername } = req.query;
+            if (!routerId || !pppoeUsername) {
+                return res.status(400).json({ message: 'routerId and pppoeUsername are required' });
+            }
+            
+            const customer = await db.get(
+                'SELECT accountNumber FROM customers WHERE routerId = ? AND username = ?',
+                [routerId, pppoeUsername]
+            );
+            
+            if (customer && customer.accountNumber) {
+                res.json({ accountNumber: customer.accountNumber, found: true });
+            } else {
+                res.json({ accountNumber: null, found: false, message: 'Account number not found for this PPPoE user' });
+            }
+        } catch (e) { 
+            res.status(500).json({ message: e.message }); 
+        }
     });
 
     // Admin: Delete Client User (Protected)
