@@ -2117,11 +2117,12 @@ async function startServer() {
                             console.error('[Manual Payments] Session kick error:', kickErr.message);
                         }
                         
-                        // Create scheduler to auto-expire on due date
+                        // Create scheduler to auto-expire on due date (EXACTLY like PayMongo webhook)
                         try {
+                            console.log('[Manual Payments] Creating expiration scheduler...');
                             const schedulerName = `ppp-auto-kick-${payment.customer_username}`;
                             
-                            // Remove existing scheduler
+                            // Remove existing scheduler for this user if any
                             try {
                                 const existingRes = await axios.get(`${apiBase}/rest/system/scheduler`, {
                                     headers: { Authorization: authHeader },
@@ -2134,17 +2135,18 @@ async function startServer() {
                                             headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                                             timeout: 10000
                                         });
-                                        console.log('[Manual Payments] ✓ Removed old scheduler');
+                                        console.log('[Manual Payments] Removed old scheduler:', sched['.id']);
                                     }
                                 }
                             } catch (delErr) {
                                 console.error('[Manual Payments] Old scheduler cleanup error:', delErr.message);
                             }
-                            
-                            // Create new scheduler
+
+                            // Format start-date as YYYY-MM-DD and start-time as HH:MM:SS (matching PayMongo webhook format EXACTLY)
                             const startDate = `${newDueDateTime.getFullYear()}-${String(newDueDateTime.getMonth() + 1).padStart(2, '0')}-${String(newDueDateTime.getDate()).padStart(2, '0')}`;
                             const startTime = `${String(newDueDateTime.getHours()).padStart(2, '0')}:${String(newDueDateTime.getMinutes()).padStart(2, '0')}:00`;
-                            
+
+                            // Match exact on-event format from PayMongo webhook
                             const onEvent = `/log info message="PPPoE auto-kick: ${payment.customer_username}";\n:do { /ppp active remove [find name="${payment.customer_username}"] } on-error={};\n/ppp secret set [find name="${payment.customer_username}"] profile="Non-Payment"`;
                             
                             await axios.post(`${apiBase}/rest/system/scheduler/add`, {
@@ -2158,10 +2160,10 @@ async function startServer() {
                                 headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                                 timeout: 10000
                             });
-                            
                             console.log('[Manual Payments] ✓ Scheduler created: Non-Payment on', dueDateStr);
                         } catch (schedErr) {
                             console.error('[Manual Payments] Scheduler creation error:', schedErr.message);
+                            console.error('[Manual Payments] Scheduler error stack:', schedErr.stack);
                         }
                     }
                 }
