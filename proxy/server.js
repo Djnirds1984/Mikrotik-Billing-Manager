@@ -750,7 +750,11 @@ async function startServer() {
     }));
     app.use('/api/admin', createProxyMiddleware({
         target: 'http://localhost:3002',
-        changeOrigin: true
+        changeOrigin: true,
+        pathRewrite: {
+            // Preserve /api/admin prefix - backend expects full path
+            '^/api/admin': '/api/admin'
+        }
     }));
     app.use('/ws', createProxyMiddleware({
         target: 'http://localhost:3002',
