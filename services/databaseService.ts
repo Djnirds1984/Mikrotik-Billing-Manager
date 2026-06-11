@@ -67,3 +67,7 @@ export const initMariaDb = (): Promise<{ message: string }> => {
 export const migrateSqliteToMariaDb = (): Promise<{ message: string }> => {
     return dbApi.post<{ message: string }>('/migrate-sqlite-to-mariadb', {});
 };
+
+export const factoryReset = (): Promise<{ message: string; success: boolean }> => {
+    return dbApi.post<{ message: string; success: boolean }>('/factory-reset', {});
+};

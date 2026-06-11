@@ -1955,6 +1955,92 @@ async function startServer() {
         res.json({ message: 'Sales cleared' });
     });
 
+    // Factory Reset - Delete all database files and return to fresh state
+    dbRouter.post('/factory-reset', async (req, res) => {
+        try {
+            console.log('[Factory Reset] Initiating factory reset...');
+            
+            // Close database connections
+            await db.close();
+            if (superadminDb) {
+                await superadminDb.close();
+            }
+            
+            // Delete panel.db and related WAL/SHM files
+            const panelDbPath = DB_PATH;
+            const panelDbWalPath = DB_PATH + '-wal';
+            const panelDbShmPath = DB_PATH + '-shm';
+            
+            if (fs.existsSync(panelDbPath)) {
+                fs.unlinkSync(panelDbPath);
+                console.log('[Factory Reset] Deleted panel.db');
+            }
+            if (fs.existsSync(panelDbWalPath)) {
+                fs.unlinkSync(panelDbWalPath);
+                console.log('[Factory Reset] Deleted panel.db-wal');
+            }
+            if (fs.existsSync(panelDbShmPath)) {
+                fs.unlinkSync(panelDbShmPath);
+                console.log('[Factory Reset] Deleted panel.db-shm');
+            }
+            
+            // Delete superadmin.db and related files
+            if (fs.existsSync(SUPERADMIN_DB_PATH)) {
+                fs.unlinkSync(SUPERADMIN_DB_PATH);
+                console.log('[Factory Reset] Deleted superadmin.db');
+            }
+            const superadminDbWalPath = SUPERADMIN_DB_PATH + '-wal';
+            const superadminDbShmPath = SUPERADMIN_DB_PATH + '-shm';
+            if (fs.existsSync(superadminDbWalPath)) {
+                fs.unlinkSync(superadminDbWalPath);
+                console.log('[Factory Reset] Deleted superadmin.db-wal');
+            }
+            if (fs.existsSync(superadminDbShmPath)) {
+                fs.unlinkSync(superadminDbShmPath);
+                console.log('[Factory Reset] Deleted superadmin.db-shm');
+            }
+            
+            // Clear all uploaded files
+            if (fs.existsSync(UPLOADS_DIR)) {
+                const files = fs.readdirSync(UPLOADS_DIR);
+                for (const file of files) {
+                    const filePath = path.join(UPLOADS_DIR, file);
+                    if (fs.statSync(filePath).isDirectory()) {
+                        fs.rmSync(filePath, { recursive: true, force: true });
+                        console.log(`[Factory Reset] Deleted directory: ${filePath}`);
+                    } else {
+                        fs.unlinkSync(filePath);
+                        console.log(`[Factory Reset] Deleted file: ${filePath}`);
+                    }
+                }
+                // Recreate the applications uploads directory
+                if (!fs.existsSync(APPLICATIONS_UPLOADS_DIR)) {
+                    fs.mkdirSync(APPLICATIONS_UPLOADS_DIR, { recursive: true });
+                }
+            }
+            
+            console.log('[Factory Reset] Factory reset completed successfully');
+            
+            // Close all connections and restart the server
+            res.json({ 
+                message: 'Factory reset completed. Restarting server...',
+                success: true 
+            });
+            
+            // Give response time to send before restarting
+            setTimeout(() => {
+                process.exit(0); // PM2 or process manager will restart
+            }, 1000);
+            
+        } catch (error) {
+            console.error('[Factory Reset] Error during factory reset:', error);
+            res.status(500).json({ 
+                message: 'Factory reset failed: ' + error.message,
+                success: false 
+            });
+        }
+    });
+
     app.use('/api/db', dbRouter);
 
     // Manual Payment Requests API (Public - Admin Panel Access)

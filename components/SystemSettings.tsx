@@ -5,7 +5,7 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { initializeAiClient } from '../services/geminiService.ts';
-import { getPanelSettings, savePanelSettings, getAuthHeader } from '../services/databaseService.ts';
+import { getPanelSettings, savePanelSettings, getAuthHeader, factoryReset } from '../services/databaseService.ts';
 import { Loader } from './Loader.tsx';
 import { KeyIcon, CogIcon } from '../constants.tsx';
 
@@ -106,6 +106,7 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
     const [isSavingPassword, setIsSavingPassword] = React.useState(false);
     const [passwordError, setPasswordError] = React.useState<string | null>(null);
     const [passwordSuccess, setPasswordSuccess] = React.useState<string | null>(null);
+    const [isResetting, setIsResetting] = React.useState(false);
     const { logout } = useAuth();
 
     const handlePasswordChange = async (e: React.FormEvent) => {
@@ -139,6 +140,63 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
             setPasswordError((err as Error).message);
         } finally {
             setIsSavingPassword(false);
+        }
+    };
+
+    const handleFactoryReset = async () => {
+        // Triple confirmation for safety
+        const firstConfirm = window.confirm(
+            '⚠️ WARNING: FACTORY RESET\n\n' +
+            'This will DELETE ALL DATA including:\n' +
+            '• All user accounts\n' +
+            '• All customers\n' +
+            '• All routers\n' +
+            '• All sales records\n' +
+            '• All settings\n' +
+            '• All uploaded files\n\n' +
+            'This action CANNOT be undone!\n\n' +
+            'Are you sure you want to continue?'
+        );
+        
+        if (!firstConfirm) return;
+        
+        const secondConfirm = window.confirm(
+            'FINAL WARNING\n\n' +
+            'You are about to perform a FACTORY RESET.\n' +
+            'The system will restart and return to the first-time setup page.\n\n' +
+            'Click OK to proceed, or Cancel to abort.'
+        );
+        
+        if (!secondConfirm) return;
+        
+        const thirdConfirm = window.prompt(
+            'Type "RESET" in the box below to confirm factory reset:'
+        );
+        
+        if (thirdConfirm !== 'RESET') {
+            alert('Factory reset cancelled. Type "RESET" exactly to confirm.');
+            return;
+        }
+        
+        setIsResetting(true);
+        try {
+            const result = await factoryReset();
+            if (result.success) {
+                alert('Factory reset completed! The system is restarting...');
+                // Clear local storage and redirect to registration
+                localStorage.clear();
+                sessionStorage.clear();
+                // Wait a moment for server to restart, then reload
+                setTimeout(() => {
+                    window.location.href = '/register';
+                }, 2000);
+            } else {
+                alert('Factory reset failed: ' + result.message);
+            }
+        } catch (err) {
+            alert('Factory reset error: ' + (err as Error).message);
+        } finally {
+            setIsResetting(false);
         }
     };
 
@@ -190,6 +248,32 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
                         </button>
                     </div>
                 </form>
+            </SettingsSection>
+
+            <SettingsSection title="Factory Reset">
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                        <svg className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                        <div className="flex-1">
+                            <h4 className="text-sm font-semibold text-red-800 dark:text-red-300 mb-2">Danger Zone</h4>
+                            <p className="text-sm text-red-700 dark:text-red-400 mb-4">
+                                Factory reset will permanently delete ALL data and return the system to its initial state. 
+                                This includes all user accounts, customers, routers, sales records, settings, and uploaded files.
+                                <strong className="block mt-1">This action cannot be undone!</strong>
+                            </p>
+                            <button
+                                onClick={handleFactoryReset}
+                                disabled={isResetting}
+                                className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {isResetting && <Loader />}
+                                {isResetting ? 'Resetting...' : '⚠️ Factory Reset'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </SettingsSection>
         </>
     );
