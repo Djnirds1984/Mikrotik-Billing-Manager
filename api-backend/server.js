@@ -429,17 +429,15 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     doc.fontSize(14).font('Helvetica-Bold').text('Compliance Assessment Summary');
     doc.moveDown(0.5);
     
-    const tableTop = doc.y;
     const colWidths = { item: 250, status: 100, details: 150 };
-    let yPos = tableTop;
     
-    doc.rect(50, yPos, 500, 20).fill('#1e3a8a');
+    // Draw table header
+    doc.rect(50, doc.y, 500, 20).fill('#1e3a8a');
     doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
-    doc.text('Compliance Item', 55, yPos + 5, { width: colWidths.item });
-    doc.text('Status', 310, yPos + 5, { width: colWidths.status });
-    doc.text('Details', 415, yPos + 5, { width: colWidths.details });
-    
-    yPos += 20;
+    doc.text('Compliance Item', 55, doc.y + 5, { width: colWidths.item });
+    doc.text('Status', 310, doc.y + 5, { width: colWidths.status });
+    doc.text('Details', 415, doc.y + 5, { width: colWidths.details });
+    doc.moveDown(1.2);
     
     const items = [
       { item: 'Control Plane Hardening', status: complianceData.compliance.controlPlane.overallStatus, details: `${complianceData.compliance.controlPlane.routers.length} routers checked` },
@@ -450,17 +448,24 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     
     items.forEach((row, idx) => {
       const isEven = idx % 2 === 0;
-      doc.rect(50, yPos, 500, 20).fill(isEven ? '#f1f5f9' : 'white');
+      const rowHeight = 20;
+      
+      // Check if we need a new page
+      if (doc.y + rowHeight > 750) {
+        doc.addPage();
+      }
+      
+      doc.rect(50, doc.y, 500, rowHeight).fill(isEven ? '#f1f5f9' : 'white');
       doc.fillColor('black').fontSize(10).font('Helvetica');
-      doc.text(row.item, 55, yPos + 5, { width: colWidths.item });
+      doc.text(row.item, 55, doc.y + 5, { width: colWidths.item });
       
       doc.fillColor(row.status === 'COMPLIANT' ? '#059669' : '#dc2626');
-      doc.text(row.status, 310, yPos + 5, { width: colWidths.status });
+      doc.text(row.status, 310, doc.y + 5, { width: colWidths.status });
       
       doc.fillColor('black').font('Helvetica');
-      doc.text(row.details, 415, yPos + 5, { width: colWidths.details });
+      doc.text(row.details, 415, doc.y + 5, { width: colWidths.details });
       
-      yPos += 20;
+      doc.moveDown(1.2);
     });
     
     doc.moveDown(1.5);
