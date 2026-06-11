@@ -500,10 +500,15 @@ async function initDb() {
             const customerColNames = customerCols.map(c => c.name);
             console.log('[Migration] Customers table columns:', customerColNames);
             
-            if (!customerColNames.includes('facebook_psid')) {
-                console.log('[Migration] Adding facebook_psid column to customers table...');
-                await db.exec("ALTER TABLE customers ADD COLUMN facebook_psid TEXT");
-                console.log('[Migration] ✓ facebook_psid column added');
+            // Add missing columns for billing and authentication
+            const missingColumns = ['dueDate', 'planType', 'planName', 'password', 'facebook_psid'];
+            for (const col of missingColumns) {
+                if (!customerColNames.includes(col)) {
+                    console.log(`[Migration] Adding ${col} column to customers table...`);
+                    const defaultVal = col === 'planType' ? "'Inactive'" : 'NULL';
+                    await db.exec(`ALTER TABLE customers ADD COLUMN ${col} TEXT DEFAULT ${defaultVal}`);
+                    console.log(`[Migration] ✓ ${col} column added`);
+                }
             }
         } catch (err) {
             console.error('[Migration] Customer table migration error:', err.message);
