@@ -748,9 +748,13 @@ async function startServer() {
             '^/mt-api': ''
         }
     }));
-    app.use(createProxyMiddleware('/api/admin', {
+    app.use('/api/admin', createProxyMiddleware({
         target: 'http://localhost:3002',
-        changeOrigin: true
+        changeOrigin: true,
+        pathRewrite: {
+            // Restore /api/admin prefix that Express strips when mounting
+            '^/': '/api/admin/'
+        }
     }));
     app.use('/ws', createProxyMiddleware({
         target: 'http://localhost:3002',
