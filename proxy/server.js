@@ -748,6 +748,13 @@ async function startServer() {
             '^/mt-api': ''
         }
     }));
+    app.use('/api/admin', createProxyMiddleware({
+        target: 'http://localhost:3002',
+        changeOrigin: true,
+        pathRewrite: {
+            '^/api/admin': '/api/admin'
+        }
+    }));
     app.use('/ws', createProxyMiddleware({
         target: 'http://localhost:3002',
         changeOrigin: true,
