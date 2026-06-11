@@ -20,7 +20,20 @@ export const NtcCompliance: React.FC = () => {
     setError(null);
     try {
       const response = await fetch('/api/admin/ntc-compliance-check');
-      if (!response.ok) throw new Error('Compliance check failed');
+      
+      // Check if response is JSON before parsing
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('[NTC] Non-JSON response:', text.substring(0, 200));
+        throw new Error(`Server returned HTML instead of JSON. Is the backend running on port 3002?`);
+      }
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Compliance check failed');
+      }
+      
       const data = await response.json();
       setComplianceData(data);
     } catch (err) {
