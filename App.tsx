@@ -59,6 +59,7 @@ const LandingPage = React.lazy(() => import('./components/LandingPage.tsx').then
 const ApplicationForm = React.lazy(() => import('./components/ApplicationForm.tsx').then(m => ({ default: m.ApplicationForm })));
 const ManualPayments = React.lazy(() => import('./components/ManualPayments.tsx').then(m => ({ default: m.ManualPayments })));
 const Store = React.lazy(() => import('./components/Store.tsx').then(m => ({ default: m.Store })));
+const NtcCompliance = React.lazy(() => import('./components/NtcCompliance.tsx').then(m => ({ default: m.NtcCompliance })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -298,6 +299,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <RepairTickets />;
                   case 'manual_payments':
                     return <ManualPayments />;
+                  case 'ntc-compliance':
+                    return <NtcCompliance />;
                   case 'license':
                       return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
                   case 'super_admin':

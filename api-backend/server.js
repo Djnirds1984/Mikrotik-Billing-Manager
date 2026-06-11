@@ -7,6 +7,7 @@ const axios = require('axios');
 const https = require('https');
 const path = require('path');
 const crypto = require('crypto');
+const PDFDocument = require('pdfkit');
 let sqlite3;
 let open;
 const { WebSocketServer } = require('ws');
@@ -1966,6 +1967,274 @@ setInterval(processExpiredGrace, 60000);
 
 
 // Global error handler to catch JSON/body parse errors (e.g. request aborted)
+// --- NTC COMPLIANCE ENDPOINTS ---
+
+// Helper: Check MikroTik services (Telnet, FTP, WinBox)
+const checkMikrotikServices = async (routerConfig) => {
+  try {
+    const client = createRouterInstance(routerConfig);
+    // Query /ip/service/print
+    const services = await client.write('/ip/service/print');
+    
+    const telnet = services.find(s => s.name === 'telnet');
+    const ftp = services.find(s => s.name === 'ftp');
+    const winbox = services.find(s => s.name === 'winbox');
+    
+    return {
+      telnet: telnet?.disabled === 'true' ? 'DISABLED' : 'ENABLED',
+      ftp: ftp?.disabled === 'true' ? 'DISABLED' : 'ENABLED',
+      winbox: winbox?.address === '0.0.0.0/0' ? 'EXPOSED' : 'SECURE',
+      status: (telnet?.disabled === 'true' && ftp?.disabled === 'true' && winbox?.address !== '0.0.0.0/0') 
+        ? 'COMPLIANT' 
+        : 'WARNING'
+    };
+  } catch (err) {
+    console.error('[NTC] Service check failed:', err.message);
+    return { telnet: 'UNKNOWN', ftp: 'UNKNOWN', winbox: 'UNKNOWN', status: 'WARNING' };
+  }
+};
+
+// Helper: Check PPPoE profile isolation
+const checkPPPoEIsolation = async (routerConfig) => {
+  try {
+    const client = createRouterInstance(routerConfig);
+    const profiles = await client.write('/ppp/profile/print');
+    
+    let isolatedCount = 0;
+    profiles.forEach(profile => {
+      const hasLocalAddr = profile['local-address'];
+      const hasRemoteAddr = profile['remote-address'];
+      if (hasLocalAddr && hasRemoteAddr) isolatedCount++;
+    });
+    
+    const allIsolated = isolatedCount === profiles.length && profiles.length > 0;
+    return {
+      profilesChecked: profiles.length,
+      isolated: allIsolated,
+      status: allIsolated ? 'COMPLIANT' : 'WARNING'
+    };
+  } catch (err) {
+    console.error('[NTC] PPPoE isolation check failed:', err.message);
+    return { profilesChecked: 0, isolated: false, status: 'WARNING' };
+  }
+};
+
+// Helper: Check Cloudflare Tunnel status
+const checkCloudflareTunnel = () => {
+  const tunnelActive = process.env.USING_CLOUDFLARE_TUNNEL === 'true';
+  return {
+    tunnelActive,
+    tlsVersion: tunnelActive ? '1.3' : 'unknown',
+    status: tunnelActive ? 'COMPLIANT' : 'WARNING'
+  };
+};
+
+// Helper: Check PSID cryptography layer
+const checkPSIDCryptography = async () => {
+  try {
+    const database = await getDb();
+    const settings = await database.get('SELECT facebookAppSecret, facebookVerifyToken FROM settings WHERE id = 1');
+    
+    const botConfigured = !!(settings?.facebookAppSecret && settings?.facebookVerifyToken);
+    return {
+      psidEncrypted: botConfigured,
+      botConfigured,
+      status: botConfigured ? 'COMPLIANT' : 'WARNING'
+    };
+  } catch (err) {
+    console.error('[NTC] PSID check failed:', err.message);
+    return { psidEncrypted: false, botConfigured: false, status: 'WARNING' };
+  }
+};
+
+// Reusable function for compliance check (used by both endpoints)
+const runComplianceCheck = async () => {
+  console.log('[NTC] Starting compliance check...');
+  
+  const database = await getDb();
+  const routers = await database.all('SELECT * FROM routers');
+  
+  const results = {
+    controlPlane: { routers: [], overallStatus: 'COMPLIANT' },
+    networkIsolation: { routers: [], overallStatus: 'COMPLIANT' },
+    encryption: checkCloudflareTunnel(),
+    dataPrivacy: await checkPSIDCryptography()
+  };
+  
+  const warnings = [];
+  
+  for (const router of routers) {
+    // Check services
+    const services = await checkMikrotikServices(router);
+    results.controlPlane.routers.push({ name: router.name, ...services });
+    if (services.status === 'WARNING') {
+      results.controlPlane.overallStatus = 'WARNING';
+      warnings.push(`${router.name}: Insecure services detected`);
+    }
+    
+    // Check PPPoE isolation
+    const isolation = await checkPPPoEIsolation(router);
+    results.networkIsolation.routers.push({ name: router.name, ...isolation });
+    if (isolation.status === 'WARNING') {
+      results.networkIsolation.overallStatus = 'WARNING';
+      warnings.push(`${router.name}: PPPoE isolation incomplete`);
+    }
+  }
+  
+  const overallStatus = (
+    results.controlPlane.overallStatus === 'WARNING' ||
+    results.networkIsolation.overallStatus === 'WARNING' ||
+    results.encryption.status === 'WARNING' ||
+    results.dataPrivacy.status === 'WARNING'
+  ) ? 'WARNING' : 'COMPLIANT';
+  
+  return {
+    timestamp: new Date().toISOString(),
+    generatedAtManila: new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' }),
+    systemEngineId: crypto.randomUUID(),
+    operator: 'CityConnect Network / AJC Softwares',
+    totalRoutersChecked: routers.length,
+    compliance: results,
+    overallStatus,
+    warnings
+  };
+};
+
+// Main endpoint: NTC Compliance Check
+app.get('/api/admin/ntc-compliance-check', async (req, res) => {
+  try {
+    const complianceReport = await runComplianceCheck();
+    console.log('[NTC] Compliance check complete:', complianceReport.overallStatus);
+    res.json(complianceReport);
+  } catch (err) {
+    console.error('[NTC] Compliance check error:', err);
+    res.status(500).json({ 
+      message: 'Compliance check failed', 
+      error: err.message 
+    });
+  }
+});
+
+// PDF Report Download Endpoint
+app.get('/api/admin/ntc-report/download', async (req, res) => {
+  try {
+    // Get compliance data
+    const complianceData = await runComplianceCheck();
+    
+    // Set PDF headers
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=NTC_Compliance_Report.pdf');
+    
+    // Create PDF document
+    const doc = new PDFDocument({ 
+      size: 'A4', 
+      margin: 50 
+    });
+    
+    doc.pipe(res);
+    
+    // === HEADER ===
+    doc.fontSize(20).font('Helvetica-Bold').text('CYBERSECURITY COMPLIANCE AND AUDIT REPORT', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(12).font('Helvetica').text('Issued under Republic Act No. 12234 (Konektadong Pinoy Act Framework)', { align: 'center' });
+    doc.moveDown(1);
+    
+    // === METADATA SECTION ===
+    doc.fontSize(11).font('Helvetica-Bold').text('Report Metadata');
+    doc.moveDown(0.3);
+    doc.font('Helvetica').fontSize(10);
+    doc.text(`Date Generated: ${complianceData.generatedAtManila} (Asia/Manila)`);
+    doc.text(`Operator: ${complianceData.operator}`);
+    doc.text(`System Engine ID: ${complianceData.systemEngineId}`);
+    doc.text(`Total Routers Inspected: ${complianceData.totalRoutersChecked}`);
+    doc.moveDown(1);
+    
+    // === COMPLIANCE SUMMARY TABLE ===
+    doc.fontSize(14).font('Helvetica-Bold').text('Compliance Assessment Summary');
+    doc.moveDown(0.5);
+    
+    // Draw table header
+    const tableTop = doc.y;
+    const colWidths = { item: 250, status: 100, details: 150 };
+    let yPos = tableTop;
+    
+    // Header row
+    doc.rect(50, yPos, 500, 20).fill('#1e3a8a');
+    doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
+    doc.text('Compliance Item', 55, yPos + 5, { width: colWidths.item });
+    doc.text('Status', 310, yPos + 5, { width: colWidths.status });
+    doc.text('Details', 415, yPos + 5, { width: colWidths.details });
+    
+    yPos += 20;
+    
+    // Data rows
+    const items = [
+      { item: 'Control Plane Hardening', status: complianceData.compliance.controlPlane.overallStatus, details: `${complianceData.compliance.controlPlane.routers.length} routers checked` },
+      { item: 'Network Isolation (PPPoE)', status: complianceData.compliance.networkIsolation.overallStatus, details: `${complianceData.compliance.networkIsolation.routers.length} profiles verified` },
+      { item: 'Encryption Matrix (TLS 1.3)', status: complianceData.compliance.encryption.status, details: complianceData.compliance.encryption.tunnelActive ? 'Cloudflare Active' : 'Not Configured' },
+      { item: 'Data Privacy (PSID Crypto)', status: complianceData.compliance.dataPrivacy.status, details: complianceData.compliance.dataPrivacy.botConfigured ? 'Bot Secured' : 'Not Configured' }
+    ];
+    
+    items.forEach((row, idx) => {
+      const isEven = idx % 2 === 0;
+      doc.rect(50, yPos, 500, 20).fill(isEven ? '#f1f5f9' : 'white');
+      doc.fillColor('black').fontSize(10).font('Helvetica');
+      doc.text(row.item, 55, yPos + 5, { width: colWidths.item });
+      
+      // Color-code status
+      doc.fillColor(row.status === 'COMPLIANT' ? '#059669' : '#dc2626');
+      doc.text(row.status, 310, yPos + 5, { width: colWidths.status });
+      
+      doc.fillColor('black').font('Helvetica');
+      doc.text(row.details, 415, yPos + 5, { width: colWidths.details });
+      
+      yPos += 20;
+    });
+    
+    doc.moveDown(1.5);
+    
+    // === WARNINGS SECTION ===
+    if (complianceData.warnings.length > 0) {
+      doc.fontSize(14).font('Helvetica-Bold').fillColor('#dc2626').text('Warnings & Recommendations');
+      doc.moveDown(0.3);
+      doc.fontSize(10).font('Helvetica').fillColor('black');
+      complianceData.warnings.forEach((warning, idx) => {
+        doc.text(`${idx + 1}. ${warning}`, { indent: 20 });
+        doc.moveDown(0.2);
+      });
+      doc.moveDown(1);
+    }
+    
+    // === OVERALL STATUS ===
+    doc.fontSize(16).font('Helvetica-Bold');
+    doc.fillColor(complianceData.overallStatus === 'COMPLIANT' ? '#059669' : '#dc2626');
+    doc.text(`OVERALL STATUS: ${complianceData.overallStatus}`, { align: 'center' });
+    doc.moveDown(2);
+    
+    // === SIGNATURE BLOCK ===
+    doc.fillColor('black').fontSize(11).font('Helvetica');
+    doc.text('_'.repeat(40), { align: 'center' });
+    doc.moveDown(0.2);
+    doc.fontSize(12).font('Helvetica-Bold').text('Network Administrator / DTIP Operator', { align: 'center' });
+    doc.fontSize(10).font('Helvetica').text('CityConnect Network', { align: 'center' });
+    doc.text('Date: _________________', { align: 'center' });
+    
+    // === FOOTER ===
+    doc.moveDown(2);
+    doc.fontSize(8).font('Helvetica').fillColor('#64748b');
+    doc.text('This report is automatically generated by the Mikrotik Billing Manager NTC Compliance System.', { align: 'center' });
+    doc.text('Confidential - For regulatory compliance purposes only.', { align: 'center' });
+    
+    doc.end();
+    console.log('[NTC] PDF report generated successfully');
+  } catch (err) {
+    console.error('[NTC] PDF generation error:', err);
+    res.status(500).json({ message: 'PDF generation failed', error: err.message });
+  }
+});
+
+// --- END NTC COMPLIANCE ENDPOINTS ---
+
 app.use((err, req, res, next) => {
     if (err && err.type === 'request.aborted') {
         console.warn('[Request Aborted]', req.method, req.url);

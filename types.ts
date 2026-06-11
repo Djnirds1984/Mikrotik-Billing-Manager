@@ -32,7 +32,8 @@ export type View =
   | 'notifications'
   | 'captive_chat'
   | 'application_form'
-  | 'manual_payments';
+  | 'manual_payments'
+  | 'ntc-compliance';
 
 export interface Notification {
   id: string;
