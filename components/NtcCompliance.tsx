@@ -110,13 +110,13 @@ export const NtcCompliance: React.FC = () => {
         <div className="space-y-6">
           {/* Overall Status Badge */}
           <div className={`p-6 rounded-lg border-2 ${
-            complianceData.overallStatus === 'COMPLIANT' 
+            complianceData.overallStatus === 'PASSED' 
               ? 'bg-green-50 dark:bg-green-900/20 border-green-500' 
               : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-500'
           }`}>
             <div className="flex items-center gap-4">
               <ShieldCheckIcon className={`w-12 h-12 ${
-                complianceData.overallStatus === 'COMPLIANT' ? 'text-green-600' : 'text-yellow-600'
+                complianceData.overallStatus === 'PASSED' ? 'text-green-600' : 'text-yellow-600'
               }`} />
               <div>
                 <h3 className="text-xl font-bold">Overall Status: {complianceData.overallStatus}</h3>
@@ -150,7 +150,7 @@ export const NtcCompliance: React.FC = () => {
               details={complianceData.compliance.networkIsolation.routers.map((r: any) => (
                 <div key={r.name} className="text-sm">
                   <p className="font-semibold">{r.name}</p>
-                  <p>Profiles: {r.profilesChecked} | Isolated: {r.isolated ? 'Yes' : 'No'}</p>
+                  <p>Profiles: {r.profilesCount} | Isolated: {r.isolated ? 'Yes' : 'No'}</p>
                 </div>
               ))}
             />
@@ -162,7 +162,7 @@ export const NtcCompliance: React.FC = () => {
               icon={<ShieldCheckIcon className="w-6 h-6" />}
               details={
                 <div className="text-sm">
-                  <p>Cloudflare Tunnel: {complianceData.compliance.encryption.tunnelActive ? 'Active' : 'Inactive'}</p>
+                  <p>Cloudflare Tunnel: {complianceData.compliance.encryption.cloudflareTunnel}</p>
                   <p>TLS Version: {complianceData.compliance.encryption.tlsVersion}</p>
                 </div>
               }
@@ -176,7 +176,7 @@ export const NtcCompliance: React.FC = () => {
               details={
                 <div className="text-sm">
                   <p>PSID Encrypted: {complianceData.compliance.dataPrivacy.psidEncrypted ? 'Yes' : 'No'}</p>
-                  <p>Facebook Bot: {complianceData.compliance.dataPrivacy.botConfigured ? 'Configured' : 'Not Configured'}</p>
+                  <p>Facebook Bot: {complianceData.compliance.dataPrivacy.facebookBotConfigured ? 'Configured' : 'Not Configured'}</p>
                 </div>
               }
             />
@@ -202,22 +202,22 @@ export const NtcCompliance: React.FC = () => {
 // Reusable Compliance Card Component
 const ComplianceCard: React.FC<{
   title: string;
-  status: 'COMPLIANT' | 'WARNING';
+  status: 'COMPLIANT' | 'PASSED' | 'WARNING';
   icon: React.ReactNode;
   details: React.ReactNode;
 }> = ({ title, status, icon, details }) => (
   <div className={`p-4 rounded-lg border-2 ${
-    status === 'COMPLIANT' 
+    status === 'COMPLIANT' || status === 'PASSED'
       ? 'bg-green-50 dark:bg-green-900/20 border-green-400' 
       : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-400'
   }`}>
     <div className="flex items-center gap-3 mb-3">
-      <div className={status === 'COMPLIANT' ? 'text-green-600' : 'text-yellow-600'}>
+      <div className={status === 'COMPLIANT' || status === 'PASSED' ? 'text-green-600' : 'text-yellow-600'}>
         {icon}
       </div>
       <h4 className="font-bold text-lg">{title}</h4>
       <span className={`ml-auto px-3 py-1 rounded-full text-xs font-bold ${
-        status === 'COMPLIANT' 
+        status === 'COMPLIANT' || status === 'PASSED'
           ? 'bg-green-200 text-green-800' 
           : 'bg-yellow-200 text-yellow-800'
       }`}>
