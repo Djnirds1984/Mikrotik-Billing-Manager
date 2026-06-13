@@ -604,37 +604,38 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     
     const doc = new PDFDocument({ 
       size: 'A4', 
-      margin: 50 
+      margin: 40,
+      autoFirstPage: true
     });
     
     doc.pipe(res);
     
-    doc.fontSize(20).font('Helvetica-Bold').text('CYBERSECURITY COMPLIANCE AND AUDIT REPORT', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(12).font('Helvetica').text('Issued under Republic Act No. 12234 (Konektadong Pinoy Act Framework)', { align: 'center' });
-    doc.moveDown(1);
-    
-    doc.fontSize(11).font('Helvetica-Bold').text('Report Metadata');
+    doc.fontSize(18).font('Helvetica-Bold').text('CYBERSECURITY COMPLIANCE AND AUDIT REPORT', { align: 'center' });
     doc.moveDown(0.3);
-    doc.font('Helvetica').fontSize(10);
+    doc.fontSize(10).font('Helvetica').text('Issued under Republic Act No. 12234 (Konektadong Pinoy Act Framework)', { align: 'center' });
+    doc.moveDown(0.5);
+    
+    doc.fontSize(10).font('Helvetica-Bold').text('Report Metadata');
+    doc.moveDown(0.2);
+    doc.font('Helvetica').fontSize(9);
     doc.text(`Date Generated: ${complianceData.generatedAtManila} (Asia/Manila)`);
     doc.text(`Operator: ${complianceData.operator}`);
     doc.text(`System Engine ID: ${complianceData.systemEngineId}`);
     doc.text(`Total Routers Inspected: ${complianceData.totalRoutersChecked}`);
-    doc.moveDown(1);
-    
-    doc.fontSize(14).font('Helvetica-Bold').text('Compliance Assessment Summary');
     doc.moveDown(0.5);
+    
+    doc.fontSize(12).font('Helvetica-Bold').text('Compliance Assessment Summary');
+    doc.moveDown(0.3);
     
     const colWidths = { item: 250, status: 100, details: 150 };
     
     // Draw table header
-    doc.rect(50, doc.y, 500, 20).fill('#1e3a8a');
-    doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
-    doc.text('Compliance Item', 55, doc.y + 5, { width: colWidths.item });
-    doc.text('Status', 310, doc.y + 5, { width: colWidths.status });
-    doc.text('Details', 415, doc.y + 5, { width: colWidths.details });
-    doc.moveDown(1.2);
+    doc.rect(50, doc.y, 500, 18).fill('#1e3a8a');
+    doc.fillColor('white').fontSize(9).font('Helvetica-Bold');
+    doc.text('Compliance Item', 55, doc.y + 4, { width: colWidths.item });
+    doc.text('Status', 310, doc.y + 4, { width: colWidths.status });
+    doc.text('Details', 415, doc.y + 4, { width: colWidths.details });
+    doc.moveDown(0.8);
     
     const items = [
       { item: 'Control Plane Hardening', status: complianceData.compliance.controlPlane.overallStatus, details: `${complianceData.compliance.controlPlane.routers.length} routers checked` },
@@ -645,57 +646,50 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     
     items.forEach((row, idx) => {
       const isEven = idx % 2 === 0;
-      const rowHeight = 20;
-      
-      // Check if we need a new page
-      if (doc.y + rowHeight > 750) {
-        doc.addPage();
-      }
+      const rowHeight = 18;
       
       doc.rect(50, doc.y, 500, rowHeight).fill(isEven ? '#f1f5f9' : 'white');
-      doc.fillColor('black').fontSize(10).font('Helvetica');
-      doc.text(row.item, 55, doc.y + 5, { width: colWidths.item });
+      doc.fillColor('black').fontSize(9).font('Helvetica');
+      doc.text(row.item, 55, doc.y + 4, { width: colWidths.item });
       
       doc.fillColor(row.status === 'COMPLIANT' ? '#059669' : '#dc2626');
-      doc.text(row.status, 310, doc.y + 5, { width: colWidths.status });
+      doc.text(row.status, 310, doc.y + 4, { width: colWidths.status });
       
       doc.fillColor('black').font('Helvetica');
-      doc.text(row.details, 415, doc.y + 5, { width: colWidths.details });
+      doc.text(row.details, 415, doc.y + 4, { width: colWidths.details });
       
-      doc.moveDown(1.2);
+      doc.moveDown(0.8);
     });
     
-    doc.moveDown(1);
+    doc.moveDown(0.5);
     
     // Signature and footer section - all centered
-    doc.moveDown(1);
-    
     if (complianceData.warnings.length > 0) {
-      doc.fontSize(14).font('Helvetica-Bold').fillColor('#dc2626').text('Warnings & Recommendations');
-      doc.moveDown(0.3);
-      doc.fontSize(10).font('Helvetica').fillColor('black');
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#dc2626').text('Warnings & Recommendations');
+      doc.moveDown(0.2);
+      doc.fontSize(9).font('Helvetica').fillColor('black');
       complianceData.warnings.forEach((warning, idx) => {
-        doc.text(`${idx + 1}. ${warning}`, { indent: 20 });
-        doc.moveDown(0.2);
+        doc.text(`${idx + 1}. ${warning}`, { indent: 15 });
+        doc.moveDown(0.1);
       });
-      doc.moveDown(0.5);
+      doc.moveDown(0.3);
     }
     
-    doc.fontSize(16).font('Helvetica-Bold');
+    doc.fontSize(14).font('Helvetica-Bold');
     doc.fillColor(complianceData.overallStatus === 'COMPLIANT' ? '#059669' : '#dc2626');
     doc.text(`OVERALL STATUS: ${complianceData.overallStatus}`, { align: 'center' });
-    doc.moveDown(1.5);
+    doc.moveDown(0.8);
     
-    // All footer content centered
-    doc.fillColor('black').fontSize(11).font('Helvetica');
-    doc.text('_'.repeat(40), { align: 'center' });
+    // All footer content centered - compact spacing
+    doc.fillColor('black').fontSize(10).font('Helvetica');
+    doc.text('_'.repeat(35), { align: 'center' });
+    doc.moveDown(0.1);
+    doc.fontSize(10).font('Helvetica-Bold').text('Network Administrator / DTIP Operator', { align: 'center' });
+    doc.fontSize(9).font('Helvetica').text('CityConnect Network', { align: 'center' });
     doc.moveDown(0.2);
-    doc.fontSize(12).font('Helvetica-Bold').text('Network Administrator / DTIP Operator', { align: 'center' });
-    doc.fontSize(10).font('Helvetica').text('CityConnect Network', { align: 'center' });
-    doc.moveDown(0.5);
     doc.text('Date: _________________', { align: 'center' });
-    doc.moveDown(1);
-    doc.fontSize(8).font('Helvetica').fillColor('#64748b');
+    doc.moveDown(0.5);
+    doc.fontSize(7).font('Helvetica').fillColor('#64748b');
     doc.text('This report is automatically generated by the Mikrotik Billing Manager NTC Compliance System.', { align: 'center' });
     doc.text('Confidential - For regulatory compliance purposes only.', { align: 'center' });
     
