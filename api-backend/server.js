@@ -783,9 +783,18 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     // PAGINATION CONTROL: REPORT CLOSING BLOCK
     // Keep warnings, status, and signatures together
     // ==========================================
-    const closingBlockHeight = complianceData.warnings.length > 0 
-      ? 250 // With warnings: ~30+20*n + 60 + 80 = ~250px
-      : 160; // Without warnings: ~60 + 80 = ~140px (buffer to 160)
+    const warningBoxHeight = complianceData.warnings.length > 0 
+      ? (30 + (complianceData.warnings.length * 20)) 
+      : 0;
+    
+    const closingBlockHeight = 20 + // spacing before warnings
+      warningBoxHeight + 
+      15 + // spacing after warnings
+      35 + // status badge height
+      25 + // spacing after status
+      80 + // signature block height
+      25 + // confidential footer
+      20;  // buffer
     
     // Check if there's enough space for the entire closing block
     if (doc.y + closingBlockHeight > pageHeight) {
@@ -794,16 +803,15 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
       doc.y = 50; // Reset to top margin
     }
     
-    const closingBlockStartY = doc.y;
+    let closingY = doc.y;
     
     // ==========================================
     // 5. SYSTEM WARNINGS & REQUIRED ACTIONS
     // ==========================================
     if (complianceData.warnings.length > 0) {
-      doc.moveDown(0.5);
+      closingY += 15; // spacing before warnings
       
-      const warningBoxY = doc.y;
-      const warningBoxHeight = 30 + (complianceData.warnings.length * 20);
+      const warningBoxY = closingY;
       
       // Warning box background
       doc.rect(startX, warningBoxY, pageWidth, warningBoxHeight).fill('#fff7ed');
@@ -820,63 +828,62 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
         doc.text(`• ${warning}`, startX + 15, warningY, { width: pageWidth - 30 });
       });
       
-      doc.y = warningBoxY + warningBoxHeight + 15;
+      closingY = warningBoxY + warningBoxHeight + 15;
     }
     
     // ==========================================
     // OVERALL STATUS BADGE
     // ==========================================
-    doc.moveDown(0.5);
-    
     const overallStatusText = complianceData.overallStatus;
     const badgeWidth2 = 180;
     const badgeHeight2 = 35;
     const badgeX2 = startX + (pageWidth - badgeWidth2) / 2;
     
     if (overallStatusText === 'PASSED' || overallStatusText === 'COMPLIANT') {
-      doc.rect(badgeX2, doc.y, badgeWidth2, badgeHeight2).fill('#dcfce7');
+      doc.rect(badgeX2, closingY, badgeWidth2, badgeHeight2).fill('#dcfce7');
       doc.fillColor('#166534').fontSize(13).font('Helvetica-Bold');
-      doc.text(`OVERALL STATUS: ${overallStatusText}`, badgeX2 + 5, doc.y + 10, { width: badgeWidth2 - 10, align: 'center' });
+      doc.text(`OVERALL STATUS: ${overallStatusText}`, badgeX2 + 5, closingY + 10, { width: badgeWidth2 - 10, align: 'center' });
     } else {
-      doc.rect(badgeX2, doc.y, badgeWidth2, badgeHeight2).fill('#fef3c7');
+      doc.rect(badgeX2, closingY, badgeWidth2, badgeHeight2).fill('#fef3c7');
       doc.fillColor('#92400e').fontSize(13).font('Helvetica-Bold');
-      doc.text(`OVERALL STATUS: ${overallStatusText}`, badgeX2 + 5, doc.y + 10, { width: badgeWidth2 - 10, align: 'center' });
+      doc.text(`OVERALL STATUS: ${overallStatusText}`, badgeX2 + 5, closingY + 10, { width: badgeWidth2 - 10, align: 'center' });
     }
     
-    doc.y += badgeHeight2 + 25;
+    closingY += badgeHeight2 + 25;
     
     // ==========================================
     // 6. SIGNATURE FOOTER - HORIZONTAL ALIGNMENT
     // ==========================================
-    const signatureY = doc.y;
     const signatureWidth = pageWidth / 2 - 30;
     
     // Left signature block
-    doc.moveTo(startX, signatureY + 30).lineTo(startX + signatureWidth, signatureY + 30).stroke('#94a3b8');
+    doc.moveTo(startX, closingY + 30).lineTo(startX + signatureWidth, closingY + 30).stroke('#94a3b8');
     doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold');
-    doc.text('Network Administrator / DTIP Operator', startX, signatureY + 35, { width: signatureWidth });
+    doc.text('Network Administrator / DTIP Operator', startX, closingY + 35, { width: signatureWidth, continued: false });
     doc.fillColor('#64748b').fontSize(8).font('Helvetica');
-    doc.text('CityConnect Network', startX, signatureY + 47, { width: signatureWidth });
-    doc.text('Admin Signature', startX, signatureY + 57, { width: signatureWidth });
+    doc.text('CityConnect Network', startX, closingY + 47, { width: signatureWidth, continued: false });
+    doc.text('Admin Signature', startX, closingY + 57, { width: signatureWidth, continued: false });
     
     // Right signature block
     const rightX = startX + signatureWidth + 60;
-    doc.moveTo(rightX, signatureY + 30).lineTo(rightX + signatureWidth, signatureY + 30).stroke('#94a3b8');
+    doc.moveTo(rightX, closingY + 30).lineTo(rightX + signatureWidth, closingY + 30).stroke('#94a3b8');
     doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold');
-    doc.text('Date Verification', rightX, signatureY + 35, { width: signatureWidth });
+    doc.text('Date Verification', rightX, closingY + 35, { width: signatureWidth, continued: false });
     doc.fillColor('#64748b').fontSize(8).font('Helvetica');
-    doc.text(`Generated: ${complianceData.generatedAtManila}`, rightX, signatureY + 47, { width: signatureWidth });
-    doc.text('Date: _________________', rightX, signatureY + 57, { width: signatureWidth });
+    doc.text(`Generated: ${complianceData.generatedAtManila}`, rightX, closingY + 47, { width: signatureWidth, continued: false });
+    doc.text('Date: _________________', rightX, closingY + 57, { width: signatureWidth, continued: false });
     
-    doc.y = signatureY + 80;
+    closingY += 80;
     
     // ==========================================
     // CONFIDENTIAL FOOTER
     // ==========================================
-    doc.rect(startX, doc.y, pageWidth, 25).fill('#f1f5f9');
+    doc.rect(startX, closingY, pageWidth, 25).fill('#f1f5f9');
     doc.fillColor('#64748b').fontSize(7).font('Helvetica');
-    doc.text('This report is automatically generated by the Mikrotik Billing Manager NTC Compliance System.', startX + 10, doc.y + 6, { width: pageWidth - 20, align: 'center' });
-    doc.text('CONFIDENTIAL — For regulatory compliance purposes only.', startX + 10, doc.y + 15, { width: pageWidth - 20, align: 'center' });
+    doc.text('This report is automatically generated by the Mikrotik Billing Manager NTC Compliance System.', startX + 10, closingY + 6, { width: pageWidth - 20, align: 'center', continued: false });
+    doc.text('CONFIDENTIAL — For regulatory compliance purposes only.', startX + 10, closingY + 15, { width: pageWidth - 20, align: 'center', continued: false });
+    
+    doc.y = closingY + 30;
     
     doc.end();
     console.log('[NTC] PDF report generated successfully');
