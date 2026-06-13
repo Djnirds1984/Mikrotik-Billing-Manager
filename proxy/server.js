@@ -3149,25 +3149,76 @@ async function startServer() {
             // Explicit margin after meta banner
             y = y - metaBannerPadding - metaBannerHeight - 20;
 
-            // ====== HELPER: Draw data grid row ======
-            const drawGridRow = (label, value, xPos, yPos, cellWidth, cellHeight) => {
-                // Label cell background
-                drawRect(xPos, yPos, cellWidth, cellHeight, COLORS.bgLight);
-                drawRect(xPos, yPos, cellWidth, 1, COLORS.border); // Top border
-                drawRect(xPos, yPos, 1, cellHeight, COLORS.border); // Left border
-                drawRect(xPos + cellWidth - 1, yPos, 1, cellHeight, COLORS.border); // Right border
+            // ====== BULLETPROOF 4-COLUMN DATA GRID TABLE SYSTEM ======
+            // Equivalent to CSS: table-layout: fixed; border-collapse: collapse;
+            
+            // Grid configuration (matches CSS: 20% + 30% + 20% + 30% = 100%)
+            const GRID_CONFIG = {
+                labelCol1: contentWidth * 0.20,    // 20% - First label column
+                valueCol1: contentWidth * 0.30,    // 30% - First value column
+                labelCol2: contentWidth * 0.20,    // 20% - Second label column
+                valueCol2: contentWidth * 0.30,    // 30% - Second value column
+                fullWidth: contentWidth * 0.80,    // 80% - Full width value (for colspan=3)
+                rowHeight: 24,                      // Fixed row height for consistency
+                cellPadding: 8,                     // Internal cell padding
+                borderWidth: 1                      // Uniform border width
+            };
+
+            // Helper: Draw a single cell with border and background
+            const drawGridCell = (x, y, width, height, text, isLabel = false, isFullWidth = false) => {
+                const padding = GRID_CONFIG.cellPadding;
                 
-                // Label text
-                drawText(label, xPos + 5, yPos + 8, 9, true, COLORS.secondary);
+                // Cell background
+                const bgColor = isLabel ? COLORS.bgLight : COLORS.white;
+                drawRect(x, y, width, height, bgColor);
                 
-                // Value cell background
-                const valueX = xPos + cellWidth;
-                drawRect(valueX, yPos, cellWidth, cellHeight, COLORS.white);
-                drawRect(valueX, yPos, cellWidth, 1, COLORS.border); // Top border
-                drawRect(valueX + cellWidth - 1, yPos, 1, cellHeight, COLORS.border); // Right border
+                // Cell borders (all 4 sides for uniform clean borders)
+                drawRect(x, y, width, GRID_CONFIG.borderWidth, COLORS.border);           // Top
+                drawRect(x, y + height - GRID_CONFIG.borderWidth, width, GRID_CONFIG.borderWidth, COLORS.border); // Bottom
+                drawRect(x, y, GRID_CONFIG.borderWidth, height, COLORS.border);          // Left
+                drawRect(x + width - GRID_CONFIG.borderWidth, y, GRID_CONFIG.borderWidth, height, COLORS.border); // Right
                 
-                // Value text
-                drawText(String(value || 'N/A'), valueX + 5, yPos + 8, 9, false, COLORS.primary);
+                // Cell text
+                const textColor = isLabel ? COLORS.secondary : COLORS.primary;
+                const fontWeight = isLabel;
+                const fontSize = 9;
+                const textY = y + ((height - fontSize) / 2); // Vertically centered
+                
+                drawText(String(text || 'N/A'), x + padding, textY, fontSize, fontWeight, textColor, width - (padding * 2));
+            };
+
+            // Helper: Draw a complete 4-column grid row
+            const drawGridRow4Col = (label1, value1, label2, value2, yPos) => {
+                const rowH = GRID_CONFIG.rowHeight;
+                let currentX = margin;
+                
+                // Column 1: Label (20%)
+                drawGridCell(currentX, yPos, GRID_CONFIG.labelCol1, rowH, label1, true);
+                currentX += GRID_CONFIG.labelCol1;
+                
+                // Column 2: Value (30%)
+                drawGridCell(currentX, yPos, GRID_CONFIG.valueCol1, rowH, value1, false);
+                currentX += GRID_CONFIG.valueCol1;
+                
+                // Column 3: Label (20%)
+                drawGridCell(currentX, yPos, GRID_CONFIG.labelCol2, rowH, label2, true);
+                currentX += GRID_CONFIG.labelCol2;
+                
+                // Column 4: Value (30%)
+                drawGridCell(currentX, yPos, GRID_CONFIG.valueCol2, rowH, value2, false);
+            };
+
+            // Helper: Draw a row with label + full-width value (colspan=3 equivalent)
+            const drawGridRowFullWidth = (label, value, yPos) => {
+                const rowH = GRID_CONFIG.rowHeight;
+                let currentX = margin;
+                
+                // Column 1: Label (20%)
+                drawGridCell(currentX, yPos, GRID_CONFIG.labelCol1, rowH, label, true);
+                currentX += GRID_CONFIG.labelCol1;
+                
+                // Columns 2-4: Full width value (80%)
+                drawGridCell(currentX, yPos, GRID_CONFIG.fullWidth, rowH, value, false, true);
             };
 
             // ====== APPLICANT INFORMATION SECTION ======
@@ -3177,29 +3228,36 @@ async function startServer() {
             drawRect(margin, y, contentWidth, 2, COLORS.accent);
             y -= 25;
 
-            const rowHeight = 22;
-            const halfWidth = contentWidth / 2;
             const gridStartY = y;
 
-            // Row 1
-            drawGridRow('Full Name:', customerData?.fullName || userData.name, margin, y, halfWidth, rowHeight);
-            y -= rowHeight;
+            // Row 1: Full Name | Account Number
+            drawGridRow4Col(
+                'Full Name:', customerData?.fullName || userData.name,
+                'Account No:', customerData?.accountNumber || 'N/A',
+                y
+            );
+            y -= GRID_CONFIG.rowHeight;
             
-            // Row 2
-            drawGridRow('Account Number:', customerData?.accountNumber || 'N/A', margin, y, halfWidth, rowHeight);
-            drawGridRow('Contact Number:', customerData?.contactNumber || userData.phone || 'N/A', margin + halfWidth, y, halfWidth, rowHeight);
-            y -= rowHeight;
+            // Row 2: Contact Number | Email
+            drawGridRow4Col(
+                'Contact No:', customerData?.contactNumber || userData.phone || 'N/A',
+                'Email:', customerData?.email || userData.email || 'N/A',
+                y
+            );
+            y -= GRID_CONFIG.rowHeight;
             
-            // Row 3
-            drawGridRow('Email Address:', customerData?.email || userData.email || 'N/A', margin, y, halfWidth, rowHeight);
-            y -= rowHeight;
+            // Row 3: Address (full width - colspan=3)
+            drawGridRowFullWidth('Address:', customerData?.address || 'N/A', y);
+            y -= GRID_CONFIG.rowHeight;
             
-            // Row 4 - Address (full width)
-            drawGridRow('Address:', customerData?.address || 'N/A', margin, y, halfWidth, rowHeight);
+            // Row 4: GPS Location (if available, full width)
             if (customerData?.gps) {
-                drawGridRow('GPS Location:', customerData.gps, margin + halfWidth, y, halfWidth, rowHeight);
+                drawGridRowFullWidth('GPS Location:', customerData.gps, y);
+                y -= GRID_CONFIG.rowHeight;
             }
-            y -= (rowHeight + 20);
+            
+            // Explicit margin after grid table
+            y -= 18;
 
             // ====== SERVICE DETAILS SECTION ======
             drawText('SERVICE DETAILS', margin, y, 11, true, COLORS.primary);
@@ -3207,23 +3265,33 @@ async function startServer() {
             drawRect(margin, y, contentWidth, 2, COLORS.accent);
             y -= 25;
 
-            // Service details grid
-            drawGridRow('Service Type:', source === 'pppoe' ? 'PPPoE' : 'DHCP', margin, y, halfWidth, rowHeight);
-            drawGridRow('Plan:', planData?.name || 'N/A', margin + halfWidth, y, halfWidth, rowHeight);
-            y -= rowHeight;
+            // Service details 4-column grid
+            // Row 1: Service Type | Plan
+            drawGridRow4Col(
+                'Service Type:', source === 'pppoe' ? 'PPPoE' : 'DHCP',
+                'Plan:', planData?.name || 'N/A',
+                y
+            );
+            y -= GRID_CONFIG.rowHeight;
             
-            if (planData?.price) {
-                drawGridRow('Monthly Rate:', `${planData.currency || 'PHP'} ${planData.price}`, margin, y, halfWidth, rowHeight);
+            // Row 2: Monthly Rate | Speed Limit (conditional)
+            if (planData?.price || planData?.speedLimit) {
+                drawGridRow4Col(
+                    'Monthly Rate:', planData?.price ? `${planData.currency || 'PHP'} ${planData.price}` : 'N/A',
+                    'Speed Limit:', planData?.speedLimit || 'N/A',
+                    y
+                );
+                y -= GRID_CONFIG.rowHeight;
             }
-            if (planData?.speedLimit) {
-                drawGridRow('Speed Limit:', planData.speedLimit, margin + halfWidth, y, halfWidth, rowHeight);
-            }
-            y -= rowHeight;
             
+            // Row 3: Plan Type (full width if exists)
             if (planData?.planType) {
-                drawGridRow('Plan Type:', planData.planType, margin, y, halfWidth, rowHeight);
+                drawGridRowFullWidth('Plan Type:', planData.planType, y);
+                y -= GRID_CONFIG.rowHeight;
             }
-            y -= (rowHeight + 25);
+            
+            // Explicit margin after service details grid
+            y -= 25;
 
             // ====== TERMS AND CONDITIONS CALLOUT BOX ======
             const termsTitleY = y;
