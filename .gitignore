@@ -37,6 +37,7 @@ database.sqlite-wal
 
 # Per-install machine identity (must persist across git pull / redeploy)
 proxy/.device-id
+proxy/.device-info.json
 
 # Local environment + runtime config (never overwrite on update)
 proxy/.env

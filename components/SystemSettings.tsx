@@ -154,6 +154,7 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
             '• All sales records\n' +
             '• All settings\n' +
             '• All uploaded files\n\n' +
+            '✓ GOOD NEWS: Your system license is stored in the cloud and will be automatically restored after reset.\n\n' +
             'This action CANNOT be undone!\n\n' +
             'Are you sure you want to continue?'
         );
@@ -163,7 +164,8 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
         const secondConfirm = window.confirm(
             'FINAL WARNING\n\n' +
             'You are about to perform a FACTORY RESET.\n' +
-            'The system will restart and return to the first-time setup page.\n\n' +
+            'The system will restart and return to the first-time setup page.\n' +
+            'Your license will be automatically restored from the cloud.\n\n' +
             'Click OK to proceed, or Cancel to abort.'
         );
         
@@ -182,7 +184,7 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
         try {
             const result = await factoryReset();
             if (result.success) {
-                alert('Factory reset completed! The system is restarting...');
+                alert('Factory reset completed! The system is restarting...\n\nYour license will be automatically restored from the cloud when the system restarts.');
                 // Clear local storage and redirect to registration
                 localStorage.clear();
                 sessionStorage.clear();
@@ -263,6 +265,12 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
                                 This includes all user accounts, customers, routers, sales records, settings, and uploaded files.
                                 <strong className="block mt-1">This action cannot be undone!</strong>
                             </p>
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4">
+                                <p className="text-sm text-blue-700 dark:text-blue-400">
+                                    <strong>ℹ️ License Recovery:</strong> Your system license is safely stored in the cloud. 
+                                    After factory reset, your license will be automatically restored when you access the system again.
+                                </p>
+                            </div>
                             <button
                                 onClick={handleFactoryReset}
                                 disabled={isResetting}

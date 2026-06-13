@@ -618,6 +618,30 @@ const getDeviceId = async () => {
             return stored.deviceId;
         }
 
+        // After factory reset: Try to restore deviceId from preserved file
+        const deviceInfoPath = path.join(__dirname, '.device-info.json');
+        if (fs.existsSync(deviceInfoPath)) {
+            try {
+                const deviceInfo = JSON.parse(fs.readFileSync(deviceInfoPath, 'utf8'));
+                if (deviceInfo?.deviceId) {
+                    console.log('[getDeviceId] Restored deviceId from .device-info.json after factory reset');
+                    
+                    // Save it back to the new database
+                    await db.run('UPDATE settings SET deviceId = ? WHERE id = 1', [deviceInfo.deviceId]);
+                    
+                    // If licenseKey was also preserved, restore it
+                    if (deviceInfo.licenseKey) {
+                        await db.run('UPDATE settings SET licenseKey = ? WHERE id = 1', [deviceInfo.licenseKey]);
+                        console.log('[getDeviceId] Restored licenseKey from .device-info.json');
+                    }
+                    
+                    return deviceInfo.deviceId;
+                }
+            } catch (readErr) {
+                console.warn('[getDeviceId] Failed to read .device-info.json:', readErr.message);
+            }
+        }
+
         // Generate a stable hardware ID
         const cpu = await si.cpu();
         const sys = await si.system();
@@ -1972,6 +1996,21 @@ async function startServer() {
     dbRouter.post('/factory-reset', async (req, res) => {
         try {
             console.log('[Factory Reset] Initiating factory reset...');
+            
+            // Step 1: Preserve deviceId and licenseKey before deleting database
+            const settings = await db.get('SELECT deviceId, licenseKey FROM settings WHERE id = 1');
+            const deviceInfoPath = path.join(__dirname, '.device-info.json');
+            
+            if (settings?.deviceId) {
+                // Save deviceId to external file so it survives factory reset
+                const deviceInfo = {
+                    deviceId: settings.deviceId,
+                    licenseKey: settings.licenseKey || null,
+                    preservedAt: new Date().toISOString()
+                };
+                fs.writeFileSync(deviceInfoPath, JSON.stringify(deviceInfo, null, 2));
+                console.log('[Factory Reset] Preserved deviceId to .device-info.json');
+            }
             
             // Close database connections
             await db.close();
