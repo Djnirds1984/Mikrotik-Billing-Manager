@@ -383,31 +383,27 @@ const checkPPPoEIsolation = async (routerConfig) => {
     const profilesCount = profiles.length;
     
     // Look for active forward chain rules that drop client-to-client traffic
-    // Typically these rules block traffic within the same subnet (e.g., 10.0.0.0/24)
+    // Specifically checks for PPPoE network isolation on 172.15.0.0/24
     let hasIsolationRule = false;
     
     for (const rule of firewallRules) {
       // Check if rule is active (not disabled)
       if (rule.disabled === 'true') continue;
       
-      // Check if it's a forward chain drop/reject rule
-      const isForwardChain = rule.chain === 'forward';
-      const isDropAction = rule.action === 'drop' || rule.action === 'reject';
+      // Check if it's a drop action rule
+      const isDropAction = rule.action === 'drop';
       
-      if (!isForwardChain || !isDropAction) continue;
+      if (!isDropAction) continue;
       
-      // Check if rule targets client subnet ranges
-      // Common patterns: src-address and dst-address both match client subnets
+      // Check for exact 172.15.0.0/24 subnet isolation
+      // Both src-address and dst-address must match the PPPoE network
       const srcAddr = rule['src-address'] || '';
       const dstAddr = rule['dst-address'] || '';
       
-      // Check for subnet isolation rules (e.g., 10.0.0.0/24, 192.168.0.0/16, etc.)
-      const isClientSubnet = (addr) => {
-        return addr.includes('10.') || addr.includes('192.168.') || addr.includes('172.16.');
-      };
-      
-      if (isClientSubnet(srcAddr) && isClientSubnet(dstAddr)) {
+      // String-match BOTH addresses to exactly equal 172.15.0.0/24
+      if (srcAddr === '172.15.0.0/24' && dstAddr === '172.15.0.0/24') {
         hasIsolationRule = true;
+        console.log('[NTC] Found PPPoE isolation rule: drop 172.15.0.0/24 -> 172.15.0.0/24');
         break;
       }
     }
