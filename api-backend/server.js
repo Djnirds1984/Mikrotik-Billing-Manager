@@ -605,13 +605,16 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     const doc = new PDFDocument({ 
       size: 'A4', 
       margin: 50,
-      autoFirstPage: true
+      autoFirstPage: true,
+      bufferPages: true // Enable page buffering for better control
     });
     
     doc.pipe(res);
     
     const pageWidth = doc.page.width - 100; // Account for margins
+    const pageHeight = doc.page.height - 100; // Account for margins
     const startX = 50;
+    const MIN_SPACE_FOR_CLOSING = 220; // Minimum pixels needed for warnings + status + signatures
     
     // ==========================================
     // 1. EXECUTIVE HEADER BLOCK
@@ -724,6 +727,20 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     auditItems.forEach((row, idx) => {
       const isEven = idx % 2 === 0;
       
+      // Check if we need a new page before drawing this row
+      if (currentY + rowHeight > pageHeight - MIN_SPACE_FOR_CLOSING) {
+        doc.addPage();
+        currentY = 50; // Reset to top margin
+        
+        // Redraw table header on new page
+        doc.rect(colX.vector, currentY, tableWidth, rowHeight).fill('#1e3a8a');
+        doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
+        doc.text('Vector Section', colX.vector + 8, currentY + 7, { width: colWidths.vector - 16 });
+        doc.text('Details', colX.details + 8, currentY + 7, { width: colWidths.details - 16 });
+        doc.text('Status', colX.status + 8, currentY + 7, { width: colWidths.status - 16 });
+        currentY += rowHeight;
+      }
+      
       // Row background
       doc.rect(colX.vector, currentY, tableWidth, rowHeight).fill(isEven ? '#f8fafc' : '#ffffff');
       
@@ -761,6 +778,23 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     });
     
     doc.y = currentY + 20;
+    
+    // ==========================================
+    // PAGINATION CONTROL: REPORT CLOSING BLOCK
+    // Keep warnings, status, and signatures together
+    // ==========================================
+    const closingBlockHeight = complianceData.warnings.length > 0 
+      ? 250 // With warnings: ~30+20*n + 60 + 80 = ~250px
+      : 160; // Without warnings: ~60 + 80 = ~140px (buffer to 160)
+    
+    // Check if there's enough space for the entire closing block
+    if (doc.y + closingBlockHeight > pageHeight) {
+      // Not enough space - force page break to keep closing block together
+      doc.addPage();
+      doc.y = 50; // Reset to top margin
+    }
+    
+    const closingBlockStartY = doc.y;
     
     // ==========================================
     // 5. SYSTEM WARNINGS & REQUIRED ACTIONS
