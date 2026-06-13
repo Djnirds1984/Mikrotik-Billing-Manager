@@ -12,6 +12,7 @@
     "axios": "^1.7.2",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "node-routeros-v2": "1.6.12",
