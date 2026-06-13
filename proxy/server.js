@@ -2898,78 +2898,185 @@ async function startServer() {
             const font = await doc.embedFont(StandardFonts.Helvetica);
             const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
             const page = doc.addPage([595.28, 841.89]);
-            const drawText = (text, x, y, size = 12, isBold = false) => {
-                page.drawText(String(text || ''), { x, y, size, font: isBold ? boldFont : font, color: rgb(0, 0, 0) });
+            const { width, height } = page.getSize();
+            
+            // Color constants
+            const COLORS = {
+                primary: rgb(0.059, 0.090, 0.165),      // #0f172a - Navy/Slate Dark
+                secondary: rgb(0.278, 0.333, 0.412),     // #475569 - Subdued gray
+                bgLight: rgb(0.973, 0.980, 0.984),       // #f8fafc - Light background
+                bgMedium: rgb(0.945, 0.961, 0.976),      // #f1f5f9 - Medium background
+                accent: rgb(0.192, 0.251, 0.361),        // #31405c - Accent blue
+                white: rgb(1, 1, 1),
+                black: rgb(0, 0, 0),
+                border: rgb(0.878, 0.894, 0.914)         // #e2e8f0 - Border gray
             };
 
-            // Header with company info
-            let y = 800;
+            // Helper: Draw filled rectangle
+            const drawRect = (x, y, w, h, color, opacity = 1) => {
+                page.drawRectangle({ x, y, width: w, height: h, color, opacity });
+            };
+
+            // Helper: Draw text with options
+            const drawText = (text, x, y, size = 12, isBold = false, color = COLORS.black, maxWidth = null) => {
+                const fontToUse = isBold ? boldFont : font;
+                const textToDraw = String(text || '');
+                page.drawText(textToDraw, { 
+                    x, 
+                    y, 
+                    size, 
+                    font: fontToUse, 
+                    color,
+                    maxWidth: maxWidth || undefined
+                });
+            };
+
+            // Helper: Get text width
+            const getTextWidth = (text, size, isBold = false) => {
+                const fontToUse = isBold ? boldFont : font;
+                return fontToUse.widthOfTextAtSize(String(text || ''), size);
+            };
+
+            let y = height - 50;
+            const margin = 50;
+            const contentWidth = width - (margin * 2);
+
+            // ====== HEADER SECTION: Company Branding ======
             if (companySettings?.companyName) {
-                drawText(companySettings.companyName, 50, y, 18, true);
-                y -= 25;
-            }
-            if (companySettings?.address) {
-                drawText(companySettings.address, 50, y, 10);
+                // Company name with thick bottom border
+                drawText(companySettings.companyName.toUpperCase(), margin, y, 22, true, COLORS.primary);
+                y -= 30;
+                
+                // Thick bottom border line
+                drawRect(margin, y + 5, contentWidth, 3, COLORS.primary);
                 y -= 15;
             }
+
+            // Contact metadata
+            const contactLines = [];
+            if (companySettings?.address) contactLines.push(companySettings.address);
             if (companySettings?.contactNumber || companySettings?.email) {
-                const contactInfo = `${companySettings.contactNumber || ''} ${companySettings.contactNumber && companySettings.email ? '|' : ''} ${companySettings.email || ''}`.trim();
-                drawText(contactInfo, 50, y, 10);
-                y -= 25;
+                const contact = [companySettings.contactNumber, companySettings.email].filter(Boolean).join(' | ');
+                contactLines.push(contact);
             }
+            
+            for (const line of contactLines) {
+                drawText(line, margin, y, 9, false, COLORS.secondary);
+                y -= 14;
+            }
+            y -= 10;
 
-            // Application title
-            drawText('INTERNET SERVICE APPLICATION FORM', 50, y, 16, true);
-            y -= 30;
+            // ====== APPLICATION TITLE WITH ACCENT BANNER ======
+            // Banner background
+            const bannerHeight = 35;
+            drawRect(margin, y - 10, contentWidth, bannerHeight, COLORS.bgMedium);
+            
+            // Banner top and bottom borders
+            drawRect(margin, y - 10, contentWidth, 2, COLORS.accent);
+            drawRect(margin, y - 10 + bannerHeight - 2, contentWidth, 2, COLORS.accent);
+            
+            // Application title centered in banner
+            const titleText = 'INTERNET SERVICE APPLICATION FORM';
+            const titleWidth = getTextWidth(titleText, 14, true);
+            drawText(titleText, margin + (contentWidth - titleWidth) / 2, y + 8, 14, true, COLORS.primary);
+            y -= (bannerHeight + 15);
 
-            // Application details
-            drawText(`Application ID: ${id}`, 50, y, 11, true);
-            drawText(`Date: ${new Date(createdAt).toLocaleString()}`, 300, y, 11);
+            // ====== APPLICATION ID & DATE HIGHLIGHTED BANNER ======
+            const metaBannerHeight = 25;
+            drawRect(margin, y - 5, contentWidth, metaBannerHeight, COLORS.bgLight);
+            drawRect(margin, y - 5, contentWidth, 1.5, COLORS.border);
+            
+            drawText(`Application ID: ${id}`, margin + 10, y + 5, 9, true, COLORS.accent);
+            const dateText = `Date: ${new Date(createdAt).toLocaleString()}`;
+            const dateWidth = getTextWidth(dateText, 9, false);
+            drawText(dateText, margin + contentWidth - dateWidth - 10, y + 5, 9, false, COLORS.secondary);
+            y -= (metaBannerHeight + 20);
+
+            // ====== HELPER: Draw data grid row ======
+            const drawGridRow = (label, value, xPos, yPos, cellWidth, cellHeight) => {
+                // Label cell background
+                drawRect(xPos, yPos, cellWidth, cellHeight, COLORS.bgLight);
+                drawRect(xPos, yPos, cellWidth, 1, COLORS.border); // Top border
+                drawRect(xPos, yPos, 1, cellHeight, COLORS.border); // Left border
+                drawRect(xPos + cellWidth - 1, yPos, 1, cellHeight, COLORS.border); // Right border
+                
+                // Label text
+                drawText(label, xPos + 5, yPos + 8, 9, true, COLORS.secondary);
+                
+                // Value cell background
+                const valueX = xPos + cellWidth;
+                drawRect(valueX, yPos, cellWidth, cellHeight, COLORS.white);
+                drawRect(valueX, yPos, cellWidth, 1, COLORS.border); // Top border
+                drawRect(valueX + cellWidth - 1, yPos, 1, cellHeight, COLORS.border); // Right border
+                
+                // Value text
+                drawText(String(value || 'N/A'), valueX + 5, yPos + 8, 9, false, COLORS.primary);
+            };
+
+            // ====== APPLICANT INFORMATION SECTION ======
+            const sectionTitleY = y;
+            drawText('APPLICANT INFORMATION', margin, y, 11, true, COLORS.primary);
+            y -= 5;
+            drawRect(margin, y, contentWidth, 2, COLORS.accent);
             y -= 25;
 
-            // User information
-            drawText('APPLICANT INFORMATION', 50, y, 12, true);
-            y -= 20;
-            drawText(`Full Name: ${customerData?.fullName || userData.name}`, 50, y);
-            y -= 18;
-            drawText(`Account Number: ${customerData?.accountNumber || 'N/A'}`, 50, y);
-            y -= 18;
-            drawText(`Contact Number: ${customerData?.contactNumber || userData.phone || 'N/A'}`, 50, y);
-            y -= 18;
-            drawText(`Email Address: ${customerData?.email || userData.email || 'N/A'}`, 50, y);
-            y -= 18;
-            drawText(`Address: ${customerData?.address || 'N/A'}`, 50, y);
-            y -= 18;
-            if (customerData?.gps) {
-                drawText(`GPS Location: ${customerData.gps}`, 50, y);
-                y -= 18;
-            }
+            const rowHeight = 22;
+            const halfWidth = contentWidth / 2;
+            const gridStartY = y;
 
-            // Service details
-            y -= 10;
-            drawText('SERVICE DETAILS', 50, y, 12, true);
-            y -= 20;
-            drawText(`Service Type: ${source === 'pppoe' ? 'PPPoE' : 'DHCP'}`, 50, y);
-            y -= 18;
-            drawText(`Plan: ${planData?.name || 'N/A'}`, 50, y);
-            y -= 18;
+            // Row 1
+            drawGridRow('Full Name:', customerData?.fullName || userData.name, margin, y, halfWidth, rowHeight);
+            y -= rowHeight;
+            
+            // Row 2
+            drawGridRow('Account Number:', customerData?.accountNumber || 'N/A', margin, y, halfWidth, rowHeight);
+            drawGridRow('Contact Number:', customerData?.contactNumber || userData.phone || 'N/A', margin + halfWidth, y, halfWidth, rowHeight);
+            y -= rowHeight;
+            
+            // Row 3
+            drawGridRow('Email Address:', customerData?.email || userData.email || 'N/A', margin, y, halfWidth, rowHeight);
+            y -= rowHeight;
+            
+            // Row 4 - Address (full width)
+            drawGridRow('Address:', customerData?.address || 'N/A', margin, y, halfWidth, rowHeight);
+            if (customerData?.gps) {
+                drawGridRow('GPS Location:', customerData.gps, margin + halfWidth, y, halfWidth, rowHeight);
+            }
+            y -= (rowHeight + 20);
+
+            // ====== SERVICE DETAILS SECTION ======
+            drawText('SERVICE DETAILS', margin, y, 11, true, COLORS.primary);
+            y -= 5;
+            drawRect(margin, y, contentWidth, 2, COLORS.accent);
+            y -= 25;
+
+            // Service details grid
+            drawGridRow('Service Type:', source === 'pppoe' ? 'PPPoE' : 'DHCP', margin, y, halfWidth, rowHeight);
+            drawGridRow('Plan:', planData?.name || 'N/A', margin + halfWidth, y, halfWidth, rowHeight);
+            y -= rowHeight;
+            
             if (planData?.price) {
-                drawText(`Monthly Rate: ${planData.currency || 'PHP'} ${planData.price}`, 50, y);
-                y -= 18;
+                drawGridRow('Monthly Rate:', `${planData.currency || 'PHP'} ${planData.price}`, margin, y, halfWidth, rowHeight);
             }
             if (planData?.speedLimit) {
-                drawText(`Speed Limit: ${planData.speedLimit}`, 50, y);
-                y -= 18;
+                drawGridRow('Speed Limit:', planData.speedLimit, margin + halfWidth, y, halfWidth, rowHeight);
             }
+            y -= rowHeight;
+            
             if (planData?.planType) {
-                drawText(`Plan Type: ${planData.planType}`, 50, y);
-                y -= 18;
+                drawGridRow('Plan Type:', planData.planType, margin, y, halfWidth, rowHeight);
             }
+            y -= (rowHeight + 25);
 
-            // Terms and conditions
+            // ====== TERMS AND CONDITIONS CALLOUT BOX ======
+            const termsTitleY = y;
+            drawText('TERMS AND CONDITIONS', margin, y, 11, true, COLORS.primary);
+            y -= 5;
+            drawRect(margin, y, contentWidth, 2, COLORS.accent);
             y -= 20;
-            drawText('TERMS AND CONDITIONS', 50, y, 12, true);
-            y -= 20;
+
+            // Callout box background
+            const termsStartY = y;
             const terms = [
                 '1. Payment is due on the specified due date.',
                 '2. Service interruption may occur for non-payment.',
@@ -2977,20 +3084,44 @@ async function startServer() {
                 '4. Installation fees may apply.',
                 '5. 24-hour notice required for service cancellation.'
             ];
-            for (const term of terms) {
-                drawText(term, 50, y, 9);
-                y -= 14;
+            
+            const termsBoxHeight = (terms.length * 16) + 15;
+            drawRect(margin, y - termsBoxHeight + 10, contentWidth, termsBoxHeight, COLORS.bgLight);
+            drawRect(margin, y - termsBoxHeight + 10, contentWidth, 2, COLORS.border);
+            drawRect(margin, y - termsBoxHeight + 10, 2, termsBoxHeight, COLORS.border);
+            drawRect(margin + contentWidth - 2, y - termsBoxHeight + 10, 2, termsBoxHeight, COLORS.border);
+            drawRect(margin, y - 2, contentWidth, 2, COLORS.border);
+            
+            for (let i = 0; i < terms.length; i++) {
+                drawText(terms[i], margin + 10, y - 12 - (i * 16), 9, false, COLORS.secondary);
             }
+            y -= (termsBoxHeight + 35);
 
-            // Signature section
-            y -= 30;
-            drawText('_________________________', 50, y);
-            drawText('Applicant Signature', 50, y - 15, 10);
-            drawText('Date', 50, y - 30, 10);
-
-            drawText('_________________________', 300, y);
-            drawText('Company Representative', 300, y - 15, 10);
-            drawText('Date', 300, y - 30, 10);
+            // ====== SIGNATURE GRID TABLE (page-break-inside: avoid) ======
+            // Signature section container with border
+            const sigBoxHeight = 70;
+            const sigWidth = 200;
+            const sigGap = 50;
+            const totalSigWidth = (sigWidth * 2) + sigGap;
+            const sigStartX = margin + (contentWidth - totalSigWidth) / 2;
+            
+            // Signature box background and border
+            drawRect(sigStartX - 10, y - sigBoxHeight + 10, totalSigWidth + 20, sigBoxHeight, COLORS.white);
+            drawRect(sigStartX - 10, y - sigBoxHeight + 10, totalSigWidth + 20, 2, COLORS.border);
+            drawRect(sigStartX - 10, y - sigBoxHeight + 10, 2, sigBoxHeight, COLORS.border);
+            drawRect(sigStartX - 10 + totalSigWidth + 8, y - sigBoxHeight + 10, 2, sigBoxHeight, COLORS.border);
+            drawRect(sigStartX - 10, y - 2, totalSigWidth + 20, 2, COLORS.border);
+            
+            // Left signature
+            drawText('_________________________', sigStartX, y - 25, 10, false, COLORS.primary);
+            drawText('Applicant Signature', sigStartX, y - 42, 9, true, COLORS.secondary);
+            drawText(`Date: ___________________`, sigStartX, y - 57, 9, false, COLORS.secondary);
+            
+            // Right signature
+            const rightSigX = sigStartX + sigWidth + sigGap;
+            drawText('_________________________', rightSigX, y - 25, 10, false, COLORS.primary);
+            drawText('Company Representative', rightSigX, y - 42, 9, true, COLORS.secondary);
+            drawText(`Date: ___________________`, rightSigX, y - 57, 9, false, COLORS.secondary);
 
             const pdfBytes = await doc.save();
             await fs.promises.writeFile(pdfPath, pdfBytes);
