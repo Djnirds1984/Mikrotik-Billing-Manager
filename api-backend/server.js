@@ -385,9 +385,18 @@ const checkPPPoEIsolation = async (routerConfig) => {
 
 // Helper: Check Cloudflare Tunnel status
 const checkCloudflareTunnel = () => {
-  const usingCloudflare = process.env.USING_CLOUDFLARE_TUNNEL === 'true' || 
-                          process.env.USING_CLOUDFLARE_TUNNEL === '1' ||
-                          (process.env.USING_CLOUDFLARE_TUNNEL && process.env.USING_CLOUDFLARE_TUNNEL.length > 0);
+  // Check multiple possible env variable names
+  const usingCloudflare = 
+    process.env.USING_CLOUDFLARE_TUNNEL === 'true' || 
+    process.env.USING_CLOUDFLARE_TUNNEL === '1' ||
+    process.env.CLOUDFLARE_TUNNEL === 'true' ||
+    process.env.CLOUDFLARE === 'true';
+  
+  console.log('[NTC] Cloudflare check:', {
+    USING_CLOUDFLARE_TUNNEL: process.env.USING_CLOUDFLARE_TUNNEL,
+    CLOUDFLARE_TUNNEL: process.env.CLOUDFLARE_TUNNEL,
+    usingCloudflare
+  });
   
   // Default to TLS 1.3 when using Cloudflare proxy edge
   const tlsVersion = process.env.TLS_VERSION || (usingCloudflare ? '1.3' : 'unknown');
@@ -415,13 +424,21 @@ const checkPSIDCryptography = async () => {
     if (hasEnvConfig) {
       facebookBotConfigured = true;
     } else {
-      // Fallback to database check
+      // Fallback to database check - settings table uses JSON column
       const database = await getDb();
-      const settings = await database.get('SELECT facebookPageAccessToken, facebookPageId, facebookVerifyToken FROM settings WHERE id = 1');
+      const settings = await database.get('SELECT facebookSettings FROM settings WHERE id = 1');
+      
+      // Parse JSON settings
+      let fbSettings = {};
+      try {
+        fbSettings = settings?.facebookSettings ? JSON.parse(settings.facebookSettings) : {};
+      } catch (e) {
+        // Ignore parse errors
+      }
       
       // Check if Facebook bot is configured
       facebookBotConfigured = !!(
-        settings?.facebookPageAccessToken && settings?.facebookPageId
+        fbSettings?.pageAccessToken && fbSettings?.pageId
       );
     }
     
