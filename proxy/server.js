@@ -2937,60 +2937,217 @@ async function startServer() {
                 return fontToUse.widthOfTextAtSize(String(text || ''), size);
             };
 
+            // ====== DYNAMIC LOGO RETRIEVAL ======
+            let logoImage = null;
+            const logoSrc = companySettings?.logoBase64 || companySettings?.logoUrl || '';
+            
+            if (logoSrc) {
+                try {
+                    // Handle base64 image
+                    if (logoSrc.startsWith('data:image/')) {
+                        const base64Data = logoSrc.split(',')[1];
+                        const imageBuffer = Buffer.from(base64Data, 'base64');
+                        
+                        if (logoSrc.includes('png')) {
+                            logoImage = await doc.embedPng(imageBuffer);
+                        } else if (logoSrc.includes('jpeg') || logoSrc.includes('jpg')) {
+                            logoImage = await doc.embedJpg(imageBuffer);
+                        }
+                    } 
+                    // Handle URL (would need to fetch - skip for now, use placeholder)
+                    else if (logoSrc.startsWith('http')) {
+                        console.log('[PDF] Logo URL detected but URL fetching not implemented in this route');
+                    }
+                } catch (logoErr) {
+                    console.warn('[PDF] Failed to embed logo:', logoErr.message);
+                    logoImage = null;
+                }
+            }
+
             let y = height - 50;
             const margin = 50;
             const contentWidth = width - (margin * 2);
 
-            // ====== HEADER SECTION: Company Branding ======
-            if (companySettings?.companyName) {
-                // Company name with thick bottom border
-                drawText(companySettings.companyName.toUpperCase(), margin, y, 22, true, COLORS.primary);
-                y -= 30;
+            // ====== DUAL-COLUMN HEADER LAYOUT (Table Structure) ======
+            // brand-header-table equivalent using PDF primitives
+            const headerTableY = y;
+            const logoCellWidth = 100;  // Fixed logo cell width
+            const infoCellWidth = contentWidth - logoCellWidth - 15; // Info cell with gap
+            const logoCellX = margin;
+            const infoCellX = margin + logoCellWidth + 15;
+            
+            const LOGO_SIZE = 70; // Logo display size (70x70 px)
+            const logoPadding = 5;
+            
+            // Draw logo cell (left column)
+            if (logoImage) {
+                // Calculate centered position within logo cell
+                const logoX = logoCellX + ((logoCellWidth - LOGO_SIZE) / 2);
+                const logoY = y - LOGO_SIZE - logoPadding;
                 
-                // Thick bottom border line
-                drawRect(margin, y + 5, contentWidth, 3, COLORS.primary);
-                y -= 15;
+                // Draw logo image
+                page.drawImage(logoImage, {
+                    x: logoX,
+                    y: logoY,
+                    width: LOGO_SIZE,
+                    height: LOGO_SIZE,
+                    opacity: 1
+                });
+                
+                y -= (LOGO_SIZE + (logoPadding * 2));
+            } else {
+                // Logo placeholder - empty box
+                const placeholderY = y - LOGO_SIZE - logoPadding;
+                drawRect(
+                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2),
+                    placeholderY,
+                    LOGO_SIZE,
+                    LOGO_SIZE,
+                    COLORS.bgLight
+                );
+                drawRect(
+                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2),
+                    placeholderY,
+                    LOGO_SIZE,
+                    1,
+                    COLORS.border
+                );
+                drawRect(
+                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2),
+                    placeholderY,
+                    1,
+                    LOGO_SIZE,
+                    COLORS.border
+                );
+                drawRect(
+                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2) + LOGO_SIZE - 1,
+                    placeholderY,
+                    1,
+                    LOGO_SIZE,
+                    COLORS.border
+                );
+                drawRect(
+                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2),
+                    placeholderY - 1,
+                    LOGO_SIZE,
+                    1,
+                    COLORS.border
+                );
+                
+                y -= (LOGO_SIZE + (logoPadding * 2));
             }
 
-            // Contact metadata
-            const contactLines = [];
-            if (companySettings?.address) contactLines.push(companySettings.address);
-            if (companySettings?.contactNumber || companySettings?.email) {
-                const contact = [companySettings.contactNumber, companySettings.email].filter(Boolean).join(' | ');
-                contactLines.push(contact);
+            // Draw info cell (right column) - company name and details
+            const infoCellStartY = y;
+            
+            // Company name (h1 equivalent)
+            const companyName = companySettings?.companyName || 'CITYCONNECT NETWORK';
+            const nameFontSize = 18;
+            const nameLineHeight = 1.2;
+            
+            // Handle long company names with word wrapping
+            const maxNameWidth = infoCellWidth;
+            const nameFontWidth = boldFont.widthOfTextAtSize(companyName, nameFontSize);
+            
+            if (nameFontWidth > maxNameWidth) {
+                // Multi-line company name
+                const words = companyName.split(' ');
+                let currentLine = '';
+                
+                for (const word of words) {
+                    const testLine = currentLine ? `${currentLine} ${word}` : word;
+                    const testWidth = boldFont.widthOfTextAtSize(testLine, nameFontSize);
+                    
+                    if (testWidth > maxNameWidth && currentLine) {
+                        drawText(currentLine, infoCellX, y, nameFontSize, true, COLORS.primary);
+                        y -= (nameFontSize * nameLineHeight);
+                        currentLine = word;
+                    } else {
+                        currentLine = testLine;
+                    }
+                }
+                if (currentLine) {
+                    drawText(currentLine, infoCellX, y, nameFontSize, true, COLORS.primary);
+                    y -= (nameFontSize * nameLineHeight);
+                }
+            } else {
+                drawText(companyName, infoCellX, y, nameFontSize, true, COLORS.primary);
+                y -= (nameFontSize * nameLineHeight);
             }
             
-            for (const line of contactLines) {
-                drawText(line, margin, y, 9, false, COLORS.secondary);
-                y -= 14;
-            }
-            y -= 10;
+            // Explicit margin after company name
+            y -= 6;
 
-            // ====== APPLICATION TITLE WITH ACCENT BANNER ======
-            // Banner background
-            const bannerHeight = 35;
-            drawRect(margin, y - 10, contentWidth, bannerHeight, COLORS.bgMedium);
+            // Company details (p.company-details equivalent)
+            const detailsFontSize = 9;
+            const detailsLineHeight = 1.4;
+            const detailsSpacing = 2;
+            
+            if (companySettings?.address) {
+                drawText(companySettings.address, infoCellX, y, detailsFontSize, false, COLORS.secondary);
+                y -= (detailsFontSize * detailsLineHeight + detailsSpacing);
+            }
+            
+            // Tel: xxx | Email: xxx (single line)
+            const contactParts = [];
+            if (companySettings?.contactNumber) contactParts.push(`Tel: ${companySettings.contactNumber}`);
+            if (companySettings?.email) contactParts.push(`Email: ${companySettings.email}`);
+            
+            if (contactParts.length > 0) {
+                const contactText = contactParts.join(' | ');
+                drawText(contactText, infoCellX, y, detailsFontSize, false, COLORS.secondary);
+                y -= (detailsFontSize * detailsLineHeight + detailsSpacing);
+            }
+
+            // Calculate actual header table height for proper spacing
+            const headerTableHeight = headerTableY - y;
+            
+            // Thick bottom border line (spans full content width)
+            const borderY = y - 8;
+            drawRect(margin, borderY, contentWidth, 2, COLORS.primary);
+            
+            // Explicit margin-bottom after brand header
+            y = borderY - 20;
+
+            // ====== APPLICATION TITLE WITH ACCENT BANNER (Fluid Spacing) ======
+            const bannerPadding = 10;
+            const titleFontSize = 14;
+            const titleText = 'INTERNET SERVICE APPLICATION FORM';
+            const titleHeight = titleFontSize + (bannerPadding * 2);
+            
+            // Banner background - auto-height based on content
+            drawRect(margin, y - bannerPadding, contentWidth, titleHeight, COLORS.bgMedium);
             
             // Banner top and bottom borders
-            drawRect(margin, y - 10, contentWidth, 2, COLORS.accent);
-            drawRect(margin, y - 10 + bannerHeight - 2, contentWidth, 2, COLORS.accent);
+            drawRect(margin, y - bannerPadding, contentWidth, 2, COLORS.accent);
+            drawRect(margin, y - bannerPadding + titleHeight - 2, contentWidth, 2, COLORS.accent);
             
             // Application title centered in banner
-            const titleText = 'INTERNET SERVICE APPLICATION FORM';
-            const titleWidth = getTextWidth(titleText, 14, true);
-            drawText(titleText, margin + (contentWidth - titleWidth) / 2, y + 8, 14, true, COLORS.primary);
-            y -= (bannerHeight + 15);
-
-            // ====== APPLICATION ID & DATE HIGHLIGHTED BANNER ======
-            const metaBannerHeight = 25;
-            drawRect(margin, y - 5, contentWidth, metaBannerHeight, COLORS.bgLight);
-            drawRect(margin, y - 5, contentWidth, 1.5, COLORS.border);
+            const titleWidth = getTextWidth(titleText, titleFontSize, true);
+            const titleY = y - bannerPadding + ((titleHeight - titleFontSize) / 2);
+            drawText(titleText, margin + (contentWidth - titleWidth) / 2, titleY, titleFontSize, true, COLORS.primary);
             
-            drawText(`Application ID: ${id}`, margin + 10, y + 5, 9, true, COLORS.accent);
+            // Explicit margin after title banner
+            y = y - bannerPadding - titleHeight - 15;
+
+            // ====== APPLICATION ID & DATE HIGHLIGHTED BANNER (Fluid) ======
+            const metaFontSize = 9;
+            const metaBannerPadding = 8;
+            const metaBannerHeight = metaFontSize + (metaBannerPadding * 2);
+            
+            drawRect(margin, y - metaBannerPadding, contentWidth, metaBannerHeight, COLORS.bgLight);
+            drawRect(margin, y - metaBannerPadding, contentWidth, 1.5, COLORS.border);
+            drawRect(margin, y - metaBannerPadding + metaBannerHeight - 1.5, contentWidth, 1.5, COLORS.border);
+            
+            const metaY = y - metaBannerPadding + ((metaBannerHeight - metaFontSize) / 2);
+            drawText(`Application ID: ${id}`, margin + 10, metaY, metaFontSize, true, COLORS.accent);
+            
             const dateText = `Date: ${new Date(createdAt).toLocaleString()}`;
-            const dateWidth = getTextWidth(dateText, 9, false);
-            drawText(dateText, margin + contentWidth - dateWidth - 10, y + 5, 9, false, COLORS.secondary);
-            y -= (metaBannerHeight + 20);
+            const dateWidth = getTextWidth(dateText, metaFontSize, false);
+            drawText(dateText, margin + contentWidth - dateWidth - 10, metaY, metaFontSize, false, COLORS.secondary);
+            
+            // Explicit margin after meta banner
+            y = y - metaBannerPadding - metaBannerHeight - 20;
 
             // ====== HELPER: Draw data grid row ======
             const drawGridRow = (label, value, xPos, yPos, cellWidth, cellHeight) => {
