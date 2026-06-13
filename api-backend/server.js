@@ -274,6 +274,12 @@ const checkMikrotikServices = async (routerConfig) => {
       services = response.data;
     }
     
+    // Defensive: ensure services is an array
+    if (!Array.isArray(services)) {
+      console.error('[NTC] Services response is not an array:', typeof services);
+      services = [];
+    }
+    
     const telnet = services.find(s => s.name === 'telnet');
     const ftp = services.find(s => s.name === 'ftp');
     const winbox = services.find(s => s.name === 'winbox');
@@ -338,6 +344,16 @@ const checkPPPoEIsolation = async (routerConfig) => {
       ]);
       profiles = profilesRes.data;
       firewallRules = firewallRes.data;
+    }
+    
+    // Defensive: ensure responses are arrays
+    if (!Array.isArray(profiles)) {
+      console.error('[NTC] Profiles response is not an array:', typeof profiles);
+      profiles = [];
+    }
+    if (!Array.isArray(firewallRules)) {
+      console.error('[NTC] Firewall rules response is not an array:', typeof firewallRules);
+      firewallRules = [];
     }
     
     const profilesCount = profiles.length;
