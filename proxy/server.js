@@ -2898,7 +2898,13 @@ async function startServer() {
             const font = await doc.embedFont(StandardFonts.Helvetica);
             const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
             const page = doc.addPage([595.28, 841.89]);
-            const { width, height } = page.getSize();
+            
+            // ====== CANVAS LAYOUT CONSTANTS & PAGE SETUP ======
+            const PAGE_WIDTH = 595;
+            const PAGE_HEIGHT = 842;
+            const MARGIN_LEFT = 45;
+            const MARGIN_RIGHT = 45;
+            const CONTENT_WIDTH = PAGE_WIDTH - (MARGIN_LEFT + MARGIN_RIGHT); // Exactly 505 points wide
             
             // Color constants
             const COLORS = {
@@ -2964,93 +2970,47 @@ async function startServer() {
                 }
             }
 
-            let y = height - 50;
-            const margin = 50;
-            const contentWidth = width - (margin * 2);
+            // ====== DYNAMIC ROW ACCUMULATOR SYSTEM ======
+            let currentY = PAGE_HEIGHT - 50; // Starts from the top margin area
 
-            // ====== DUAL-COLUMN HEADER LAYOUT (Table Structure) ======
-            // brand-header-table equivalent using PDF primitives
-            const headerTableY = y;
-            const logoCellWidth = 100;  // Fixed logo cell width
-            const infoCellWidth = contentWidth - logoCellWidth - 15; // Info cell with gap
-            const logoCellX = margin;
-            const infoCellX = margin + logoCellWidth + 15;
+            // ====== TWO-COLUMN BRAND HEADER LOGO & TEXT BOUNDS ======
+            // Draw the company details side-by-side without horizontal collisions
             
-            const LOGO_SIZE = 70; // Logo display size (70x70 px)
-            const logoPadding = 5;
+            const LOGO_WIDTH = 75; // Fixed width for logo
+            const LOGO_HEIGHT = 75;
+            const LOGO_GAP = 15; // Clean 15-point gap between logo and text
+            const TEXT_START_X = MARGIN_LEFT + LOGO_WIDTH + LOGO_GAP; // X = MARGIN_LEFT + 90
+            const TEXT_AREA_WIDTH = CONTENT_WIDTH - LOGO_WIDTH - LOGO_GAP;
             
-            // Draw logo cell (left column)
+            // Draw logo if exists
             if (logoImage) {
-                // Calculate centered position within logo cell
-                const logoX = logoCellX + ((logoCellWidth - LOGO_SIZE) / 2);
-                const logoY = y - LOGO_SIZE - logoPadding;
-                
-                // Draw logo image
                 page.drawImage(logoImage, {
-                    x: logoX,
-                    y: logoY,
-                    width: LOGO_SIZE,
-                    height: LOGO_SIZE,
+                    x: MARGIN_LEFT,
+                    y: currentY - LOGO_HEIGHT,
+                    width: LOGO_WIDTH,
+                    height: LOGO_HEIGHT,
                     opacity: 1
                 });
-                
-                y -= (LOGO_SIZE + (logoPadding * 2));
             } else {
-                // Logo placeholder - empty box
-                const placeholderY = y - LOGO_SIZE - logoPadding;
-                drawRect(
-                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2),
-                    placeholderY,
-                    LOGO_SIZE,
-                    LOGO_SIZE,
-                    COLORS.bgLight
-                );
-                drawRect(
-                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2),
-                    placeholderY,
-                    LOGO_SIZE,
-                    1,
-                    COLORS.border
-                );
-                drawRect(
-                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2),
-                    placeholderY,
-                    1,
-                    LOGO_SIZE,
-                    COLORS.border
-                );
-                drawRect(
-                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2) + LOGO_SIZE - 1,
-                    placeholderY,
-                    1,
-                    LOGO_SIZE,
-                    COLORS.border
-                );
-                drawRect(
-                    logoCellX + ((logoCellWidth - LOGO_SIZE) / 2),
-                    placeholderY - 1,
-                    LOGO_SIZE,
-                    1,
-                    COLORS.border
-                );
-                
-                y -= (LOGO_SIZE + (logoPadding * 2));
+                // Logo placeholder - bordered box
+                drawRect(MARGIN_LEFT, currentY - LOGO_HEIGHT, LOGO_WIDTH, LOGO_HEIGHT, COLORS.bgLight);
+                drawRect(MARGIN_LEFT, currentY - LOGO_HEIGHT, LOGO_WIDTH, 1, COLORS.border); // Top
+                drawRect(MARGIN_LEFT, currentY - LOGO_HEIGHT, 1, LOGO_HEIGHT, COLORS.border); // Left
+                drawRect(MARGIN_LEFT + LOGO_WIDTH - 1, currentY - LOGO_HEIGHT, 1, LOGO_HEIGHT, COLORS.border); // Right
+                drawRect(MARGIN_LEFT, currentY - 1, LOGO_WIDTH, 1, COLORS.border); // Bottom
             }
-
-            // Draw info cell (right column) - company name and details
-            const infoCellStartY = y;
             
-            // Company name (h1 equivalent)
+            // Draw company name at X = MARGIN_LEFT + 90
             const companyName = companySettings?.companyName || 'CITYCONNECT NETWORK';
             const nameFontSize = 18;
             const nameLineHeight = 1.2;
             
             // Handle long company names with word wrapping
-            const maxNameWidth = infoCellWidth;
             const nameFontWidth = boldFont.widthOfTextAtSize(companyName, nameFontSize);
+            let nameEndY = currentY;
             
-            if (nameFontWidth > maxNameWidth) {
-                // Multi-line company name
+            if (nameFontWidth > TEXT_AREA_WIDTH) {
+                // Multi-line company name - split and render
                 const words = companyName.split(' ');
                 let currentLine = '';
                 
@@ -3058,34 +3018,34 @@ async function startServer() {
                     const testLine = currentLine ? `${currentLine} ${word}` : word;
                     const testWidth = boldFont.widthOfTextAtSize(testLine, nameFontSize);
                     
-                    if (testWidth > maxNameWidth && currentLine) {
-                        drawText(currentLine, infoCellX, y, nameFontSize, true, COLORS.primary);
-                        y -= (nameFontSize * nameLineHeight);
+                    if (testWidth > TEXT_AREA_WIDTH && currentLine) {
+                        drawText(currentLine, TEXT_START_X, currentY, nameFontSize, true, COLORS.primary);
+                        currentY -= (nameFontSize * nameLineHeight);
                         currentLine = word;
                     } else {
                         currentLine = testLine;
                     }
                 }
                 if (currentLine) {
-                    drawText(currentLine, infoCellX, y, nameFontSize, true, COLORS.primary);
-                    y -= (nameFontSize * nameLineHeight);
+                    drawText(currentLine, TEXT_START_X, currentY, nameFontSize, true, COLORS.primary);
+                    currentY -= (nameFontSize * nameLineHeight);
                 }
             } else {
-                drawText(companyName, infoCellX, y, nameFontSize, true, COLORS.primary);
-                y -= (nameFontSize * nameLineHeight);
+                drawText(companyName, TEXT_START_X, currentY, nameFontSize, true, COLORS.primary);
+                currentY -= (nameFontSize * nameLineHeight);
             }
             
-            // Explicit margin after company name
-            y -= 6;
+            // Explicit spacing after company name
+            currentY -= 4;
 
-            // Company details (p.company-details equivalent)
-            const detailsFontSize = 9;
+            // Company details (address, contact, email)
+            const detailsFontSize = 8.5;
             const detailsLineHeight = 1.4;
             const detailsSpacing = 2;
             
             if (companySettings?.address) {
-                drawText(companySettings.address, infoCellX, y, detailsFontSize, false, COLORS.secondary);
-                y -= (detailsFontSize * detailsLineHeight + detailsSpacing);
+                drawText(companySettings.address, TEXT_START_X, currentY, detailsFontSize, false, COLORS.secondary);
+                currentY -= (detailsFontSize * detailsLineHeight + detailsSpacing);
             }
             
             // Tel: xxx | Email: xxx (single line)
@@ -3095,19 +3055,16 @@ async function startServer() {
             
             if (contactParts.length > 0) {
                 const contactText = contactParts.join(' | ');
-                drawText(contactText, infoCellX, y, detailsFontSize, false, COLORS.secondary);
-                y -= (detailsFontSize * detailsLineHeight + detailsSpacing);
+                drawText(contactText, TEXT_START_X, currentY, detailsFontSize, false, COLORS.secondary);
+                currentY -= (detailsFontSize * detailsLineHeight + detailsSpacing);
             }
 
-            // Calculate actual header table height for proper spacing
-            const headerTableHeight = headerTableY - y;
+            // Thick bottom border line (spans full CONTENT_WIDTH)
+            const borderY = currentY - 8;
+            drawRect(MARGIN_LEFT, borderY, CONTENT_WIDTH, 2, COLORS.primary);
             
-            // Thick bottom border line (spans full content width)
-            const borderY = y - 8;
-            drawRect(margin, borderY, contentWidth, 2, COLORS.primary);
-            
-            // Explicit margin-bottom after brand header
-            y = borderY - 20;
+            // Advance currentY cleanly below the header line
+            currentY = borderY - 20; // Moves the marker down safely
 
             // ====== APPLICATION TITLE WITH ACCENT BANNER (Fluid Spacing) ======
             const bannerPadding = 10;
@@ -3116,67 +3073,66 @@ async function startServer() {
             const titleHeight = titleFontSize + (bannerPadding * 2);
             
             // Banner background - auto-height based on content
-            drawRect(margin, y - bannerPadding, contentWidth, titleHeight, COLORS.bgMedium);
+            drawRect(MARGIN_LEFT, currentY - bannerPadding, CONTENT_WIDTH, titleHeight, COLORS.bgMedium);
             
             // Banner top and bottom borders
-            drawRect(margin, y - bannerPadding, contentWidth, 2, COLORS.accent);
-            drawRect(margin, y - bannerPadding + titleHeight - 2, contentWidth, 2, COLORS.accent);
+            drawRect(MARGIN_LEFT, currentY - bannerPadding, CONTENT_WIDTH, 2, COLORS.accent);
+            drawRect(MARGIN_LEFT, currentY - bannerPadding + titleHeight - 2, CONTENT_WIDTH, 2, COLORS.accent);
             
             // Application title centered in banner
             const titleWidth = getTextWidth(titleText, titleFontSize, true);
-            const titleY = y - bannerPadding + ((titleHeight - titleFontSize) / 2);
-            drawText(titleText, margin + (contentWidth - titleWidth) / 2, titleY, titleFontSize, true, COLORS.primary);
+            const titleY = currentY - bannerPadding + ((titleHeight - titleFontSize) / 2);
+            drawText(titleText, MARGIN_LEFT + (CONTENT_WIDTH - titleWidth) / 2, titleY, titleFontSize, true, COLORS.primary);
             
             // Explicit margin after title banner
-            y = y - bannerPadding - titleHeight - 15;
+            currentY = currentY - bannerPadding - titleHeight - 15;
 
             // ====== APPLICATION ID & DATE HIGHLIGHTED BANNER (Fluid) ======
             const metaFontSize = 9;
             const metaBannerPadding = 8;
             const metaBannerHeight = metaFontSize + (metaBannerPadding * 2);
             
-            drawRect(margin, y - metaBannerPadding, contentWidth, metaBannerHeight, COLORS.bgLight);
-            drawRect(margin, y - metaBannerPadding, contentWidth, 1.5, COLORS.border);
-            drawRect(margin, y - metaBannerPadding + metaBannerHeight - 1.5, contentWidth, 1.5, COLORS.border);
+            drawRect(MARGIN_LEFT, currentY - metaBannerPadding, CONTENT_WIDTH, metaBannerHeight, COLORS.bgLight);
+            drawRect(MARGIN_LEFT, currentY - metaBannerPadding, CONTENT_WIDTH, 1.5, COLORS.border);
+            drawRect(MARGIN_LEFT, currentY - metaBannerPadding + metaBannerHeight - 1.5, CONTENT_WIDTH, 1.5, COLORS.border);
             
-            const metaY = y - metaBannerPadding + ((metaBannerHeight - metaFontSize) / 2);
-            drawText(`Application ID: ${id}`, margin + 10, metaY, metaFontSize, true, COLORS.accent);
+            const metaY = currentY - metaBannerPadding + ((metaBannerHeight - metaFontSize) / 2);
+            drawText(`Application ID: ${id}`, MARGIN_LEFT + 10, metaY, metaFontSize, true, COLORS.accent);
             
             const dateText = `Date: ${new Date(createdAt).toLocaleString()}`;
             const dateWidth = getTextWidth(dateText, metaFontSize, false);
-            drawText(dateText, margin + contentWidth - dateWidth - 10, metaY, metaFontSize, false, COLORS.secondary);
+            drawText(dateText, MARGIN_LEFT + CONTENT_WIDTH - dateWidth - 10, metaY, metaFontSize, false, COLORS.secondary);
             
             // Explicit margin after meta banner
-            y = y - metaBannerPadding - metaBannerHeight - 20;
+            currentY = currentY - metaBannerPadding - metaBannerHeight - 20;
 
-            // ====== BULLETPROOF 4-COLUMN DATA GRID TABLE SYSTEM ======
-            // Equivalent to CSS: table-layout: fixed; border-collapse: collapse;
+            // ====== PERFECT REGULATION 4-COLUMN TABLE GRID ENGINE ======
+            // Calculate exact widths of balanced 4-column key-value grid across 505-point content canvas
             
-            // Grid configuration (matches CSS: 20% + 30% + 20% + 30% = 100%)
-            const GRID_CONFIG = {
-                labelCol1: contentWidth * 0.20,    // 20% - First label column
-                valueCol1: contentWidth * 0.30,    // 30% - First value column
-                labelCol2: contentWidth * 0.20,    // 20% - Second label column
-                valueCol2: contentWidth * 0.30,    // 30% - Second value column
-                fullWidth: contentWidth * 0.80,    // 80% - Full width value (for colspan=3)
-                rowHeight: 24,                      // Fixed row height for consistency
-                cellPadding: 8,                     // Internal cell padding
-                borderWidth: 1                      // Uniform border width
-            };
+            const colWidthLabel = CONTENT_WIDTH * 0.20;    // 20% width = 101 points
+            const colWidthValue = CONTENT_WIDTH * 0.30;    // 30% width = 151.5 points
+            const colWidthFull = CONTENT_WIDTH * 0.80;     // 80% for colspan=3 equivalent
+            const rowHeight = 24;                           // Fixed row height
+            const cellPadding = 8;                          // Internal padding
+            const borderWidth = 1;                          // Uniform border width
+            
+            // Exact X anchors programmatically calculated
+            const col1X = MARGIN_LEFT;                                      // Column 1 (Label) X
+            const col2X = MARGIN_LEFT + colWidthLabel;                     // Column 2 (Value) X
+            const col3X = MARGIN_LEFT + colWidthLabel + colWidthValue;    // Column 3 (Label) X
+            const col4X = MARGIN_LEFT + (colWidthLabel * 2) + colWidthValue; // Column 4 (Value) X
 
             // Helper: Draw a single cell with border and background
-            const drawGridCell = (x, y, width, height, text, isLabel = false, isFullWidth = false) => {
-                const padding = GRID_CONFIG.cellPadding;
-                
+            const drawGridCell = (x, y, width, height, text, isLabel = false) => {
                 // Cell background
                 const bgColor = isLabel ? COLORS.bgLight : COLORS.white;
                 drawRect(x, y, width, height, bgColor);
                 
-                // Cell borders (all 4 sides for uniform clean borders)
-                drawRect(x, y, width, GRID_CONFIG.borderWidth, COLORS.border);           // Top
-                drawRect(x, y + height - GRID_CONFIG.borderWidth, width, GRID_CONFIG.borderWidth, COLORS.border); // Bottom
-                drawRect(x, y, GRID_CONFIG.borderWidth, height, COLORS.border);          // Left
-                drawRect(x + width - GRID_CONFIG.borderWidth, y, GRID_CONFIG.borderWidth, height, COLORS.border); // Right
+                // Cell borders (all 4 sides - borderWidth: 1, borderColor: rgb(0.878, 0.894, 0.914))
+                drawRect(x, y, width, borderWidth, COLORS.border);                    // Top
+                drawRect(x, y + height - borderWidth, width, borderWidth, COLORS.border); // Bottom
+                drawRect(x, y, borderWidth, height, COLORS.border);                   // Left
+                drawRect(x + width - borderWidth, y, borderWidth, height, COLORS.border); // Right
                 
                 // Cell text
                 const textColor = isLabel ? COLORS.secondary : COLORS.primary;
@@ -3184,124 +3140,109 @@ async function startServer() {
                 const fontSize = 9;
                 const textY = y + ((height - fontSize) / 2); // Vertically centered
                 
-                drawText(String(text || 'N/A'), x + padding, textY, fontSize, fontWeight, textColor, width - (padding * 2));
+                drawText(String(text || 'N/A'), x + cellPadding, textY, fontSize, fontWeight, textColor, width - (cellPadding * 2));
             };
 
             // Helper: Draw a complete 4-column grid row
             const drawGridRow4Col = (label1, value1, label2, value2, yPos) => {
-                const rowH = GRID_CONFIG.rowHeight;
-                let currentX = margin;
+                // Column 1: Label (20%) - X = MARGIN_LEFT
+                drawGridCell(col1X, yPos, colWidthLabel, rowHeight, label1, true);
                 
-                // Column 1: Label (20%)
-                drawGridCell(currentX, yPos, GRID_CONFIG.labelCol1, rowH, label1, true);
-                currentX += GRID_CONFIG.labelCol1;
+                // Column 2: Value (30%) - X = MARGIN_LEFT + colWidthLabel
+                drawGridCell(col2X, yPos, colWidthValue, rowHeight, value1, false);
                 
-                // Column 2: Value (30%)
-                drawGridCell(currentX, yPos, GRID_CONFIG.valueCol1, rowH, value1, false);
-                currentX += GRID_CONFIG.valueCol1;
+                // Column 3: Label (20%) - X = MARGIN_LEFT + colWidthLabel + colWidthValue
+                drawGridCell(col3X, yPos, colWidthLabel, rowHeight, label2, true);
                 
-                // Column 3: Label (20%)
-                drawGridCell(currentX, yPos, GRID_CONFIG.labelCol2, rowH, label2, true);
-                currentX += GRID_CONFIG.labelCol2;
-                
-                // Column 4: Value (30%)
-                drawGridCell(currentX, yPos, GRID_CONFIG.valueCol2, rowH, value2, false);
+                // Column 4: Value (30%) - X = MARGIN_LEFT + (colWidthLabel * 2) + colWidthValue
+                drawGridCell(col4X, yPos, colWidthValue, rowHeight, value2, false);
             };
 
             // Helper: Draw a row with label + full-width value (colspan=3 equivalent)
             const drawGridRowFullWidth = (label, value, yPos) => {
-                const rowH = GRID_CONFIG.rowHeight;
-                let currentX = margin;
-                
                 // Column 1: Label (20%)
-                drawGridCell(currentX, yPos, GRID_CONFIG.labelCol1, rowH, label, true);
-                currentX += GRID_CONFIG.labelCol1;
+                drawGridCell(col1X, yPos, colWidthLabel, rowHeight, label, true);
                 
                 // Columns 2-4: Full width value (80%)
-                drawGridCell(currentX, yPos, GRID_CONFIG.fullWidth, rowH, value, false, true);
+                drawGridCell(col2X, yPos, colWidthFull, rowHeight, value, false);
             };
 
             // ====== APPLICANT INFORMATION SECTION ======
-            const sectionTitleY = y;
-            drawText('APPLICANT INFORMATION', margin, y, 11, true, COLORS.primary);
-            y -= 5;
-            drawRect(margin, y, contentWidth, 2, COLORS.accent);
-            y -= 25;
-
-            const gridStartY = y;
+            drawText('APPLICANT INFORMATION', MARGIN_LEFT, currentY, 11, true, COLORS.primary);
+            currentY -= 5;
+            drawRect(MARGIN_LEFT, currentY, CONTENT_WIDTH, 2, COLORS.accent);
+            currentY -= 25;
 
             // Row 1: Full Name | Account Number
             drawGridRow4Col(
                 'Full Name:', customerData?.fullName || userData.name,
                 'Account No:', customerData?.accountNumber || 'N/A',
-                y
+                currentY
             );
-            y -= GRID_CONFIG.rowHeight;
+            currentY -= rowHeight;
             
             // Row 2: Contact Number | Email
             drawGridRow4Col(
                 'Contact No:', customerData?.contactNumber || userData.phone || 'N/A',
                 'Email:', customerData?.email || userData.email || 'N/A',
-                y
+                currentY
             );
-            y -= GRID_CONFIG.rowHeight;
+            currentY -= rowHeight;
             
             // Row 3: Address (full width - colspan=3)
-            drawGridRowFullWidth('Address:', customerData?.address || 'N/A', y);
-            y -= GRID_CONFIG.rowHeight;
+            drawGridRowFullWidth('Address:', customerData?.address || 'N/A', currentY);
+            currentY -= rowHeight;
             
             // Row 4: GPS Location (if available, full width)
             if (customerData?.gps) {
-                drawGridRowFullWidth('GPS Location:', customerData.gps, y);
-                y -= GRID_CONFIG.rowHeight;
+                drawGridRowFullWidth('GPS Location:', customerData.gps, currentY);
+                currentY -= rowHeight;
             }
             
             // Explicit margin after grid table
-            y -= 18;
+            currentY -= 18;
 
             // ====== SERVICE DETAILS SECTION ======
-            drawText('SERVICE DETAILS', margin, y, 11, true, COLORS.primary);
-            y -= 5;
-            drawRect(margin, y, contentWidth, 2, COLORS.accent);
-            y -= 25;
+            drawText('SERVICE DETAILS', MARGIN_LEFT, currentY, 11, true, COLORS.primary);
+            currentY -= 5;
+            drawRect(MARGIN_LEFT, currentY, CONTENT_WIDTH, 2, COLORS.accent);
+            currentY -= 25;
 
             // Service details 4-column grid
             // Row 1: Service Type | Plan
             drawGridRow4Col(
                 'Service Type:', source === 'pppoe' ? 'PPPoE' : 'DHCP',
                 'Plan:', planData?.name || 'N/A',
-                y
+                currentY
             );
-            y -= GRID_CONFIG.rowHeight;
+            currentY -= rowHeight;
             
             // Row 2: Monthly Rate | Speed Limit (conditional)
             if (planData?.price || planData?.speedLimit) {
                 drawGridRow4Col(
                     'Monthly Rate:', planData?.price ? `${planData.currency || 'PHP'} ${planData.price}` : 'N/A',
                     'Speed Limit:', planData?.speedLimit || 'N/A',
-                    y
+                    currentY
                 );
-                y -= GRID_CONFIG.rowHeight;
+                currentY -= rowHeight;
             }
             
             // Row 3: Plan Type (full width if exists)
             if (planData?.planType) {
-                drawGridRowFullWidth('Plan Type:', planData.planType, y);
-                y -= GRID_CONFIG.rowHeight;
+                drawGridRowFullWidth('Plan Type:', planData.planType, currentY);
+                currentY -= rowHeight;
             }
             
             // Explicit margin after service details grid
-            y -= 25;
+            currentY -= 25;
 
             // ====== TERMS AND CONDITIONS CALLOUT BOX ======
-            const termsTitleY = y;
-            drawText('TERMS AND CONDITIONS', margin, y, 11, true, COLORS.primary);
-            y -= 5;
-            drawRect(margin, y, contentWidth, 2, COLORS.accent);
-            y -= 20;
+            drawText('TERMS AND CONDITIONS', MARGIN_LEFT, currentY, 11, true, COLORS.primary);
+            currentY -= 5;
+            drawRect(MARGIN_LEFT, currentY, CONTENT_WIDTH, 2, COLORS.accent);
+            currentY -= 20;
 
             // Callout box background
-            const termsStartY = y;
             const terms = [
                 '1. Payment is due on the specified due date.',
                 '2. Service interruption may occur for non-payment.',
@@ -3311,16 +3252,16 @@ async function startServer() {
             ];
             
             const termsBoxHeight = (terms.length * 16) + 15;
-            drawRect(margin, y - termsBoxHeight + 10, contentWidth, termsBoxHeight, COLORS.bgLight);
-            drawRect(margin, y - termsBoxHeight + 10, contentWidth, 2, COLORS.border);
-            drawRect(margin, y - termsBoxHeight + 10, 2, termsBoxHeight, COLORS.border);
-            drawRect(margin + contentWidth - 2, y - termsBoxHeight + 10, 2, termsBoxHeight, COLORS.border);
-            drawRect(margin, y - 2, contentWidth, 2, COLORS.border);
+            drawRect(MARGIN_LEFT, currentY - termsBoxHeight + 10, CONTENT_WIDTH, termsBoxHeight, COLORS.bgLight);
+            drawRect(MARGIN_LEFT, currentY - termsBoxHeight + 10, CONTENT_WIDTH, 2, COLORS.border);
+            drawRect(MARGIN_LEFT, currentY - termsBoxHeight + 10, 2, termsBoxHeight, COLORS.border);
+            drawRect(MARGIN_LEFT + CONTENT_WIDTH - 2, currentY - termsBoxHeight + 10, 2, termsBoxHeight, COLORS.border);
+            drawRect(MARGIN_LEFT, currentY - 2, CONTENT_WIDTH, 2, COLORS.border);
             
             for (let i = 0; i < terms.length; i++) {
-                drawText(terms[i], margin + 10, y - 12 - (i * 16), 9, false, COLORS.secondary);
+                drawText(terms[i], MARGIN_LEFT + 10, currentY - 12 - (i * 16), 9, false, COLORS.secondary);
             }
-            y -= (termsBoxHeight + 35);
+            currentY -= (termsBoxHeight + 35);
 
             // ====== SIGNATURE GRID TABLE (page-break-inside: avoid) ======
             // Signature section container with border
@@ -3328,25 +3269,25 @@ async function startServer() {
             const sigWidth = 200;
             const sigGap = 50;
             const totalSigWidth = (sigWidth * 2) + sigGap;
-            const sigStartX = margin + (contentWidth - totalSigWidth) / 2;
+            const sigStartX = MARGIN_LEFT + (CONTENT_WIDTH - totalSigWidth) / 2;
             
             // Signature box background and border
-            drawRect(sigStartX - 10, y - sigBoxHeight + 10, totalSigWidth + 20, sigBoxHeight, COLORS.white);
-            drawRect(sigStartX - 10, y - sigBoxHeight + 10, totalSigWidth + 20, 2, COLORS.border);
-            drawRect(sigStartX - 10, y - sigBoxHeight + 10, 2, sigBoxHeight, COLORS.border);
-            drawRect(sigStartX - 10 + totalSigWidth + 8, y - sigBoxHeight + 10, 2, sigBoxHeight, COLORS.border);
-            drawRect(sigStartX - 10, y - 2, totalSigWidth + 20, 2, COLORS.border);
+            drawRect(sigStartX - 10, currentY - sigBoxHeight + 10, totalSigWidth + 20, sigBoxHeight, COLORS.white);
+            drawRect(sigStartX - 10, currentY - sigBoxHeight + 10, totalSigWidth + 20, 2, COLORS.border);
+            drawRect(sigStartX - 10, currentY - sigBoxHeight + 10, 2, sigBoxHeight, COLORS.border);
+            drawRect(sigStartX - 10 + totalSigWidth + 8, currentY - sigBoxHeight + 10, 2, sigBoxHeight, COLORS.border);
+            drawRect(sigStartX - 10, currentY - 2, totalSigWidth + 20, 2, COLORS.border);
             
             // Left signature
-            drawText('_________________________', sigStartX, y - 25, 10, false, COLORS.primary);
-            drawText('Applicant Signature', sigStartX, y - 42, 9, true, COLORS.secondary);
-            drawText(`Date: ___________________`, sigStartX, y - 57, 9, false, COLORS.secondary);
+            drawText('_________________________', sigStartX, currentY - 25, 10, false, COLORS.primary);
+            drawText('Applicant Signature', sigStartX, currentY - 42, 9, true, COLORS.secondary);
+            drawText(`Date: ___________________`, sigStartX, currentY - 57, 9, false, COLORS.secondary);
             
             // Right signature
             const rightSigX = sigStartX + sigWidth + sigGap;
-            drawText('_________________________', rightSigX, y - 25, 10, false, COLORS.primary);
-            drawText('Company Representative', rightSigX, y - 42, 9, true, COLORS.secondary);
-            drawText(`Date: ___________________`, rightSigX, y - 57, 9, false, COLORS.secondary);
+            drawText('_________________________', rightSigX, currentY - 25, 10, false, COLORS.primary);
+            drawText('Company Representative', rightSigX, currentY - 42, 9, true, COLORS.secondary);
+            drawText(`Date: ___________________`, rightSigX, currentY - 57, 9, false, COLORS.secondary);
 
             const pdfBytes = await doc.save();
             await fs.promises.writeFile(pdfPath, pdfBytes);
