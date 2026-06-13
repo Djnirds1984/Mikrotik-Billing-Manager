@@ -122,6 +122,11 @@ server {
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_cache_bypass \$http_upgrade;
+        
+        # Timeout settings to prevent 504 Gateway Timeout
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
     }
 
     # WebSocket for the Terminal (port 3002)

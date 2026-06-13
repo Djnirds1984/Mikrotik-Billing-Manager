@@ -20,6 +20,30 @@ const PORT = 3002;
 app.use(cors());
 app.use(express.json());
 
+// Global timeout middleware to prevent 504 Gateway Timeout from Nginx
+app.use((req, res, next) => {
+    // Set default timeout for all routes (30 seconds)
+    req.setTimeout(30000, () => {
+        console.warn(`[Timeout] Request timed out: ${req.method} ${req.originalUrl}`);
+        if (!res.headersSent) {
+            res.status(504).json({ 
+                message: 'Router API request timed out. The MikroTik device may be unreachable or slow to respond.',
+                code: 'ROUTER_TIMEOUT'
+            });
+        }
+    });
+    res.setTimeout(30000, () => {
+        console.warn(`[Timeout] Response timed out: ${req.method} ${req.originalUrl}`);
+        if (!res.headersSent) {
+            res.status(504).json({ 
+                message: 'Router API request timed out. The MikroTik device may be unreachable or slow to respond.',
+                code: 'ROUTER_TIMEOUT'
+            });
+        }
+    });
+    next();
+});
+
 // Database setup - pointing to the proxy's DB
 const DB_PATH = path.resolve(__dirname, '../proxy/panel.db');
 
@@ -685,6 +709,10 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
 // 1. SPECIAL ENDPOINT: Interface Stats
 // This logic was previously in proxy/server.js but belongs here because Nginx routes /mt-api here.
 app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
+    // Set explicit timeout to prevent 504 from Nginx
+    req.setTimeout(30000);
+    res.setTimeout(30000);
+    
     try {
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
@@ -733,6 +761,10 @@ app.get('/:routerId/interface/print', getRouter, async (req, res) => {
 
 // 2b. System Resource Print
 app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
+    // Set explicit timeout to prevent 504 from Nginx
+    req.setTimeout(30000);
+    res.setTimeout(30000);
+    
     try {
         let resource;
         let temperature = null;
@@ -819,6 +851,10 @@ app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
 
 // 3. PPP Active Print
 app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
+    // Set explicit timeout to prevent 504 from Nginx
+    req.setTimeout(30000);
+    res.setTimeout(30000);
+    
     try {
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
