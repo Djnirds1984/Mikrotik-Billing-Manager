@@ -190,46 +190,46 @@ export const ManualPayments: React.FC = () => {
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
-                            <table className="w-full">
+                            <table className="w-full min-w-[1000px]">
                                 <thead>
                                     <tr className="border-b border-slate-200 dark:border-slate-700">
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Request #</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Customer</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Account #</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Plan</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Amount</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">GCash Ref #</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Mobile #</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Status</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Created</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Actions</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Request #</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Customer</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Account #</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Plan</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Amount</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">GCash Ref #</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Mobile #</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Status</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Created</th>
+                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {payments.map((payment) => (
                                         <tr key={payment.id} className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                            <td className="py-3 px-4 text-sm font-mono text-slate-600 dark:text-slate-400">
+                                            <td className="py-3 px-4 text-sm font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                                 {payment.id.split('_')[2].toUpperCase()}
                                             </td>
-                                            <td className="py-3 px-4 text-sm">
+                                            <td className="py-3 px-4 text-sm whitespace-nowrap">
                                                 <div className="font-medium text-slate-800 dark:text-slate-200">{payment.customer_full_name || 'N/A'}</div>
                                                 <div className="text-xs text-slate-500">{payment.customer_name_on_gcash}</div>
                                             </td>
-                                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{payment.customer_account_number}</td>
-                                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{payment.plan_name}</td>
-                                            <td className="py-3 px-4 text-sm font-semibold text-slate-800 dark:text-slate-200">₱{payment.plan_price.toFixed(2)}</td>
-                                            <td className="py-3 px-4 text-sm font-mono text-blue-600 dark:text-blue-400">{payment.gcash_reference_number}</td>
-                                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{payment.customer_mobile_number}</td>
-                                            <td className="py-3 px-4">
+                                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">{payment.customer_account_number}</td>
+                                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">{payment.plan_name}</td>
+                                            <td className="py-3 px-4 text-sm font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">₱{payment.plan_price.toFixed(2)}</td>
+                                            <td className="py-3 px-4 text-sm font-mono text-blue-600 dark:text-blue-400 whitespace-nowrap">{payment.gcash_reference_number}</td>
+                                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">{payment.customer_mobile_number}</td>
+                                            <td className="py-3 px-4 whitespace-nowrap">
                                                 <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getStatusBadge(payment.status)}`}>
                                                     {payment.status.toUpperCase()}
                                                 </span>
                                             </td>
-                                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{formatDate(payment.created_at)}</td>
-                                            <td className="py-3 px-4">
+                                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatDate(payment.created_at)}</td>
+                                            <td className="py-3 px-4 whitespace-nowrap">
                                                 <button
                                                     onClick={() => openDetailModal(payment)}
-                                                    className="px-3 py-1 bg-[--color-primary-500] text-white text-sm rounded hover:bg-[--color-primary-600] transition"
+                                                    className="px-3 py-1 bg-[--color-primary-500] text-white text-sm rounded hover:bg-[--color-primary-600] transition whitespace-nowrap"
                                                 >
                                                     View Details
                                                 </button>
