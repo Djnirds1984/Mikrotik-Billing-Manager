@@ -604,94 +604,245 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     
     const doc = new PDFDocument({ 
       size: 'A4', 
-      margin: 40,
+      margin: 50,
       autoFirstPage: true
     });
     
     doc.pipe(res);
     
-    doc.fontSize(18).font('Helvetica-Bold').text('CYBERSECURITY COMPLIANCE AND AUDIT REPORT', { align: 'center' });
+    const pageWidth = doc.page.width - 100; // Account for margins
+    const startX = 50;
+    
+    // ==========================================
+    // 1. EXECUTIVE HEADER BLOCK
+    // ==========================================
+    doc.rect(startX, doc.y, pageWidth, 60).fill('#1e3a8a');
+    doc.fillColor('white').fontSize(20).font('Helvetica-Bold');
+    doc.text('CYBERSECURITY COMPLIANCE & AUDIT REPORT', startX + 10, doc.y + 12, { width: pageWidth - 20, align: 'center' });
+    
+    // Accent border line
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica').text('Issued under Republic Act No. 12234 (Konektadong Pinoy Act Framework)', { align: 'center' });
+    doc.rect(startX, doc.y, pageWidth, 3).fill('#f59e0b');
     doc.moveDown(0.5);
     
-    doc.fontSize(10).font('Helvetica-Bold').text('Report Metadata');
-    doc.moveDown(0.2);
-    doc.font('Helvetica').fontSize(9);
-    doc.text(`Date Generated: ${complianceData.generatedAtManila} (Asia/Manila)`);
-    doc.text(`Operator: ${complianceData.operator}`);
-    doc.text(`System Engine ID: ${complianceData.systemEngineId}`);
-    doc.text(`Total Routers Inspected: ${complianceData.totalRoutersChecked}`);
-    doc.moveDown(0.5);
+    // Subtitle
+    doc.fontSize(10).font('Helvetica').fillColor('#64748b');
+    doc.text('Issued under Republic Act No. 12234 (Konektadong Pinoy Act Framework)', { align: 'center' });
+    doc.moveDown(1);
     
-    doc.fontSize(12).font('Helvetica-Bold').text('Compliance Assessment Summary');
+    // ==========================================
+    // 2. METADATA BOXED SUB-TABLE CONTAINER
+    // ==========================================
+    const metadataY = doc.y;
+    doc.rect(startX, metadataY, pageWidth, 80).fill('#f8fafc').stroke('#cbd5e1');
+    doc.strokeOpacity(1);
+    
+    // Draw metadata box border
+    doc.rect(startX, metadataY, pageWidth, 80).lineWidth(1.5).stroke('#cbd5e1');
+    
+    doc.fillColor('#1e293b').fontSize(11).font('Helvetica-Bold');
+    doc.text('Report Metadata', startX + 15, metadataY + 10);
+    
+    // Metadata fields in two columns
+    const col1X = startX + 15;
+    const col2X = startX + pageWidth / 2 + 10;
+    const fieldY = metadataY + 30;
+    
+    doc.fontSize(9).font('Helvetica');
+    
+    // Left column
+    doc.fillColor('#64748b').text('Operator Name:', col1X, fieldY);
+    doc.fillColor('#0f172a').font('Helvetica-Bold').text(complianceData.operator, col1X + 100, fieldY);
+    
+    doc.fillColor('#64748b').font('Helvetica').text('Assessment Date:', col1X, fieldY + 20);
+    doc.fillColor('#0f172a').font('Helvetica-Bold').text(complianceData.generatedAtManila, col1X + 100, fieldY + 20);
+    
+    // Right column
+    doc.fillColor('#64748b').font('Helvetica').text('Node Core Target:', col2X, fieldY);
+    doc.fillColor('#0f172a').font('Helvetica-Bold').text(`${complianceData.totalRoutersChecked} Router(s)`, col2X + 105, fieldY);
+    
+    doc.fillColor('#64748b').font('Helvetica').text('Engine Version:', col2X, fieldY + 20);
+    doc.fillColor('#0f172a').font('Helvetica-Bold').text('v2.4.1-stable', col2X + 105, fieldY + 20);
+    
+    doc.moveDown(2.5);
+    
+    // ==========================================
+    // 3. CORE AUDIT VECTORS TABLE
+    // ==========================================
+    doc.fontSize(13).font('Helvetica-Bold').fillColor('#1e293b');
+    doc.text('Core Audit Vectors Assessment', startX, doc.y);
     doc.moveDown(0.3);
     
-    const colWidths = { item: 250, status: 100, details: 150 };
+    const tableStartY = doc.y;
+    const tableWidth = pageWidth;
+    const colWidths = {
+      vector: tableWidth * 0.45,      // 45%
+      details: tableWidth * 0.35,     // 35%
+      status: tableWidth * 0.20       // 20%
+    };
     
-    // Draw table header
-    doc.rect(50, doc.y, 500, 18).fill('#1e3a8a');
-    doc.fillColor('white').fontSize(9).font('Helvetica-Bold');
-    doc.text('Compliance Item', 55, doc.y + 4, { width: colWidths.item });
-    doc.text('Status', 310, doc.y + 4, { width: colWidths.status });
-    doc.text('Details', 415, doc.y + 4, { width: colWidths.details });
-    doc.moveDown(0.8);
+    const colX = {
+      vector: startX,
+      details: startX + colWidths.vector,
+      status: startX + colWidths.vector + colWidths.details
+    };
     
-    const items = [
-      { item: 'Control Plane Hardening', status: complianceData.compliance.controlPlane.overallStatus, details: `${complianceData.compliance.controlPlane.routers.length} routers checked` },
-      { item: 'Network Isolation (PPPoE)', status: complianceData.compliance.networkIsolation.overallStatus, details: `${complianceData.compliance.networkIsolation.routers.length} profiles verified` },
-      { item: 'Encryption Matrix (TLS 1.3)', status: complianceData.compliance.encryption.status, details: complianceData.compliance.encryption.tunnelActive ? 'Cloudflare Active' : 'Not Configured' },
-      { item: 'Data Privacy (PSID Crypto)', status: complianceData.compliance.dataPrivacy.status, details: complianceData.compliance.dataPrivacy.botConfigured ? 'Bot Secured' : 'Not Configured' }
+    const rowHeight = 25;
+    
+    // Table header
+    doc.rect(colX.vector, tableStartY, tableWidth, rowHeight).fill('#1e3a8a');
+    doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
+    doc.text('Vector Section', colX.vector + 8, tableStartY + 7, { width: colWidths.vector - 16 });
+    doc.text('Details', colX.details + 8, tableStartY + 7, { width: colWidths.details - 16 });
+    doc.text('Status', colX.status + 8, tableStartY + 7, { width: colWidths.status - 16 });
+    
+    let currentY = tableStartY + rowHeight;
+    
+    const auditItems = [
+      { 
+        vector: 'Control Plane Hardening', 
+        status: complianceData.compliance.controlPlane.overallStatus, 
+        details: `${complianceData.compliance.controlPlane.routers.length} router(s) inspected` 
+      },
+      { 
+        vector: 'Network Isolation (PPPoE)', 
+        status: complianceData.compliance.networkIsolation.overallStatus, 
+        details: `${complianceData.compliance.networkIsolation.routers.length} profile(s) verified` 
+      },
+      { 
+        vector: 'Encryption Matrix (TLS 1.3)', 
+        status: complianceData.compliance.encryption.status, 
+        details: complianceData.compliance.encryption.tunnelActive ? 'Cloudflare Tunnel Active' : 'Not Configured' 
+      },
+      { 
+        vector: 'Data Privacy (PSID Crypto)', 
+        status: complianceData.compliance.dataPrivacy.status, 
+        details: complianceData.compliance.dataPrivacy.botConfigured ? 'Facebook Bot Secured' : 'Not Configured' 
+      }
     ];
     
-    items.forEach((row, idx) => {
+    auditItems.forEach((row, idx) => {
       const isEven = idx % 2 === 0;
-      const rowHeight = 18;
       
-      doc.rect(50, doc.y, 500, rowHeight).fill(isEven ? '#f1f5f9' : 'white');
-      doc.fillColor('black').fontSize(9).font('Helvetica');
-      doc.text(row.item, 55, doc.y + 4, { width: colWidths.item });
+      // Row background
+      doc.rect(colX.vector, currentY, tableWidth, rowHeight).fill(isEven ? '#f8fafc' : '#ffffff');
       
-      doc.fillColor(row.status === 'COMPLIANT' ? '#059669' : '#dc2626');
-      doc.text(row.status, 310, doc.y + 4, { width: colWidths.status });
+      // Row border
+      doc.rect(colX.vector, currentY, tableWidth, rowHeight).lineWidth(0.5).stroke('#e2e8f0');
       
-      doc.fillColor('black').font('Helvetica');
-      doc.text(row.details, 415, doc.y + 4, { width: colWidths.details });
+      // Vector section
+      doc.fillColor('#0f172a').fontSize(9).font('Helvetica');
+      doc.text(row.vector, colX.vector + 8, currentY + 7, { width: colWidths.vector - 16 });
       
-      doc.moveDown(0.8);
+      // Details
+      doc.fillColor('#475569').fontSize(9).font('Helvetica');
+      doc.text(row.details, colX.details + 8, currentY + 7, { width: colWidths.details - 16 });
+      
+      // Status badge with color-coding
+      const statusText = row.status;
+      const badgeX = colX.status + 8;
+      const badgeY = currentY + 5;
+      const badgeWidth = colWidths.status - 16;
+      const badgeHeight = 15;
+      
+      if (statusText === 'COMPLIANT') {
+        // Light green background with dark forest green text
+        doc.rect(badgeX, badgeY, badgeWidth, badgeHeight).fill('#dcfce7');
+        doc.fillColor('#166534').fontSize(9).font('Helvetica-Bold');
+        doc.text(statusText, badgeX + 3, badgeY + 2, { width: badgeWidth - 6 });
+      } else {
+        // Light amber background with dark gold text
+        doc.rect(badgeX, badgeY, badgeWidth, badgeHeight).fill('#fef3c7');
+        doc.fillColor('#92400e').fontSize(9).font('Helvetica-Bold');
+        doc.text(statusText, badgeX + 3, badgeY + 2, { width: badgeWidth - 6 });
+      }
+      
+      currentY += rowHeight;
     });
     
-    doc.moveDown(0.5);
+    doc.y = currentY + 20;
     
-    // Signature and footer section - all centered
+    // ==========================================
+    // 5. SYSTEM WARNINGS & REQUIRED ACTIONS
+    // ==========================================
     if (complianceData.warnings.length > 0) {
-      doc.fontSize(11).font('Helvetica-Bold').fillColor('#dc2626').text('Warnings & Recommendations');
-      doc.moveDown(0.2);
-      doc.fontSize(9).font('Helvetica').fillColor('black');
+      doc.moveDown(0.5);
+      
+      const warningBoxY = doc.y;
+      const warningBoxHeight = 30 + (complianceData.warnings.length * 20);
+      
+      // Warning box background
+      doc.rect(startX, warningBoxY, pageWidth, warningBoxHeight).fill('#fff7ed');
+      doc.rect(startX, warningBoxY, pageWidth, warningBoxHeight).lineWidth(1.5).stroke('#f97316');
+      
+      // Warning header
+      doc.fillColor('#9a3412').fontSize(11).font('Helvetica-Bold');
+      doc.text('System Warnings & Required Actions', startX + 12, warningBoxY + 8);
+      
+      // Warning items
+      doc.fillColor('#7c2d12').fontSize(9).font('Helvetica');
       complianceData.warnings.forEach((warning, idx) => {
-        doc.text(`${idx + 1}. ${warning}`, { indent: 15 });
-        doc.moveDown(0.1);
+        const warningY = warningBoxY + 28 + (idx * 18);
+        doc.text(`• ${warning}`, startX + 15, warningY, { width: pageWidth - 30 });
       });
-      doc.moveDown(0.3);
+      
+      doc.y = warningBoxY + warningBoxHeight + 15;
     }
     
-    doc.fontSize(14).font('Helvetica-Bold');
-    doc.fillColor(complianceData.overallStatus === 'COMPLIANT' ? '#059669' : '#dc2626');
-    doc.text(`OVERALL STATUS: ${complianceData.overallStatus}`, { align: 'center' });
-    doc.moveDown(0.8);
-    
-    // All footer content centered - compact spacing
-    doc.fillColor('black').fontSize(10).font('Helvetica');
-    doc.text('_'.repeat(35), { align: 'center' });
-    doc.moveDown(0.1);
-    doc.fontSize(10).font('Helvetica-Bold').text('Network Administrator / DTIP Operator', { align: 'center' });
-    doc.fontSize(9).font('Helvetica').text('CityConnect Network', { align: 'center' });
-    doc.moveDown(0.2);
-    doc.text('Date: _________________', { align: 'center' });
+    // ==========================================
+    // OVERALL STATUS BADGE
+    // ==========================================
     doc.moveDown(0.5);
-    doc.fontSize(7).font('Helvetica').fillColor('#64748b');
-    doc.text('This report is automatically generated by the Mikrotik Billing Manager NTC Compliance System.', { align: 'center' });
-    doc.text('Confidential - For regulatory compliance purposes only.', { align: 'center' });
+    
+    const overallStatusText = complianceData.overallStatus;
+    const badgeWidth2 = 180;
+    const badgeHeight2 = 35;
+    const badgeX2 = startX + (pageWidth - badgeWidth2) / 2;
+    
+    if (overallStatusText === 'PASSED' || overallStatusText === 'COMPLIANT') {
+      doc.rect(badgeX2, doc.y, badgeWidth2, badgeHeight2).fill('#dcfce7');
+      doc.fillColor('#166534').fontSize(13).font('Helvetica-Bold');
+      doc.text(`OVERALL STATUS: ${overallStatusText}`, badgeX2 + 5, doc.y + 10, { width: badgeWidth2 - 10, align: 'center' });
+    } else {
+      doc.rect(badgeX2, doc.y, badgeWidth2, badgeHeight2).fill('#fef3c7');
+      doc.fillColor('#92400e').fontSize(13).font('Helvetica-Bold');
+      doc.text(`OVERALL STATUS: ${overallStatusText}`, badgeX2 + 5, doc.y + 10, { width: badgeWidth2 - 10, align: 'center' });
+    }
+    
+    doc.y += badgeHeight2 + 25;
+    
+    // ==========================================
+    // 6. SIGNATURE FOOTER - HORIZONTAL ALIGNMENT
+    // ==========================================
+    const signatureY = doc.y;
+    const signatureWidth = pageWidth / 2 - 30;
+    
+    // Left signature block
+    doc.moveTo(startX, signatureY + 30).lineTo(startX + signatureWidth, signatureY + 30).stroke('#94a3b8');
+    doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold');
+    doc.text('Network Administrator / DTIP Operator', startX, signatureY + 35, { width: signatureWidth });
+    doc.fillColor('#64748b').fontSize(8).font('Helvetica');
+    doc.text('CityConnect Network', startX, signatureY + 47, { width: signatureWidth });
+    doc.text('Admin Signature', startX, signatureY + 57, { width: signatureWidth });
+    
+    // Right signature block
+    const rightX = startX + signatureWidth + 60;
+    doc.moveTo(rightX, signatureY + 30).lineTo(rightX + signatureWidth, signatureY + 30).stroke('#94a3b8');
+    doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold');
+    doc.text('Date Verification', rightX, signatureY + 35, { width: signatureWidth });
+    doc.fillColor('#64748b').fontSize(8).font('Helvetica');
+    doc.text(`Generated: ${complianceData.generatedAtManila}`, rightX, signatureY + 47, { width: signatureWidth });
+    doc.text('Date: _________________', rightX, signatureY + 57, { width: signatureWidth });
+    
+    doc.y = signatureY + 80;
+    
+    // ==========================================
+    // CONFIDENTIAL FOOTER
+    // ==========================================
+    doc.rect(startX, doc.y, pageWidth, 25).fill('#f1f5f9');
+    doc.fillColor('#64748b').fontSize(7).font('Helvetica');
+    doc.text('This report is automatically generated by the Mikrotik Billing Manager NTC Compliance System.', startX + 10, doc.y + 6, { width: pageWidth - 20, align: 'center' });
+    doc.text('CONFIDENTIAL — For regulatory compliance purposes only.', startX + 10, doc.y + 15, { width: pageWidth - 20, align: 'center' });
     
     doc.end();
     console.log('[NTC] PDF report generated successfully');
