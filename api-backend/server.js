@@ -258,7 +258,21 @@ app.post('/test/test-connection', async (req, res) => {
 const checkMikrotikServices = async (routerConfig) => {
   try {
     const client = createRouterInstance(routerConfig);
-    const services = await client.write('/ip/service/print');
+    
+    let services;
+    if (routerConfig.api_type === 'legacy') {
+      // Legacy API uses .write()
+      await client.connect();
+      try {
+        services = await client.write('/ip/service/print');
+      } finally {
+        await client.close();
+      }
+    } else {
+      // REST API uses axios get
+      const response = await client.get('/ip/service');
+      services = response.data;
+    }
     
     const telnet = services.find(s => s.name === 'telnet');
     const ftp = services.find(s => s.name === 'ftp');
@@ -287,7 +301,15 @@ const checkMikrotikServices = async (routerConfig) => {
     };
   } catch (err) {
     console.error('[NTC] Service check failed:', err.message);
-    return { telnetDisabled: false, ftpDisabled: false, winboxSecure: false, telnet: 'UNKNOWN', ftp: 'UNKNOWN', winbox: 'UNKNOWN', status: 'WARNING' };
+    return {
+      telnetDisabled: false,
+      ftpDisabled: false,
+      winboxSecure: false,
+      telnet: 'ERROR',
+      ftp: 'ERROR',
+      winbox: 'ERROR',
+      status: 'WARNING'
+    };
   }
 };
 
@@ -296,12 +318,29 @@ const checkPPPoEIsolation = async (routerConfig) => {
   try {
     const client = createRouterInstance(routerConfig);
     
-    // Get PPPoE profiles count
-    const profiles = await client.write('/ppp/profile/print');
-    const profilesCount = profiles.length;
+    let profiles;
+    let firewallRules;
     
-    // Check firewall filter rules for client isolation
-    const firewallRules = await client.write('/ip/firewall/filter/print');
+    if (routerConfig.api_type === 'legacy') {
+      // Legacy API uses .write()
+      await client.connect();
+      try {
+        profiles = await client.write('/ppp/profile/print');
+        firewallRules = await client.write('/ip/firewall/filter/print');
+      } finally {
+        await client.close();
+      }
+    } else {
+      // REST API uses axios get
+      const [profilesRes, firewallRes] = await Promise.all([
+        client.get('/ppp/profile'),
+        client.get('/ip/firewall/filter')
+      ]);
+      profiles = profilesRes.data;
+      firewallRules = firewallRes.data;
+    }
+    
+    const profilesCount = profiles.length;
     
     // Look for active forward chain rules that drop client-to-client traffic
     // Typically these rules block traffic within the same subnet (e.g., 10.0.0.0/24)
@@ -378,12 +417,11 @@ const checkPSIDCryptography = async () => {
     } else {
       // Fallback to database check
       const database = await getDb();
-      const settings = await database.get('SELECT facebookAppSecret, facebookVerifyToken, facebookPageAccessToken, facebookPageId FROM settings WHERE id = 1');
+      const settings = await database.get('SELECT facebookPageAccessToken, facebookPageId, facebookVerifyToken FROM settings WHERE id = 1');
       
-      // Check both env-style and database-style field names
+      // Check if Facebook bot is configured
       facebookBotConfigured = !!(
-        (settings?.facebookPageAccessToken && settings?.facebookPageId) ||
-        (settings?.facebookAppSecret && settings?.facebookVerifyToken)
+        settings?.facebookPageAccessToken && settings?.facebookPageId
       );
     }
     
