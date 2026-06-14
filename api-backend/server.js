@@ -497,6 +497,10 @@ const runComplianceCheck = async () => {
   const database = await getDb();
   const routers = await database.all('SELECT * FROM routers');
   
+  // ====== DYNAMIC VARIABLE RETRIEVAL: Fetch active organization name ======
+  const settings = await database.get('SELECT companyName FROM settings WHERE id = 1');
+  const operatorName = settings?.companyName || 'Network Operator';
+  
   const results = {
     controlPlane: { routers: [], overallStatus: 'COMPLIANT' },
     networkIsolation: { routers: [], overallStatus: 'COMPLIANT' },
@@ -567,7 +571,7 @@ const runComplianceCheck = async () => {
     timestamp: new Date().toISOString(),
     generatedAtManila: new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' }),
     systemEngineId: crypto.randomUUID(),
-    operator: 'CityConnect Network / AJC Softwares',
+    operator: operatorName, // Dynamic operator name from settings
     totalRoutersChecked: routers.length,
     compliance: results,
     overallStatus,
@@ -594,6 +598,9 @@ app.get('/api/admin/ntc-compliance-check', async (req, res) => {
 app.get('/api/admin/ntc-report/download', async (req, res) => {
   try {
     const complianceData = await runComplianceCheck();
+    
+    // Extract dynamic operator name from compliance data for use in PDF footer
+    const operatorName = complianceData.operator || 'Network Operator';
     
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename=NTC_Compliance_Report.pdf');
@@ -857,7 +864,7 @@ app.get('/api/admin/ntc-report/download', async (req, res) => {
     doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold');
     doc.text('Network Administrator / DTIP Operator', startX, closingY + 35, { width: signatureWidth, continued: false });
     doc.fillColor('#64748b').fontSize(8).font('Helvetica');
-    doc.text('CityConnect Network', startX, closingY + 47, { width: signatureWidth, continued: false });
+    doc.text(operatorName, startX, closingY + 47, { width: signatureWidth, continued: false });
     doc.text('Admin Signature', startX, closingY + 57, { width: signatureWidth, continued: false });
     
     // Right signature block
