@@ -493,7 +493,25 @@ async function initDb() {
                 processed_at TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS wan_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                connection_type TEXT NOT NULL DEFAULT 'dhcp',
+                wan_interface TEXT NOT NULL DEFAULT 'eth0',
+                static_ip TEXT,
+                static_gateway TEXT,
+                static_dns TEXT,
+                pppoe_username TEXT,
+                pppoe_password TEXT,
+                pppoe_interface_name TEXT,
+                last_applied_at TEXT,
+                status TEXT DEFAULT 'pending',
+                error_message TEXT
+            );
         `);
+        
+        // Insert default WAN settings if not exists
+        await db.run("INSERT OR IGNORE INTO wan_settings (id, connection_type, wan_interface) VALUES (1, 'dhcp', 'eth0')");
+        
         // Ensure new columns exist (idempotent migrations)
         try {
             const customerCols = await db.all("PRAGMA table_info(customers)");
@@ -1957,6 +1975,129 @@ async function startServer() {
             const setClause = keys.map(k => `${k} = ?`).join(',');
             await db.run(`UPDATE settings SET ${setClause} WHERE id = 1`, values);
             res.json({ message: 'Settings saved' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // WAN Settings Endpoints
+    dbRouter.get('/wan-settings', async (req, res) => {
+        try {
+            const settings = await db.get('SELECT * FROM wan_settings WHERE id = 1');
+            if (settings && settings.pppoe_password) {
+                settings.pppoe_password = '***masked***';
+            }
+            res.json(settings || {});
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.post('/wan-settings', async (req, res) => {
+        try {
+            const { connectionType, wanInterface, staticIp, staticGateway, staticDns, pppoeUsername, pppoePassword } = req.body;
+            
+            // Validation
+            if (!connectionType || !['dhcp', 'static', 'pppoe'].includes(connectionType)) {
+                return res.status(400).json({ message: 'Invalid connection type' });
+            }
+            
+            if (connectionType === 'static' && (!staticIp || !staticGateway || !staticDns)) {
+                return res.status(400).json({ message: 'Static IP configuration requires IP, gateway, and DNS' });
+            }
+            
+            if (connectionType === 'pppoe' && (!pppoeUsername || !pppoePassword)) {
+                return res.status(400).json({ message: 'PPPoE configuration requires username and password' });
+            }
+            
+            // Validate interface name to prevent injection
+            if (wanInterface && !/^[a-zA-Z0-9-]+$/.test(wanInterface)) {
+                return res.status(400).json({ message: 'Invalid interface name' });
+            }
+            
+            // Save to database (keep existing password if not changed)
+            const existing = await db.get('SELECT pppoe_password FROM wan_settings WHERE id = 1');
+            const finalPppoePassword = (pppoePassword && pppoePassword !== '***masked***') ? pppoePassword : existing?.pppoe_password;
+            
+            await db.run(`
+                UPDATE wan_settings SET 
+                    connection_type = ?, 
+                    wan_interface = ?,
+                    static_ip = ?,
+                    static_gateway = ?,
+                    static_dns = ?,
+                    pppoe_username = ?,
+                    pppoe_password = ?,
+                    status = 'pending',
+                    error_message = NULL
+                WHERE id = 1
+            `, [connectionType, wanInterface || 'eth0', staticIp, staticGateway, staticDns, pppoeUsername, finalPppoePassword]);
+            
+            // Trigger network agent to apply
+            try {
+                const NetworkAgent = require('../services/networkAgent');
+                const agent = new NetworkAgent();
+                await agent.applyConfiguration({
+                    connectionType,
+                    wanInterface: wanInterface || 'eth0',
+                    staticIp,
+                    staticGateway,
+                    staticDns,
+                    pppoeUsername,
+                    pppoePassword: finalPppoePassword
+                });
+                
+                await db.run('UPDATE wan_settings SET status = ?, last_applied_at = ? WHERE id = 1', 
+                    ['applied', new Date().toISOString()]);
+                
+                res.json({ message: 'WAN configuration saved and applied successfully' });
+            } catch (agentError) {
+                console.error('[WAN Config] Agent application error:', agentError);
+                await db.run('UPDATE wan_settings SET status = ?, error_message = ? WHERE id = 1',
+                    ['failed', agentError.message]);
+                res.status(500).json({ message: 'Configuration saved but failed to apply: ' + agentError.message });
+            }
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.post('/wan-settings/apply', async (req, res) => {
+        try {
+            const settings = await db.get('SELECT * FROM wan_settings WHERE id = 1');
+            if (!settings) {
+                return res.status(404).json({ message: 'No WAN configuration found' });
+            }
+            
+            const NetworkAgent = require('../services/networkAgent');
+            const agent = new NetworkAgent();
+            await agent.applyConfiguration({
+                connectionType: settings.connection_type,
+                wanInterface: settings.wan_interface,
+                staticIp: settings.static_ip,
+                staticGateway: settings.static_gateway,
+                staticDns: settings.static_dns,
+                pppoeUsername: settings.pppoe_username,
+                pppoePassword: settings.pppoe_password
+            });
+            
+            await db.run('UPDATE wan_settings SET status = ?, last_applied_at = ?, error_message = NULL WHERE id = 1', 
+                ['applied', new Date().toISOString()]);
+            
+            res.json({ message: 'WAN configuration re-applied successfully', success: true });
+        } catch (e) {
+            await db.run('UPDATE wan_settings SET status = ?, error_message = ? WHERE id = 1',
+                ['failed', e.message]);
+            res.status(500).json({ message: 'Failed to apply configuration: ' + e.message, success: false });
+        }
+    });
+
+    dbRouter.get('/wan-settings/status', async (req, res) => {
+        try {
+            const NetworkAgent = require('../services/networkAgent');
+            const agent = new NetworkAgent();
+            const status = await agent.getCurrentNetworkStatus();
+            res.json(status);
         } catch (e) {
             res.status(500).json({ message: e.message });
         }

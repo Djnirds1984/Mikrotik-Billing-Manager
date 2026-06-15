@@ -894,3 +894,27 @@ export interface DhcpClientActionParams {
     accountNumber?: string;
     gpsCoordinates?: string;
 }
+
+export interface NetworkStatus {
+  wanInterface: string;
+  ipAddress: string;
+  gateway: string;
+  dnsServers: string[];
+  isOnline: boolean;
+  uptime?: string;
+}
+
+export interface WanSettings {
+  id?: number;
+  connectionType: 'dhcp' | 'static' | 'pppoe';
+  wanInterface: string;
+  staticIp?: string;
+  staticGateway?: string;
+  staticDns?: string;
+  pppoeUsername?: string;
+  pppoePassword?: string;
+  pppoeInterfaceName?: string;
+  lastAppliedAt?: string;
+  status: 'pending' | 'applied' | 'failed';
+  errorMessage?: string;
+}
