@@ -145,21 +145,21 @@ interface CustomerInfo {
 const MIKROTIK_SCRIPT = `# ============================================
 # EXPIRED CLIENT WALLED GARDEN SETUP
 # Run this script on your MikroTik router
+# Non-payment IP pool: 172.16.44.0/24
 # ============================================
 
 # 1. Create address list for the portal/store server
 /ip firewall address-list
 add list=PORTAL_SERVER address=<PORTAL_IP> comment="Billing Portal Server"
 
-# 2. Create address list for expired clients (auto-populated by the system)
-# The billing system will add/remove IPs dynamically via API
+# 2. Non-payment pool address list (expired clients get IPs from this range)
 /ip firewall address-list
-add list=EXPIRED_CLIENTS address=192.0.2.1 comment="Placeholder - auto-populated by billing system"
+add list=NON_PAYMENT_POOL address=172.16.44.0/24 comment="Non-payment profile IP pool"
 
 # 3. Mangle rule: mark expired client traffic going outside portal
 /ip firewall mangle
 add chain=prerouting \\
-    src-address-list=EXPIRED_CLIENTS \\
+    src-address-list=NON_PAYMENT_POOL \\
     dst-address-list=!PORTAL_SERVER \\
     action=mark-connection \\
     new-connection-mark=expired_blocked \\
@@ -178,7 +178,7 @@ add chain=forward \\
 add chain=dstnat \\
     protocol=tcp \\
     dst-port=80 \\
-    src-address-list=EXPIRED_CLIENTS \\
+    src-address-list=NON_PAYMENT_POOL \\
     dst-address-list=!PORTAL_SERVER \\
     action=dst-nat \\
     to-addresses=<PORTAL_IP> \\
@@ -190,10 +190,14 @@ add chain=dstnat \\
 add chain=dstnat \\
     protocol=udp \\
     dst-port=53 \\
-    src-address-list=EXPIRED_CLIENTS \\
+    src-address-list=NON_PAYMENT_POOL \\
     action=redirect \\
     to-ports=53 \\
     comment="Redirect expired DNS to router"
+
+# NOTE: The billing system also dynamically manages an EXPIRED_CLIENTS
+# address-list via API for per-client IP tracking. The NON_PAYMENT_POOL
+# covers the entire subnet assigned to the non-payment PPPoE profile.
 `;
 
 export const ExpiredPortal: React.FC = () => {
@@ -204,8 +208,14 @@ export const ExpiredPortal: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [isNavigating, setIsNavigating] = useState(false);
     const [showScript, setShowScript] = useState(false);
+    const [customExpiredMessage, setCustomExpiredMessage] = useState('');
 
     useEffect(() => {
+        // Load store settings for custom expired message
+        fetch('/api/public/store-settings').then(r => r.ok ? r.json() : null).then(data => {
+            if (data?.customExpiredMessage) setCustomExpiredMessage(data.customExpiredMessage);
+        }).catch(() => {});
+
         const lookupCustomer = async () => {
             try {
                 setLoading(true);
@@ -324,7 +334,7 @@ export const ExpiredPortal: React.FC = () => {
                                 </svg>
                             </div>
                             <h1 className="text-2xl font-extrabold text-red-600 dark:text-red-400">Subscription Expired</h1>
-                            <p className="mt-2 text-slate-600 dark:text-slate-300">Your internet service has been suspended due to an expired subscription.</p>
+                            <p className="mt-2 text-slate-600 dark:text-slate-300">{customExpiredMessage || 'Your internet service has been suspended due to an expired subscription.'}</p>
                         </div>
 
                         {/* Account Info */}

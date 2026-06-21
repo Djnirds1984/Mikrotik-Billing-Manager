@@ -157,6 +157,9 @@ async function initDb() {
         // Company settings JSON column (for GCash and other config)
         if (!columnNames.includes('companySettings')) await db.exec("ALTER TABLE settings ADD COLUMN companySettings TEXT");
 
+        // Store & Portal settings JSON column
+        if (!columnNames.includes('storeSettings')) await db.exec("ALTER TABLE settings ADD COLUMN storeSettings TEXT");
+
         // Manual payment requests table (for existing databases)
         try {
             await db.exec(`
@@ -1961,6 +1964,47 @@ async function startServer() {
         }
     });
 
+    // ========================================
+    // Store & Portal Settings
+    // ========================================
+    dbRouter.get('/store-settings', async (req, res) => {
+        try {
+            const s = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+            if (s && s.storeSettings) {
+                try { res.json(JSON.parse(s.storeSettings)); } catch (_) { res.json({}); }
+            } else {
+                // Return defaults
+                res.json({
+                    portalRedirectUrl: '',
+                    nonPaymentPool: '172.16.44.0/24',
+                    portalServerIp: '',
+                    portalServerPort: 8080,
+                    walledGardenEnabled: false,
+                    autoSyncWorkerEnabled: false,
+                    customExpiredMessage: '',
+                    storeEnabled: true,
+                    paymentMethods: { paymongo: true, manualGcash: true },
+                    gcashNumber: '',
+                    gcashAccountName: '',
+                    storeBannerText: '',
+                    autoRestoreOnPayment: true
+                });
+            }
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.post('/store-settings', async (req, res) => {
+        try {
+            const settings = JSON.stringify(req.body);
+            await db.run('UPDATE settings SET storeSettings = ? WHERE id = 1', [settings]);
+            res.json({ message: 'Store settings saved' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     dbRouter.post('/panel-settings', async (req, res) => {
         try {
             const data = { ...req.body };
@@ -2670,6 +2714,15 @@ async function startServer() {
     // GET: Get all available store plans
     app.get('/api/public/store/plans', async (req, res) => {
         try {
+            // Check if store is enabled
+            const settingsRow = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+            if (settingsRow && settingsRow.storeSettings) {
+                try {
+                    const ss = JSON.parse(settingsRow.storeSettings);
+                    if (ss.storeEnabled === false) return res.json([]);
+                } catch (_) {}
+            }
+
             const { routerId, type = 'all' } = req.query;
             
             let plans = [];
@@ -2942,6 +2995,77 @@ async function startServer() {
                 }
             }
 
+            // If IP is from non-payment pool (172.16.44.0/24) and DB lookup failed,
+            // query MikroTik PPPoE active sessions to find the secret name
+            if (!customer && ip && ip.startsWith('172.16.44.')) {
+                const routers = await db.all('SELECT * FROM routers');
+                for (const router of routers) {
+                    try {
+                        const axios = require('axios');
+                        const routerIp = router.host || router.ip;
+                        const routerPort = router.port || 3002;
+                        const routerUser = router.username || 'admin';
+                        const routerPass = router.password || '';
+                        const apiBase = `http://${routerIp}:${routerPort}`;
+                        const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
+
+                        // Query PPPoE active sessions for this IP
+                        const activeResp = await axios.get(`${apiBase}/rest/ppp/active`, {
+                            params: { address: ip },
+                            headers: { Authorization: authHeader },
+                            timeout: 10000
+                        });
+                        const activeSessions = Array.isArray(activeResp.data) ? activeResp.data : [];
+                        const session = activeSessions.find(s => s.address === ip);
+
+                        if (session && session.name) {
+                            // Found the PPPoE secret name - look up the customer by username
+                            customer = await db.get(
+                                `SELECT c.*, r.name as routerName FROM customers c 
+                                 LEFT JOIN routers r ON c.routerId = r.id 
+                                 WHERE (c.username = ? OR c.name = ?) AND c.routerId = ?`,
+                                [session.name, session.name, router.id]
+                            );
+                            if (customer) {
+                                clientType = 'pppoe';
+                                break;
+                            }
+
+                            // Fallback: look in client_users table
+                            const clientUser = await db.get(
+                                'SELECT * FROM client_users WHERE pppoe_username = ? AND router_id = ?',
+                                [session.name, router.id]
+                            );
+                            if (clientUser) {
+                                customer = await db.get(
+                                    `SELECT c.*, r.name as routerName FROM customers c 
+                                     LEFT JOIN routers r ON c.routerId = r.id 
+                                     WHERE c.routerId = ? AND (c.username = ? OR c.accountNumber = ?)`,
+                                    [router.id, clientUser.pppoe_username || session.name, clientUser.account_number || '']
+                                );
+                                if (!customer) {
+                                    // Build customer from client_user data
+                                    customer = {
+                                        username: session.name,
+                                        name: session.name,
+                                        fullName: clientUser.pppoe_username || session.name,
+                                        accountNumber: clientUser.account_number || '',
+                                        routerId: router.id,
+                                        routerName: router.name,
+                                        planName: '',
+                                        dueDate: ''
+                                    };
+                                }
+                                clientType = 'pppoe';
+                                break;
+                            }
+                        }
+                    } catch (routerErr) {
+                        console.warn(`[Expired Portal] PPPoE active lookup failed on ${router.name}:`, routerErr.message);
+                    }
+                }
+            }
+
             if (!customer) {
                 return res.json({ found: false });
             }
@@ -3067,6 +3191,30 @@ async function startServer() {
             });
         } catch (e) {
             console.error('[Expired Portal] Verify session error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // GET: Public store settings (for expired portal)
+    app.get('/api/public/store-settings', async (req, res) => {
+        try {
+            const s = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+            if (s && s.storeSettings) {
+                try {
+                    const settings = JSON.parse(s.storeSettings);
+                    res.json({
+                        customExpiredMessage: settings.customExpiredMessage || '',
+                        storeBannerText: settings.storeBannerText || '',
+                        storeEnabled: settings.storeEnabled !== false,
+                        paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },
+                        gcashNumber: settings.gcashNumber || '',
+                        gcashAccountName: settings.gcashAccountName || ''
+                    });
+                } catch (_) { res.json({}); }
+            } else {
+                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true } });
+            }
+        } catch (e) {
             res.status(500).json({ message: e.message });
         }
     });
@@ -8831,6 +8979,31 @@ WantedBy=multi-user.target`;
         }
     });
 
+    // Public store settings endpoint (for expired portal to read custom message/banner)
+    captiveApp.get('/api/public/store-settings', async (req, res) => {
+        try {
+            const s = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+            if (s && s.storeSettings) {
+                try {
+                    const settings = JSON.parse(s.storeSettings);
+                    // Only return public-safe fields
+                    res.json({
+                        customExpiredMessage: settings.customExpiredMessage || '',
+                        storeBannerText: settings.storeBannerText || '',
+                        storeEnabled: settings.storeEnabled !== false,
+                        paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },
+                        gcashNumber: settings.gcashNumber || '',
+                        gcashAccountName: settings.gcashAccountName || ''
+                    });
+                } catch (_) { res.json({}); }
+            } else {
+                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true } });
+            }
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     // Expired portal APIs on captive server (so redirected clients can access them)
     captiveApp.get('/api/public/expired/lookup', async (req, res) => {
         try {
@@ -8876,6 +9049,45 @@ WantedBy=multi-user.target`;
                         [normalizedMac, altMac]
                     );
                     if (customer) clientType = customer.clientType || 'pppoe';
+                }
+            }
+
+            // If IP is from non-payment pool (172.16.44.0/24), query MikroTik PPPoE active sessions
+            if (!customer && ip && ip.startsWith('172.16.44.')) {
+                const routers = await db.all('SELECT * FROM routers');
+                for (const router of routers) {
+                    try {
+                        const axios = require('axios');
+                        const routerIp = router.host || router.ip;
+                        const routerPort = router.port || 3002;
+                        const routerUser = router.username || 'admin';
+                        const routerPass = router.password || '';
+                        const apiBase = `http://${routerIp}:${routerPort}`;
+                        const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
+                        const activeResp = await axios.get(`${apiBase}/rest/ppp/active`, {
+                            params: { address: ip }, headers: { Authorization: authHeader }, timeout: 10000
+                        });
+                        const activeSessions = Array.isArray(activeResp.data) ? activeResp.data : [];
+                        const session = activeSessions.find(s => s.address === ip);
+                        if (session && session.name) {
+                            customer = await db.get(
+                                `SELECT c.*, r.name as routerName FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE (c.username = ? OR c.name = ?) AND c.routerId = ?`,
+                                [session.name, session.name, router.id]
+                            );
+                            if (!customer) {
+                                const clientUser = await db.get('SELECT * FROM client_users WHERE pppoe_username = ? AND router_id = ?', [session.name, router.id]);
+                                if (clientUser) {
+                                    customer = await db.get(`SELECT c.*, r.name as routerName FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.routerId = ? AND (c.username = ? OR c.accountNumber = ?)`, [router.id, clientUser.pppoe_username || session.name, clientUser.account_number || '']);
+                                    if (!customer) {
+                                        customer = { username: session.name, name: session.name, fullName: clientUser.pppoe_username || session.name, accountNumber: clientUser.account_number || '', routerId: router.id, routerName: router.name, planName: '', dueDate: '' };
+                                    }
+                                }
+                            }
+                            if (customer) { clientType = 'pppoe'; break; }
+                        }
+                    } catch (routerErr) {
+                        console.warn(`[Captive Expired] PPPoE lookup failed on ${router.name}:`, routerErr.message);
+                    }
                 }
             }
 
@@ -9006,6 +9218,15 @@ WantedBy=multi-user.target`;
     // Store plans API on captive server (for expired clients to browse plans)
     captiveApp.get('/api/public/store/plans', async (req, res) => {
         try {
+            // Check if store is enabled
+            const settingsRow = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+            if (settingsRow && settingsRow.storeSettings) {
+                try {
+                    const ss = JSON.parse(settingsRow.storeSettings);
+                    if (ss.storeEnabled === false) return res.json([]);
+                } catch (_) {}
+            }
+
             const { routerId, type = 'all' } = req.query;
             let plans = [];
             if (type === 'all' || type === 'pppoe') {
@@ -9227,6 +9448,17 @@ async function syncExpiredClientsToAddressList() {
     if (expiredWorkerRunning) return;
     expiredWorkerRunning = true;
     try {
+        // Check if auto-sync worker is enabled in store settings
+        const settingsRow = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+        let storeSettings = null;
+        if (settingsRow && settingsRow.storeSettings) {
+            try { storeSettings = JSON.parse(settingsRow.storeSettings); } catch (_) {}
+        }
+        if (!storeSettings || !storeSettings.autoSyncWorkerEnabled) {
+            expiredWorkerRunning = false;
+            return; // Worker disabled
+        }
+
         const routers = await db.all('SELECT * FROM routers');
         const axios = require('axios');
 

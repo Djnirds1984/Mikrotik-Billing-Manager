@@ -60,6 +60,7 @@ const ApplicationForm = React.lazy(() => import('./components/ApplicationForm.ts
 const ManualPayments = React.lazy(() => import('./components/ManualPayments.tsx').then(m => ({ default: m.ManualPayments })));
 const Store = React.lazy(() => import('./components/Store.tsx').then(m => ({ default: m.Store })));
 const ExpiredPortal = React.lazy(() => import('./components/ExpiredPortal.tsx').then(m => ({ default: m.ExpiredPortal })));
+const StoreSettingsPage = React.lazy(() => import('./components/StoreSettings.tsx').then(m => ({ default: m.StoreSettingsPage })));
 const NtcCompliance = React.lazy(() => import('./components/NtcCompliance.tsx').then(m => ({ default: m.NtcCompliance })));
 
 
@@ -300,6 +301,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <RepairTickets />;
                   case 'manual_payments':
                     return <ManualPayments />;
+                  case 'store_settings':
+                    return <StoreSettingsPage />;
                   case 'ntc-compliance':
                     return <NtcCompliance />;
                   case 'license':

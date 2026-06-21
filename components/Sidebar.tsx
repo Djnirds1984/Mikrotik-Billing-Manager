@@ -60,6 +60,12 @@ const TerminalIcon: React.FC<{ className?: string }> = ({ className }) => (
     </svg>
 );
 
+const ShoppingCartIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+    </svg>
+);
+
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, companySettings, isOpen, setIsOpen, licenseStatus }) => {
   const { user, hasPermission } = useAuth();
@@ -93,6 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'client_portal_users', label: t('sidebar.client_portal_users'), icon: <ShieldCheckIcon className="w-6 h-6" /> },
     { id: 'repair_tickets', label: t('sidebar.repair_tickets') || 'Repair Tickets', icon: <CogIcon className="w-6 h-6" /> },
     { id: 'manual_payments', label: 'Manual Payments', icon: <CurrencyDollarIcon className="w-6 h-6" /> },
+    { id: 'store_settings', label: 'Store Settings', icon: <ShoppingCartIcon className="w-6 h-6" /> },
     { id: 'updater', label: t('sidebar.updater'), icon: <UpdateIcon className="w-6 h-6" /> },
     { id: 'logs', label: t('sidebar.logs'), icon: <CodeBracketIcon className="w-6 h-6" /> },
     { id: 'license', label: t('sidebar.license'), icon: <KeyIcon className="w-6 h-6" /> },

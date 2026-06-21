@@ -33,7 +33,8 @@ export type View =
   | 'captive_chat'
   | 'application_form'
   | 'manual_payments'
-  | 'ntc-compliance';
+  | 'ntc-compliance'
+  | 'store_settings';
 
 export interface Notification {
   id: string;
@@ -571,6 +572,22 @@ export interface PanelSettings {
     paymongoSettings?: PayMongoSettings;
     facebookSettings?: FacebookMessengerSettings;
     landingPageConfig?: LandingPageConfig;
+}
+
+export interface StoreSettings {
+    portalRedirectUrl: string;
+    nonPaymentPool: string;
+    portalServerIp: string;
+    portalServerPort: number;
+    walledGardenEnabled: boolean;
+    autoSyncWorkerEnabled: boolean;
+    customExpiredMessage: string;
+    storeEnabled: boolean;
+    paymentMethods: { paymongo: boolean; manualGcash: boolean };
+    gcashNumber: string;
+    gcashAccountName: string;
+    storeBannerText: string;
+    autoRestoreOnPayment: boolean;
 }
 
 export interface PanelNtpStatus {

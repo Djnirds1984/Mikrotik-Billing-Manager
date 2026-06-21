@@ -36,6 +36,21 @@ export const Store: React.FC = () => {
   const [gcashRef, setGcashRef] = useState('');
   const [filter, setFilter] = useState<'all' | 'pppoe' | 'dhcp'>('all');
   const [autoLoginLoading, setAutoLoginLoading] = useState(true);
+  const [storeSettings, setStoreSettings] = useState<{
+    storeEnabled: boolean;
+    storeBannerText: string;
+    paymentMethods: { paymongo: boolean; manualGcash: boolean };
+    gcashNumber: string;
+    gcashAccountName: string;
+  } | null>(null);
+
+  // Load store settings
+  useEffect(() => {
+    fetch('/api/public/store-settings')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setStoreSettings(data); })
+      .catch(() => {});
+  }, []);
 
   // Restore session on mount (supports both regular session and auto-login from expired portal)
   useEffect(() => {
@@ -285,6 +300,25 @@ export const Store: React.FC = () => {
   // Store Main Screen
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-6">
+      {/* Store Disabled Banner */}
+      {storeSettings && !storeSettings.storeEnabled && (
+        <div className="max-w-7xl mx-auto mb-6">
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-6 text-center">
+            <p className="text-xl font-semibold text-amber-800 dark:text-amber-200">Store is currently unavailable</p>
+            <p className="text-amber-600 dark:text-amber-300 mt-2">Our store is temporarily under maintenance. Please contact your service provider for assistance.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Store Banner */}
+      {storeSettings?.storeBannerText && (
+        <div className="max-w-7xl mx-auto mb-6">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4">
+            <p className="text-blue-800 dark:text-blue-200 font-medium text-center">{storeSettings.storeBannerText}</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="max-w-7xl mx-auto mb-8">
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 flex justify-between items-center">
@@ -441,33 +475,46 @@ export const Store: React.FC = () => {
             <div className="space-y-3 mb-6">
               <p className="font-medium text-slate-700 dark:text-slate-300">Select Payment Method:</p>
               
-              <button
-                onClick={() => setPaymentMethod('paymongo')}
-                className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
-                  paymentMethod === 'paymongo'
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-200 dark:border-slate-600 hover:border-blue-300'
-                }`}
-              >
-                <div className="font-semibold text-slate-900 dark:text-white">💳 Online Payment</div>
-                <div className="text-sm text-slate-600 dark:text-slate-400">PayMongo (Card, GCash, Maya)</div>
-              </button>
+              {(!storeSettings || storeSettings.paymentMethods.paymongo) && (
+                <button
+                  onClick={() => setPaymentMethod('paymongo')}
+                  className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
+                    paymentMethod === 'paymongo'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-slate-200 dark:border-slate-600 hover:border-blue-300'
+                  }`}
+                >
+                  <div className="font-semibold text-slate-900 dark:text-white">💳 Online Payment</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">PayMongo (Card, GCash, Maya)</div>
+                </button>
+              )}
 
-              <button
-                onClick={() => setPaymentMethod('manual')}
-                className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
-                  paymentMethod === 'manual'
-                    ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                    : 'border-slate-200 dark:border-slate-600 hover:border-green-300'
-                }`}
-              >
-                <div className="font-semibold text-slate-900 dark:text-white">📱 Manual GCash</div>
-                <div className="text-sm text-slate-600 dark:text-slate-400">Send to GCash, wait for approval</div>
-              </button>
+              {(!storeSettings || storeSettings.paymentMethods.manualGcash) && (
+                <button
+                  onClick={() => setPaymentMethod('manual')}
+                  className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
+                    paymentMethod === 'manual'
+                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                      : 'border-slate-200 dark:border-slate-600 hover:border-green-300'
+                  }`}
+                >
+                  <div className="font-semibold text-slate-900 dark:text-white">📱 Manual GCash</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Send to GCash, wait for approval</div>
+                </button>
+              )}
             </div>
 
             {paymentMethod === 'manual' && (
               <div className="mb-6">
+                {storeSettings?.gcashNumber && (
+                  <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg">
+                    <p className="text-sm font-semibold text-green-800 dark:text-green-200">Send payment to:</p>
+                    <p className="text-lg font-bold text-green-900 dark:text-green-100">{storeSettings.gcashNumber}</p>
+                    {storeSettings.gcashAccountName && (
+                      <p className="text-sm text-green-700 dark:text-green-300">Account: {storeSettings.gcashAccountName}</p>
+                    )}
+                  </div>
+                )}
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   GCash Reference Number
                 </label>
