@@ -35,18 +35,65 @@ export const Store: React.FC = () => {
   const [processing, setProcessing] = useState(false);
   const [gcashRef, setGcashRef] = useState('');
   const [filter, setFilter] = useState<'all' | 'pppoe' | 'dhcp'>('all');
+  const [autoLoginLoading, setAutoLoginLoading] = useState(true);
 
-  // Restore session on mount
+  // Restore session on mount (supports both regular session and auto-login from expired portal)
   useEffect(() => {
-    const savedSession = sessionStorage.getItem('storeSession');
-    if (savedSession) {
+    const restoreSession = async () => {
       try {
-        const sessionData = JSON.parse(savedSession);
-        setCustomer(sessionData);
+        // Check for auto-login token from expired portal redirect
+        const params = new URLSearchParams(window.location.search);
+        const sessionToken = params.get('session');
+
+        if (sessionToken) {
+          // Auto-login from expired portal - verify token
+          setAutoLoginLoading(true);
+          const resp = await fetch('/api/public/expired/verify-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: sessionToken })
+          });
+
+          if (resp.ok) {
+            const customerData = await resp.json();
+            // Map to Customer interface
+            const customer: Customer = {
+              id: customerData.id,
+              username: customerData.pppoeUsername || customerData.username,
+              fullName: customerData.fullName || customerData.username,
+              accountNumber: customerData.accountNumber,
+              routerId: customerData.routerId,
+            };
+            setCustomer(customer);
+            sessionStorage.setItem('storeSession', JSON.stringify(customer));
+            // Clean up URL
+            window.history.replaceState({}, '', '/store');
+            setAutoLoginLoading(false);
+            return;
+          } else {
+            // Token invalid/expired - clean URL and show login
+            window.history.replaceState({}, '', '/store');
+          }
+        }
+
+        // Restore regular saved session
+        const savedSession = sessionStorage.getItem('storeSession');
+        if (savedSession) {
+          try {
+            const sessionData = JSON.parse(savedSession);
+            setCustomer(sessionData);
+          } catch (e) {
+            console.error('Failed to restore session:', e);
+          }
+        }
       } catch (e) {
-        console.error('Failed to restore session:', e);
+        console.error('Session restore error:', e);
+      } finally {
+        setAutoLoginLoading(false);
       }
-    }
+    };
+
+    restoreSession();
   }, []);
 
   useEffect(() => {
@@ -163,19 +210,18 @@ export const Store: React.FC = () => {
     }).format(price);
   };
 
-  // Restore session on mount
-  useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem('storeSession');
-      if (saved) {
-        setCustomer(JSON.parse(saved));
-      }
-    } catch (e) {
-      console.warn('Failed to restore store session', e);
-    }
-  }, []);
-
   // Login Screen
+  if (autoLoginLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center p-6">
+        <div className="text-center">
+          <Loader />
+          <p className="mt-4 text-slate-600 dark:text-slate-400">Verifying your session...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!customer) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center p-6">

@@ -2865,6 +2865,304 @@ async function startServer() {
         }
     });
     
+    // ========================================
+    // Expired Client Portal APIs
+    // ========================================
+    
+    // In-memory store for auto-login tokens (expires in 10 minutes)
+    const expiredSessionTokens = new Map();
+    
+    // Cleanup expired tokens every 5 minutes
+    setInterval(() => {
+        const now = Date.now();
+        for (const [token, data] of expiredSessionTokens.entries()) {
+            if (data.expiresAt < now) expiredSessionTokens.delete(token);
+        }
+    }, 5 * 60 * 1000);
+
+    // GET: Lookup customer by IP or MAC address
+    app.get('/api/public/expired/lookup', async (req, res) => {
+        try {
+            const { ip, mac } = req.query;
+            if (!ip && !mac) {
+                return res.status(400).json({ message: 'ip or mac query parameter is required' });
+            }
+
+            let customer = null;
+            let clientType = 'pppoe';
+
+            // Try PPPoE customers first - match by IP in dhcp_clients or customers table
+            if (ip) {
+                // Look in dhcp_clients table (DHCP portal clients with IP binding)
+                customer = await db.get(
+                    `SELECT dc.*, r.name as routerName FROM dhcp_clients dc 
+                     LEFT JOIN routers r ON dc.routerId = r.id 
+                     WHERE dc.address = ? OR dc.ip = ?`,
+                    [ip, ip]
+                );
+                if (customer) {
+                    clientType = 'dhcp';
+                }
+
+                // Look in customers table by IP
+                if (!customer) {
+                    customer = await db.get(
+                        `SELECT c.*, r.name as routerName FROM customers c 
+                         LEFT JOIN routers r ON c.routerId = r.id 
+                         WHERE c.ipAddress = ? OR c.ip = ?`,
+                        [ip, ip]
+                    );
+                    if (customer) clientType = customer.clientType || 'pppoe';
+                }
+            }
+
+            // Try MAC address lookup
+            if (!customer && mac) {
+                const normalizedMac = String(mac).toUpperCase().replace(/[:-]/g, ':');
+                const altMac = String(mac).toUpperCase().replace(/[:-]/g, '');
+
+                // DHCP clients by MAC
+                customer = await db.get(
+                    `SELECT dc.*, r.name as routerName FROM dhcp_clients dc 
+                     LEFT JOIN routers r ON dc.routerId = r.id 
+                     WHERE UPPER(dc.macAddress) = ? OR UPPER(REPLACE(dc.macAddress, ':', '')) = ?`,
+                    [normalizedMac, altMac]
+                );
+                if (customer) clientType = 'dhcp';
+
+                // Customers by MAC
+                if (!customer) {
+                    customer = await db.get(
+                        `SELECT c.*, r.name as routerName FROM customers c 
+                         LEFT JOIN routers r ON c.routerId = r.id 
+                         WHERE UPPER(c.macAddress) = ? OR UPPER(REPLACE(c.macAddress, ':', '')) = ?`,
+                        [normalizedMac, altMac]
+                    );
+                    if (customer) clientType = customer.clientType || 'pppoe';
+                }
+            }
+
+            if (!customer) {
+                return res.json({ found: false });
+            }
+
+            // Parse comment for plan info if it's JSON
+            let planName = customer.planName || customer.plan || '';
+            let dueDate = customer.dueDate || customer.expiresAt || '';
+            try {
+                const comment = customer.comment || '';
+                if (comment.startsWith('{')) {
+                    const parsed = JSON.parse(comment);
+                    planName = planName || parsed.plan || parsed.planName || '';
+                    dueDate = dueDate || parsed.dueDate || parsed.expiresAt || '';
+                }
+            } catch (_) {}
+
+            // Determine username (PPPoE secret name or DHCP client name)
+            const username = customer.username || customer.name || '';
+            const accountNumber = customer.accountNumber || customer.account_number || '';
+            const fullName = customer.fullName || customer.full_name || customer.name || username;
+
+            return res.json({
+                found: true,
+                customer: {
+                    fullName,
+                    accountNumber,
+                    planName,
+                    dueDate,
+                    routerId: customer.routerId || customer.router_id || '',
+                    username,
+                    clientType,
+                    routerName: customer.routerName || ''
+                }
+            });
+        } catch (e) {
+            console.error('[Expired Portal] Lookup error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // POST: Create auto-login token for store access
+    app.post('/api/public/expired/auto-login', async (req, res) => {
+        try {
+            const { username, routerId, accountNumber, ip, mac } = req.body;
+            if (!username && !ip && !mac) {
+                return res.status(400).json({ message: 'username or ip/mac is required' });
+            }
+
+            // Find the customer to verify they exist
+            let customer = null;
+            if (username && routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE (username = ? OR name = ?) AND routerId = ?',
+                    [username, username, routerId]
+                );
+            }
+            if (!customer && username) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE username = ? OR name = ?',
+                    [username, username]
+                );
+            }
+
+            // Fallback: look in dhcp_clients
+            if (!customer && (ip || mac)) {
+                if (ip) {
+                    customer = await db.get('SELECT * FROM dhcp_clients WHERE address = ? OR ip = ?', [ip, ip]);
+                }
+                if (!customer && mac) {
+                    customer = await db.get('SELECT * FROM dhcp_clients WHERE UPPER(macAddress) = ?', [String(mac).toUpperCase()]);
+                }
+            }
+
+            // Generate token
+            const token = `exp_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
+            const sessionData = {
+                id: customer?.id || `temp_${Date.now()}`,
+                username: customer?.username || customer?.name || username || 'expired_client',
+                routerId: customer?.routerId || customer?.router_id || routerId || '',
+                accountNumber: customer?.accountNumber || customer?.account_number || accountNumber || '',
+                fullName: customer?.fullName || customer?.full_name || customer?.name || 'Valued Customer',
+                pppoeUsername: username || customer?.username || '',
+                expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+                createdAt: Date.now()
+            };
+
+            expiredSessionTokens.set(token, sessionData);
+            console.log(`[Expired Portal] Auto-login token created for ${username || ip || mac}`);
+
+            res.json({ token, expiresIn: 600 }); // 10 minutes
+        } catch (e) {
+            console.error('[Expired Portal] Auto-login error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // POST: Verify auto-login token and return customer data
+    app.post('/api/public/expired/verify-session', async (req, res) => {
+        try {
+            const { token } = req.body;
+            if (!token) {
+                return res.status(400).json({ message: 'token is required' });
+            }
+
+            const sessionData = expiredSessionTokens.get(token);
+            if (!sessionData) {
+                return res.status(401).json({ message: 'Invalid or expired session token' });
+            }
+
+            if (sessionData.expiresAt < Date.now()) {
+                expiredSessionTokens.delete(token);
+                return res.status(401).json({ message: 'Session token has expired' });
+            }
+
+            // Return customer data in the same format as client-portal login
+            res.json({
+                id: sessionData.id,
+                username: sessionData.username,
+                routerId: sessionData.routerId,
+                pppoeUsername: sessionData.pppoeUsername,
+                accountNumber: sessionData.accountNumber,
+                fullName: sessionData.fullName
+            });
+        } catch (e) {
+            console.error('[Expired Portal] Verify session error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // POST: Add IP to EXPIRED_CLIENTS address-list on MikroTik
+    app.post('/api/:routerId/firewall/address-list/add', protect, async (req, res) => {
+        try {
+            const { ipAddress, listName = 'EXPIRED_CLIENTS' } = req.body;
+            if (!ipAddress) return res.status(400).json({ message: 'ipAddress is required' });
+            
+            const routerConfig = await db.get('SELECT * FROM routers WHERE id = ?', [req.params.routerId]);
+            if (!routerConfig) return res.status(404).json({ message: 'Router not found' });
+            
+            const axios = require('axios');
+            const routerIp = routerConfig.host || routerConfig.ip;
+            const routerPort = routerConfig.port || 3002;
+            const routerUser = routerConfig.username || 'admin';
+            const routerPass = routerConfig.password || '';
+            const apiBase = `http://${routerIp}:${routerPort}`;
+            const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
+            
+            // Check if entry already exists
+            const existing = await axios.get(`${apiBase}/rest/ip/firewall/address-list`, {
+                params: { list: listName, address: ipAddress },
+                headers: { Authorization: authHeader },
+                timeout: 10000
+            }).catch(() => ({ data: [] }));
+            
+            const existingList = Array.isArray(existing.data) ? existing.data : [];
+            if (existingList.length > 0) {
+                return res.json({ message: 'IP already in address list', existing: true });
+            }
+            
+            // Add to address list
+            await axios.put(`${apiBase}/rest/ip/firewall/address-list`, {
+                list: listName,
+                address: ipAddress,
+                comment: `Expired client - added by billing system`
+            }, {
+                headers: { Authorization: authHeader },
+                timeout: 10000
+            });
+            
+            console.log(`[Firewall] Added ${ipAddress} to ${listName} on router ${routerConfig.name}`);
+            res.json({ message: `Added ${ipAddress} to ${listName}`, success: true });
+        } catch (e) {
+            console.error('[Firewall] Address-list add error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // POST: Remove IP from EXPIRED_CLIENTS address-list on MikroTik
+    app.post('/api/:routerId/firewall/address-list/remove', protect, async (req, res) => {
+        try {
+            const { ipAddress, listName = 'EXPIRED_CLIENTS' } = req.body;
+            if (!ipAddress) return res.status(400).json({ message: 'ipAddress is required' });
+            
+            const routerConfig = await db.get('SELECT * FROM routers WHERE id = ?', [req.params.routerId]);
+            if (!routerConfig) return res.status(404).json({ message: 'Router not found' });
+            
+            const axios = require('axios');
+            const routerIp = routerConfig.host || routerConfig.ip;
+            const routerPort = routerConfig.port || 3002;
+            const routerUser = routerConfig.username || 'admin';
+            const routerPass = routerConfig.password || '';
+            const apiBase = `http://${routerIp}:${routerPort}`;
+            const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
+            
+            // Find the entry
+            const entries = await axios.get(`${apiBase}/rest/ip/firewall/address-list`, {
+                params: { list: listName, address: ipAddress },
+                headers: { Authorization: authHeader },
+                timeout: 10000
+            }).catch(() => ({ data: [] }));
+            
+            const entryList = Array.isArray(entries.data) ? entries.data : [];
+            if (entryList.length === 0) {
+                return res.json({ message: 'IP not found in address list', notFound: true });
+            }
+            
+            // Remove all matching entries
+            for (const entry of entryList) {
+                await axios.delete(`${apiBase}/rest/ip/firewall/address-list/${entry['.id']}`, {
+                    headers: { Authorization: authHeader },
+                    timeout: 10000
+                });
+            }
+            
+            console.log(`[Firewall] Removed ${ipAddress} from ${listName} on router ${routerConfig.name}`);
+            res.json({ message: `Removed ${ipAddress} from ${listName}`, success: true });
+        } catch (e) {
+            console.error('[Firewall] Address-list remove error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     app.use('/uploads', express.static(UPLOADS_DIR));
     
     app.get('/api/public/routers', async (req, res) => {
@@ -8470,6 +8768,11 @@ WantedBy=multi-user.target`;
             return next(); // Allow direct access to login on IP addresses
         }
         
+        // Allow direct access to expired portal (clients redirected by MikroTik)
+        if (isIpHost && (req.path === '/expired' || req.path.startsWith('/expired'))) {
+            return next();
+        }
+        
         // Redirect unauthorized clients to captive portal (only for non-login paths)
         if (isIpHost && !isApi && !isStaticAsset && req.path !== '/login' && req.path !== '/') {
             return res.redirect(`http://${host}:${CAPTIVE_PORT}/captive`);
@@ -8489,6 +8792,294 @@ WantedBy=multi-user.target`;
             });
         } catch (e) {
             console.error('Error in captive /api/public/landing-page:', e);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Public company settings for captive/expired portal (no auth required)
+    captiveApp.get('/api/company-settings', async (req, res) => {
+        try {
+            const s = await db.get('SELECT * FROM settings WHERE id = 1');
+            if (!s) return res.json({});
+            // Return only public-facing fields (no API keys or secrets)
+            res.json({
+                companyName: s.companyName || '',
+                logoBase64: s.logoBase64 || '',
+                address: s.address || '',
+                contactNumber: s.contactNumber || '',
+                email: s.email || '',
+                currency: s.currency || 'PHP'
+            });
+        } catch (e) {
+            console.error('[Captive] Company settings error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Expired portal APIs on captive server (so redirected clients can access them)
+    captiveApp.get('/api/public/expired/lookup', async (req, res) => {
+        try {
+            const { ip, mac } = req.query;
+            if (!ip && !mac) return res.status(400).json({ message: 'ip or mac required' });
+
+            let customer = null;
+            let clientType = 'pppoe';
+
+            if (ip) {
+                customer = await db.get(
+                    `SELECT dc.*, r.name as routerName FROM dhcp_clients dc 
+                     LEFT JOIN routers r ON dc.routerId = r.id 
+                     WHERE dc.address = ? OR dc.ip = ?`, [ip, ip]
+                );
+                if (customer) clientType = 'dhcp';
+
+                if (!customer) {
+                    customer = await db.get(
+                        `SELECT c.*, r.name as routerName FROM customers c 
+                         LEFT JOIN routers r ON c.routerId = r.id 
+                         WHERE c.ipAddress = ? OR c.ip = ?`, [ip, ip]
+                    );
+                    if (customer) clientType = customer.clientType || 'pppoe';
+                }
+            }
+
+            if (!customer && mac) {
+                const normalizedMac = String(mac).toUpperCase().replace(/[:-]/g, ':');
+                const altMac = String(mac).toUpperCase().replace(/[:-]/g, '');
+                customer = await db.get(
+                    `SELECT dc.*, r.name as routerName FROM dhcp_clients dc 
+                     LEFT JOIN routers r ON dc.routerId = r.id 
+                     WHERE UPPER(dc.macAddress) = ? OR UPPER(REPLACE(dc.macAddress, ':', '')) = ?`,
+                    [normalizedMac, altMac]
+                );
+                if (customer) clientType = 'dhcp';
+                if (!customer) {
+                    customer = await db.get(
+                        `SELECT c.*, r.name as routerName FROM customers c 
+                         LEFT JOIN routers r ON c.routerId = r.id 
+                         WHERE UPPER(c.macAddress) = ? OR UPPER(REPLACE(c.macAddress, ':', '')) = ?`,
+                        [normalizedMac, altMac]
+                    );
+                    if (customer) clientType = customer.clientType || 'pppoe';
+                }
+            }
+
+            if (!customer) return res.json({ found: false });
+
+            let planName = customer.planName || customer.plan || '';
+            let dueDate = customer.dueDate || customer.expiresAt || '';
+            try {
+                const comment = customer.comment || '';
+                if (comment.startsWith('{')) {
+                    const parsed = JSON.parse(comment);
+                    planName = planName || parsed.plan || parsed.planName || '';
+                    dueDate = dueDate || parsed.dueDate || parsed.expiresAt || '';
+                }
+            } catch (_) {}
+
+            const username = customer.username || customer.name || '';
+            const accountNumber = customer.accountNumber || customer.account_number || '';
+            const fullName = customer.fullName || customer.full_name || customer.name || username;
+
+            res.json({
+                found: true,
+                customer: {
+                    fullName, accountNumber, planName, dueDate,
+                    routerId: customer.routerId || customer.router_id || '',
+                    username, clientType,
+                    routerName: customer.routerName || ''
+                }
+            });
+        } catch (e) {
+            console.error('[Captive Expired] Lookup error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    captiveApp.post('/api/public/expired/auto-login', async (req, res) => {
+        try {
+            const { username, routerId, accountNumber, ip, mac } = req.body;
+            if (!username && !ip && !mac) return res.status(400).json({ message: 'username or ip/mac is required' });
+
+            let customer = null;
+            if (username && routerId) {
+                customer = await db.get('SELECT * FROM customers WHERE (username = ? OR name = ?) AND routerId = ?', [username, username, routerId]);
+            }
+            if (!customer && username) {
+                customer = await db.get('SELECT * FROM customers WHERE username = ? OR name = ?', [username, username]);
+            }
+            if (!customer && ip) {
+                customer = await db.get('SELECT * FROM dhcp_clients WHERE address = ? OR ip = ?', [ip, ip]);
+            }
+            if (!customer && mac) {
+                customer = await db.get('SELECT * FROM dhcp_clients WHERE UPPER(macAddress) = ?', [String(mac).toUpperCase()]);
+            }
+
+            const token = `exp_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
+            const sessionData = {
+                id: customer?.id || `temp_${Date.now()}`,
+                username: customer?.username || customer?.name || username || 'expired_client',
+                routerId: customer?.routerId || customer?.router_id || routerId || '',
+                accountNumber: customer?.accountNumber || customer?.account_number || accountNumber || '',
+                fullName: customer?.fullName || customer?.full_name || customer?.name || 'Valued Customer',
+                pppoeUsername: username || customer?.username || '',
+                expiresAt: Date.now() + 10 * 60 * 1000,
+                createdAt: Date.now()
+            };
+            expiredSessionTokens.set(token, sessionData);
+            res.json({ token, expiresIn: 600 });
+        } catch (e) {
+            console.error('[Captive Expired] Auto-login error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    captiveApp.post('/api/public/expired/verify-session', async (req, res) => {
+        try {
+            const { token } = req.body;
+            if (!token) return res.status(400).json({ message: 'token is required' });
+            const sessionData = expiredSessionTokens.get(token);
+            if (!sessionData || sessionData.expiresAt < Date.now()) {
+                if (sessionData) expiredSessionTokens.delete(token);
+                return res.status(401).json({ message: 'Invalid or expired session token' });
+            }
+            res.json({
+                id: sessionData.id, username: sessionData.username,
+                routerId: sessionData.routerId, pppoeUsername: sessionData.pppoeUsername,
+                accountNumber: sessionData.accountNumber, fullName: sessionData.fullName
+            });
+        } catch (e) {
+            console.error('[Captive Expired] Verify error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Captive portal chat endpoints (needed for ExpiredHelp widget)
+    captiveApp.get('/api/captive-thread', async (req, res) => {
+        try {
+            const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+            const notifications = await db.all(
+                `SELECT * FROM notifications WHERE type = 'client-chat' AND context_json LIKE ? ORDER BY timestamp ASC LIMIT 50`,
+                [`%"${clientIp}"%`]
+            );
+            res.json(notifications);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    captiveApp.post('/api/captive-message', async (req, res) => {
+        const { message } = req.body;
+        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        if (!message) return res.status(400).json({ message: 'Message content is required.' });
+        try {
+            const notification = {
+                id: `notif_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+                type: 'client-chat',
+                message: `New message from ${clientIp}: "${message}"`,
+                is_read: 0,
+                timestamp: new Date().toISOString(),
+                link_to: 'dhcp-portal',
+                context_json: JSON.stringify({ ip: clientIp })
+            };
+            await db.run(
+                `INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?,?,?,?,?,?,?)`,
+                [notification.id, notification.type, notification.message, notification.is_read, notification.timestamp, notification.link_to, notification.context_json]
+            );
+            res.json({ message: 'Message sent', id: notification.id });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Store plans API on captive server (for expired clients to browse plans)
+    captiveApp.get('/api/public/store/plans', async (req, res) => {
+        try {
+            const { routerId, type = 'all' } = req.query;
+            let plans = [];
+            if (type === 'all' || type === 'pppoe') {
+                const pppoePlans = routerId
+                    ? await db.all('SELECT * FROM billing_plans WHERE routerId = ? AND store_enabled = 1 ORDER BY price ASC', [routerId])
+                    : await db.all('SELECT * FROM billing_plans WHERE store_enabled = 1 ORDER BY price ASC');
+                plans = plans.concat(pppoePlans.map(p => ({ ...p, planType: 'pppoe' })));
+            }
+            if (type === 'all' || type === 'dhcp') {
+                const dhcpPlans = routerId
+                    ? await db.all('SELECT * FROM dhcp_billing_plans WHERE routerId = ? AND store_enabled = 1 ORDER BY price ASC', [routerId])
+                    : await db.all('SELECT * FROM dhcp_billing_plans WHERE store_enabled = 1 ORDER BY price ASC');
+                plans = plans.concat(dhcpPlans.map(p => ({ ...p, planType: 'dhcp' })));
+            }
+            res.json(plans);
+        } catch (e) {
+            console.error('[Captive Store] Plans error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Store purchase API on captive server
+    captiveApp.post('/api/public/store/purchase', async (req, res) => {
+        try {
+            const { planId, planType, paymentMethod, customerUsername, routerId, gcashReference } = req.body;
+            if (!planId || !planType || !paymentMethod || !customerUsername || !routerId) {
+                return res.status(400).json({ message: 'Missing required fields' });
+            }
+
+            let plan;
+            if (planType === 'pppoe') {
+                plan = await db.get('SELECT * FROM billing_plans WHERE id = ?', [planId]);
+            } else if (planType === 'dhcp') {
+                plan = await db.get('SELECT * FROM dhcp_billing_plans WHERE id = ?', [planId]);
+            }
+            if (!plan) return res.status(404).json({ message: 'Plan not found' });
+
+            const clientUser = await db.get('SELECT * FROM client_users WHERE username = ? AND router_id = ?', [customerUsername, routerId]);
+            let customer = null;
+            if (clientUser?.pppoe_username) {
+                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [clientUser.pppoe_username, routerId]);
+            }
+            if (!customer && clientUser?.account_number) {
+                customer = await db.get('SELECT * FROM customers WHERE accountNumber = ? AND routerId = ?', [clientUser.account_number, routerId]);
+            }
+            if (!customer) {
+                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [customerUsername, routerId]);
+            }
+            if (!customer) return res.status(404).json({ message: 'Customer profile not found. Please contact support.' });
+
+            if (paymentMethod === 'paymongo') {
+                const pmSettings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
+                const pmConfig = JSON.parse(pmSettings?.paymongoSettings || '{}');
+                if (!pmConfig.enabled || !pmConfig.secretKey) return res.status(400).json({ message: 'PayMongo not configured' });
+
+                const axios = require('axios');
+                const amount = Math.round(plan.price * 100);
+                const checkoutData = {
+                    data: {
+                        attributes: {
+                            line_items: [{ currency: 'PHP', amount, description: `${plan.name} - ${customer.fullName || customer.accountNumber}`, quantity: 1 }],
+                            payment_method_types: ['gcash', 'paymaya', 'card'],
+                            send_email_receipt: false, show_description: false,
+                            success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/success`,
+                            cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/cancel`,
+                            metadata: { customerUsername, planId, planType, routerId, planName: plan.name, planPrice: plan.price, customerAccountNumber: customer.accountNumber, customerFullName: customer.fullName }
+                        }
+                    }
+                };
+                const response = await axios.post('https://api.paymongo.com/v1/checkout_sessions', checkoutData, {
+                    auth: { username: pmConfig.secretKey, password: '' }, headers: { 'Content-Type': 'application/json' }
+                });
+                res.json({ success: true, checkoutUrl: response.data.data.attributes.checkout_url, checkoutId: response.data.data.id });
+
+            } else if (paymentMethod === 'manual') {
+                const paymentId = `manual_pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const now = new Date().toISOString();
+                const pppoeUsername = clientUser?.pppoe_username || customer.username;
+                const accountNumber = customer.accountNumber || clientUser?.account_number || '';
+                await db.run(
+                    `INSERT INTO manual_payment_requests (id, customer_account_number, customer_username, customer_full_name, customer_router_id, plan_name, plan_price, gcash_reference_number, customer_mobile_number, customer_name_on_gcash, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    [paymentId, accountNumber, pppoeUsername, customer.fullName, routerId, plan.name, plan.price, gcashReference || '', customer.contactNumber || '', customer.fullName || '', 'pending', now, now]
+                );
+                res.json({ success: true, paymentId, message: 'Manual payment submitted for approval' });
+            } else {
+                res.status(400).json({ message: 'Invalid payment method' });
+            }
+        } catch (e) {
+            console.error('[Captive Store] Purchase error:', e.message);
             res.status(500).json({ message: e.message });
         }
     });
@@ -8611,5 +9202,150 @@ function startFacebookReminderScheduler() {
         setInterval(sendPaymentReminders, 24 * 60 * 60 * 1000);
     }, timeUntilFirstRun);
 }
+
+// ========================================
+// Expired Client Address-List Worker
+// Periodically syncs expired client IPs to MikroTik EXPIRED_CLIENTS address-list
+// ========================================
+let expiredWorkerRunning = false;
+async function syncExpiredClientsToAddressList() {
+    if (expiredWorkerRunning) return;
+    expiredWorkerRunning = true;
+    try {
+        const routers = await db.all('SELECT * FROM routers');
+        const axios = require('axios');
+
+        for (const router of routers) {
+            try {
+                const routerIp = router.host || router.ip;
+                const routerPort = router.port || 3002;
+                const routerUser = router.username || 'admin';
+                const routerPass = router.password || '';
+                const apiBase = `http://${routerIp}:${routerPort}`;
+                const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
+
+                // Find PPPoE customers with expired due dates for this router
+                const now = new Date().toISOString();
+                const expiredCustomers = await db.all(
+                    `SELECT c.*, r.host, r.port FROM customers c 
+                     JOIN routers r ON c.routerId = r.id 
+                     WHERE c.routerId = ? 
+                     AND c.dueDate IS NOT NULL AND c.dueDate != '' 
+                     AND c.dueDate < ?
+                     AND (c.ipAddress IS NOT NULL AND c.ipAddress != '')`,
+                    [router.id, now]
+                );
+
+                // Find DHCP clients with expired due dates
+                const expiredDhcpClients = await db.all(
+                    `SELECT dc.*, r.host, r.port FROM dhcp_clients dc
+                     JOIN routers r ON dc.routerId = r.id
+                     WHERE dc.routerId = ?
+                     AND dc.dueDate IS NOT NULL AND dc.dueDate != ''
+                     AND dc.dueDate < ?
+                     AND (dc.address IS NOT NULL AND dc.address != '' OR dc.ip IS NOT NULL AND dc.ip != '')`,
+                    [router.id, now]
+                );
+
+                const expiredIps = new Set();
+
+                // Collect IPs from expired PPPoE customers
+                for (const c of expiredCustomers) {
+                    const ip = c.ipAddress || c.ip;
+                    if (ip) expiredIps.add(ip);
+                }
+
+                // Collect IPs from expired DHCP clients
+                for (const c of expiredDhcpClients) {
+                    const ip = c.address || c.ip;
+                    if (ip) expiredIps.add(ip);
+                }
+
+                if (expiredIps.size === 0) continue;
+
+                // Get current address list entries
+                let currentEntries = [];
+                try {
+                    const resp = await axios.get(`${apiBase}/rest/ip/firewall/address-list`, {
+                        params: { list: 'EXPIRED_CLIENTS' },
+                        headers: { Authorization: authHeader },
+                        timeout: 10000
+                    });
+                    currentEntries = Array.isArray(resp.data) ? resp.data : [];
+                } catch (_) {
+                    // Address list might not exist yet - that's okay
+                }
+
+                const currentIps = new Set(currentEntries.map(e => e.address));
+
+                // Add missing expired IPs
+                for (const ip of expiredIps) {
+                    if (!currentIps.has(ip)) {
+                        try {
+                            await axios.put(`${apiBase}/rest/ip/firewall/address-list`, {
+                                list: 'EXPIRED_CLIENTS',
+                                address: ip,
+                                comment: `Auto-added: expired client`
+                            }, {
+                                headers: { Authorization: authHeader },
+                                timeout: 10000
+                            });
+                            console.log(`[Expired Worker] Added ${ip} to EXPIRED_CLIENTS on ${router.name}`);
+                        } catch (addErr) {
+                            console.warn(`[Expired Worker] Failed to add ${ip} on ${router.name}:`, addErr.message);
+                        }
+                    }
+                }
+
+                // Find active (non-expired) customers to remove from list
+                const activeCustomers = await db.all(
+                    `SELECT c.ipAddress, c.ip FROM customers c 
+                     WHERE c.routerId = ? 
+                     AND (c.dueDate IS NULL OR c.dueDate = '' OR c.dueDate >= ?)
+                     AND (c.ipAddress IS NOT NULL AND c.ipAddress != '')`,
+                    [router.id, now]
+                );
+                const activeDhcpClients = await db.all(
+                    `SELECT dc.address, dc.ip FROM dhcp_clients dc
+                     WHERE dc.routerId = ?
+                     AND (dc.dueDate IS NULL OR dc.dueDate = '' OR dc.dueDate >= ?)
+                     AND (dc.address IS NOT NULL AND dc.address != '' OR dc.ip IS NOT NULL AND dc.ip != '')`,
+                    [router.id, now]
+                );
+
+                const activeIps = new Set();
+                for (const c of activeCustomers) activeIps.add(c.ipAddress || c.ip);
+                for (const c of activeDhcpClients) activeIps.add(c.address || c.ip);
+
+                // Remove active IPs from EXPIRED_CLIENTS list
+                for (const entry of currentEntries) {
+                    if (activeIps.has(entry.address)) {
+                        try {
+                            await axios.delete(`${apiBase}/rest/ip/firewall/address-list/${entry['.id']}`, {
+                                headers: { Authorization: authHeader },
+                                timeout: 10000
+                            });
+                            console.log(`[Expired Worker] Removed ${entry.address} from EXPIRED_CLIENTS on ${router.name} (renewed)`);
+                        } catch (removeErr) {
+                            console.warn(`[Expired Worker] Failed to remove ${entry.address} on ${router.name}:`, removeErr.message);
+                        }
+                    }
+                }
+
+            } catch (routerErr) {
+                console.warn(`[Expired Worker] Router ${router.name} sync failed:`, routerErr.message);
+            }
+        }
+    } catch (e) {
+        console.error('[Expired Worker] Sync error:', e.message);
+    } finally {
+        expiredWorkerRunning = false;
+    }
+}
+
+// Run expired client sync every 2 minutes
+setInterval(syncExpiredClientsToAddressList, 2 * 60 * 1000);
+// Also run once after server starts (delayed 30s to let everything initialize)
+setTimeout(syncExpiredClientsToAddressList, 30000);
 
 startServer();

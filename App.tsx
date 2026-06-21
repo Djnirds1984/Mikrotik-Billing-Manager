@@ -59,6 +59,7 @@ const LandingPage = React.lazy(() => import('./components/LandingPage.tsx').then
 const ApplicationForm = React.lazy(() => import('./components/ApplicationForm.tsx').then(m => ({ default: m.ApplicationForm })));
 const ManualPayments = React.lazy(() => import('./components/ManualPayments.tsx').then(m => ({ default: m.ManualPayments })));
 const Store = React.lazy(() => import('./components/Store.tsx').then(m => ({ default: m.Store })));
+const ExpiredPortal = React.lazy(() => import('./components/ExpiredPortal.tsx').then(m => ({ default: m.ExpiredPortal })));
 const NtcCompliance = React.lazy(() => import('./components/NtcCompliance.tsx').then(m => ({ default: m.NtcCompliance })));
 
 
@@ -475,6 +476,18 @@ const AppRouter: React.FC = () => {
                 <LocalizationProvider>
                     <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
                         <Store />
+                    </Suspense>
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
+    if (path.startsWith('/expired')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <ExpiredPortal />
                     </Suspense>
                 </LocalizationProvider>
             </ThemeProvider>
