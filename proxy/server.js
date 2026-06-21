@@ -5221,7 +5221,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 fbResponse = await axios.post(
                     `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                     {
-                        messaging_type: 'UPDATE',
+                        messaging_type: 'MESSAGE_TAG',
+                        tag: 'ACCOUNT_UPDATE',
                         recipient: { id: customer.facebook_psid },
                         message: { text: message }
                     },
@@ -5230,7 +5231,22 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             } catch (fbErr) {
                 const fbErrMsg = fbErr.response?.data?.error?.message || fbErr.message;
                 console.error('[Facebook Clients] Facebook API error:', fbErr.response?.data || fbErr.message);
-                return res.status(502).json({ message: `Facebook API error: ${fbErrMsg}` });
+                // Try fallback with UPDATE type (works within 24h window)
+                try {
+                    fbResponse = await axios.post(
+                        `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                        {
+                            messaging_type: 'UPDATE',
+                            recipient: { id: customer.facebook_psid },
+                            message: { text: message }
+                        },
+                        { timeout: 10000 }
+                    );
+                } catch (fallbackErr) {
+                    const fallbackMsg = fallbackErr.response?.data?.error?.message || fallbackErr.message;
+                    console.error('[Facebook Clients] Fallback also failed:', fallbackErr.response?.data || fallbackErr.message);
+                    return res.status(502).json({ message: `Facebook API error: ${fallbackMsg}` });
+                }
             }
             
             console.log(`[Facebook Clients] Reminder sent to ${customer.accountNumber} (${customer.facebook_psid})`);
@@ -5268,8 +5284,13 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                   );
             
             // Get Facebook settings
-            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
-            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            let fbConfig = {};
+            try {
+                const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            } catch (parseErr) {
+                return res.status(400).json({ message: 'Facebook Messenger settings are corrupted.' });
+            }
             
             if (!fbConfig.enabled || !fbConfig.pageAccessToken) {
                 return res.status(400).json({ message: 'Facebook Messenger not configured' });
@@ -5280,26 +5301,43 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             
             for (const customer of clients) {
                 try {
-                    const daysUntilDue = Math.ceil((new Date(customer.dueDate) - now) / (1000 * 60 * 60 * 24));
+                    const daysUntilDue = customer.dueDate ? Math.ceil((new Date(customer.dueDate) - now) / (1000 * 60 * 60 * 24)) : null;
                     
                     let message;
-                    if (daysUntilDue < 0) {
-                        message = `⚠️ OVERDUE: ₱${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber}\nDue: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\nPay now to avoid suspension!\nSend PAY to this bot to pay.`;
+                    if (daysUntilDue === null) {
+                        message = `📅 PAYMENT NOTIFICATION\nAccount: ${customer.accountNumber || 'N/A'}\nAmount: ₱${(customer.planPrice || 0).toFixed(2)}\n\nSend PAY to this bot to pay.`;
+                    } else if (daysUntilDue < 0) {
+                        message = `⚠️ OVERDUE: ₱${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber || 'N/A'}\nDue: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\nPay now to avoid suspension!\nSend PAY to this bot to pay.`;
                     } else if (daysUntilDue === 0) {
-                        message = `🔴 DUE TODAY: ₱${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber}\n\nPlease pay today to avoid service interruption.\nSend PAY to this bot.`;
+                        message = `🔴 DUE TODAY: ₱${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber || 'N/A'}\n\nPlease pay today to avoid service interruption.\nSend PAY to this bot.`;
                     } else {
-                        message = `⏰ Reminder: ₱${(customer.planPrice || 0).toFixed(2)} due in ${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''}\nAccount: ${customer.accountNumber}\nDue: ${customer.dueDate}\n\nSend PAY to this bot to pay.`;
+                        message = `⏰ Reminder: ₱${(customer.planPrice || 0).toFixed(2)} due in ${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''}\nAccount: ${customer.accountNumber || 'N/A'}\nDue: ${customer.dueDate}\n\nSend PAY to this bot to pay.`;
                     }
                     
-                    await axios.post(
-                        `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
-                        {
-                            messaging_type: 'UPDATE',
-                            recipient: { id: customer.facebook_psid },
-                            message: { text: message }
-                        },
-                        { timeout: 10000 }
-                    );
+                    // Try MESSAGE_TAG first (works outside 24h window)
+                    try {
+                        await axios.post(
+                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            {
+                                messaging_type: 'MESSAGE_TAG',
+                                tag: 'ACCOUNT_UPDATE',
+                                recipient: { id: customer.facebook_psid },
+                                message: { text: message }
+                            },
+                            { timeout: 10000 }
+                        );
+                    } catch (tagErr) {
+                        // Fallback to UPDATE (works within 24h window)
+                        await axios.post(
+                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            {
+                                messaging_type: 'UPDATE',
+                                recipient: { id: customer.facebook_psid },
+                                message: { text: message }
+                            },
+                            { timeout: 10000 }
+                        );
+                    }
                     
                     results.push({
                         account: customer.accountNumber,
@@ -5308,11 +5346,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         days_until_due: daysUntilDue
                     });
                 } catch (err) {
+                    const errMsg = err.response?.data?.error?.message || err.message;
                     results.push({
                         account: customer.accountNumber,
                         facebook_psid: customer.facebook_psid,
                         status: 'failed',
-                        error: err.message
+                        error: errMsg
                     });
                 }
             }
@@ -5360,8 +5399,13 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log(`[Facebook Broadcast] Found ${fbClients.length} clients to notify`);
             
             // Get Facebook settings
-            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
-            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            let fbConfig = {};
+            try {
+                const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            } catch (parseErr) {
+                return res.status(400).json({ message: 'Facebook Messenger settings are corrupted.' });
+            }
             
             if (!fbConfig.enabled || !fbConfig.pageAccessToken) {
                 return res.status(400).json({ message: 'Facebook Messenger not configured' });
@@ -5377,17 +5421,31 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     // Personalize message with customer name
                     const personalizedMessage = message
                         .replace('{name}', client.fullName || 'Valued Customer')
-                        .replace('{account}', client.accountNumber);
+                        .replace('{account}', client.accountNumber || 'N/A');
                     
-                    await axios.post(
-                        `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
-                        {
-                            messaging_type: 'UPDATE',
-                            recipient: { id: client.facebook_psid },
-                            message: { text: personalizedMessage }
-                        },
-                        { timeout: 10000 }
-                    );
+                    // Try MESSAGE_TAG first, fallback to UPDATE
+                    try {
+                        await axios.post(
+                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            {
+                                messaging_type: 'MESSAGE_TAG',
+                                tag: 'ACCOUNT_UPDATE',
+                                recipient: { id: client.facebook_psid },
+                                message: { text: personalizedMessage }
+                            },
+                            { timeout: 10000 }
+                        );
+                    } catch (tagErr) {
+                        await axios.post(
+                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            {
+                                messaging_type: 'UPDATE',
+                                recipient: { id: client.facebook_psid },
+                                message: { text: personalizedMessage }
+                            },
+                            { timeout: 10000 }
+                        );
+                    }
                     
                     sentCount++;
                     console.log(`[Facebook Broadcast] ✓ Sent to ${client.accountNumber} (${client.fullName})`);
@@ -9376,8 +9434,14 @@ function startFacebookReminderScheduler() {
             console.log(`[Facebook Reminders] Found ${clients.length} clients due within 3 days`);
             
             // Get Facebook settings
-            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
-            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            let fbConfig = {};
+            try {
+                const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            } catch (parseErr) {
+                console.warn('[Facebook Reminders] Facebook settings corrupted, skipping reminders');
+                return;
+            }
             
             if (!fbConfig.enabled || !fbConfig.pageAccessToken) {
                 console.warn('[Facebook Reminders] Facebook Messenger not configured, skipping reminders');
@@ -9390,34 +9454,51 @@ function startFacebookReminderScheduler() {
             
             for (const customer of clients) {
                 try {
-                    const daysUntilDue = Math.ceil((new Date(customer.dueDate) - now) / (1000 * 60 * 60 * 24));
+                    const daysUntilDue = customer.dueDate ? Math.ceil((new Date(customer.dueDate) - now) / (1000 * 60 * 60 * 24)) : null;
                     
                     let message;
-                    if (daysUntilDue < 0) {
-                        message = `⚠️ OVERDUE PAYMENT\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\n⚠️ Service may be suspended!\n\n💳 Send PAY to pay now.`;
+                    if (daysUntilDue === null) {
+                        message = `📅 PAYMENT NOTIFICATION\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n\n💳 Send PAY to pay now.`;
+                    } else if (daysUntilDue < 0) {
+                        message = `⚠️ OVERDUE PAYMENT\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\n⚠️ Service may be suspended!\n\n💳 Send PAY to pay now.`;
                     } else if (daysUntilDue === 0) {
-                        message = `🔴 DUE TODAY\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n\n⏰ Please pay today!\n\n💳 Send PAY to pay now.`;
+                        message = `🔴 DUE TODAY\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n\n⏰ Please pay today!\n\n💳 Send PAY to pay now.`;
                     } else if (daysUntilDue === 1) {
-                        message = `⏰ PAYMENT DUE TOMORROW\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate}\n\n💳 Send PAY to pay now.`;
+                        message = `⏰ PAYMENT DUE TOMORROW\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate}\n\n💳 Send PAY to pay now.`;
                     } else {
-                        message = `⏰ Payment Reminder\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Send PAY to pay now.`;
+                        message = `⏰ Payment Reminder\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Send PAY to pay now.`;
                     }
                     
-                    await axios.post(
-                        `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
-                        {
-                            messaging_type: 'UPDATE',
-                            recipient: { id: customer.facebook_psid },
-                            message: { text: message }
-                        },
-                        { timeout: 10000 }
-                    );
+                    // Try MESSAGE_TAG first, fallback to UPDATE
+                    try {
+                        await axios.post(
+                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            {
+                                messaging_type: 'MESSAGE_TAG',
+                                tag: 'ACCOUNT_UPDATE',
+                                recipient: { id: customer.facebook_psid },
+                                message: { text: message }
+                            },
+                            { timeout: 10000 }
+                        );
+                    } catch (tagErr) {
+                        await axios.post(
+                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            {
+                                messaging_type: 'UPDATE',
+                                recipient: { id: customer.facebook_psid },
+                                message: { text: message }
+                            },
+                            { timeout: 10000 }
+                        );
+                    }
                     
                     sentCount++;
                     console.log(`[Facebook Reminders] ✓ Sent to ${customer.accountNumber} (${daysUntilDue} days)`);
                 } catch (err) {
                     failedCount++;
-                    console.error(`[Facebook Reminders] ✗ Failed for ${customer.accountNumber}:`, err.message);
+                    const errMsg = err.response?.data?.error?.message || err.message;
+                    console.error(`[Facebook Reminders] ✗ Failed for ${customer.accountNumber}:`, errMsg);
                 }
             }
             
