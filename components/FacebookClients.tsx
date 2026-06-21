@@ -65,8 +65,16 @@ export const FacebookClients: React.FC = () => {
         body: JSON.stringify({})
       });
       
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`Server returned ${response.status} (${response.statusText || 'error'}). Check that the proxy server is running.`);
+      }
+      
       const data = await response.json();
       if (!response.ok) {
+        if (data.outside_window) {
+          throw new Error(data.message);
+        }
         throw new Error(data.message || `Server error: ${response.status}`);
       }
       
@@ -93,12 +101,16 @@ export const FacebookClients: React.FC = () => {
         body: JSON.stringify({ daysBefore: 3 })
       });
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`Server returned ${response.status} (non-JSON response). Check that the proxy server is running.`);
       }
       
       const result = await response.json();
-      alert(`Reminders sent successfully! Sent: ${result.sent || 0}, Failed: ${result.failed || 0}`);
+      if (!response.ok) {
+        throw new Error(result.message || `Server error: ${response.status}`);
+      }
+      alert(`✅ ${result.message || 'Reminders processed'}\n\nSent: ${result.sent || 0}\nSkipped (outside 24h): ${result.skipped || 0}\nFailed: ${result.failed || 0}`);
       loadClients();
     } catch (error: any) {
       alert(`Failed to send bulk reminders: ${error.message}`);
@@ -126,12 +138,16 @@ export const FacebookClients: React.FC = () => {
         body: JSON.stringify({ message: broadcastMessage })
       });
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`Server returned ${response.status} (non-JSON response). Check that the proxy server is running.`);
       }
       
       const result = await response.json();
-      alert(`Broadcast sent!\n\nTotal: ${result.total}\nSent: ${result.sent}\nFailed: ${result.failed}`);
+      if (!response.ok) {
+        throw new Error(result.message || `Server error: ${response.status}`);
+      }
+      alert(`✅ ${result.message || 'Broadcast processed'}\n\nSent: ${result.sent}\nSkipped (outside 24h): ${result.skipped || 0}\nFailed: ${result.failed}`);
       setBroadcastMessage('');
       setShowBroadcast(false);
     } catch (error: any) {

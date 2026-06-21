@@ -5218,23 +5218,33 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const axios = require('axios');
             let fbResponse;
             try {
+                // Use RESPONSE type - works within 24h of last user interaction
                 fbResponse = await axios.post(
-                    `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                    `https://graph.facebook.com/v21.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                     {
-                        messaging_type: 'MESSAGE_TAG',
-                        tag: 'ACCOUNT_UPDATE',
+                        messaging_type: 'RESPONSE',
                         recipient: { id: customer.facebook_psid },
                         message: { text: message }
                     },
                     { timeout: 10000 }
                 );
             } catch (fbErr) {
-                const fbErrMsg = fbErr.response?.data?.error?.message || fbErr.message;
-                console.error('[Facebook Clients] Facebook API error:', fbErr.response?.data || fbErr.message);
-                // Try fallback with UPDATE type (works within 24h window)
+                const fbErrorData = fbErr.response?.data?.error;
+                const isOutsideWindow = fbErrorData?.error_subcode === 2018278 || 
+                                        (fbErrorData?.message || '').includes('outside of allowed window');
+                
+                if (isOutsideWindow) {
+                    console.warn(`[Facebook Clients] Cannot send to ${customer.accountNumber}: outside 24h messaging window. User must message the bot first.`);
+                    return res.status(403).json({ 
+                        message: `Cannot send reminder: ${customer.fullName || 'this customer'} hasn't messaged the bot in the last 24 hours. Facebook only allows replies within 24h of the user's last message.`,
+                        outside_window: true
+                    });
+                }
+                
+                // Try UPDATE as fallback
                 try {
                     fbResponse = await axios.post(
-                        `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                        `https://graph.facebook.com/v21.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                         {
                             messaging_type: 'UPDATE',
                             recipient: { id: customer.facebook_psid },
@@ -5243,7 +5253,16 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         { timeout: 10000 }
                     );
                 } catch (fallbackErr) {
-                    const fallbackMsg = fallbackErr.response?.data?.error?.message || fallbackErr.message;
+                    const fallbackData = fallbackErr.response?.data?.error;
+                    const fallbackIsOutsideWindow = fallbackData?.error_subcode === 2018278 || 
+                                                    (fallbackData?.message || '').includes('outside of allowed window');
+                    if (fallbackIsOutsideWindow) {
+                        return res.status(403).json({ 
+                            message: `Cannot send reminder: ${customer.fullName || 'this customer'} hasn't messaged the bot in the last 24 hours.`,
+                            outside_window: true
+                        });
+                    }
+                    const fallbackMsg = fallbackData?.message || fallbackErr.message;
                     console.error('[Facebook Clients] Fallback also failed:', fallbackErr.response?.data || fallbackErr.message);
                     return res.status(502).json({ message: `Facebook API error: ${fallbackMsg}` });
                 }
@@ -5314,22 +5333,27 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         message = `⏰ Reminder: ₱${(customer.planPrice || 0).toFixed(2)} due in ${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''}\nAccount: ${customer.accountNumber || 'N/A'}\nDue: ${customer.dueDate}\n\nSend PAY to this bot to pay.`;
                     }
                     
-                    // Try MESSAGE_TAG first (works outside 24h window)
+                    // Try RESPONSE first (within 24h window), fallback to UPDATE
                     try {
                         await axios.post(
-                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            `https://graph.facebook.com/v21.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                             {
-                                messaging_type: 'MESSAGE_TAG',
-                                tag: 'ACCOUNT_UPDATE',
+                                messaging_type: 'RESPONSE',
                                 recipient: { id: customer.facebook_psid },
                                 message: { text: message }
                             },
                             { timeout: 10000 }
                         );
-                    } catch (tagErr) {
-                        // Fallback to UPDATE (works within 24h window)
+                    } catch (respErr) {
+                        const errData = respErr.response?.data?.error;
+                        const isOutsideWindow = errData?.error_subcode === 2018278 || 
+                                                (errData?.message || '').includes('outside of allowed window');
+                        if (isOutsideWindow) {
+                            throw new Error('Outside 24h messaging window - user must message bot first');
+                        }
+                        // Fallback to UPDATE
                         await axios.post(
-                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            `https://graph.facebook.com/v21.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                             {
                                 messaging_type: 'UPDATE',
                                 recipient: { id: customer.facebook_psid },
@@ -5346,23 +5370,31 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         days_until_due: daysUntilDue
                     });
                 } catch (err) {
-                    const errMsg = err.response?.data?.error?.message || err.message;
+                    const errData = err.response?.data?.error;
+                    const isOutsideWindow = (err.message || '').includes('Outside 24h') || 
+                                            errData?.error_subcode === 2018278;
+                    const errMsg = isOutsideWindow ? 'Outside 24h window' : (errData?.message || err.message);
                     results.push({
                         account: customer.accountNumber,
                         facebook_psid: customer.facebook_psid,
-                        status: 'failed',
+                        status: isOutsideWindow ? 'skipped' : 'failed',
                         error: errMsg
                     });
                 }
             }
             
-            console.log(`[Facebook Clients] Bulk reminders sent: ${results.filter(r => r.status === 'sent').length}/${clients.length}`);
+            const sentCount = results.filter(r => r.status === 'sent').length;
+            const skippedCount = results.filter(r => r.status === 'skipped').length;
+            const failedCount = results.filter(r => r.status === 'failed').length;
+            
+            console.log(`[Facebook Clients] Bulk reminders: ${sentCount} sent, ${skippedCount} skipped (outside window), ${failedCount} failed / ${clients.length} total`);
             
             res.json({ 
-                message: `Reminders sent to ${results.filter(r => r.status === 'sent').length} clients`,
+                message: `Sent: ${sentCount}, Skipped: ${skippedCount} (outside 24h window), Failed: ${failedCount}`,
                 total: clients.length,
-                sent: results.filter(r => r.status === 'sent').length,
-                failed: results.filter(r => r.status === 'failed').length,
+                sent: sentCount,
+                skipped: skippedCount,
+                failed: failedCount,
                 results
             });
         } catch (e) {
@@ -5413,6 +5445,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             
             const axios = require('axios');
             let sentCount = 0;
+            let skippedCount = 0;
             let failedCount = 0;
             const results = [];
             
@@ -5423,21 +5456,34 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         .replace('{name}', client.fullName || 'Valued Customer')
                         .replace('{account}', client.accountNumber || 'N/A');
                     
-                    // Try MESSAGE_TAG first, fallback to UPDATE
+                    // Try RESPONSE first, fallback to UPDATE
                     try {
                         await axios.post(
-                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            `https://graph.facebook.com/v21.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                             {
-                                messaging_type: 'MESSAGE_TAG',
-                                tag: 'ACCOUNT_UPDATE',
+                                messaging_type: 'RESPONSE',
                                 recipient: { id: client.facebook_psid },
                                 message: { text: personalizedMessage }
                             },
                             { timeout: 10000 }
                         );
-                    } catch (tagErr) {
+                    } catch (respErr) {
+                        const errData = respErr.response?.data?.error;
+                        const isOutsideWindow = errData?.error_subcode === 2018278 || 
+                                                (errData?.message || '').includes('outside of allowed window');
+                        if (isOutsideWindow) {
+                            skippedCount++;
+                            results.push({
+                                accountNumber: client.accountNumber,
+                                facebook_psid: client.facebook_psid,
+                                status: 'skipped',
+                                error: 'Outside 24h window'
+                            });
+                            continue;
+                        }
+                        // Fallback to UPDATE
                         await axios.post(
-                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            `https://graph.facebook.com/v21.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                             {
                                 messaging_type: 'UPDATE',
                                 recipient: { id: client.facebook_psid },
@@ -5456,22 +5502,24 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     });
                 } catch (err) {
                     failedCount++;
-                    console.error(`[Facebook Broadcast] ✗ Failed for ${client.accountNumber}:`, err.message);
+                    const errData = err.response?.data?.error;
+                    console.error(`[Facebook Broadcast] ✗ Failed for ${client.accountNumber}:`, errData?.message || err.message);
                     results.push({
                         accountNumber: client.accountNumber,
                         facebook_psid: client.facebook_psid,
                         status: 'failed',
-                        error: err.message
+                        error: errData?.message || err.message
                     });
                 }
             }
             
-            console.log(`[Facebook Broadcast] Complete: ${sentCount} sent, ${failedCount} failed out of ${fbClients.length} total`);
+            console.log(`[Facebook Broadcast] Complete: ${sentCount} sent, ${skippedCount} skipped, ${failedCount} failed out of ${fbClients.length} total`);
             
             res.json({
-                message: 'Broadcast sent',
+                message: `Broadcast complete: ${sentCount} sent, ${skippedCount} skipped (outside 24h window), ${failedCount} failed`,
                 total: fbClients.length,
                 sent: sentCount,
+                skipped: skippedCount,
                 failed: failedCount,
                 results
             });
@@ -9450,6 +9498,7 @@ function startFacebookReminderScheduler() {
             
             const axios = require('axios');
             let sentCount = 0;
+            let skippedCount = 0;
             let failedCount = 0;
             
             for (const customer of clients) {
@@ -9469,21 +9518,29 @@ function startFacebookReminderScheduler() {
                         message = `⏰ Payment Reminder\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Send PAY to pay now.`;
                     }
                     
-                    // Try MESSAGE_TAG first, fallback to UPDATE
+                    // Try RESPONSE first, fallback to UPDATE
                     try {
                         await axios.post(
-                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            `https://graph.facebook.com/v21.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                             {
-                                messaging_type: 'MESSAGE_TAG',
-                                tag: 'ACCOUNT_UPDATE',
+                                messaging_type: 'RESPONSE',
                                 recipient: { id: customer.facebook_psid },
                                 message: { text: message }
                             },
                             { timeout: 10000 }
                         );
-                    } catch (tagErr) {
+                    } catch (respErr) {
+                        const errData = respErr.response?.data?.error;
+                        const isOutsideWindow = errData?.error_subcode === 2018278 || 
+                                                (errData?.message || '').includes('outside of allowed window');
+                        if (isOutsideWindow) {
+                            skippedCount++;
+                            console.warn(`[Facebook Reminders] ⊘ Skipped ${customer.accountNumber}: outside 24h window`);
+                            continue;
+                        }
+                        // Fallback to UPDATE
                         await axios.post(
-                            `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                            `https://graph.facebook.com/v21.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
                             {
                                 messaging_type: 'UPDATE',
                                 recipient: { id: customer.facebook_psid },
@@ -9497,12 +9554,12 @@ function startFacebookReminderScheduler() {
                     console.log(`[Facebook Reminders] ✓ Sent to ${customer.accountNumber} (${daysUntilDue} days)`);
                 } catch (err) {
                     failedCount++;
-                    const errMsg = err.response?.data?.error?.message || err.message;
-                    console.error(`[Facebook Reminders] ✗ Failed for ${customer.accountNumber}:`, errMsg);
+                    const errData = err.response?.data?.error;
+                    console.error(`[Facebook Reminders] ✗ Failed for ${customer.accountNumber}:`, errData?.message || err.message);
                 }
             }
             
-            console.log(`[Facebook Reminders] Job complete: ${sentCount} sent, ${failedCount} failed`);
+            console.log(`[Facebook Reminders] Job complete: ${sentCount} sent, ${skippedCount} skipped (outside window), ${failedCount} failed`);
         } catch (err) {
             console.error('[Facebook Reminders] Scheduler error:', err.message);
         }
