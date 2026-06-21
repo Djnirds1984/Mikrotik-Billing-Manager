@@ -5035,40 +5035,55 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
             
             // Get Facebook settings
-            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
-            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            let fbConfig = {};
+            try {
+                const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            } catch (parseErr) {
+                console.error('[Facebook Clients] Failed to parse Facebook settings:', parseErr.message);
+                return res.status(400).json({ message: 'Facebook Messenger settings are corrupted. Please reconfigure in System Settings.' });
+            }
             
             if (!fbConfig.enabled || !fbConfig.pageAccessToken) {
-                return res.status(400).json({ message: 'Facebook Messenger not configured' });
+                return res.status(400).json({ message: 'Facebook Messenger not configured or not enabled. Go to System Settings > Facebook to configure.' });
             }
             
             // Calculate days until due
             const now = new Date();
-            const dueDate = new Date(customer.dueDate);
-            const daysUntilDue = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
+            const dueDate = customer.dueDate ? new Date(customer.dueDate) : null;
+            const daysUntilDue = dueDate ? Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24)) : null;
             
             let message;
-            if (daysUntilDue < 0) {
-                message = `⚠️ OVERDUE PAYMENT NOTICE\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\n⚠️ Your internet service may be suspended.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+            if (daysUntilDue === null) {
+                message = `📅 PAYMENT NOTIFICATION\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: Not set\n\n💳 Pay via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+            } else if (daysUntilDue < 0) {
+                message = `⚠️ OVERDUE PAYMENT NOTICE\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\n⚠️ Your internet service may be suspended.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
             } else if (daysUntilDue === 0) {
-                message = `🔴 PAYMENT DUE TODAY\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: TODAY\n\n⏰ Please make your payment today to avoid service interruption.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+                message = `🔴 PAYMENT DUE TODAY\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: TODAY\n\n⏰ Please make your payment today to avoid service interruption.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
             } else if (daysUntilDue <= 3) {
-                message = `⏰ PAYMENT REMINDER\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''})\n\n💡 This is a friendly reminder to make your payment on time.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+                message = `⏰ PAYMENT REMINDER\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''})\n\n💡 This is a friendly reminder to make your payment on time.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
             } else {
-                message = `📅 PAYMENT NOTIFICATION\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Pay via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+                message = `📅 PAYMENT NOTIFICATION\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Pay via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
             }
             
             // Send Facebook message
             const axios = require('axios');
-            const fbResponse = await axios.post(
-                `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
-                {
-                    messaging_type: 'UPDATE',
-                    recipient: { id: customer.facebook_psid },
-                    message: { text: message }
-                },
-                { timeout: 10000 }
-            );
+            let fbResponse;
+            try {
+                fbResponse = await axios.post(
+                    `https://graph.facebook.com/v18.0/me/messages?access_token=${fbConfig.pageAccessToken}`,
+                    {
+                        messaging_type: 'UPDATE',
+                        recipient: { id: customer.facebook_psid },
+                        message: { text: message }
+                    },
+                    { timeout: 10000 }
+                );
+            } catch (fbErr) {
+                const fbErrMsg = fbErr.response?.data?.error?.message || fbErr.message;
+                console.error('[Facebook Clients] Facebook API error:', fbErr.response?.data || fbErr.message);
+                return res.status(502).json({ message: `Facebook API error: ${fbErrMsg}` });
+            }
             
             console.log(`[Facebook Clients] Reminder sent to ${customer.accountNumber} (${customer.facebook_psid})`);
             
@@ -5079,7 +5094,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             });
         } catch (e) {
             console.error('[Facebook Clients] Error sending reminder:', e.message);
-            res.status(500).json({ message: e.message });
+            res.status(500).json({ message: `Internal error: ${e.message}` });
         }
     });
     

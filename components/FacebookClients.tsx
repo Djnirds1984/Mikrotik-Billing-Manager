@@ -65,11 +65,12 @@ export const FacebookClients: React.FC = () => {
         body: JSON.stringify({})
       });
       
+      const data = await response.json();
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(data.message || `Server error: ${response.status}`);
       }
       
-      alert(`Payment reminder sent to ${client.accountNumber}`);
+      alert(`✅ ${data.message || 'Payment reminder sent'} - ${client.accountNumber}`);
     } catch (error: any) {
       alert(`Failed to send reminder: ${error.message}`);
     } finally {
