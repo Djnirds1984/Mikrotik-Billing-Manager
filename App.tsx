@@ -33,6 +33,7 @@ const Hotspot = React.lazy(() => import('./components/Hotspot.tsx').then(m => ({
 const Help = React.lazy(() => import('./components/Help.tsx').then(m => ({ default: m.Help })));
 const SystemSettings = React.lazy(() => import('./components/SystemSettings.tsx').then(m => ({ default: m.SystemSettings })));
 const SalesReport = React.lazy(() => import('./components/SalesReport.tsx').then(m => ({ default: m.SalesReport })));
+const StatementOfAccount = React.lazy(() => import('./components/StatementOfAccount.tsx').then(m => ({ default: m.StatementOfAccount })));
 const Network = React.lazy(() => import('./components/Network.tsx').then(m => ({ default: m.Network })));
 const Inventory = React.lazy(() => import('./components/Inventory.tsx').then(m => ({ default: m.Inventory })));
 const Accounting = React.lazy(() => import('./components/Accounting.tsx').then(m => ({ default: m.Accounting })));
@@ -267,6 +268,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                       return <Billing selectedRouter={selectedRouter} />;
                   case 'sales':
                       return <SalesReport salesData={sales} deleteSale={deleteSale} clearSales={clearSales} companySettings={companySettings} selectedRouter={selectedRouter} />;
+                  case 'soa':
+                      return <StatementOfAccount selectedRouter={selectedRouter} />;
                   case 'inventory':
                       return (
                         <Inventory 

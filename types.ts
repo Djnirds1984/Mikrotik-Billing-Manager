@@ -34,7 +34,8 @@ export type View =
   | 'application_form'
   | 'manual_payments'
   | 'ntc-compliance'
-  | 'store_settings';
+  | 'store_settings'
+  | 'soa';
 
 export interface Notification {
   id: string;

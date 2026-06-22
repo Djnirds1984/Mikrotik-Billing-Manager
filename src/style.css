@@ -30,6 +30,21 @@
     display: none !important;
   }
   
+  /* SOA Print Styles */
+  .max-w-6xl {
+    visibility: visible !important;
+    max-width: none !important;
+  }
+  
+  .max-w-6xl * {
+    visibility: visible !important;
+  }
+  
+  /* Hide search and UI elements when printing SOA */
+  .max-w-6xl > div:first-child {
+    display: none !important;
+  }
+  
   /* Thermal receipt specific styles */
   .thermal-receipt {
     visibility: visible !important;

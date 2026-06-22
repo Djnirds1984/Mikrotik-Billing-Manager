@@ -86,6 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'facebook-clients', label: 'Facebook Clients', icon: <ChatBubbleLeftRightIcon className="w-6 h-6" /> },
     { id: 'billing', label: t('sidebar.billing_plans'), icon: <SignalIcon className="w-6 h-6" /> },
     { id: 'sales', label: t('sidebar.sales_report'), icon: <CurrencyDollarIcon className="w-6 h-6" /> },
+    { id: 'soa', label: 'Statement of Account', icon: <ArchiveBoxIcon className="w-6 h-6" /> },
     { id: 'inventory', label: t('sidebar.inventory'), icon: <ArchiveBoxIcon className="w-6 h-6" /> },
     { id: 'accounting', label: 'Accounting & Expenses', icon: <CurrencyDollarIcon className="w-6 h-6" /> },
     { id: 'payroll', label: t('sidebar.payroll'), icon: <CalculatorIcon className="w-6 h-6" /> },
