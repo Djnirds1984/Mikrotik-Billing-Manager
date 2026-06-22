@@ -160,6 +160,9 @@ async function initDb() {
         // Store & Portal settings JSON column
         if (!columnNames.includes('storeSettings')) await db.exec("ALTER TABLE settings ADD COLUMN storeSettings TEXT");
 
+        // Billing settings JSON column (non-payment profile, default plan, grace period, expiry time)
+        if (!columnNames.includes('billingSettings')) await db.exec("ALTER TABLE settings ADD COLUMN billingSettings TEXT");
+
         // Manual payment requests table (for existing databases)
         try {
             await db.exec(`
@@ -2013,6 +2016,37 @@ async function startServer() {
             const settings = JSON.stringify(req.body);
             await db.run('UPDATE settings SET storeSettings = ? WHERE id = 1', [settings]);
             res.json({ message: 'Store settings saved' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // ========================================
+    // BILLING SETTINGS API
+    // ========================================
+    dbRouter.get('/billing-settings', async (req, res) => {
+        try {
+            const s = await db.get('SELECT billingSettings FROM settings WHERE id = 1');
+            if (s && s.billingSettings) {
+                try { res.json(JSON.parse(s.billingSettings)); } catch (_) { res.json({}); }
+            } else {
+                res.json({
+                    nonPaymentProfile: '',
+                    defaultPlanId: '',
+                    gracePeriodDays: 3,
+                    expiryTime: '23:59'
+                });
+            }
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.post('/billing-settings', async (req, res) => {
+        try {
+            const settings = JSON.stringify(req.body);
+            await db.run('UPDATE settings SET billingSettings = ? WHERE id = 1', [settings]);
+            res.json({ message: 'Billing settings saved' });
         } catch (e) {
             res.status(500).json({ message: e.message });
         }

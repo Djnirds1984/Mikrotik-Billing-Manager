@@ -60,7 +60,8 @@
     "common": {
         "cancel": "Kanselahin",
         "save": "I-save",
-        "save_plan": "I-save ang Plano"
+        "save_plan": "I-save ang Plano",
+        "saving": "Nagse-save..."
     },
     "dhcp-portal": {
         "client_management": "Pamamahala ng Kliyente",
@@ -90,7 +91,22 @@
                 "validity_days": "Validity (Araw)",
                 "days": "araw",
         "description": "Deskripsyon",
-        "description_placeholder": "Isang maikling paglalarawan ng plano."
+        "description_placeholder": "Isang maikling paglalarawan ng plano.",
+        "plans_tab": "Mga Plano",
+        "settings_tab": "Mga Setting",
+        "settings_title": "Mga Setting ng Pagsingil",
+        "non_payment_profile": "Profile sa Hindi Pagbabayad",
+        "select_profile": "Pumili ng profile...",
+        "non_payment_profile_info": "PPP profile na inilalapat sa mga user kapag nag-expire ang kanilang subscription.",
+        "default_plan": "Default na Plano sa Pagsingil",
+        "no_default": "Walang default",
+        "default_plan_info": "Paunang napiling plano kapag nagdaragdag ng mga bagong user o nagpoproseso ng mga pagbabayad.",
+        "grace_period_days": "Araw ng Grace Period",
+        "grace_period_info": "Default na bilang ng grace days para sa mga overdue na user.",
+        "expiry_time": "Oras ng Pag-expire",
+        "expiry_time_info": "Default na oras ng araw para sa pag-expire ng due date ng subscription.",
+        "save_settings": "I-save ang mga Setting",
+        "settings_saved": "Na-save ang mga setting!"
     },
     "pppoe": {
         "users": "Mga User",

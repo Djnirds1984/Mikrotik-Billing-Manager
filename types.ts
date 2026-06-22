@@ -591,6 +591,13 @@ export interface StoreSettings {
     autoRestoreOnPayment: boolean;
 }
 
+export interface BillingSettings {
+    nonPaymentProfile: string;
+    defaultPlanId: string;
+    gracePeriodDays: number;
+    expiryTime: string; // HH:MM format
+}
+
 export interface PanelNtpStatus {
     enabled: boolean;
 }

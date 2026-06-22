@@ -58,7 +58,8 @@
     "common": {
         "cancel": "Cancelar",
         "save": "Salvar",
-        "save_plan": "Salvar Plano"
+        "save_plan": "Salvar Plano",
+        "saving": "Salvando..."
     },
     "dhcp-portal": {
         "client_management": "Gerenciamento de Clientes",
@@ -88,7 +89,22 @@
                 "validity_days": "Validade (Dias)",
                 "days": "dias",
         "description": "Descrição",
-        "description_placeholder": "Uma breve descrição do plano."
+        "description_placeholder": "Uma breve descrição do plano.",
+        "plans_tab": "Planos",
+        "settings_tab": "Configurações",
+        "settings_title": "Configurações de Cobrança",
+        "non_payment_profile": "Perfil de Não Pagamento",
+        "select_profile": "Selecionar perfil...",
+        "non_payment_profile_info": "Perfil PPP aplicado aos usuários quando sua assinatura expira.",
+        "default_plan": "Plano de Cobrança Padrão",
+        "no_default": "Sem padrão",
+        "default_plan_info": "Plano pré-selecionado ao adicionar novos usuários ou processar pagamentos.",
+        "grace_period_days": "Dias de Período de Carência",
+        "grace_period_info": "Número padrão de dias de carência para usuários inadimplentes.",
+        "expiry_time": "Hora de Vencimento",
+        "expiry_time_info": "Hora padrão do dia para o vencimento da data de assinatura.",
+        "save_settings": "Salvar Configurações",
+        "settings_saved": "Configurações salvas!"
     },
      "pppoe": {
         "users": "Usuários",

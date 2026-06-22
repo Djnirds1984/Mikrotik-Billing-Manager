@@ -4,23 +4,22 @@ interface GracePeriodModalProps {
   isOpen: boolean;
   onClose: () => void;
   subject: { comment?: string } | null;
-  profiles?: { id: string; name: string }[];
+  nonPaymentProfile: string;
+  defaultGraceDays?: number;
   onSave: (params: { graceDays: number; nonPaymentProfile: string; graceTime: string }) => Promise<boolean> | boolean;
 }
 
-export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onClose, subject, profiles, onSave }) => {
-  const [graceDays, setGraceDays] = useState<number>(0);
+export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onClose, subject, nonPaymentProfile, defaultGraceDays = 3, onSave }) => {
+  const [graceDays, setGraceDays] = useState<number>(defaultGraceDays);
   const [dueDate, setDueDate] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [expiryProfile, setExpiryProfile] = useState<string>('');
   const [graceTime, setGraceTime] = useState<string>('23:59');
 
   useEffect(() => {
     setError(null);
-    setGraceDays(0);
+    setGraceDays(defaultGraceDays);
     setDueDate('');
-    setExpiryProfile('');
     setGraceTime('23:59');
     if (subject?.comment) {
       try {
@@ -39,12 +38,7 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
       } catch (_) {
       }
     }
-    if (profiles && profiles.length > 0) {
-      const lowerTags = ['cut','disable','disabled','non-payment','nonpayment'];
-      const found = profiles.find(p => lowerTags.some(tag => p.name.toLowerCase().includes(tag)))?.name || profiles[0].name;
-      setExpiryProfile(found);
-    }
-  }, [subject, isOpen]);
+  }, [subject, isOpen, defaultGraceDays]);
 
   if (!isOpen) return null;
 
@@ -56,17 +50,13 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
       setError('Please enter a valid number of days (> 0).');
       return;
     }
-    if (!expiryProfile) {
-      setError('Please select the profile on expiry.');
-      return;
-    }
     if (!/^\d{2}:\d{2}$/.test(graceTime)) {
       setError('Please set a valid time (HH:MM).');
       return;
     }
     setIsSubmitting(true);
     try {
-      const ok = await onSave({ graceDays, nonPaymentProfile: expiryProfile, graceTime });
+      const ok = await onSave({ graceDays, nonPaymentProfile, graceTime });
       if (ok) onClose();
     } catch (err) {
       setError(String((err as Error).message || 'Failed to grant grace period.'));
@@ -110,18 +100,10 @@ export const GracePeriodModal: React.FC<GracePeriodModalProps> = ({ isOpen, onCl
               required
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Profile on Expiry</label>
-            <select value={expiryProfile} onChange={(e) => setExpiryProfile(e.target.value)} className="w-full px-3 py-2 border rounded-md">
-              {(profiles || []).map(p => (
-                <option key={p.id} value={p.name}>{p.name}</option>
-              ))}
-            </select>
-          </div>
           <div className="flex justify-end space-x-2">
             <button type="button" onClick={onClose} className="px-3 py-2 rounded-md border">Cancel</button>
             <button type="submit" disabled={isSubmitting} className="px-3 py-2 rounded-md bg-[--color-primary-600] text-white disabled:opacity-50">
-              {isSubmitting ? 'Saving…' : 'Grant Grace'}
+              {isSubmitting ? 'Saving...' : 'Grant Grace'}
             </button>
           </div>
         </form>

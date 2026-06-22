@@ -62,7 +62,8 @@
     "common": {
         "cancel": "Cancelar",
         "save": "Guardar",
-        "save_plan": "Guardar Plan"
+        "save_plan": "Guardar Plan",
+        "saving": "Guardando..."
     },
     "dhcp-portal": {
         "client_management": "Gestión de Clientes",
@@ -92,7 +93,22 @@
                 "validity_days": "Validez (Días)",
                 "days": "días",
         "description": "Descripción",
-        "description_placeholder": "Una breve descripción del plan."
+        "description_placeholder": "Una breve descripción del plan.",
+        "plans_tab": "Planes",
+        "settings_tab": "Configuración",
+        "settings_title": "Configuración de Facturación",
+        "non_payment_profile": "Perfil de No Pago",
+        "select_profile": "Seleccionar perfil...",
+        "non_payment_profile_info": "Perfil PPP aplicado a los usuarios cuando su suscripción expira.",
+        "default_plan": "Plan de Facturación Predeterminado",
+        "no_default": "Sin predeterminado",
+        "default_plan_info": "Plan preseleccionado al agregar nuevos usuarios o procesar pagos.",
+        "grace_period_days": "Días de Período de Gracia",
+        "grace_period_info": "Número predeterminado de días de gracia para usuarios morosos.",
+        "expiry_time": "Hora de Vencimiento",
+        "expiry_time_info": "Hora predeterminada del día para el vencimiento de la fecha de suscripción.",
+        "save_settings": "Guardar Configuración",
+        "settings_saved": "¡Configuración guardada!"
     },
     "pppoe": {
         "users": "Usuarios",

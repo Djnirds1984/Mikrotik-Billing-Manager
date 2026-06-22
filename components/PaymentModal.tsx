@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { PppSecret, BillingPlanWithId, SaleRecord, CompanySettings, PppProfile } from '../types.ts';
+import type { PppSecret, BillingPlanWithId, SaleRecord, CompanySettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
 
@@ -8,7 +8,7 @@ interface PaymentModalProps {
     onClose: () => void;
     secret: PppSecret | null;
     plans: BillingPlanWithId[];
-    profiles: PppProfile[];
+    nonPaymentProfile: string;
     onSave: (data: {
         sale: Omit<SaleRecord, 'id' | 'date' | 'routerName'>;
         payment: { plan: BillingPlanWithId, nonPaymentProfile: string, discountDays: number, paymentDate: string };
@@ -16,10 +16,9 @@ interface PaymentModalProps {
     companySettings: CompanySettings;
 }
 
-export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, secret, plans, profiles, onSave, companySettings }) => {
+export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, secret, plans, nonPaymentProfile, onSave, companySettings }) => {
     const { t, formatCurrency } = useLocalization();
     const [selectedPlanId, setSelectedPlanId] = useState('');
-    const [nonPaymentProfile, setNonPaymentProfile] = useState('');
     const [discountDays, setDiscountDays] = useState('0');
     const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
     const [receiptData, setReceiptData] = useState<SaleRecord | null>(null);
@@ -36,13 +35,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
             }
-            if (profiles.length > 0) {
-                // Try to find a sensible default 'non-payment' profile
-                const defaultNonPayment = profiles.find(p => p.name.toLowerCase().includes('cut') || p.name.toLowerCase().includes('disable'))?.name || profiles[0].name;
-                setNonPaymentProfile(defaultNonPayment);
-            }
         }
-    }, [isOpen, plans, profiles]);
+    }, [isOpen, plans]);
 
     useEffect(() => {
         if (receiptData) {
@@ -150,13 +144,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                             </option>
                                         ))}
                                     </select>
-                                </div>
-                                <div>
-                                    <label htmlFor="nonPaymentProfile" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Non-Payment Profile</label>
-                                     <select id="nonPaymentProfile" value={nonPaymentProfile} onChange={(e) => setNonPaymentProfile(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
-                                        {profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                                    </select>
-                                    <p className="text-xs text-slate-500 mt-1">Profile to apply on due date.</p>
                                 </div>
                                 <div>
                                     <label htmlFor="paymentDate" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Payment Date</label>

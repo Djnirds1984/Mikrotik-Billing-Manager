@@ -9,6 +9,7 @@ import {
     savePppUser // Import the new service function
 } from '../services/mikrotikService.ts';
 import { useBillingPlans } from '../hooks/useBillingPlans.ts';
+import { useBillingSettings } from '../hooks/useBillingSettings.ts';
 import { useCustomers } from '../hooks/useCustomers.ts';
 import { Loader } from './Loader.tsx';
 import { RouterIcon, EditIcon, TrashIcon, ExclamationTriangleIcon, UsersIcon, SignalIcon, CurrencyDollarIcon, KeyIcon, SearchIcon, EyeIcon, EyeSlashIcon, ServerIcon, XMarkIcon } from '../constants.tsx';
@@ -220,7 +221,6 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', gps: '' });
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
-    const [nonPaymentProfile, setNonPaymentProfile] = useState('');
     const [planType, setPlanType] = useState<'prepaid' | 'postpaid'>('prepaid');
     const toDatetimeLocal = (s: string) => {
         try {
@@ -311,11 +311,6 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             setDueDate('');
             setPlanType('prepaid');
         }
-        
-        if (profiles.length > 0) {
-            const defaultNonPayment = profiles.find(p => p.name.toLowerCase().includes('cut') || p.name.toLowerCase().includes('disable'))?.name || profiles[0].name;
-            setNonPaymentProfile(defaultNonPayment);
-        }
     }, [isOpen, initialData, plans, customers, profiles]);
 
     useEffect(() => {
@@ -346,7 +341,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer, { dueDate, nonPaymentProfile, planId: secret.profile, planType });
+        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType });
     }
 
     return (
@@ -376,13 +371,6 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                                 <option value="postpaid">Postpaid</option>
                             </select>
                         </div>
-                        <div>
-                            <label>Profile on Expiry</label>
-                            <select value={nonPaymentProfile} onChange={e => setNonPaymentProfile(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 rounded-md p-2">
-                                {profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                            </select>
-                            <p className="text-xs text-slate-500 mt-1">Profile to apply when the due date is reached.</p>
-                        </div>
                         <hr className="my-4 border-slate-200 dark:border-slate-700" />
                         <h4 className="font-semibold">Customer Information (Optional)</h4>
                         <div><label>Full Name</label><input type="text" value={customer.fullName} onChange={e => setCustomer(c => ({...c, fullName: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
@@ -408,6 +396,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [secrets, setSecrets] = useState<PppSecret[]>([]);
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const { plans } = useBillingPlans(selectedRouter.id);
+    const { settings: billingSettings } = useBillingSettings();
     const { customers, addCustomer, updateCustomer, fetchCustomers } = useCustomers(selectedRouter.id);
     const { settings: companySettings } = useCompanySettings();
 
@@ -625,7 +614,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         setSortConfig({ key, direction });
     };
 
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; nonPaymentProfile: string; planId: string; planType?: 'prepaid' | 'postpaid' }) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid' }) => {
         setIsSubmitting(true);
         try {
             // Find existing customer by username AND routerId (more precise)
@@ -712,7 +701,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             await savePppUser(selectedRouter, {
                 initialSecret: selectedSecret,
                 secretData,
-                subscriptionData,
+                subscriptionData: { ...subscriptionData, nonPaymentProfile: billingSettings.nonPaymentProfile },
                 customerData: enrichedCustomerData,
             });
 
@@ -817,7 +806,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         }
     };
 
-    const handleGraceSave = async ({ graceDays, nonPaymentProfile, graceTime }: { graceDays: number; nonPaymentProfile: string; graceTime: string }) => {
+    const handleGraceSave = async ({ graceDays, graceTime }: { graceDays: number; graceTime: string }) => {
         if (!selectedSecret) return false;
         try {
             const sub = (selectedSecret as any).subscription || {};
@@ -835,7 +824,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             await savePppUser(selectedRouter, {
                 initialSecret: selectedSecret,
                 secretData,
-                subscriptionData: { dueDate: '', nonPaymentProfile, graceDays, graceTime, planId: chosenPlan?.id }
+                subscriptionData: { dueDate: '', nonPaymentProfile: billingSettings.nonPaymentProfile, graceDays, graceTime, planId: chosenPlan?.id }
             });
             setGraceModalOpen(false);
             await fetchData();
@@ -862,8 +851,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 isSubmitting={isSubmitting}
                 selectedRouterId={selectedRouter?.id}
             />
-            <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} profiles={profiles} onSave={handlePayment} companySettings={companySettings} />
-            <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} profiles={profiles} onSave={handleGraceSave} />
+            <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} nonPaymentProfile={billingSettings.nonPaymentProfile} onSave={handlePayment} companySettings={companySettings} />
+            <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} nonPaymentProfile={billingSettings.nonPaymentProfile} defaultGraceDays={billingSettings.gracePeriodDays} onSave={handleGraceSave} />
 
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">

@@ -66,7 +66,8 @@
     "common": {
         "cancel": "Cancel",
         "save": "Save",
-        "save_plan": "Save Plan"
+        "save_plan": "Save Plan",
+        "saving": "Saving..."
     },
     "dhcp-portal": {
         "client_management": "Client Management",
@@ -96,7 +97,22 @@
         "validity_days": "Validity (Days)",
         "days": "days",
         "description": "Description",
-        "description_placeholder": "A brief description of the plan."
+        "description_placeholder": "A brief description of the plan.",
+        "plans_tab": "Plans",
+        "settings_tab": "Settings",
+        "settings_title": "Billing Settings",
+        "non_payment_profile": "Non-Payment Profile",
+        "select_profile": "Select profile...",
+        "non_payment_profile_info": "PPP profile applied to users when their subscription expires.",
+        "default_plan": "Default Billing Plan",
+        "no_default": "No default",
+        "default_plan_info": "Pre-selected plan when adding new users or processing payments.",
+        "grace_period_days": "Grace Period Days",
+        "grace_period_info": "Default number of grace days for overdue users.",
+        "expiry_time": "Expiry Time",
+        "expiry_time_info": "Default time of day for subscription due date expiry.",
+        "save_settings": "Save Settings",
+        "settings_saved": "Settings saved!"
     },
     "pppoe": {
         "users": "Users",

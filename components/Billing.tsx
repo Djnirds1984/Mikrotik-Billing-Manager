@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import type { BillingPlan, BillingPlanWithId, PppProfile, RouterConfigWithId } from '../types.ts';
+import type { BillingPlan, BillingPlanWithId, BillingSettings, PppProfile, RouterConfigWithId } from '../types.ts';
 import { useBillingPlans } from '../hooks/useBillingPlans.ts';
+import { useBillingSettings } from '../hooks/useBillingSettings.ts';
 import { getPppProfiles } from '../services/mikrotikService.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
-import { EditIcon, TrashIcon, SignalIcon, RouterIcon } from '../constants.tsx';
+import { EditIcon, TrashIcon, SignalIcon, RouterIcon, CogIcon } from '../constants.tsx';
 import { Loader } from './Loader.tsx';
 
 // Form component for adding/editing plans
@@ -14,14 +15,11 @@ const PlanForm: React.FC<{
     profiles: PppProfile[];
     isLoadingProfiles: boolean;
 }> = ({ onSave, onCancel, initialData, profiles, isLoadingProfiles }) => {
-    // FIX: Add currency to plan state and handle it during initialization.
     const { t, currency } = useLocalization();
     const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', cycle_days: 30, pppoeProfile: '', description: '', currency, store_enabled: 1 };
     const [plan, setPlan] = useState<BillingPlan>(initialData || defaultPlanState);
     
     useEffect(() => {
-        // If it's an existing plan, it will have its own currency.
-        // If it's a new plan, it will get the current global currency from the context.
         const initialState = initialData ? 
             { ...initialData } : 
             { ...defaultPlanState, currency: currency };
@@ -100,6 +98,117 @@ const PlanForm: React.FC<{
     );
 };
 
+// Billing Settings form
+const BillingSettingsForm: React.FC<{
+    router: RouterConfigWithId;
+    plans: BillingPlanWithId[];
+}> = ({ router, plans }) => {
+    const { t } = useLocalization();
+    const { settings, saveSettings, isLoading } = useBillingSettings();
+    const [profiles, setProfiles] = useState<PppProfile[]>([]);
+    const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
+    const [localSettings, setLocalSettings] = useState<BillingSettings>(settings);
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveSuccess, setSaveSuccess] = useState(false);
+
+    useEffect(() => {
+        setLocalSettings(settings);
+    }, [settings]);
+
+    useEffect(() => {
+        setIsLoadingProfiles(true);
+        getPppProfiles(router)
+            .then(setProfiles)
+            .catch(err => {
+                console.error("Failed to fetch PPP profiles:", err);
+                setProfiles([]);
+            })
+            .finally(() => setIsLoadingProfiles(false));
+    }, [router]);
+
+    const handleSave = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsSaving(true);
+        setSaveSuccess(false);
+        try {
+            await saveSettings(localSettings);
+            setSaveSuccess(true);
+            setTimeout(() => setSaveSuccess(false), 3000);
+        } catch (err) {
+            alert(`Failed to save: ${(err as Error).message}`);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
+
+    return (
+        <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700">
+            <h3 className="text-xl font-bold text-[--color-primary-500] dark:text-[--color-primary-400] mb-6">{t('billing.settings_title')}</h3>
+            <form onSubmit={handleSave} className="space-y-6">
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('billing.non_payment_profile')}</label>
+                    <select
+                        value={localSettings.nonPaymentProfile}
+                        onChange={e => setLocalSettings(prev => ({ ...prev, nonPaymentProfile: e.target.value }))}
+                        disabled={isLoadingProfiles || profiles.length === 0}
+                        className="block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] disabled:opacity-50"
+                    >
+                        <option value="">{t('billing.select_profile')}</option>
+                        {profiles.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('billing.non_payment_profile_info')}</p>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('billing.default_plan')}</label>
+                    <select
+                        value={localSettings.defaultPlanId}
+                        onChange={e => setLocalSettings(prev => ({ ...prev, defaultPlanId: e.target.value }))}
+                        className="block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]"
+                    >
+                        <option value="">{t('billing.no_default')}</option>
+                        {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('billing.default_plan_info')}</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('billing.grace_period_days')}</label>
+                        <input
+                            type="number"
+                            min={1}
+                            value={localSettings.gracePeriodDays}
+                            onChange={e => setLocalSettings(prev => ({ ...prev, gracePeriodDays: parseInt(e.target.value) || 3 }))}
+                            className="block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        />
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('billing.grace_period_info')}</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('billing.expiry_time')}</label>
+                        <input
+                            type="time"
+                            value={localSettings.expiryTime}
+                            onChange={e => setLocalSettings(prev => ({ ...prev, expiryTime: e.target.value }))}
+                            className="block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        />
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('billing.expiry_time_info')}</p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <button type="submit" disabled={isSaving} className="px-6 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] transition-all hover:shadow-md disabled:opacity-50">
+                        {isSaving ? t('common.saving') : t('billing.save_settings')}
+                    </button>
+                    {saveSuccess && <span className="text-sm text-green-600 dark:text-green-400 font-medium">{t('billing.settings_saved')}</span>}
+                </div>
+            </form>
+        </div>
+    );
+};
+
 interface BillingProps {
   selectedRouter: RouterConfigWithId | null;
 }
@@ -107,6 +216,7 @@ interface BillingProps {
 export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
     const { plans, addPlan, updatePlan, deletePlan, isLoading: isLoadingPlans, error: plansError } = useBillingPlans(selectedRouter?.id || null);
     const { t, formatCurrency } = useLocalization();
+    const [activeTab, setActiveTab] = useState<'plans' | 'settings'>('plans');
     const [editingPlan, setEditingPlan] = useState<BillingPlanWithId | null>(null);
     const [isAdding, setIsAdding] = useState(false);
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
@@ -168,66 +278,102 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
         <div className="max-w-4xl mx-auto">
              <div className="flex justify-between items-center mb-6">
                 <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">{t('titles.billing')}</h2>
-                {!isAdding && !editingPlan && (
+                {activeTab === 'plans' && !isAdding && !editingPlan && (
                      <button onClick={handleAddNew} className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all">
                         {t('billing.add_new_plan')}
                     </button>
                 )}
             </div>
 
-            {(isAdding || editingPlan) && (
-                <div className="mb-8">
-                    { !selectedRouter ? (
-                        <div className="text-center p-8 bg-yellow-50 dark:bg-slate-800 rounded-lg border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300">
-                           <p>{t('billing.select_router_manage')}</p>
+            {/* Tab Buttons */}
+            <div className="flex border-b border-slate-200 dark:border-slate-700 mb-6">
+                <button
+                    onClick={() => setActiveTab('plans')}
+                    className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'plans' ? 'border-[--color-primary-500] text-[--color-primary-500] dark:text-[--color-primary-400]' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                >
+                    <SignalIcon className="h-5 w-5" />
+                    {t('billing.plans_tab')}
+                </button>
+                <button
+                    onClick={() => setActiveTab('settings')}
+                    className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'settings' ? 'border-[--color-primary-500] text-[--color-primary-500] dark:text-[--color-primary-400]' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                >
+                    <CogIcon className="h-5 w-5" />
+                    {t('billing.settings_tab')}
+                </button>
+            </div>
+
+            {/* Plans Tab */}
+            {activeTab === 'plans' && (
+                <>
+                    {(isAdding || editingPlan) && (
+                        <div className="mb-8">
+                            { !selectedRouter ? (
+                                <div className="text-center p-8 bg-yellow-50 dark:bg-slate-800 rounded-lg border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300">
+                                   <p>{t('billing.select_router_manage')}</p>
+                                </div>
+                            ) : (
+                                <PlanForm
+                                    onSave={handleSave}
+                                    onCancel={handleCancel}
+                                    initialData={editingPlan}
+                                    profiles={profiles}
+                                    isLoadingProfiles={isLoadingProfiles}
+                                />
+                            )}
                         </div>
-                    ) : (
-                        <PlanForm
-                            onSave={handleSave}
-                            onCancel={handleCancel}
-                            initialData={editingPlan}
-                            profiles={profiles}
-                            isLoadingProfiles={isLoadingProfiles}
-                        />
                     )}
-                </div>
-            )}
-            
-            {isLoadingPlans && (
-                 <div className="flex flex-col items-center justify-center h-64">
-                    <Loader />
-                    <p className="mt-4 text-[--color-primary-500] dark:text-[--color-primary-400]">{t('billing.loading_plans')}</p>
-                </div>
+                    
+                    {isLoadingPlans && (
+                         <div className="flex flex-col items-center justify-center h-64">
+                            <Loader />
+                            <p className="mt-4 text-[--color-primary-500] dark:text-[--color-primary-400]">{t('billing.loading_plans')}</p>
+                        </div>
+                    )}
+
+                    {!isLoadingPlans && (
+                        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
+                            <ul role="list" className="divide-y divide-slate-200 dark:divide-slate-700">
+                                {plans.map((plan) => (
+                                    <li key={plan.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                        <div className="flex items-center gap-4 mb-2 sm:mb-0">
+                                            <SignalIcon className="h-8 w-8 text-[--color-primary-500] dark:text-[--color-primary-400] flex-shrink-0" />
+                                            <div>
+                                                <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{plan.name}</p>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                                    <span className="font-bold text-slate-800 dark:text-slate-200">{formatCurrency(plan.price)}</span> / {plan.cycle_days || 30} {t('billing.days')}
+                                                    <span className="mx-2 text-slate-300 dark:text-slate-600">|</span>
+                                                    {t('billing.profile')}: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">{plan.pppoeProfile}</span>
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center space-x-2 self-end sm:self-center">
+                                            <button onClick={() => handleEdit(plan)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400]">
+                                                <EditIcon className="h-5 w-5" />
+                                            </button>
+                                            <button onClick={() => handleDelete(plan.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500">
+                                                <TrashIcon className="h-5 w-5" />
+                                            </button>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </>
             )}
 
-            {!isLoadingPlans && (
-                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
-                    <ul role="list" className="divide-y divide-slate-200 dark:divide-slate-700">
-                        {plans.map((plan) => (
-                            <li key={plan.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                <div className="flex items-center gap-4 mb-2 sm:mb-0">
-                                    <SignalIcon className="h-8 w-8 text-[--color-primary-500] dark:text-[--color-primary-400] flex-shrink-0" />
-                                    <div>
-                                        <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{plan.name}</p>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">
-                                            <span className="font-bold text-slate-800 dark:text-slate-200">{formatCurrency(plan.price)}</span> / {plan.cycle_days || 30} {t('billing.days')}
-                                            <span className="mx-2 text-slate-300 dark:text-slate-600">|</span>
-                                            {t('billing.profile')}: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">{plan.pppoeProfile}</span>
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center space-x-2 self-end sm:self-center">
-                                    <button onClick={() => handleEdit(plan)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400]">
-                                        <EditIcon className="h-5 w-5" />
-                                    </button>
-                                    <button onClick={() => handleDelete(plan.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500">
-                                        <TrashIcon className="h-5 w-5" />
-                                    </button>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
+            {/* Settings Tab */}
+            {activeTab === 'settings' && (
+                <>
+                    {!selectedRouter ? (
+                        <div className="text-center p-8 bg-yellow-50 dark:bg-slate-800 rounded-lg border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-300">
+                            <p>{t('billing.select_router_manage')}</p>
+                        </div>
+                    ) : (
+                        <BillingSettingsForm router={selectedRouter} plans={plans} />
+                    )}
+                </>
             )}
         </div>
     );
