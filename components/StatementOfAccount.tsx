@@ -44,23 +44,46 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
   const loadClients = async (routerId: string) => {
     try {
       setIsLoading(true);
-      // Load PPPoE clients from client_users table
       let pppoeUsers: any[] = [];
+      let dhcpClients: any[] = [];
+      
+      // Load PPPoE clients from router secrets
       try {
-        const pppoeRes = await fetch('/api/client-portal/users', { 
-          headers: getAuthHeader() 
+        const pppoeRes = await fetch(`/mt-api/${routerId}/ppp/secret`, {
+          headers: getAuthHeader()
         });
         if (pppoeRes.ok) {
-          pppoeUsers = await pppoeRes.json();
+          const secrets = await pppoeRes.json();
+          // Transform PPPoE secrets to client format
+          pppoeUsers = (Array.isArray(secrets) ? secrets : []).map((secret: any) => {
+            let customerInfo: any = {};
+            try {
+              customerInfo = JSON.parse(secret.comment || '{}');
+            } catch {}
+            
+            return {
+              id: secret['.id'] || secret.id,
+              type: 'pppoe',
+              name: secret.name,
+              username: secret.name,
+              pppoeUsername: secret.name,
+              accountNumber: customerInfo.accountNumber || customerInfo.account_number || '',
+              contactNumber: customerInfo.contactNumber || customerInfo.contact_number || '',
+              email: customerInfo.email || '',
+              fullName: customerInfo.fullName || customerInfo.customer?.fullName || '',
+              routerId: routerId,
+              profile: secret.profile || '',
+              comment: secret.comment || ''
+            };
+          });
         } else {
-          console.warn('Failed to fetch PPPoE users:', pppoeRes.status);
+          console.warn('Failed to fetch PPPoE secrets:', pppoeRes.status);
         }
       } catch (err) {
-        console.error('Error fetching PPPoE users:', err);
+        console.error('Error fetching PPPoE secrets:', err);
       }
       
       // Load DHCP clients
-      let dhcpClients: any[] = [];
       try {
         dhcpClients = await dbApi.get<any[]>(`/dhcp_clients?routerId=${routerId}`);
       } catch (err) {
@@ -69,15 +92,7 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
       
       // Combine both types
       const combined = [
-        ...(Array.isArray(pppoeUsers) ? pppoeUsers.filter((u: any) => u.router_id === routerId) : []).map((u: any) => ({
-          id: u.id,
-          type: 'pppoe',
-          name: u.username,
-          accountNumber: u.account_number,
-          contactNumber: u.contact_number || '',
-          email: u.email || '',
-          routerId: u.router_id
-        })),
+        ...pppoeUsers,
         ...(Array.isArray(dhcpClients) ? dhcpClients : []).map((c: any) => ({
           id: c.id || c.macAddress,
           type: 'dhcp',
@@ -105,7 +120,8 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
     return clients.filter(client => 
       client.name.toLowerCase().includes(query) ||
       client.accountNumber?.toLowerCase().includes(query) ||
-      client.contactNumber?.includes(query)
+      client.contactNumber?.includes(query) ||
+      client.fullName?.toLowerCase().includes(query)
     );
   }, [searchQuery, clients]);
 
@@ -231,11 +247,22 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
                   >
                     <UserIcon className="h-5 w-5 text-slate-400 flex-shrink-0" />
                     <div>
-                      <div className="font-medium">{client.name}</div>
+                      <div className="font-medium">
+                        {client.fullName || client.name}
+                        {client.fullName && client.type === 'pppoe' && (
+                          <span className="ml-2 text-xs text-slate-400">({client.name})</span>
+                        )}
+                      </div>
                       <div className="text-sm text-slate-500">
                         {client.accountNumber && `Account: ${client.accountNumber}`}
-                        <span className="mx-2">|</span>
+                        {client.accountNumber && <span className="mx-2">|</span>}
                         <span className="uppercase">{client.type}</span>
+                        {client.profile && client.type === 'pppoe' && (
+                          <>
+                            <span className="mx-2">|</span>
+                            <span>{client.profile}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </button>
