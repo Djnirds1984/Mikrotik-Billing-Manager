@@ -435,17 +435,6 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
                 </div>
               ) : (
                 <>
-                  {/* Print-only header */}
-                  <div className="hidden print:block mb-8">
-                    <h1 className="text-3xl font-bold">Statement of Account</h1>
-                    <p className="text-sm text-slate-500">Generated: {new Date().toLocaleString()}</p>
-                    <div className="mt-4">
-                      <p><strong>Client:</strong> {selectedClient.name}</p>
-                      {selectedClient.accountNumber && <p><strong>Account Number:</strong> {selectedClient.accountNumber}</p>}
-                      {selectedClient.contactNumber && <p><strong>Contact:</strong> {selectedClient.contactNumber}</p>}
-                    </div>
-                  </div>
-
                   {/* Account Summary Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700">
