@@ -45,13 +45,27 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
     try {
       setIsLoading(true);
       // Load PPPoE clients from client_users table
-      const pppoeRes = await fetch('/api/client-portal/users', { 
-        headers: getAuthHeader() 
-      });
-      const pppoeUsers = await pppoeRes.json();
+      let pppoeUsers: any[] = [];
+      try {
+        const pppoeRes = await fetch('/api/client-portal/users', { 
+          headers: getAuthHeader() 
+        });
+        if (pppoeRes.ok) {
+          pppoeUsers = await pppoeRes.json();
+        } else {
+          console.warn('Failed to fetch PPPoE users:', pppoeRes.status);
+        }
+      } catch (err) {
+        console.error('Error fetching PPPoE users:', err);
+      }
       
       // Load DHCP clients
-      const dhcpClients = await dbApi.get<any[]>(`/dhcp_clients?routerId=${routerId}`);
+      let dhcpClients: any[] = [];
+      try {
+        dhcpClients = await dbApi.get<any[]>(`/dhcp_clients?routerId=${routerId}`);
+      } catch (err) {
+        console.error('Error fetching DHCP clients:', err);
+      }
       
       // Combine both types
       const combined = [
@@ -232,6 +246,22 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
             {isLoading && (
               <div className="mt-4 flex justify-center">
                 <Loader />
+              </div>
+            )}
+
+            {!isLoading && clients.length === 0 && (
+              <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
+                <p className="text-sm text-blue-800 dark:text-blue-300">
+                  <strong>No clients found.</strong> To view PPPoE clients, please create client portal users first in the Client Portal Users page. DHCP clients will appear automatically when they connect to the portal-enabled DHCP server.
+                </p>
+              </div>
+            )}
+
+            {searchQuery && !isLoading && filteredClients.length === 0 && clients.length > 0 && (
+              <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                <p className="text-sm text-yellow-800 dark:text-yellow-300">
+                  No clients match your search query.
+                </p>
               </div>
             )}
           </div>

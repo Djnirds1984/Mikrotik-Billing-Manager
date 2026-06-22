@@ -617,6 +617,13 @@ async function initDb() {
                 await db.exec("ALTER TABLE pisowifi_income ADD COLUMN resellerId TEXT");
             }
         } catch (_) {}
+        try {
+            const expCols = await db.all("PRAGMA table_info(expenses)");
+            const expColNames = expCols.map(c => c.name);
+            if (!expColNames.includes('routerId')) {
+                await db.exec("ALTER TABLE expenses ADD COLUMN routerId TEXT");
+            }
+        } catch (_) {}
         
         try {
             const resellerNames = await db.all("SELECT DISTINCT TRIM(resellerName) AS name FROM pisowifi_income WHERE resellerName IS NOT NULL AND TRIM(resellerName) <> ''");
