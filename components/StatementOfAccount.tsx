@@ -563,7 +563,9 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
               )}
             </>
           )}
-        </div>
-      </>
+        </>
+      )}
+      </div>
+    </>
     );
 };
