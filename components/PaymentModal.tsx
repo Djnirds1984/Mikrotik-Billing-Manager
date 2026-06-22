@@ -67,9 +67,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const selectedPlan = plans.find(p => p.id === selectedPlanId);
     const planPrice = selectedPlan?.price || 0;
     
-    let daysInCycle = 30; // Default to Monthly
-    if (selectedPlan?.cycle === 'Yearly') daysInCycle = 365;
-    else if (selectedPlan?.cycle === 'Quarterly') daysInCycle = 90;
+    const daysInCycle = selectedPlan?.cycle_days || 30;
     
     const pricePerDay = daysInCycle > 0 ? planPrice / daysInCycle : 0;
     const discountDaysValue = parseInt(discountDays, 10) || 0;

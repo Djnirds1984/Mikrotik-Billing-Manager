@@ -548,6 +548,19 @@ async function initDb() {
             console.error('[Migration] billing_plans migration error:', err.message);
         }
         
+        // Add cycle_days column to billing_plans
+        try {
+            const billingPlanCycleDaysCols = await db.all("PRAGMA table_info(billing_plans)");
+            const billingPlanCycleDaysColNames = billingPlanCycleDaysCols.map(c => c.name);
+            if (!billingPlanCycleDaysColNames.includes('cycle_days')) {
+                console.log('[Migration] Adding cycle_days column to billing_plans...');
+                await db.exec("ALTER TABLE billing_plans ADD COLUMN cycle_days INTEGER DEFAULT 30");
+                console.log('[Migration] ✓ cycle_days column added to billing_plans');
+            }
+        } catch (err) {
+            console.error('[Migration] billing_plans cycle_days migration error:', err.message);
+        }
+        
         // Add store_enabled column to dhcp_billing_plans
         try {
             const dhcpPlanCols = await db.all("PRAGMA table_info(dhcp_billing_plans)");
@@ -2341,11 +2354,15 @@ async function startServer() {
             console.log(`[Manual Payments] Plan name: "${payment.plan_name}", Router ID: "${payment.customer_router_id}"`);
             
             if (billingPlan) {
-                // PPPoE plan - convert cycle to days
-                if (billingPlan.cycle === 'Monthly') durationDays = 30;
-                else if (billingPlan.cycle === 'Quarterly') durationDays = 90;
-                else if (billingPlan.cycle === 'Yearly') durationDays = 365;
-                console.log(`[Manual Payments] PPPoE plan detected: ${billingPlan.cycle} = ${durationDays} days`);
+                // PPPoE plan - use cycle_days if available, fall back to cycle-based conversion
+                if (billingPlan.cycle_days) {
+                    durationDays = billingPlan.cycle_days;
+                } else {
+                    if (billingPlan.cycle === 'Monthly') durationDays = 30;
+                    else if (billingPlan.cycle === 'Quarterly') durationDays = 90;
+                    else if (billingPlan.cycle === 'Yearly') durationDays = 365;
+                }
+                console.log(`[Manual Payments] PPPoE plan detected: ${durationDays} days`);
             } else if (dhcpPlan) {
                 // DHCP plan - use cycle_days directly
                 durationDays = dhcpPlan.cycle_days || 30;
@@ -2840,6 +2857,7 @@ async function startServer() {
                                 routerId: routerId,
                                 planName: plan.name,
                                 planPrice: plan.price,
+                                duration_days: plan.cycle_days || 30,
                                 customerAccountNumber: customer.accountNumber,
                                 customerFullName: customer.fullName
                             }
@@ -9398,7 +9416,7 @@ WantedBy=multi-user.target`;
                             send_email_receipt: false, show_description: false,
                             success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/success`,
                             cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/cancel`,
-                            metadata: { customerUsername, planId, planType, routerId, planName: plan.name, planPrice: plan.price, customerAccountNumber: customer.accountNumber, customerFullName: customer.fullName }
+                            metadata: { customerUsername, planId, planType, routerId, planName: plan.name, planPrice: plan.price, duration_days: plan.cycle_days || 30, customerAccountNumber: customer.accountNumber, customerFullName: customer.fullName }
                         }
                     }
                 };

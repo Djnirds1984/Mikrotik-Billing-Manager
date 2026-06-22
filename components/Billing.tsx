@@ -16,7 +16,7 @@ const PlanForm: React.FC<{
 }> = ({ onSave, onCancel, initialData, profiles, isLoadingProfiles }) => {
     // FIX: Add currency to plan state and handle it during initialization.
     const { t, currency } = useLocalization();
-    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', pppoeProfile: '', description: '', currency, store_enabled: 1 };
+    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', cycle_days: 30, pppoeProfile: '', description: '', currency, store_enabled: 1 };
     const [plan, setPlan] = useState<BillingPlan>(initialData || defaultPlanState);
     
     useEffect(() => {
@@ -64,12 +64,15 @@ const PlanForm: React.FC<{
                         <input type="number" name="price" value={plan.price} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
                     </div>
                      <div>
-                        <label htmlFor="cycle" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.cycle')}</label>
-                        <select name="cycle" value={plan.cycle} onChange={handleChange} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]">
-                            <option>{t('billing.monthly')}</option>
-                            <option>{t('billing.quarterly')}</option>
-                            <option>{t('billing.yearly')}</option>
-                        </select>
+                        <label htmlFor="cycle_days" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.validity_days')}</label>
+                        <input type="number" name="cycle_days" value={plan.cycle_days || 30} onChange={(e) => setPlan(prev => ({ ...prev, cycle_days: parseInt(e.target.value) || 30 }))} required min="1" className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                        <div className="flex gap-1.5 mt-2">
+                            {[7, 15, 30, 90, 365].map(d => (
+                                <button key={d} type="button" onClick={() => setPlan(prev => ({ ...prev, cycle_days: d }))} className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${plan.cycle_days === d ? 'bg-[--color-primary-600] text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>
+                                    {d}d
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
                 <div>
@@ -207,7 +210,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                                     <div>
                                         <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{plan.name}</p>
                                         <p className="text-sm text-slate-500 dark:text-slate-400">
-                                            <span className="font-bold text-slate-800 dark:text-slate-200">{formatCurrency(plan.price)}</span> / {t(`billing.${plan.cycle.toLowerCase()}`)}
+                                            <span className="font-bold text-slate-800 dark:text-slate-200">{formatCurrency(plan.price)}</span> / {plan.cycle_days || 30} {t('billing.days')}
                                             <span className="mx-2 text-slate-300 dark:text-slate-600">|</span>
                                             {t('billing.profile')}: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">{plan.pppoeProfile}</span>
                                         </p>

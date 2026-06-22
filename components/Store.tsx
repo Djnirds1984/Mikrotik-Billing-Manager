@@ -412,7 +412,7 @@ export const Store: React.FC = () => {
                       {formatPrice(plan.price, plan.currency)}
                     </span>
                     <span className="text-slate-600 dark:text-slate-400 ml-2">
-                      / {plan.planType === 'pppoe' ? plan.cycle : `${plan.cycle_days} days`}
+                      / {plan.cycle_days || 30} days
                     </span>
                   </div>
 
@@ -468,7 +468,7 @@ export const Store: React.FC = () => {
                 {formatPrice(selectedPlan.price, selectedPlan.currency)}
               </p>
               <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                {selectedPlan.planType === 'pppoe' ? selectedPlan.cycle : `${selectedPlan.cycle_days} days`}
+                {selectedPlan.cycle_days || 30} days
               </p>
             </div>
 

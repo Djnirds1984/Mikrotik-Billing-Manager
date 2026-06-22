@@ -21,10 +21,20 @@ export const useBillingPlans = (routerId: string | null) => {
         try {
             const data = await dbApi.get<BillingPlanWithId[]>(`/billing-plans?routerId=${routerId}`);
             // FIX: Provide a fallback currency for plans created before this update.
-            const dataWithFallback = data.map(plan => ({
-                ...plan,
-                currency: plan.currency || 'USD'
-            }));
+            // Also map old cycle values to cycle_days for backward compatibility.
+            const dataWithFallback = data.map(plan => {
+                let cycleDays = plan.cycle_days;
+                if (!cycleDays) {
+                    if (plan.cycle === 'Quarterly') cycleDays = 90;
+                    else if (plan.cycle === 'Yearly') cycleDays = 365;
+                    else cycleDays = 30;
+                }
+                return {
+                    ...plan,
+                    currency: plan.currency || 'USD',
+                    cycle_days: cycleDays
+                };
+            });
             setPlans(dataWithFallback);
         } catch (err) {
             setError((err as Error).message);

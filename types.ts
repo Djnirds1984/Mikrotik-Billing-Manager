@@ -213,6 +213,7 @@ export interface BillingPlan {
     name: string;
     price: number;
     cycle: 'Monthly' | 'Quarterly' | 'Yearly';
+    cycle_days?: number;
     pppoeProfile: string;
     description: string;
     currency: string;

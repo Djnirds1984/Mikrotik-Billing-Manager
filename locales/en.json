@@ -93,6 +93,8 @@
         "no_profiles_found": "No profiles found",
         "price": "Price",
         "cycle": "Cycle",
+        "validity_days": "Validity (Days)",
+        "days": "days",
         "description": "Description",
         "description_placeholder": "A brief description of the plan."
     },

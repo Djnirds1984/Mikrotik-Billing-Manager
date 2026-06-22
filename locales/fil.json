@@ -87,6 +87,8 @@
         "no_profiles_found": "Walang nahanap na profile",
         "price": "Presyo",
         "cycle": "Siklo",
+                "validity_days": "Validity (Araw)",
+                "days": "araw",
         "description": "Deskripsyon",
         "description_placeholder": "Isang maikling paglalarawan ng plano."
     },

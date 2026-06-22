@@ -85,6 +85,8 @@
         "no_profiles_found": "Nenhum perfil encontrado",
         "price": "Preço",
         "cycle": "Ciclo",
+                "validity_days": "Validade (Dias)",
+                "days": "dias",
         "description": "Descrição",
         "description_placeholder": "Uma breve descrição do plano."
     },
