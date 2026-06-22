@@ -52,6 +52,7 @@ const ClientPortal = React.lazy(() => import('./components/ClientPortal.tsx').th
 const ClientPortalUsers = React.lazy(() => import('./components/ClientPortalUsers.tsx').then(m => ({ default: m.ClientPortalUsers })));
 const RepairTickets = React.lazy(() => import('./components/RepairTickets.tsx').then(m => ({ default: m.RepairTickets })));
 const CaptivePortalPage = React.lazy(() => import('./components/CaptivePortalPage.tsx').then(m => ({ default: m.CaptivePortalPage })));
+const HotspotLoginPage = React.lazy(() => import('./components/HotspotController/HotspotLoginPage.tsx').then(m => ({ default: m.HotspotLoginPage })));
 const NotificationsPage = React.lazy(() => import('./components/NotificationsPage.tsx').then(m => ({ default: m.NotificationsPage })));
 const Payroll = React.lazy(() => import('./components/Payroll.tsx').then(m => ({ default: m.Payroll })));
 const CaptiveChatAdmin = React.lazy(() => import('./components/CaptiveChatAdmin.tsx').then(m => ({ default: m.CaptiveChatAdmin })));
@@ -455,6 +456,18 @@ const AppRouter: React.FC = () => {
                 <LocalizationProvider>
                     <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
                         <CaptivePortalPage />
+                    </Suspense>
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
+    if (path.startsWith('/hotspot-login')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <HotspotLoginPage />
                     </Suspense>
                 </LocalizationProvider>
             </ThemeProvider>

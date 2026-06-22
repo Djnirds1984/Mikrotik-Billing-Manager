@@ -831,6 +831,177 @@ async function startServer() {
     }));
     app.use(express.text({ limit: '10mb' }));
 
+    // --- HOTSPOT CONTROLLER MODULE (Isolated) ---
+    const hotspotDb = require('./hotspot/db');
+    const hotspotSessionManager = require('./hotspot/sessionManager');
+    await hotspotDb.initHotspotTables(db);
+    app.locals.hotspotDb = db;
+    app.use('/api/hotspot', require('./hotspot/routes'));
+    hotspotSessionManager.startExpiryChecker(db, 30000);
+    // Heartbeat checker every 2 minutes
+    setInterval(() => hotspotSessionManager.checkEspDeviceHeartbeats(db, 120000), 120000);
+
+    // --- NodeMCU Compatibility Endpoints ---
+    // These bridge the existing ESP firmware's API to the hotspot controller backend.
+    // ESP firmware calls these on the gateway IP (this server).
+
+    /**
+     * POST /api/nodemcu/register
+     * ESP registers/authenticates with systemKey.
+     * Matches existing firmware pattern: { macAddress, ipAddress, authenticationKey }
+     */
+    app.post('/api/nodemcu/register', async (req, res) => {
+        try {
+            const { macAddress, ipAddress, authenticationKey } = req.body;
+            if (!macAddress) {
+                return res.status(400).json({ message: 'macAddress required' });
+            }
+
+            const device = await hotspotDb.getEspDeviceByMac(db, macAddress);
+
+            if (!device) {
+                // Device not registered in admin panel
+                return res.json({
+                    status: 'pending',
+                    licensed: false,
+                    frozen: false,
+                    message: 'Device not registered. Register via admin panel first.'
+                });
+            }
+
+            // Validate authenticationKey against the device's api_key
+            if (authenticationKey && device.api_key === authenticationKey) {
+                await hotspotDb.updateEspHeartbeat(db, device.api_key);
+                return res.json({
+                    status: 'accepted',
+                    licensed: true,
+                    frozen: false,
+                    deviceName: device.device_name,
+                    routerId: device.router_id
+                });
+            }
+
+            // Also accept if no auth key configured yet (first boot)
+            if (!authenticationKey && device.status === 'offline') {
+                await hotspotDb.updateEspHeartbeat(db, device.api_key);
+                return res.json({
+                    status: 'accepted',
+                    licensed: true,
+                    frozen: false,
+                    deviceName: device.device_name,
+                    routerId: device.router_id
+                });
+            }
+
+            // Auth key mismatch
+            return res.json({
+                status: 'pending',
+                licensed: false,
+                frozen: false,
+                message: 'Authentication key mismatch. Check System Key in setup.'
+            });
+        } catch (err) {
+            console.error('[NodeMCU Register Error]', err);
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    /**
+     * POST /api/nodemcu/pulse
+     * ESP reports coin pulses. Backend creates/extends hotspot session.
+     * Matches existing firmware pattern: { macAddress, slotId, denomination }
+     * - macAddress: ESP device's own MAC
+     * - denomination: total coin pulse count
+     */
+    app.post('/api/nodemcu/pulse', async (req, res) => {
+        try {
+            const { macAddress, slotId, denomination } = req.body;
+            if (!macAddress || !denomination) {
+                return res.status(400).json({ message: 'macAddress and denomination required' });
+            }
+
+            // Look up ESP device by its MAC
+            const device = await hotspotDb.getEspDeviceByMac(db, macAddress);
+            if (!device) {
+                return res.status(403).json({ success: false, message: 'Device not registered', frozen: true });
+            }
+
+            // Calculate amount from pulses * coin_value
+            const amount = denomination * device.coin_value;
+
+            // Find best matching plan for this router
+            const plans = await hotspotDb.getHotspotPlans(db, device.router_id);
+            if (!plans || plans.length === 0) {
+                return res.status(400).json({ success: false, message: 'No hotspot plans configured' });
+            }
+
+            const affordablePlans = plans.filter(p => p.price <= amount).sort((a, b) => b.price - a.price);
+            if (affordablePlans.length === 0) {
+                return res.status(400).json({ success: false, message: `Amount ${amount} not enough for any plan` });
+            }
+
+            const selectedPlan = affordablePlans[0];
+
+            // Find latest active session for this router (the client waiting for coins)
+            const existingSession = await hotspotDb.getLatestActiveSession(db, device.router_id);
+
+            let session;
+            if (existingSession) {
+                // Extend existing session (may be 'pending' or 'active')
+                session = await hotspotSessionManager.extendDeviceSession(
+                    device.router_id, existingSession, selectedPlan.duration_seconds, db
+                );
+                if (!session) {
+                    return res.status(500).json({ success: false, message: 'Failed to extend session on MikroTik' });
+                }
+
+                // If session was pending, activate it now that coins arrived
+                if (existingSession.status === 'pending') {
+                    await db.run(
+                        "UPDATE hotspot_sessions SET status = 'active', payment_method = 'coinslot', amount_paid = ? WHERE id = ?",
+                        [amount, existingSession.id]
+                    );
+                    session.status = 'active';
+                }
+            } else {
+                // No active session found - can't authorize without client MAC
+                return res.status(400).json({
+                    success: false,
+                    message: 'No active client session found. Client must visit the login page first.'
+                });
+            }
+
+            // Log the transaction
+            const txn = await hotspotDb.createCoinslotTransaction(db, {
+                espDeviceId: device.id,
+                routerId: device.router_id,
+                macAddress: session.mac_address || session.macAddress,
+                ipAddress: session.ip_address || session.ipAddress,
+                coinsInserted: denomination,
+                amount,
+                durationSeconds: selectedPlan.duration_seconds,
+                sessionId: session.id,
+            });
+
+            // Update heartbeat
+            await hotspotDb.updateEspHeartbeat(db, device.api_key);
+
+            console.log(`[NodeMCU Pulse] ESP:${macAddress} | ${denomination} pulses = ${amount} | Plan: ${selectedPlan.name} | Session: ${session.id}`);
+
+            res.json({
+                success: true,
+                message: `Granted ${selectedPlan.name}`,
+                durationSeconds: selectedPlan.duration_seconds,
+                planName: selectedPlan.name,
+                amount,
+                transactionId: txn.id,
+            });
+        } catch (err) {
+            console.error('[NodeMCU Pulse Error]', err);
+            res.status(500).json({ message: err.message });
+        }
+    });
+
     // --- API ROUTES ---
     
     // Authentication

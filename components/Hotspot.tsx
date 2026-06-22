@@ -25,10 +25,11 @@ import { generateHotspotSetupScript } from '../services/geminiService.ts';
 import { Loader } from './Loader.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 // FIX: Import missing CodeBracketIcon.
-import { RouterIcon, UsersIcon, ServerIcon, EditIcon, TrashIcon, ChipIcon, CodeBracketIcon, ExclamationTriangleIcon } from '../constants.tsx';
+import { RouterIcon, UsersIcon, ServerIcon, EditIcon, TrashIcon, ChipIcon, CodeBracketIcon, ExclamationTriangleIcon, WifiIcon } from '../constants.tsx';
 import { NodeMcuManager } from './NodeMcuManager.tsx';
 import { HotspotEditor } from './HotspotEditor.tsx';
 import { HotspotInstaller } from './HotspotInstaller.tsx';
+import { HotspotControllerTab } from './HotspotController/HotspotControllerTab.tsx';
 
 // --- Reusable Components ---
 
@@ -408,7 +409,7 @@ const HotspotUserProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId 
 // --- Main Hotspot Component ---
 
 export const Hotspot: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
-    const [activeTab, setActiveTab] = useState<'user-activity' | 'nodemcu' | 'editor' | 'server-profiles' | 'user-profiles' | 'setup'>('user-activity');
+    const [activeTab, setActiveTab] = useState<'user-activity' | 'nodemcu' | 'editor' | 'server-profiles' | 'user-profiles' | 'setup' | 'controller'>('user-activity');
     
     // --- LIFTED STATE & LOGIC for user-activity and nodemcu ---
     const [activeUsers, setActiveUsers] = useState<HotspotActiveUser[]>([]);
@@ -526,6 +527,8 @@ export const Hotspot: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                 return <HotspotUserProfilesManager selectedRouter={selectedRouter} />;
             case 'setup': 
                 return <HotspotInstaller selectedRouter={selectedRouter} />;
+            case 'controller':
+                return <HotspotControllerTab routerId={selectedRouter.id} />;
             default: return null;
         }
     };
@@ -540,6 +543,7 @@ export const Hotspot: React.FC<{ selectedRouter: RouterConfigWithId | null }> = 
                     <TabButton label="Server Profiles" icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'server-profiles'} onClick={() => setActiveTab('server-profiles')} />
                     <TabButton label="User Profiles" icon={<UsersIcon className="w-5 h-5"/>} isActive={activeTab === 'user-profiles'} onClick={() => setActiveTab('user-profiles')} />
                     <TabButton label="Server Setup" icon={<ServerIcon className="w-5 h-5"/>} isActive={activeTab === 'setup'} onClick={() => setActiveTab('setup')} />
+                    <TabButton label="Controller" icon={<WifiIcon className="w-5 h-5"/>} isActive={activeTab === 'controller'} onClick={() => setActiveTab('controller')} />
                 </nav>
             </div>
             <div>

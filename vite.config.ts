@@ -24,6 +24,16 @@ export default defineConfig(({ mode, command }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/api/hotspot': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/nodemcu': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+        },
         '/api': {
           target: 'http://localhost:3002',
           changeOrigin: true,

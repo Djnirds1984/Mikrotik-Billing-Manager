@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WiFi Hotspot</title>
+    <style>
+        /* ============================================================
+           CAPTIVE PORTAL - Piso WiFi Landing Page
+           Easy to edit: change branding in the HTML section below.
+           
+           Query params (from MikroTik or dev testing):
+             ?routerId=xxx&mac=AA:BB:CC:DD:EE:FF&ip=192.168.1.50
+             &panelUrl=http://192.168.1.100:3001
+        ============================================================ */
+
+        :root {
+            --blue: #1A6BFF;
+            --blue-dark: #1557d4;
+            --purple: #6B5CE7;
+            --purple-dark: #5a4bd6;
+            --green: #22c55e;
+            --gray-bg: #f3f4f6;
+            --gray-text: #6b7280;
+            --dark: #1f2937;
+            --white: #ffffff;
+            --radius: 12px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #e8edf3;
+            color: var(--dark);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* --- HEADER BAR --- */
+        .header-bar {
+            width: 100%;
+            background: var(--blue);
+            padding: 16px 20px;
+            text-align: center;
+        }
+        .header-bar h1 {
+            color: #fff;
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+        .header-bar p {
+            color: rgba(255,255,255,0.8);
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            margin-top: 2px;
+        }
+
+        /* --- MAIN CONTENT --- */
+        .main-content {
+            flex: 1;
+            width: 100%;
+            max-width: 420px;
+            padding: 24px 16px 80px;
+        }
+
+        /* --- CARD --- */
+        .card {
+            background: var(--white);
+            border-radius: 16px;
+            padding: 32px 24px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+
+        .wifi-icon {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 16px;
+            background: #f0f0f0;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .wifi-icon svg { width: 36px; height: 36px; }
+
+        .card h2 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .card .instructions {
+            font-size: 0.8rem;
+            color: var(--gray-text);
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .device-info {
+            font-size: 0.7rem;
+            color: #9ca3af;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #dcfce7;
+            color: #16a34a;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-bottom: 24px;
+        }
+        .status-pill .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+        }
+        .status-pill.offline { background: #fee2e2; color: #dc2626; }
+        .status-pill.offline .dot { background: #dc2626; }
+
+        /* --- BUTTONS --- */
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.95rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-blue {
+            background: var(--blue);
+            color: #fff;
+        }
+        .btn-blue:hover { background: var(--blue-dark); }
+        .btn-purple {
+            background: var(--purple);
+            color: #fff;
+        }
+        .btn-purple:hover { background: var(--purple-dark); }
+        .btn-outline {
+            background: transparent;
+            border: 2px solid #d1d5db;
+            color: var(--gray-text);
+        }
+        .btn-outline:hover { border-color: #9ca3af; }
+        .btn + .btn { margin-top: 10px; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-start {
+            position: relative;
+            padding-left: 40px;
+        }
+        .btn-start .rocket {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.1rem;
+        }
+
+        /* --- BOTTOM LINKS --- */
+        .bottom-section {
+            margin-top: 24px;
+            text-align: center;
+        }
+        .restore-link {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .restore-link:hover { color: var(--blue); text-decoration: underline; }
+
+        /* --- ADMIN LOGIN (fixed bottom-right) --- */
+        .admin-btn {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            background: #1f2937;
+            color: #fff;
+            padding: 10px 16px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+        .admin-btn .lock-icon { color: #facc15; }
+
+        /* ============================================================
+           MODALS
+        ============================================================ */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .modal-overlay.active { display: flex; }
+
+        .modal {
+            background: var(--white);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 380px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            animation: modalIn 0.3s ease;
+        }
+        @keyframes modalIn {
+            from { transform: scale(0.9) translateY(20px); opacity: 0; }
+            to { transform: scale(1) translateY(0); opacity: 1; }
+        }
+
+        .modal-header {
+            background: var(--purple);
+            padding: 20px;
+            text-align: center;
+        }
+        .modal-header h3 {
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }
+        .modal-header p {
+            color: rgba(255,255,255,0.7);
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            margin-top: 2px;
+        }
+
+        .modal-body { padding: 24px; }
+
+        /* Amount/Time display boxes */
+        .display-box {
+            background: var(--gray-bg);
+            border-radius: var(--radius);
+            padding: 16px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .display-box .label {
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: #9ca3af;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+        .display-box .value {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--dark);
+            margin-top: 4px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .modal-actions .btn { flex: 1; padding: 12px; font-size: 0.8rem; }
+
+        .cancel-link {
+            display: block;
+            text-align: center;
+            color: #9ca3af;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            margin-top: 12px;
+            padding: 8px;
+        }
+        .cancel-link:hover { color: #ef4444; }
+
+        /* --- Pulse animation --- */
+        .pulse-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 0.75rem;
+            color: var(--gray-text);
+            margin-bottom: 16px;
+        }
+        .pulse-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #facc15;
+            animation: pulseDot 1.5s infinite;
+        }
+        .pulse-dot.active { background: var(--green); animation: none; }
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.8); }
+        }
+
+        /* --- Rates modal --- */
+        .rate-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .rate-item:last-child { border-bottom: none; }
+        .rate-item .rate-name { font-weight: 700; font-size: 0.9rem; }
+        .rate-item .rate-duration { font-size: 0.75rem; color: var(--gray-text); }
+        .rate-item .rate-price { font-weight: 800; color: var(--purple); font-size: 1rem; }
+
+        /* --- Spinner --- */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* --- Connected state --- */
+        .connected-badge {
+            background: #dcfce7;
+            color: #16a34a;
+            padding: 12px;
+            border-radius: var(--radius);
+            font-weight: 700;
+            font-size: 0.85rem;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .countdown {
+            font-size: 1.5rem;
+            font-weight: 800;
+            font-family: monospace;
+            color: var(--purple);
+            text-align: center;
+            margin: 8px 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- ===================== HEADER - EDIT BRANDING HERE ===================== -->
+    <div class="header-bar">
+        <h1 id="company-name">WIFI HOTSPOT</h1>
+        <p>ENTERPRISE INTERNET GATEWAY</p>
+    </div>
+
+    <!-- ===================== MAIN LANDING PAGE ===================== -->
+    <div class="main-content">
+        <div class="card">
+            <!-- WiFi Icon -->
+            <div class="wifi-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#1A6BFF" stroke-width="2" stroke-linecap="round">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                    <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                    <circle cx="12" cy="20" r="1" fill="#1A6BFF"/>
+                </svg>
+            </div>
+
+            <h2>Insert Coins to Connect</h2>
+            <p class="instructions">
+                1. Tap <strong>INSERT COIN</strong>.<br>
+                2. Drop coins.<br>
+                3. Tap <strong>START SURFING</strong>.
+            </p>
+
+            <div class="device-info">
+                DEVICE IP: <span id="device-ip">---</span>
+                &nbsp;&nbsp;
+                DEVICE MAC: <span id="device-mac">---</span>
+            </div>
+
+            <div>
+                <span class="status-pill" id="status-pill">
+                    <span class="dot"></span>
+                    <span id="status-text">ONLINE</span>
+                </span>
+            </div>
+
+            <!-- Action Buttons -->
+            <button class="btn btn-blue" id="btn-insert-coin" onclick="openInsertCoinModal()">
+                INSERT COIN
+            </button>
+            <button class="btn btn-blue" onclick="openRatesModal()">
+                VIEW RATES
+            </button>
+        </div>
+
+        <div class="bottom-section">
+            <a class="restore-link" onclick="restoreSession()">LOST CONNECTION? RESTORE SESSION</a>
+        </div>
+    </div>
+
+    <!-- Admin Login Button (fixed) -->
+    <a class="admin-btn" href="/admin" id="admin-link">
+        <span class="lock-icon">&#128274;</span>
+        ADMIN LOGIN
+    </a>
+
+    <!-- ===================== INSERT COIN MODAL ===================== -->
+    <div class="modal-overlay" id="coin-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>INSERT COINS</h3>
+                <p id="modal-machine-name">MAIN MACHINE</p>
+            </div>
+            <div class="modal-body">
+                <!-- Status indicator -->
+                <div class="pulse-indicator">
+                    <span class="pulse-dot" id="pulse-dot"></span>
+                    <span id="pulse-status-text">Waiting for coins...</span>
+                </div>
+
+                <!-- Amount display -->
+                <div class="display-box">
+                    <div class="label">TOTAL AMOUNT</div>
+                    <div class="value" id="total-amount">&#8369;0</div>
+                </div>
+
+                <!-- Time display -->
+                <div class="display-box">
+                    <div class="label">TOTAL TIME</div>
+                    <div class="value" id="total-time">0s</div>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="modal-actions">
+                    <button class="btn btn-purple" id="btn-surf" onclick="surfInternet()" disabled>
+                        SURF INTERNET
+                    </button>
+                    <button class="btn btn-outline" id="btn-credit" onclick="saveAsCredit()" disabled>
+                        SAVE AS CREDIT
+                    </button>
+                </div>
+
+                <!-- Start surfing -->
+                <button class="btn btn-purple btn-start" id="btn-start" onclick="startSurfing()" disabled>
+                    <span class="rocket">&#128640;</span>
+                    START SURFING
+                </button>
+
+                <a class="cancel-link" onclick="closeCoinModal()">CANCEL</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== VIEW RATES MODAL ===================== -->
+    <div class="modal-overlay" id="rates-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>WiFi RATES</h3>
+                <p>SELECT A PLAN</p>
+            </div>
+            <div class="modal-body">
+                <div id="rates-list">
+                    <div class="display-box">
+                        <div class="label" style="margin-bottom:8px">Loading plans...</div>
+                    </div>
+                </div>
+                <a class="cancel-link" onclick="closeRatesModal()">CLOSE</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== CONNECTED MODAL ===================== -->
+    <div class="modal-overlay" id="connected-modal">
+        <div class="modal">
+            <div class="modal-header" style="background:#16a34a">
+                <h3>&#10003; CONNECTED</h3>
+                <p>YOU ARE NOW ONLINE</p>
+            </div>
+            <div class="modal-body">
+                <div class="connected-badge" id="connected-plan">Plan Active</div>
+                <div class="display-box">
+                    <div class="label">TIME REMAINING</div>
+                    <div class="countdown" id="session-countdown">00:00:00</div>
+                </div>
+                <button class="btn btn-purple" onclick="closeConnectedModal()">
+                    START BROWSING
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== JAVASCRIPT ===================== -->
+    <script>
+    (function() {
+        'use strict';
+
+        // ============================================================
+        // CONFIG - Edit these as needed
+        // ============================================================
+        var CONFIG = {
+            panelUrl: '',  // Leave empty for dev, set IP for MikroTik: 'http://192.168.1.100:3001'
+            pollInterval: 2000,       // How often to poll for coin updates (ms)
+            countdownInterval: 1000,  // Countdown refresh (ms)
+            currencySymbol: '\u20B1', // PHP Peso sign. Use '$' for USD
+            companyName: 'WIFI HOTSPOT',
+        };
+
+        // ============================================================
+        // Parse URL params (from MikroTik redirect or dev testing)
+        // ============================================================
+        var params = new URLSearchParams(window.location.search);
+        var routerId = params.get('routerId') || params.get('router') || '';
+        var mac = params.get('mac') || '';
+        var ip = params.get('ip') || '';
+        var linkOrig = params.get('link-orig') || '';
+
+        if (params.get('panelUrl')) {
+            CONFIG.panelUrl = params.get('panelUrl').replace(/\/+$/, '');
+        }
+
+        // State
+        var isCoinModalOpen = false;
+        var coinPollTimer = null;
+        var countdownTimer = null;
+        var currentSession = null;
+        var totalAmount = 0;
+        var totalDuration = 0;
+        var hasCoins = false;
+
+        // ============================================================
+        // Init
+        // ============================================================
+        function init() {
+            document.getElementById('company-name').textContent = CONFIG.companyName;
+            document.getElementById('device-ip').textContent = ip || '---';
+            document.getElementById('device-mac').textContent = mac ? 'DEV-' + mac.replace(/:/g, '').substring(0, 9).toUpperCase() : '---';
+
+            // Check if already connected, then register pending session
+            checkExistingSession().then(function() {
+                if (!currentSession) {
+                    registerPendingSession();
+                }
+            });
+        }
+
+        // ============================================================
+        // API helper
+        // ============================================================
+        function apiUrl(path) {
+            return CONFIG.panelUrl + path;
+        }
+
+        function apiGet(path) {
+            return fetch(apiUrl(path)).then(function(r) { return r.json(); });
+        }
+
+        function apiPost(path, body) {
+            return fetch(apiUrl(path), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            }).then(function(r) { return r.json(); });
+        }
+
+        // ============================================================
+        // Check existing session (on page load)
+        // ============================================================
+        function checkExistingSession() {
+            if (!routerId || !mac) return Promise.resolve();
+            return apiGet('/api/hotspot/sessions?routerId=' + encodeURIComponent(routerId))
+                .then(function(sessions) {
+                    if (!Array.isArray(sessions)) return;
+                    var mySession = sessions.find(function(s) {
+                        var sessMac = s.mac_address || s.macAddress;
+                        var sessStatus = s.status;
+                        return sessMac === mac && sessStatus === 'active';
+                    });
+                    if (mySession) {
+                        currentSession = mySession;
+                        showConnectedState(mySession);
+                    }
+                })
+                .catch(function() {});
+        }
+
+        // ============================================================
+        // Register pending session (called on page load if no active session)
+        // Creates a MikroTik hotspot user + binding so ESP can extend it later
+        // ============================================================
+        function registerPendingSession() {
+            if (!routerId || !mac) return;
+            apiPost('/api/hotspot/portal/init', { routerId: routerId, mac: mac, ip: ip })
+                .then(function(data) {
+                    if (data.success && data.alreadyActive && data.session) {
+                        currentSession = data.session;
+                        showConnectedState(data.session);
+                    }
+                    console.log('[Portal] Pending session:', data.message);
+                })
+                .catch(function(err) {
+                    console.warn('[Portal] Could not register pending session:', err);
+                });
+        }
+
+        // ============================================================
+        // INSERT COIN Modal
+        // ============================================================
+        window.openInsertCoinModal = function() {
+            isCoinModalOpen = true;
+            totalAmount = 0;
+            totalDuration = 0;
+            hasCoins = false;
+            updateCoinDisplay();
+
+            document.getElementById('coin-modal').classList.add('active');
+            document.getElementById('pulse-dot').className = 'pulse-dot';
+            document.getElementById('pulse-status-text').textContent = 'Waiting for coins...';
+            document.getElementById('btn-start').disabled = true;
+            document.getElementById('btn-surf').disabled = true;
+            document.getElementById('btn-credit').disabled = true;
+
+            startCoinPolling();
+        };
+
+        window.closeCoinModal = function() {
+            isCoinModalOpen = false;
+            document.getElementById('coin-modal').classList.remove('active');
+            stopCoinPolling();
+        };
+
+        // ============================================================
+        // Coin Polling - checks for session updates from ESP
+        // ============================================================
+        function startCoinPolling() {
+            stopCoinPolling();
+            coinPollTimer = setInterval(pollForCoins, CONFIG.pollInterval);
+            pollForCoins(); // immediate first check
+        }
+
+        function stopCoinPolling() {
+            if (coinPollTimer) {
+                clearInterval(coinPollTimer);
+                coinPollTimer = null;
+            }
+        }
+
+        function pollForCoins() {
+            if (!isCoinModalOpen || !routerId || !mac) return;
+
+            apiGet('/api/hotspot/sessions?routerId=' + encodeURIComponent(routerId))
+                .then(function(sessions) {
+                    if (!Array.isArray(sessions)) return;
+                    // Look for our session (active or pending with coins applied)
+                    var mySession = sessions.find(function(s) {
+                        var sessMac = s.mac_address || s.macAddress;
+                        return sessMac === mac && (s.status === 'active' || s.status === 'pending');
+                    });
+
+                    if (mySession) {
+                        // Session found - check if coins were inserted
+                        var newAmount = parseFloat(mySession.amount_paid || mySession.amountPaid || 0);
+                        var duration = parseInt(mySession.duration_seconds || mySession.durationSeconds || 0);
+
+                        if (newAmount > totalAmount || (duration > totalDuration && duration > 60)) {
+                            // New coins detected! (duration > 60 means it was extended beyond grace period)
+                            totalAmount = newAmount;
+                            totalDuration = duration;
+                            hasCoins = true;
+                            currentSession = mySession;
+
+                            // Update UI
+                            document.getElementById('pulse-dot').className = 'pulse-dot active';
+                            document.getElementById('pulse-status-text').textContent = 'Coins detected! Drop more or tap START SURFING.';
+                            document.getElementById('btn-start').disabled = false;
+                            document.getElementById('btn-surf').disabled = false;
+                            document.getElementById('btn-credit').disabled = false;
+                            updateCoinDisplay();
+
+                            // Flash effect
+                            document.querySelector('.display-box').style.background = '#dcfce7';
+                            setTimeout(function() {
+                                document.querySelectorAll('.display-box').forEach(function(el) { el.style.background = ''; });
+                            }, 500);
+                        }
+                    }
+                })
+                .catch(function() {});
+        }
+
+        function updateCoinDisplay() {
+            document.getElementById('total-amount').textContent = CONFIG.currencySymbol + totalAmount.toFixed(0);
+            document.getElementById('total-time').textContent = formatDuration(totalDuration);
+        }
+
+        // ============================================================
+        // Action Buttons in Modal
+        // ============================================================
+        window.startSurfing = function() {
+            if (!currentSession) return;
+            closeCoinModal();
+            showConnectedState(currentSession);
+        };
+
+        window.surfInternet = function() {
+            window.startSurfing();
+        };
+
+        window.saveAsCredit = function() {
+            if (!currentSession) return;
+            // For now, same as start surfing. Credit saving can be added later.
+            closeCoinModal();
+            showConnectedState(currentSession);
+        };
+
+        // ============================================================
+        // Connected State
+        // ============================================================
+        function showConnectedState(session) {
+            var planName = session.plan_name || session.planName || 'Active Session';
+            var expiresAt = session.expires_at || session.expiresAt;
+
+            document.getElementById('connected-plan').textContent = planName;
+            document.getElementById('connected-modal').classList.add('active');
+
+            // Update status pill
+            document.getElementById('status-pill').classList.remove('offline');
+            document.getElementById('status-text').textContent = 'CONNECTED';
+
+            // Start countdown
+            if (expiresAt) {
+                startCountdown(new Date(expiresAt).getTime());
+            }
+        }
+
+        window.closeConnectedModal = function() {
+            document.getElementById('connected-modal').classList.remove('active');
+            // Redirect to original URL if MikroTik redirect
+            if (linkOrig) {
+                window.location.href = linkOrig;
+            }
+        };
+
+        // ============================================================
+        // VIEW RATES Modal
+        // ============================================================
+        window.openRatesModal = function() {
+            document.getElementById('rates-modal').classList.add('active');
+            loadRates();
+        };
+
+        window.closeRatesModal = function() {
+            document.getElementById('rates-modal').classList.remove('active');
+        };
+
+        function loadRates() {
+            if (!routerId) {
+                document.getElementById('rates-list').innerHTML =
+                    '<div class="display-box"><div class="label">No router configured</div></div>';
+                return;
+            }
+
+            apiGet('/api/hotspot/public/plans?routerId=' + encodeURIComponent(routerId))
+                .then(function(plans) {
+                    var html = '';
+                    if (!plans || !plans.length) {
+                        html = '<div class="display-box"><div class="label">No plans available</div></div>';
+                    } else {
+                        plans.forEach(function(plan) {
+                            html += '<div class="rate-item">' +
+                                '<div><div class="rate-name">' + escHtml(plan.name) + '</div>' +
+                                '<div class="rate-duration">' + formatDuration(plan.durationSeconds) + '</div></div>' +
+                                '<div class="rate-price">' + CONFIG.currencySymbol + Number(plan.price).toFixed(2) + '</div>' +
+                                '</div>';
+                        });
+                    }
+                    document.getElementById('rates-list').innerHTML = html;
+                })
+                .catch(function() {
+                    document.getElementById('rates-list').innerHTML =
+                        '<div class="display-box"><div class="label">Could not load rates</div></div>';
+                });
+        }
+
+        // ============================================================
+        // Restore Session
+        // ============================================================
+        window.restoreSession = function() {
+            if (!routerId || !mac) {
+                alert('Missing device information. Please reconnect to WiFi.');
+                return;
+            }
+            apiGet('/api/hotspot/sessions?routerId=' + encodeURIComponent(routerId))
+                .then(function(sessions) {
+                    if (!Array.isArray(sessions)) throw new Error('No sessions');
+                    var mySession = sessions.find(function(s) {
+                        return (s.mac_address || s.macAddress) === mac && s.status === 'active';
+                    });
+                    if (mySession) {
+                        currentSession = mySession;
+                        showConnectedState(mySession);
+                    } else {
+                        alert('No active session found for this device. Insert coins to start a new session.');
+                    }
+                })
+                .catch(function() {
+                    alert('Could not check sessions. Please try again.');
+                });
+        };
+
+        // ============================================================
+        // Countdown Timer
+        // ============================================================
+        function startCountdown(expiresMs) {
+            if (countdownTimer) clearInterval(countdownTimer);
+
+            function tick() {
+                var remaining = expiresMs - Date.now();
+                var el = document.getElementById('session-countdown');
+                if (remaining <= 0) {
+                    el.textContent = '00:00:00';
+                    clearInterval(countdownTimer);
+                    document.getElementById('connected-modal').classList.remove('active');
+                    document.getElementById('status-text').textContent = 'EXPIRED';
+                    document.getElementById('status-pill').classList.add('offline');
+                    return;
+                }
+                el.textContent = formatCountdown(remaining);
+            }
+            tick();
+            countdownTimer = setInterval(tick, CONFIG.countdownInterval);
+        }
+
+        // ============================================================
+        // Helpers
+        // ============================================================
+        function formatDuration(seconds) {
+            if (!seconds || seconds <= 0) return '0s';
+            if (seconds >= 86400) return Math.floor(seconds / 86400) + 'd';
+            if (seconds >= 3600) {
+                var h = Math.floor(seconds / 3600);
+                var m = Math.floor((seconds % 3600) / 60);
+                return m > 0 ? h + 'h ' + m + 'm' : h + 'h';
+            }
+            if (seconds >= 60) return Math.floor(seconds / 60) + 'min';
+            return seconds + 's';
+        }
+
+        function formatCountdown(ms) {
+            var totalSec = Math.floor(ms / 1000);
+            var h = Math.floor(totalSec / 3600);
+            var m = Math.floor((totalSec % 3600) / 60);
+            var s = totalSec % 60;
+            return pad(h) + ':' + pad(m) + ':' + pad(s);
+        }
+
+        function pad(n) { return n < 10 ? '0' + n : '' + n; }
+        function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        // ============================================================
+        // Start
+        // ============================================================
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    })();
+    </script>
+</body>
+</html>
