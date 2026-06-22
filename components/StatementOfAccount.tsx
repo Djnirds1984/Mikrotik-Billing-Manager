@@ -200,12 +200,145 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
   }, [invoices, payments]);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">
-          Statement of Account
-        </h2>
-      </div>
+    <>
+      {/* Print Layout - Only visible when printing */}
+      {selectedClient && (
+        <div className="hidden print:block print:p-8 print:max-w-none">
+          {/* SOA Print Header */}
+          <div className="print:mb-8 print:border-b-2 print:border-black print:pb-4">
+            <h1 className="print:text-3xl print:font-bold print:mb-2">STATEMENT OF ACCOUNT</h1>
+            <p className="print:text-sm print:text-gray-600">Generated: {new Date().toLocaleString()}</p>
+          </div>
+
+          {/* Client Information */}
+          <div className="print:mb-6 print:grid print:grid-cols-2 print:gap-4">
+            <div>
+              <p className="print:text-sm print:text-gray-600 print:mb-1">Client Name:</p>
+              <p className="print:text-lg print:font-bold">{selectedClient.fullName || selectedClient.name}</p>
+              {selectedClient.type === 'pppoe' && selectedClient.name && (
+                <p className="print:text-sm print:text-gray-600">Username: {selectedClient.name}</p>
+              )}
+            </div>
+            <div>
+              {selectedClient.accountNumber && (
+                <>
+                  <p className="print:text-sm print:text-gray-600 print:mb-1">Account Number:</p>
+                  <p className="print:text-lg print:font-bold">{selectedClient.accountNumber}</p>
+                </>
+              )}
+              {selectedClient.contactNumber && (
+                <>
+                  <p className="print:text-sm print:text-gray-600 print:mb-1">Contact Number:</p>
+                  <p className="print:text-base">{selectedClient.contactNumber}</p>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Account Summary */}
+          <div className="print:mb-6 print:border print:border-black print:p-4">
+            <h2 className="print:text-xl print:font-bold print:mb-3">Account Summary</h2>
+            <div className="print:grid print:grid-cols-2 print:gap-2">
+              <div className="print:flex print:justify-between print:py-1">
+                <span className="print:text-gray-600">Total Invoiced:</span>
+                <span className="print:font-bold">{formatCurrency(accountSummary.totalInvoiced)}</span>
+              </div>
+              <div className="print:flex print:justify-between print:py-1">
+                <span className="print:text-gray-600">Total Paid:</span>
+                <span className="print:font-bold print:text-green-600">{formatCurrency(accountSummary.totalPaid)}</span>
+              </div>
+              <div className="print:flex print:justify-between print:py-1 print:border-t print:border-gray-300">
+                <span className="print:text-gray-600 print:font-bold">Outstanding Balance:</span>
+                <span className="print:font-bold print:text-xl print:text-red-600">{formatCurrency(accountSummary.outstandingBalance)}</span>
+              </div>
+              <div className="print:flex print:justify-between print:py-1">
+                <span className="print:text-gray-600">Pending Invoices:</span>
+                <span className="print:font-bold">{accountSummary.pendingInvoices}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Invoices Table */}
+          <div className="print:mb-6">
+            <h2 className="print:text-xl print:font-bold print:mb-3">Invoices</h2>
+            {invoices.length > 0 ? (
+              <table className="print:w-full print:text-sm print:border-collapse">
+                <thead>
+                  <tr className="print:border-b-2 print:border-black">
+                    <th className="print:text-left print:py-2 print:font-bold">Date</th>
+                    <th className="print:text-left print:py-2 print:font-bold">Invoice #</th>
+                    <th className="print:text-left print:py-2 print:font-bold">Plan</th>
+                    <th className="print:text-left print:py-2 print:font-bold">Due Date</th>
+                    <th className="print:text-right print:py-2 print:font-bold">Amount</th>
+                    <th className="print:text-center print:py-2 print:font-bold">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => (
+                    <tr key={inv.id} className="print:border-b print:border-gray-300">
+                      <td className="print:py-2">{inv.issueDate ? new Date(inv.issueDate).toLocaleDateString() : '—'}</td>
+                      <td className="print:py-2 print:font-mono">{inv.id.slice(-8).toUpperCase()}</td>
+                      <td className="print:py-2">{inv.planName || '—'}</td>
+                      <td className="print:py-2">{inv.dueDateTime ? new Date(inv.dueDateTime).toLocaleDateString() : '—'}</td>
+                      <td className="print:py-2 print:text-right print:font-semibold">{formatCurrency(inv.amount || 0)}</td>
+                      <td className="print:py-2 print:text-center">{inv.status || 'PENDING'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="print:text-gray-500 print:italic">No invoices found</p>
+            )}
+          </div>
+
+          {/* Payment History */}
+          <div className="print:mb-6">
+            <h2 className="print:text-xl print:font-bold print:mb-3">Payment History</h2>
+            {payments.length > 0 ? (
+              <table className="print:w-full print:text-sm print:border-collapse">
+                <thead>
+                  <tr className="print:border-b-2 print:border-black">
+                    <th className="print:text-left print:py-2 print:font-bold">Date</th>
+                    <th className="print:text-left print:py-2 print:font-bold">Plan</th>
+                    <th className="print:text-right print:py-2 print:font-bold">Amount</th>
+                    <th className="print:text-right print:py-2 print:font-bold">Final Amount</th>
+                    <th className="print:text-right print:py-2 print:font-bold">Discount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((payment) => (
+                    <tr key={payment.id} className="print:border-b print:border-gray-300">
+                      <td className="print:py-2">{payment.date ? new Date(payment.date).toLocaleDateString() : '—'}</td>
+                      <td className="print:py-2">{payment.planName || '—'}</td>
+                      <td className="print:py-2 print:text-right">{formatCurrency(payment.planPrice || 0)}</td>
+                      <td className="print:py-2 print:text-right print:font-semibold">{formatCurrency(payment.finalAmount || payment.planPrice || 0)}</td>
+                      <td className="print:py-2 print:text-right print:text-red-600">
+                        {payment.discountAmount > 0 ? `- ${formatCurrency(payment.discountAmount)}` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="print:text-gray-500 print:italic">No payment history found</p>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="print:mt-12 print:border-t-2 print:border-black print:pt-4 print:text-center print:text-sm print:text-gray-600">
+            <p className="print:font-bold">Thank you for your business!</p>
+            <p className="print:mt-2">This is a computer-generated Statement of Account.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Screen Layout - Normal view */}
+      <div className="print:hidden max-w-6xl mx-auto space-y-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">
+            Statement of Account
+          </h2>
+        </div>
 
       {/* Router Selection Warning */}
       {!selectedRouter && (
@@ -441,8 +574,7 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
               )}
             </>
           )}
-        </>
-      )}
-    </div>
-  );
+        </div>
+      </>
+    );
 };
