@@ -10,6 +10,7 @@ import { getAuthHeader } from '../services/databaseService.ts';
 import type { PanelSettings } from '../types.ts';
 import { mikrotikSalesService } from '../services/mikrotikSalesService.ts';
 import { MikrotikSalesLogs } from './MikrotikSalesLogs.tsx';
+import { CustomInvoiceModal } from './CustomInvoiceModal.tsx';
 
 interface SalesReportProps {
     salesData: SaleRecord[];
@@ -52,6 +53,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
     const [isSyncing, setIsSyncing] = useState<string | null>(null);
     const [isBulkSyncing, setIsBulkSyncing] = useState<boolean>(false);
+    const [isCustomInvoiceOpen, setIsCustomInvoiceOpen] = useState<boolean>(false);
     const [bulkSyncResult, setBulkSyncResult] = useState<{
         synced: number;
         skipped: number;
@@ -341,6 +343,9 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                             <button onClick={() => setIsAddOpen(true)} className="px-4 py-2 text-sm text-white bg-green-600 hover:bg-green-500 rounded-lg font-semibold">
                                 Add Invoice
                             </button>
+                            <button onClick={() => setIsCustomInvoiceOpen(true)} className="px-4 py-2 text-sm text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg font-semibold">
+                                Custom Invoice
+                            </button>
                              {canDelete && (
                                 <button onClick={handleClear} className="px-4 py-2 text-sm text-white bg-red-700 hover:bg-red-800 dark:bg-red-800 dark:hover:bg-red-700 rounded-lg font-semibold flex items-center gap-2">
                                     <TrashIcon className="w-5 h-5" /> Clear All
@@ -495,7 +500,8 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                         <th className="px-4 py-3">Issued</th>
                                         <th className="px-4 py-3">Due</th>
                                         <th className="px-4 py-3">Client</th>
-                                        <th className="px-4 py-3">Plan</th>
+                                        <th className="px-4 py-3">Type</th>
+                                        <th className="px-4 py-3">Plan / Service</th>
                                         <th className="px-4 py-3 text-right">Amount</th>
                                         <th className="px-4 py-3">Status</th>
                                         <th className="px-4 py-3 text-center no-print">Actions</th>
@@ -503,13 +509,32 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                 </thead>
                                 <tbody>
                                     {invLoading ? (
-                                        <tr><td colSpan={7} className="text-center py-6 text-slate-500">Loading...</td></tr>
+                                        <tr><td colSpan={8} className="text-center py-6 text-slate-500">Loading...</td></tr>
                                     ) : invoices.length > 0 ? invoices.map(inv => (
                                         <tr key={inv.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                             <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">{inv.issueDate ? new Date(inv.issueDate).toLocaleString() : '—'}</td>
                                             <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">{inv.dueDateTime ? new Date(inv.dueDateTime).toLocaleString() : '—'}</td>
                                             <td className="px-4 py-3">{inv.username}</td>
-                                            <td className="px-4 py-3">{inv.planName || '—'}</td>
+                                            <td className="px-4 py-3">
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${inv.invoiceType === 'custom' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
+                                                    {inv.invoiceType === 'custom' ? 'Custom' : 'Subscription'}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {inv.invoiceType === 'custom' ? (
+                                                    <div>
+                                                        <div className="font-medium">{inv.category || inv.planName || 'Custom Service'}</div>
+                                                        {inv.description && <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate max-w-[200px]" title={inv.description}>{inv.description}</div>}
+                                                        {(inv.laborCost || inv.partsCost) && (
+                                                            <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                                                                L: {formatCurrency(inv.laborCost || 0)} / P: {formatCurrency(inv.partsCost || 0)}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span>{inv.planName || '—'}</span>
+                                                )}
+                                            </td>
                                             <td className="px-4 py-3 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(inv.amount || 0)}</td>
                                             <td className="px-4 py-3">
                                                 <span className={`px-2 py-1 rounded text-xs font-bold ${String(inv.status).toUpperCase() === 'PAID' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{String(inv.status || 'PENDING').toUpperCase()}</span>
@@ -527,7 +552,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                                             </td>
                                         </tr>
                                     )) : (
-                                        <tr><td colSpan={7} className="text-center py-8 text-slate-500">No invoices found.</td></tr>
+                                        <tr><td colSpan={8} className="text-center py-8 text-slate-500">No invoices found.</td></tr>
                                     )}
                                 </tbody>
                             </table>
@@ -734,6 +759,14 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                     <MikrotikSalesLogs routerId={selectedRouter?.id} />
                 </div>
             </div>
+
+            {/* Custom Invoice Modal */}
+            <CustomInvoiceModal
+                isOpen={isCustomInvoiceOpen}
+                onClose={() => setIsCustomInvoiceOpen(false)}
+                routers={routers}
+                onInvoiceCreated={loadInvoices}
+            />
         </>
     );
 }

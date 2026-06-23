@@ -362,7 +362,12 @@ async function initDb() {
                 currency TEXT,
                 dueDateTime TEXT,
                 issueDate TEXT,
-                status TEXT DEFAULT 'PENDING' -- PENDING | PAID | EXPIRED | CANCELED
+                status TEXT DEFAULT 'PENDING', -- PENDING | PAID | EXPIRED | CANCELED
+                description TEXT,
+                category TEXT,
+                laborCost REAL DEFAULT 0,
+                partsCost REAL DEFAULT 0,
+                invoiceType TEXT DEFAULT 'subscription' -- 'subscription' | 'custom'
             );
             CREATE TABLE IF NOT EXISTS inventory (
                 id TEXT PRIMARY KEY,
@@ -668,6 +673,30 @@ async function initDb() {
                 await db.exec("ALTER TABLE expenses ADD COLUMN routerId TEXT");
             }
         } catch (_) {}
+
+        // Add custom invoice columns to client_invoices
+        try {
+            const invCols = await db.all("PRAGMA table_info(client_invoices)");
+            const invColNames = invCols.map(c => c.name);
+            if (!invColNames.includes('description')) {
+                await db.exec("ALTER TABLE client_invoices ADD COLUMN description TEXT");
+            }
+            if (!invColNames.includes('category')) {
+                await db.exec("ALTER TABLE client_invoices ADD COLUMN category TEXT");
+            }
+            if (!invColNames.includes('laborCost')) {
+                await db.exec("ALTER TABLE client_invoices ADD COLUMN laborCost REAL DEFAULT 0");
+            }
+            if (!invColNames.includes('partsCost')) {
+                await db.exec("ALTER TABLE client_invoices ADD COLUMN partsCost REAL DEFAULT 0");
+            }
+            if (!invColNames.includes('invoiceType')) {
+                await db.exec("ALTER TABLE client_invoices ADD COLUMN invoiceType TEXT DEFAULT 'subscription'");
+            }
+            console.log('[Migration] ✓ client_invoices custom invoice columns ensured');
+        } catch (err) {
+            console.error('[Migration] client_invoices custom columns migration error:', err.message);
+        }
         
         try {
             const resellerNames = await db.all("SELECT DISTINCT TRIM(resellerName) AS name FROM pisowifi_income WHERE resellerName IS NOT NULL AND TRIM(resellerName) <> ''");
@@ -1362,6 +1391,10 @@ async function startServer() {
                         if (!already) {
                             const router = await db.get('SELECT name FROM routers WHERE id = ?', [existing.routerId]);
                             const saleId = `sale_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+                            // For custom invoices, use laborCost + partsCost if amount is not set
+                            const isCustom = existing.invoiceType === 'custom';
+                            const saleAmount = (existing.amount || 0) > 0 ? existing.amount : (isCustom ? ((existing.laborCost || 0) + (existing.partsCost || 0)) : 0);
+                            const salePlanName = isCustom ? (existing.category || existing.description || 'Custom Service') : (existing.planName || '');
                             await db.run(
                                 `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, routerName, currency, clientAddress, clientContact, clientEmail, invoiceId, coveredMonth)
                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1370,10 +1403,10 @@ async function startServer() {
                                     existing.routerId,
                                     new Date().toISOString(),
                                     existing.username,
-                                    existing.planName || '',
-                                    existing.amount || 0,
+                                    salePlanName,
+                                    saleAmount,
                                     0,
-                                    existing.amount || 0,
+                                    saleAmount,
                                     router?.name || '',
                                     existing.currency || 'PHP',
                                     null, null, null,
@@ -1437,9 +1470,9 @@ async function startServer() {
                                                     .insert([{
                                                         license_id: licenseData.id,
                                                         router_id: routerId,
-                                                        amount: existing.amount || 0,
+                                                        amount: saleAmount,
                                                         currency: currencyCode,
-                                                        transaction_type: 'sale',
+                                                        transaction_type: isCustom ? 'custom_service' : 'sale',
                                                         created_at: new Date().toISOString()
                                                     }]);
                                             }
@@ -1470,6 +1503,20 @@ async function startServer() {
             }
         });
     };
+
+    // Fetch pending invoices for a specific client (used by custom invoice "Add to Existing" feature)
+    dbRouter.get('/client-invoices-pending/:routerId/:username', async (req, res) => {
+        try {
+            const { routerId, username } = req.params;
+            const rows = await db.all(
+                'SELECT * FROM client_invoices WHERE routerId = ? AND username = ? AND status = ? ORDER BY issueDate DESC',
+                [decodeURIComponent(routerId), decodeURIComponent(username), 'PENDING']
+            );
+            res.json(rows);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
 
     createCrud('/billing-plans', 'billing_plans');
     createCrud('/inventory', 'inventory');

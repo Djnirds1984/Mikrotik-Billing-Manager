@@ -967,3 +967,35 @@ export interface AvailableInterfacesResponse {
   interfaces: AvailableInterface[];
   defaultInterface: string | null;
 }
+
+// Custom Invoice Types
+export type InvoiceType = 'subscription' | 'custom';
+export type CustomInvoiceCategory = 'CCTV Installation' | 'Computer Repair' | 'Network Setup' | 'Cabling' | 'Maintenance' | 'Other';
+
+export interface CustomInvoiceItem {
+  description: string;
+  category: CustomInvoiceCategory | string;
+  laborCost: number;
+  partsCost: number;
+}
+
+export interface ClientInvoice {
+  id: string;
+  routerId: string;
+  username: string;
+  accountNumber?: string;
+  source: 'pppoe' | 'dhcp';
+  planName?: string;
+  planId?: string;
+  amount: number;
+  currency: string;
+  dueDateTime?: string;
+  issueDate: string;
+  status: 'PENDING' | 'PAID' | 'EXPIRED' | 'CANCELED';
+  // Custom invoice fields
+  description?: string;
+  category?: string;
+  laborCost?: number;
+  partsCost?: number;
+  invoiceType?: InvoiceType;
+}
