@@ -675,14 +675,15 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid' }, portalOptions?: { createPortalAccount?: boolean }) => {
         setIsSubmitting(true);
         try {
-            // Find existing customer by username AND routerId (more precise)
-            let existingCustomer = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
+            // Find existing customer by username (username is UNIQUE in the customers table)
+            let existingCustomer = customers.find(c => c.username === secretData.name);
             
             // If not found in local array, try to fetch from backend directly
             if (!existingCustomer) {
                 try {
                     console.log(`[PPPoE Save] Customer not in local array, fetching from backend for user: ${secretData.name}`);
-                    const allCustomers = await dbApi.get<any[]>(`/customers?routerId=${selectedRouter.id}`);
+                    // Fetch without routerId filter since username is UNIQUE
+                    const allCustomers = await dbApi.get<any[]>(`/customers`);
                     console.log(`[PPPoE Save] Backend returned ${allCustomers.length} customers`);
                     existingCustomer = allCustomers.find(c => c.username === secretData.name);
                     if (existingCustomer) {
@@ -769,7 +770,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
             } else {
                 // Always create customer record with at least username and account number
-                const alreadyExists = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
+                const alreadyExists = customers.find(c => c.username === secretData.name);
                 if (!alreadyExists) {
                     console.log(`[PPPoE Save] Creating new customer with accountNumber: ${enrichedCustomerData.accountNumber}`);
                     await addCustomer({ 
@@ -823,7 +824,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 if (existingCustomer) {
                     await updateCustomer({ ...existingCustomer, applicationId: applicationResult.id });
                 } else {
-                    const customer = customers.find(c => c.username === secretData.name && c.routerId === selectedRouter.id);
+                    const customer = customers.find(c => c.username === secretData.name);
                     if (customer) {
                         await updateCustomer({ ...customer, applicationId: applicationResult.id });
                     }

@@ -2093,10 +2093,10 @@ async function startServer() {
             const { username, routerId } = req.body;
             if (!username) return res.status(400).json({ message: 'Username required' });
 
-            // Check existence by username AND routerId (multi-tenant support)
+            // Check existence by username ONLY — the UNIQUE constraint is on username alone
             const existing = await db.get(
-                'SELECT * FROM customers WHERE username = ? AND routerId = ?',
-                [username, routerId]
+                'SELECT * FROM customers WHERE username = ?',
+                [username]
             );
             
             console.log(`[Customers POST] username=${username}, routerId=${routerId}, existing=${!!existing}`);
