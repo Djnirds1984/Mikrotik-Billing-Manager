@@ -938,6 +938,84 @@ const XenditTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch
     // Mutual exclusion warning
     const [gatewayWarning, setGatewayWarning] = useState<string | null>(null);
 
+    // Webhook diagnostics state
+    const [webhookStatus, setWebhookStatus] = useState<{
+        configured: boolean;
+        webhookUrl: string;
+        webhookToken: string;
+        isLocalUrl: boolean;
+        enabled: boolean;
+        note: string;
+    } | null>(null);
+    const [testResult, setTestResult] = useState<{ reachable: boolean; statusCode?: number; error?: string; url: string } | null>(null);
+    const [verifyResult, setVerifyResult] = useState<{ valid: boolean; balance?: number; error?: string } | null>(null);
+    const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+    const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+    const [isVerifyingConfig, setIsVerifyingConfig] = useState(false);
+    const [webhookToast, setWebhookToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+    const showWebhookToast = (type: 'success' | 'error', message: string) => {
+        setWebhookToast({ type, message });
+        setTimeout(() => setWebhookToast(null), 5000);
+    };
+
+    const handleCheckStatus = async () => {
+        setIsCheckingStatus(true);
+        try {
+            const res = await fetch('/api/xendit-webhook-status', { headers: { ...getAuthHeader() } });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to fetch webhook status.');
+            setWebhookStatus(data);
+        } catch (err) {
+            showWebhookToast('error', `Status check failed: ${(err as Error).message}`);
+        } finally {
+            setIsCheckingStatus(false);
+        }
+    };
+
+    const handleTestWebhook = async () => {
+        setIsTestingWebhook(true);
+        try {
+            const res = await fetch('/api/xendit-webhook-test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeader() }
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Webhook test failed.');
+            setTestResult(data);
+        } catch (err) {
+            showWebhookToast('error', `Webhook test failed: ${(err as Error).message}`);
+        } finally {
+            setIsTestingWebhook(false);
+        }
+    };
+
+    const handleVerifyConfig = async () => {
+        setIsVerifyingConfig(true);
+        try {
+            const res = await fetch('/api/xendit-verify-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeader() }
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Config verification failed.');
+            setVerifyResult(data);
+        } catch (err) {
+            showWebhookToast('error', `Config verification failed: ${(err as Error).message}`);
+        } finally {
+            setIsVerifyingConfig(false);
+        }
+    };
+
+    const getHealthColor = () => {
+        if (!webhookStatus) return 'gray';
+        if (!webhookStatus.configured) return 'red';
+        if (webhookStatus.isLocalUrl) return 'yellow';
+        return 'green';
+    };
+
+    const healthColor = getHealthColor();
+
     return (
         <SettingsSection title="Xendit Payment Gateway">
             {/* Test Mode Warning */}
@@ -1047,6 +1125,173 @@ const XenditTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch
                     {(xendit.paymentMethods || ['gcash']).length === 0 && (
                         <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
                             ⚠️ At least one payment method must be selected
+                        </p>
+                    )}
+                </div>
+
+                {/* Webhook Diagnostics Section */}
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-4">
+                    <div className="space-y-1">
+                        <h4 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                            Webhook Diagnostics
+                            {webhookStatus && (
+                                <span className={`inline-block w-3 h-3 rounded-full ${
+                                    healthColor === 'green' ? 'bg-green-500' :
+                                    healthColor === 'yellow' ? 'bg-yellow-500' :
+                                    healthColor === 'red' ? 'bg-red-500' :
+                                    'bg-slate-400'
+                                }`} title={`Health: ${healthColor}`} />
+                            )}
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Xendit webhooks are configured via the Xendit Dashboard. Set the callback URL to your webhook endpoint and copy the Verification Token here.
+                        </p>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={handleCheckStatus}
+                            disabled={isCheckingStatus || !xendit.secretKey}
+                            className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isCheckingStatus ? 'Checking...' : 'Check Status'}
+                        </button>
+                        <button
+                            onClick={handleTestWebhook}
+                            disabled={isTestingWebhook}
+                            className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isTestingWebhook ? 'Testing...' : 'Test Webhook'}
+                        </button>
+                        <button
+                            onClick={handleVerifyConfig}
+                            disabled={isVerifyingConfig || !xendit.secretKey}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isVerifyingConfig ? 'Verifying...' : 'Verify API Keys'}
+                        </button>
+                    </div>
+
+                    {/* Toast Notification */}
+                    {webhookToast && (
+                        <div className={`p-3 rounded-md text-sm ${
+                            webhookToast.type === 'success'
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
+                        }`}>
+                            {webhookToast.message}
+                        </div>
+                    )}
+
+                    {/* Webhook Status Display */}
+                    {webhookStatus && (
+                        <div className="space-y-3">
+                            {!webhookStatus.configured ? (
+                                <div className="p-3 rounded-md bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-sm">
+                                    Webhook is not fully configured. Make sure Xendit is enabled, Secret Key is set, and Webhook Token is provided.
+                                </div>
+                            ) : (
+                                <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-4 space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" />
+                                        <span className="text-sm font-medium text-slate-900 dark:text-slate-100">Webhook configured</span>
+                                    </div>
+                                    {webhookStatus.isLocalUrl && (
+                                        <div className="flex items-center gap-1.5 p-2 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs">
+                                            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                            <span><strong>Warning:</strong> This webhook URL uses localhost/127.0.0.1 — Xendit cannot reach local addresses. Use a public domain or tunnel (e.g., Cloudflare Tunnel, ngrok).</span>
+                                        </div>
+                                    )}
+                                    <div className="grid grid-cols-1 gap-2 text-sm">
+                                        <div>
+                                            <span className="text-slate-500 dark:text-slate-400">URL: </span>
+                                            <span className="font-mono text-xs break-all text-slate-700 dark:text-slate-300">
+                                                {webhookStatus.webhookUrl || '(empty)'}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-500 dark:text-slate-400">Webhook Token: </span>
+                                            <span className={webhookStatus.webhookToken === 'configured' ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}>
+                                                {webhookStatus.webhookToken === 'configured' ? 'Configured' : 'Not set — enter it in the Webhook Token field above'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Note */}
+                            {webhookStatus.note && (
+                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                    {webhookStatus.note}
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Test Result Display */}
+                    {testResult && (
+                        <div className={`p-3 rounded-md text-sm ${
+                            testResult.reachable
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
+                        }`}>
+                            <div className="flex items-center gap-2">
+                                <span className={`inline-block w-2.5 h-2.5 rounded-full ${testResult.reachable ? 'bg-green-500' : 'bg-red-500'}`} />
+                                <span className="font-medium">
+                                    {testResult.reachable ? 'Endpoint reachable' : 'Endpoint unreachable'}
+                                </span>
+                            </div>
+                            {testResult.statusCode !== undefined && (
+                                <div className="mt-1">
+                                    <span className="opacity-75">Status code: </span>
+                                    <span className="font-mono">{testResult.statusCode}</span>
+                                </div>
+                            )}
+                            {testResult.error && (
+                                <div className="mt-1">
+                                    <span className="opacity-75">Error: </span>
+                                    <span>{testResult.error}</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Verify Result Display */}
+                    {verifyResult && (
+                        <div className={`p-3 rounded-md text-sm ${
+                            verifyResult.valid
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
+                        }`}>
+                            <div className="flex items-center gap-2">
+                                <span className={`inline-block w-2.5 h-2.5 rounded-full ${verifyResult.valid ? 'bg-green-500' : 'bg-red-500'}`} />
+                                <span className="font-medium">
+                                    {verifyResult.valid ? 'API key valid' : 'API key invalid'}
+                                </span>
+                            </div>
+                            {verifyResult.balance !== undefined && (
+                                <div className="mt-1">
+                                    <span className="opacity-75">Account balance: </span>
+                                    <span className="font-mono">{verifyResult.balance}</span>
+                                </div>
+                            )}
+                            {verifyResult.error && (
+                                <div className="mt-1">
+                                    <span className="opacity-75">Error: </span>
+                                    <span>{verifyResult.error}</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Hint when no status checked yet */}
+                    {!webhookStatus && xendit.enabled && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {!xendit.webhookUrl
+                                ? 'Set the Webhook URL above, then click "Check Status" to verify your Xendit webhook configuration.'
+                                : 'Click "Check Status" to verify your Xendit webhook configuration.'
+                            }
                         </p>
                     )}
                 </div>

@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import type { PppSecret, BillingPlanWithId, PanelSettings } from '../types';
-import { isXenditConfigured } from '../services/xenditService';
+import { isXenditConfigured, getXenditService } from '../services/xenditService';
+import type { XenditCheckoutResponse } from '../services/xenditService';
 import { Loader } from './Loader';
 
 interface XenditPaymentModalProps {
@@ -44,26 +45,15 @@ export const XenditPaymentModal: React.FC<XenditPaymentModalProps> = ({
     setError(null);
 
     try {
-      const response = await fetch('/api/payments/create-xendit-checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pppoe_username: client.name,
-          plan_name: plan.name,
-          amount: plan.price,
-          duration_days: plan.cycle_days,
-          router_id: client.customer?.routerId || '',
-          planType: 'pppoe',
-          planId: plan.id,
-        }),
+      const data: XenditCheckoutResponse = await getXenditService().createCheckoutSession({
+        pppoe_username: client.name,
+        plan_name: plan.name,
+        amount: plan.price,
+        duration_days: plan.cycle_days,
+        router_id: client.customer?.routerId || '',
+        planType: 'pppoe',
+        planId: plan.id,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Payment creation failed (HTTP ${response.status})`);
-      }
-
-      const data = await response.json();
 
       if (!data.checkout_url) {
         throw new Error('No payment URL received from Xendit');

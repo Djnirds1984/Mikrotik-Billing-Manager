@@ -510,6 +510,10 @@ async function initDb() {
                 router_id TEXT,
                 plan_name TEXT,
                 amount REAL,
+                base_amount REAL,
+                convenience_fee REAL,
+                total_amount REAL,
+                payment_method TEXT,
                 status TEXT DEFAULT 'pending',
                 processed_at TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
@@ -577,6 +581,22 @@ async function initDb() {
             }
         } catch (err) {
             console.error('[Migration] billing_plans cycle_days migration error:', err.message);
+        }
+        
+        // Add fee detail columns to xendit_sessions
+        try {
+            const xenditSessionCols = await db.all("PRAGMA table_info(xendit_sessions)");
+            const xenditSessionColNames = xenditSessionCols.map(c => c.name);
+            const xenditFeeColumns = ['base_amount', 'convenience_fee', 'total_amount', 'payment_method'];
+            for (const col of xenditFeeColumns) {
+                if (!xenditSessionColNames.includes(col)) {
+                    console.log(`[Migration] Adding ${col} column to xendit_sessions table...`);
+                    await db.exec(`ALTER TABLE xendit_sessions ADD COLUMN ${col} REAL DEFAULT NULL`);
+                    console.log(`[Migration] ✓ ${col} column added to xendit_sessions`);
+                }
+            }
+        } catch (err) {
+            console.error('[Migration] xendit_sessions fee columns migration error:', err.message);
         }
         
         // Add store_enabled column to dhcp_billing_plans
@@ -4748,7 +4768,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // --- Xendit API ---
     app.post('/api/payments/create-xendit-checkout', async (req, res) => {
         try {
-            const { pppoe_username, plan_name, amount, duration_days, router_id, planType, planId } = req.body;
+            const { pppoe_username, plan_name, amount, duration_days, router_id, planType, planId, paymentMethod } = req.body;
 
             // Get Xendit settings
             const settings = await new Promise((resolve, reject) => {
@@ -4765,11 +4785,50 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             const invoice_no = 'XND-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6).toUpperCase();
 
-            // Calculate amount with fee if applicable
-            let finalAmount = amount;
-            if (xenditSettings.passFeesToCustomer) {
-                finalAmount = Math.ceil(amount * 1.03); // 3% convenience fee
-            }
+            // Per-method convenience fee calculation
+            // Xendit PH fees:
+            //   - E-wallets (gcash, maya): 2.5%
+            //   - QR PH (qrph): 2.0%
+            //   - Cards (card): 3.5% + PHP 15
+            //   - Bank Transfer (bank_transfer): 1.5%
+            //   - OTC - 7-Eleven (seven_eleven): PHP 25 flat
+            //   - OTC - Cebuana (cebuana): PHP 25 flat
+            //   - OTC - DP/MLhuillier (dp_mlhuillier): PHP 25 flat
+            const baseAmount = Number(amount);
+            const passFees = !!xenditSettings.passFeesToCustomer;
+            const method = (paymentMethod || '').toLowerCase();
+
+            const computeTotal = (base, m) => {
+                if (m === 'card') return (base + 15) / (1 - 0.035);
+                if (m === 'qrph') return base / (1 - 0.020);
+                if (['gcash', 'maya'].includes(m)) return base / (1 - 0.025);
+                if (m === 'bank_transfer') return base / (1 - 0.015);
+                if (['seven_eleven', 'cebuana', 'cebuarana', 'dp_mlhuillier'].includes(m)) return base + 25;
+                return base * 1.03; // fallback flat 3%
+            };
+
+            const totalAmount = passFees ? Math.round(computeTotal(baseAmount, method) * 100) / 100 : baseAmount;
+            const convenienceFee = Math.round((totalAmount - baseAmount) * 100) / 100;
+
+            // Map internal method IDs to Xendit channel codes for invoice restriction
+            const xenditChannelMap = {
+                gcash: 'GCASH',
+                maya: 'PAYMAYA',
+                qrph: 'QRPH',
+                card: 'CARDS',
+                bank_transfer: 'BANK_TRANSFER',
+                seven_eleven: '7ELEVEN',
+                cebuana: 'CEBUANA',
+                cebuarana: 'CEBUANA',
+                dp_mlhuillier: 'MLHUILLIER'
+            };
+
+            // Restrict checkout to the chosen method when passing fees so the calculated
+            // total matches the actual fee charged by Xendit.
+            const isKnownMethod = method && Object.prototype.hasOwnProperty.call(xenditChannelMap, method);
+            const allowedMethods = (passFees && isKnownMethod)
+                ? [xenditChannelMap[method]]
+                : (xenditSettings.paymentMethods || []).map(m => xenditChannelMap[m] || m).filter(Boolean);
 
             // Create Xendit invoice via API
             const response = await fetch('https://api.xendit.co/v2/invoices', {
@@ -4780,10 +4839,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 },
                 body: JSON.stringify({
                     external_id: invoice_no,
-                    amount: finalAmount,
+                    amount: totalAmount,
                     currency: 'PHP',
                     description: `Payment for ${plan_name} - ${pppoe_username}`,
-                    payment_methods: xenditSettings.paymentMethods || [],
+                    payment_methods: allowedMethods,
                     success_redirect_url: xenditSettings.webhookUrl ? xenditSettings.webhookUrl.replace('/api/xendit-webhook', '/payment-success') : undefined,
                     failure_redirect_url: xenditSettings.webhookUrl ? xenditSettings.webhookUrl.replace('/api/xendit-webhook', '/payment-failed') : undefined,
                     metadata: {
@@ -4793,7 +4852,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         router_id,
                         invoice_no,
                         planType: planType || 'pppoe',
-                        planId: planId || ''
+                        planId: planId || '',
+                        base_amount: String(baseAmount),
+                        convenience_fee: String(convenienceFee),
+                        total_amount: String(totalAmount),
+                        payment_method: method || '',
+                        pass_fees: passFees ? '1' : '0'
                     }
                 })
             });
@@ -4808,8 +4872,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             // Store session in database
             db.run(
-                `INSERT INTO xendit_sessions (session_id, invoice_id, invoice_no, pppoe_username, router_id, plan_name, amount, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
-                [invoiceData.id, invoiceData.id, invoice_no, pppoe_username, router_id, plan_name, finalAmount],
+                `INSERT INTO xendit_sessions (session_id, invoice_id, invoice_no, pppoe_username, router_id, plan_name, amount, base_amount, convenience_fee, total_amount, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+                [invoiceData.id, invoiceData.id, invoice_no, pppoe_username, router_id, plan_name, totalAmount, baseAmount, convenienceFee, totalAmount, method || ''],
                 (err) => {
                     if (err) console.error('[Xendit] Failed to store session:', err);
                 }
@@ -4818,7 +4882,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             res.json({
                 checkout_url: invoiceData.invoice_url,
                 invoice_no: invoice_no,
-                invoice_id: invoiceData.id
+                invoice_id: invoiceData.id,
+                amount: totalAmount,
+                base_amount: baseAmount,
+                convenience_fee: convenienceFee,
+                payment_method: method || ''
             });
         } catch (error) {
             console.error('[Xendit] Checkout error:', error);
@@ -5580,6 +5648,111 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         } catch (error) {
             console.error('[Xendit Webhook] Error:', error);
             res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+
+    // ========================================
+    // Xendit Webhook Management
+    // ========================================
+
+    // GET: Check current Xendit webhook configuration status
+    app.get('/api/xendit-webhook-status', async (req, res) => {
+        try {
+            const settings = await new Promise((resolve, reject) => {
+                db.get('SELECT xenditSettings FROM settings WHERE id = 1', (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                });
+            });
+            const xenditSettings = JSON.parse(settings?.xenditSettings || '{}');
+
+            const webhookUrl = xenditSettings.webhookUrl || '';
+            const isLocalUrl = webhookUrl.includes('localhost') || webhookUrl.includes('127.0.0.1');
+
+            res.json({
+                configured: !!(xenditSettings.enabled && xenditSettings.secretKey && xenditSettings.webhookToken),
+                webhookUrl: webhookUrl,
+                webhookToken: xenditSettings.webhookToken ? 'configured' : 'not set',
+                isLocalUrl: isLocalUrl,
+                enabled: xenditSettings.enabled || false,
+                note: 'Xendit webhooks must be configured in the Xendit Dashboard. Set the callback URL to your webhook endpoint and copy the Verification Token here.'
+            });
+        } catch (error) {
+            console.error('[Xendit] Webhook status error:', error);
+            res.status(500).json({ error: 'Failed to get webhook status' });
+        }
+    });
+
+    // POST: Test if the configured webhook endpoint is reachable
+    app.post('/api/xendit-webhook-test', async (req, res) => {
+        try {
+            const settings = await new Promise((resolve, reject) => {
+                db.get('SELECT xenditSettings FROM settings WHERE id = 1', (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                });
+            });
+            const xenditSettings = JSON.parse(settings?.xenditSettings || '{}');
+
+            if (!xenditSettings.webhookUrl) {
+                return res.status(400).json({ error: 'Webhook URL not configured' });
+            }
+
+            // Test reachability of the webhook endpoint
+            const testUrl = xenditSettings.webhookUrl.replace('/api/xendit-webhook', '/api/xendit-webhook-ping');
+            const response = await fetch(testUrl, { method: 'GET', signal: AbortSignal.timeout(10000) });
+
+            res.json({
+                reachable: response.ok,
+                statusCode: response.status,
+                url: testUrl
+            });
+        } catch (error) {
+            res.json({
+                reachable: false,
+                error: error.message,
+                url: xenditSettings?.webhookUrl || 'not set'
+            });
+        }
+    });
+
+    // GET: Public ping endpoint for webhook reachability testing
+    app.get('/api/xendit-webhook-ping', (req, res) => {
+        res.json({ status: 'ok', service: 'xendit-webhook', timestamp: new Date().toISOString() });
+    });
+
+    // POST: Verify Xendit API key validity by fetching balance
+    app.post('/api/xendit-verify-config', async (req, res) => {
+        try {
+            const settings = await new Promise((resolve, reject) => {
+                db.get('SELECT xenditSettings FROM settings WHERE id = 1', (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                });
+            });
+            const xenditSettings = JSON.parse(settings?.xenditSettings || '{}');
+
+            if (!xenditSettings.secretKey) {
+                return res.status(400).json({ error: 'Secret key not configured' });
+            }
+
+            // Test API key by fetching balance
+            const response = await fetch('https://api.xendit.co/balance', {
+                method: 'GET',
+                headers: {
+                    'Authorization': 'Basic ' + Buffer.from(xenditSettings.secretKey + ':').toString('base64')
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                res.json({ valid: true, balance: data.balance });
+            } else {
+                const error = await response.json();
+                res.json({ valid: false, error: error.message || 'Invalid API key' });
+            }
+        } catch (error) {
+            res.status(500).json({ error: 'Failed to verify configuration' });
         }
     });
 
