@@ -113,9 +113,9 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
     }
   };
 
-  // Search filter
+  // Search filter - show all clients when no search query
   const filteredClients = useMemo(() => {
-    if (!searchQuery.trim()) return [];
+    if (!searchQuery.trim()) return clients; // Show all clients when not searching
     const query = searchQuery.toLowerCase();
     return clients.filter(client => 
       client.name.toLowerCase().includes(query) ||
@@ -366,40 +366,69 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
               />
             </div>
 
-            {/* Search Results Dropdown */}
-            {searchQuery && filteredClients.length > 0 && (
-              <div className="mt-2 max-h-60 overflow-y-auto border rounded-md divide-y dark:border-slate-700">
-                {filteredClients.map(client => (
-                  <button
-                    key={client.id}
-                    onClick={() => {
-                      generateSOA(client);
-                      setSearchQuery('');
-                    }}
-                    className="w-full px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-3"
-                  >
-                    <UserIcon className="h-5 w-5 text-slate-400 flex-shrink-0" />
-                    <div>
-                      <div className="font-medium">
-                        {client.fullName || client.name}
-                        {client.fullName && client.type === 'pppoe' && (
-                          <span className="ml-2 text-xs text-slate-400">({client.name})</span>
-                        )}
-                      </div>
-                      <div className="text-sm text-slate-500">
-                        {client.accountNumber && `Account: ${client.accountNumber}`}
-                        {client.accountNumber && <span className="mx-2">|</span>}
-                        <span className="uppercase">{client.type}</span>
-                        {client.profile && client.type === 'pppoe' && (
-                          <>
-                            <span className="mx-2">|</span>
-                            <span>{client.profile}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                ))}
+            {/* Client List Table */}
+            {filteredClients.length > 0 && (
+              <div className="mt-4">
+                <div className="flex justify-between items-center mb-2">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''} found
+                    {searchQuery && ` (filtered from ${clients.length} total)`}
+                  </p>
+                </div>
+                <div className="overflow-x-auto border rounded-lg dark:border-slate-700">
+                  <table className="w-full text-sm text-left">
+                    <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-900/50 dark:text-slate-300">
+                      <tr>
+                        <th className="px-4 py-3">Name / Username</th>
+                        <th className="px-4 py-3">Account Number</th>
+                        <th className="px-4 py-3">Type</th>
+                        <th className="px-4 py-3">Profile</th>
+                        <th className="px-4 py-3">Contact</th>
+                        <th className="px-4 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredClients.map(client => (
+                        <tr key={client.id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-slate-900 dark:text-white">
+                              {client.fullName || client.name}
+                            </div>
+                            {client.fullName && client.type === 'pppoe' && (
+                              <div className="text-xs text-slate-500">{client.name}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">
+                            {client.accountNumber || '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                              client.type === 'pppoe' 
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'
+                                : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400'
+                            }`}>
+                              {client.type.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
+                            {client.profile || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
+                            {client.contactNumber || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={() => generateSOA(client)}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md transition-colors"
+                            >
+                              View SOA
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -412,15 +441,15 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
             {!isLoading && clients.length === 0 && (
               <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
                 <p className="text-sm text-blue-800 dark:text-blue-300">
-                  <strong>No clients found.</strong> To view PPPoE clients, please create client portal users first in the Client Portal Users page. DHCP clients will appear automatically when they connect to the portal-enabled DHCP server.
+                  <strong>No clients found.</strong> PPPoE clients will appear here automatically from the router. DHCP clients will appear when they connect to a portal-enabled DHCP server.
                 </p>
               </div>
             )}
 
-            {searchQuery && !isLoading && filteredClients.length === 0 && clients.length > 0 && (
+            {!isLoading && filteredClients.length === 0 && clients.length > 0 && searchQuery && (
               <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
                 <p className="text-sm text-yellow-800 dark:text-yellow-300">
-                  No clients match your search query.
+                  No clients match your search query "{searchQuery}".
                 </p>
               </div>
             )}
