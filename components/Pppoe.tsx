@@ -222,6 +222,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
     const [planType, setPlanType] = useState<'prepaid' | 'postpaid'>('prepaid');
+    const [createPortalAccount, setCreatePortalAccount] = useState(false);
+    const [portalAccountExists, setPortalAccountExists] = useState(false);
     const toDatetimeLocal = (s: string) => {
         try {
             const d = new Date(s);
@@ -319,6 +321,34 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         }
     }, [isOpen, initialData, plans, secret.profile]);
 
+    // Check if portal account exists when editing, and set default for createPortalAccount
+    useEffect(() => {
+        if (!isOpen) return;
+        if (initialData) {
+            // Editing: check if portal account exists
+            setCreatePortalAccount(false); // default unchecked when editing
+            setPortalAccountExists(false);
+            if (selectedRouterId && initialData.name) {
+                fetch(`/api/client-portal/check-account?routerId=${encodeURIComponent(selectedRouterId)}&pppoeUsername=${encodeURIComponent(initialData.name)}`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                })
+                .then(res => res.ok ? res.json() : { exists: false })
+                .then(data => {
+                    setPortalAccountExists(data.exists);
+                    // If no account exists, default to checked so it gets created
+                    if (!data.exists) {
+                        setCreatePortalAccount(true);
+                    }
+                })
+                .catch(() => { setPortalAccountExists(false); setCreatePortalAccount(true); });
+            }
+        } else {
+            // Adding new user: default to checked
+            setCreatePortalAccount(true);
+            setPortalAccountExists(false);
+        }
+    }, [isOpen, initialData, selectedRouterId]);
+
 
     if (!isOpen) return null;
     
@@ -341,7 +371,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType });
+        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType }, { createPortalAccount });
     }
 
     return (
@@ -353,6 +383,21 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                      <div className="space-y-4">
                         <div><label>Username</label><input type="text" value={secret.name} onChange={e => setSecret(s => ({...s, name: e.target.value}))} disabled={!!initialData} required className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700 disabled:opacity-50" /></div>
                         <div className="relative"><label>Password</label><input type={showPass ? 'text' : 'password'} value={secret.password} onChange={e => setSecret(s => ({...s, password: e.target.value}))} placeholder={initialData ? "Leave blank to keep old" : ""} required={!initialData} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /><button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-9">{showPass ? <EyeSlashIcon className="w-5 h-5"/> : <EyeIcon className="w-5 h-5"/>}</button></div>
+                        <div className="flex items-start gap-2 p-3 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                            <input
+                                type="checkbox"
+                                id="createPortalAccount"
+                                checked={createPortalAccount}
+                                onChange={e => setCreatePortalAccount(e.target.checked)}
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <label htmlFor="createPortalAccount" className="text-sm text-blue-800 dark:text-blue-300 cursor-pointer select-none">
+                                {portalAccountExists
+                                    ? 'Client portal account exists. Check to update portal credentials (username & password).'
+                                    : 'Create client portal account using this PPPoE username and password.'
+                                }
+                            </label>
+                        </div>
                         <div><label>Billing Plan</label><select value={secret.profile} onChange={e => setSecret(s => ({...s, profile: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700">
                             {initialData && <option value="">-- No Change --</option>}
                             {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -614,7 +659,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         setSortConfig({ key, direction });
     };
 
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid' }) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid' }, portalOptions?: { createPortalAccount?: boolean }) => {
         setIsSubmitting(true);
         try {
             // Find existing customer by username AND routerId (more precise)
@@ -773,6 +818,34 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             } catch (pdfError) {
                 console.error('Failed to generate PDF application form:', pdfError);
                 // Continue with the save process even if PDF generation fails
+            }
+
+            // Auto-create or update client portal account if checkbox was checked
+            if (portalOptions?.createPortalAccount) {
+                try {
+                    const portalRes = await fetch('/api/client-portal/auto-create', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                        },
+                        body: JSON.stringify({
+                            routerId: selectedRouter.id,
+                            pppoeUsername: secretData.name,
+                            password: secretData.password || undefined, // Only send if provided
+                            accountNumber: enrichedCustomerData.accountNumber
+                        })
+                    });
+                    const portalData = await portalRes.json();
+                    if (!portalRes.ok) {
+                        console.warn('[PPPoE Save] Failed to create/update portal account:', portalData.message);
+                    } else {
+                        console.log(`[PPPoE Save] Portal account ${portalData.created ? 'created' : 'updated'} successfully`);
+                    }
+                } catch (portalError) {
+                    console.warn('[PPPoE Save] Failed to create/update portal account:', portalError);
+                    // Don't block the save process if portal account creation fails
+                }
             }
             
             setUserModalOpen(false);

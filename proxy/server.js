@@ -7711,6 +7711,76 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
+    // Check if a client portal account exists for a PPPoE user (Protected)
+    clientPortalRouter.get('/check-account', protect, async (req, res) => {
+        try {
+            const { routerId, pppoeUsername } = req.query;
+            if (!routerId || !pppoeUsername) {
+                return res.status(400).json({ message: 'routerId and pppoeUsername are required' });
+            }
+            const user = await db.get(
+                'SELECT id, username FROM client_users WHERE router_id = ? AND pppoe_username = ?',
+                [routerId, pppoeUsername]
+            );
+            res.json({ exists: !!user, username: user?.username || null, id: user?.id || null });
+        } catch (e) {
+            console.error('[Client Portal Check] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Auto-create or update client portal account from PPPoE user management (Protected)
+    clientPortalRouter.post('/auto-create', protect, async (req, res) => {
+        const { routerId, pppoeUsername, password, accountNumber } = req.body;
+        if (!pppoeUsername) return res.status(400).json({ message: 'PPPoE username is required' });
+        if (!routerId) return res.status(400).json({ message: 'Router ID is required' });
+        try {
+            // Check if account already exists for this PPPoE user + router
+            const existing = await db.get(
+                'SELECT * FROM client_users WHERE router_id = ? AND pppoe_username = ?',
+                [routerId, pppoeUsername]
+            );
+
+            if (existing) {
+                // Update existing account - only update password if provided
+                if (password) {
+                    const salt = crypto.randomBytes(16).toString('hex');
+                    const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+                    await db.run(
+                        'UPDATE client_users SET password_hash = ?, salt = ? WHERE id = ?',
+                        [hash, salt, existing.id]
+                    );
+                }
+                // Update account number if provided and different
+                if (accountNumber && accountNumber !== existing.account_number) {
+                    await db.run(
+                        'UPDATE client_users SET account_number = ? WHERE id = ?',
+                        [accountNumber, existing.id]
+                    );
+                }
+                res.json({ message: 'Portal account updated', id: existing.id, created: false });
+            } else {
+                // Create new account using PPPoE username as portal username
+                if (!password) return res.status(400).json({ message: 'Password is required for new portal accounts' });
+                const salt = crypto.randomBytes(16).toString('hex');
+                const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+                const id = `u_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const acc = accountNumber || await generateAccountNumber();
+                await db.run(
+                    'INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, account_number, created_at) VALUES (?,?,?,?,?,?,?,?)',
+                    [id, pppoeUsername, hash, salt, routerId, pppoeUsername, acc, new Date().toISOString()]
+                );
+                res.json({ message: 'Portal account created', id, created: true, accountNumber: acc });
+            }
+        } catch (e) {
+            if (e.message.includes('UNIQUE constraint failed')) {
+                return res.status(409).json({ message: 'A portal account with this username already exists' });
+            }
+            console.error('[Client Portal Auto-Create] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     app.use('/api/client-portal', clientPortalRouter);
 
     // Public Client Login

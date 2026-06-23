@@ -137,6 +137,13 @@ export const ClientPortalUsers: React.FC = () => {
     return (
         <div className="max-w-6xl mx-auto space-y-6 p-6">
             <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Client Portal Users</h2>
+
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                <p className="text-sm text-blue-800 dark:text-blue-300">
+                    <strong>Note:</strong> Client portal accounts are automatically created when you add a new PPPoE user. 
+                    The portal username and password will match the PPPoE credentials. You can also manually create accounts here if needed.
+                </p>
+            </div>
             
             <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
                 <h3 className="text-lg font-semibold mb-4 text-slate-800 dark:text-white">Create New Credentials</h3>
