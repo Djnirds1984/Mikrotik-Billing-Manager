@@ -355,6 +355,12 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         const selectedPlan = plans.find(p => p.id === secret.profile);
+
+        // Validate: password is required when creating a NEW portal account during edit
+        if (createPortalAccount && !portalAccountExists && initialData && !secret.password) {
+            alert('Password is required to create a new client portal account. Please enter the PPPoE password.');
+            return;
+        }
         
         const secretPayload: PppSecretData = {
             name: secret.name,
@@ -391,12 +397,19 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                                 onChange={e => setCreatePortalAccount(e.target.checked)}
                                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                             />
-                            <label htmlFor="createPortalAccount" className="text-sm text-blue-800 dark:text-blue-300 cursor-pointer select-none">
-                                {portalAccountExists
-                                    ? 'Client portal account exists. Check to update portal credentials (username & password).'
-                                    : 'Create client portal account using this PPPoE username and password.'
-                                }
-                            </label>
+                            <div className="text-sm text-blue-800 dark:text-blue-300">
+                                <label htmlFor="createPortalAccount" className="cursor-pointer select-none">
+                                    {portalAccountExists
+                                        ? 'Client portal account exists. Check to update portal credentials (username & password).'
+                                        : 'Create client portal account using this PPPoE username and password.'
+                                    }
+                                </label>
+                                {createPortalAccount && !portalAccountExists && initialData && !secret.password && (
+                                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1 font-medium">
+                                        ⚠ You must enter the password above to create the portal account.
+                                    </p>
+                                )}
+                            </div>
                         </div>
                         <div><label>Billing Plan</label><select value={secret.profile} onChange={e => setSecret(s => ({...s, profile: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700">
                             {initialData && <option value="">-- No Change --</option>}
