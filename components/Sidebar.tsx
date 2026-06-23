@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon, CloudIcon, ChatBubbleLeftRightIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { View, CompanySettings, LicenseStatus } from '../types.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useNotifications } from '../contexts/NotificationContext.tsx';
+import { getAppVersion } from '../services/versionService.ts';
 
 interface SidebarProps {
   currentView: View;
@@ -71,6 +72,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
   const { user, hasPermission } = useAuth();
   const { t } = useLocalization();
   const { unreadCount } = useNotifications();
+  const [appVersion, setAppVersion] = useState('v2.0.0');
+
+  useEffect(() => {
+    getAppVersion().then(data => {
+      setAppVersion(`v${data.version}`);
+    }).catch(() => {
+      // Fallback to default version
+    });
+  }, []);
   
   const navItems = useMemo(() => [
     { id: 'dashboard', label: t('sidebar.dashboard'), icon: <EthernetIcon className="w-6 h-6" /> },
@@ -162,7 +172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
           ))}
         </ul>
         <div className="text-center text-xs text-slate-400 dark:text-slate-600 mt-4">
-            v1.6.0
+            {appVersion}
         </div>
       </div>
     </aside>

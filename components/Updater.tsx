@@ -8,6 +8,8 @@ import {
     parseGitHubUrl, getRepositoryInfo, getBranches, streamPullFromRepository
 } from '../services/updaterService.ts';
 import type { UpdateSnapshot } from '../services/updaterService.ts';
+import { getAppVersion, getMigrationStatus } from '../services/versionService.ts';
+import type { MigrationStatus } from '../services/versionService.ts';
 import { UpdateIcon, CloudArrowUpIcon, CheckCircleIcon, ExclamationTriangleIcon, TrashIcon, QuestionMarkCircleIcon } from '../constants.tsx';
 import { Loader } from './Loader.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
@@ -40,11 +42,18 @@ const LogViewer: React.FC<{ logs: LogEntry[] }> = ({ logs }) => {
     );
 };
 
-const VersionInfoDisplay: React.FC<{ title: string; info: VersionInfo }> = ({ title, info }) => (
+const VersionInfoDisplay: React.FC<{ title: string; info: VersionInfo; versionNumber?: string }> = ({ title, info, versionNumber }) => (
     <div>
         <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2">{title}</h3>
         <div className="bg-slate-100 dark:bg-slate-900/50 p-4 rounded-lg space-y-3">
+            {versionNumber && (
+                <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">App Version</p>
+                    <p className="text-lg font-semibold text-[--color-primary-500] dark:text-[--color-primary-400]">v{versionNumber}</p>
+                </div>
+            )}
             <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Build Info</p>
                 <p className="text-lg font-semibold text-[--color-primary-500] dark:text-[--color-primary-400]">{info.title} <span className="text-xs font-mono text-slate-500 ml-2">{info.hash}</span></p>
                 {info.description && <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{info.description}</p>}
             </div>
@@ -80,6 +89,8 @@ export const Updater: React.FC = () => {
     const [isDeletingSnapshot, setIsDeletingSnapshot] = useState<string | null>(null);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [currentVersionInfo, setCurrentVersionInfo] = useState<VersionInfo | null>(null);
+    const [appVersion, setAppVersion] = useState<string>('2.0.0');
+    const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
     const [newVersionInfo, setNewVersionInfo] = useState<NewVersionInfo | null>(null);
     const [isLoadingCurrentVersion, setIsLoadingCurrentVersion] = useState(true);
     const [isDeleting, setIsDeleting] = useState<string | null>(null);
@@ -133,6 +144,16 @@ export const Updater: React.FC = () => {
         fetchCurrentVersion();
         fetchBackups();
         fetchUpdateSnapshots();
+
+        // Fetch app version
+        getAppVersion().then(data => {
+            setAppVersion(data.version);
+        }).catch(() => {});
+
+        // Fetch migration status
+        getMigrationStatus().then(data => {
+            setMigrationStatus(data);
+        }).catch(() => {});
         
         // Load saved repository URL and branch from localStorage
         const savedRepoUrl = localStorage.getItem('updaterRepositoryUrl');
@@ -534,7 +555,7 @@ export const Updater: React.FC = () => {
             )}
 
             { !isWorking && !newVersionInfo && currentVersionInfo && (
-                <VersionInfoDisplay title="Current Version" info={currentVersionInfo} />
+                <VersionInfoDisplay title="Current Version" info={currentVersionInfo} versionNumber={appVersion} />
             )}
             
              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-8">
@@ -578,6 +599,50 @@ export const Updater: React.FC = () => {
                     </ul>
                 ) : (
                     <p className="text-slate-500 dark:text-slate-500 text-center py-4">No update snapshots yet. The next update will create one automatically.</p>
+                )}
+            </div>
+
+            {/* Database Migrations */}
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-8">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Database Migrations</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                            Schema version: <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">{migrationStatus?.currentVersion || 'unknown'}</span>
+                            {migrationStatus && migrationStatus.pendingMigrations.length > 0 && (
+                                <span className="ml-2 text-amber-600 dark:text-amber-400">
+                                    ({migrationStatus.pendingMigrations.length} pending)
+                                </span>
+                            )}
+                        </p>
+                    </div>
+                </div>
+                {migrationStatus && migrationStatus.appliedMigrations.length > 0 ? (
+                    <ul className="space-y-2">
+                        {migrationStatus.appliedMigrations.map((m, idx) => (
+                            <li key={idx} className="bg-slate-100 dark:bg-slate-700/50 p-3 rounded-md">
+                                <div className="flex justify-between items-center gap-3">
+                                    <div>
+                                        <span className="font-mono text-sm text-green-700 dark:text-green-400 font-semibold">{m.version}</span>
+                                        <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">applied {new Date(m.applied_at).toLocaleString()}</span>
+                                    </div>
+                                    <span className="text-xs text-slate-400 dark:text-slate-500 font-mono">{m.description}</span>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p className="text-slate-500 dark:text-slate-500 text-center py-4">No migrations have been applied yet.</p>
+                )}
+                {migrationStatus && migrationStatus.pendingMigrations.length > 0 && (
+                    <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
+                        <p className="text-sm text-amber-800 dark:text-amber-400">
+                            Pending migrations: {migrationStatus.pendingMigrations.join(', ')}
+                        </p>
+                        <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                            Migrations are applied automatically on server startup.
+                        </p>
+                    </div>
                 )}
             </div>
 

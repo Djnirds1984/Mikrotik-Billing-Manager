@@ -191,7 +191,11 @@
         "protected": "(protected)",
         "pull_success": "Successfully pulled latest changes from repository",
         "pull_failed": "Pull operation failed",
-        "connection_lost": "Connection lost during pull operation"
+        "connection_lost": "Connection lost during pull operation",
+        "app_version": "App Version",
+        "db_migrations": "Database Migrations",
+        "schema_version": "Schema Version",
+        "migration_status": "Migration Status"
     },
     "repair_tickets": {
         "title": "Repair Tickets"

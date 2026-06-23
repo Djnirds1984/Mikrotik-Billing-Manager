@@ -33,6 +33,15 @@ const APPLICATIONS_UPLOADS_DIR = path.join(UPLOADS_DIR, 'applications');
 const SECRET_KEY = process.env.JWT_SECRET || 'a-very-weak-secret-key-for-dev-only';
 const LICENSE_SECRET_KEY = process.env.LICENSE_SECRET || 'a-long-and-very-secret-string-for-licenses-!@#$%^&*()';
 
+// Cache app version from package.json
+let APP_VERSION = '2.0.0';
+try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    APP_VERSION = pkg.version || '2.0.0';
+} catch (e) {
+    console.warn('[Version] Could not read package.json, defaulting to 2.0.0');
+}
+
 // Ensure backup dir exists
 if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -680,6 +689,16 @@ async function initDb() {
                 );
             }
         } catch (_) {}
+
+        // Run database migrations (v2.0.0+)
+        try {
+            const { runMigrations } = require('./migrations/runner');
+            await runMigrations(db);
+        } catch (migrationErr) {
+            console.error('[Migration] Migration runner error:', migrationErr.message);
+            // Don't throw — log and continue so the server can still start
+        }
+
         console.log('Database initialized successfully');
     } catch (err) {
         console.error('Failed to initialize database:', err);
@@ -8411,6 +8430,25 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             });
         } catch (error) {
             res.status(500).json({ message: `Failed to read local git info: ${error.message}` });
+        }
+    });
+
+    // App version (semantic version from package.json)
+    app.get('/api/app-version', protect, async (req, res) => {
+        res.json({
+            version: APP_VERSION,
+            buildDate: new Date().toISOString()
+        });
+    });
+
+    // Migration status
+    app.get('/api/migration-status', protect, async (req, res) => {
+        try {
+            const { getMigrationStatus } = require('./migrations/runner');
+            const status = await getMigrationStatus(db);
+            res.json(status);
+        } catch (e) {
+            res.status(500).json({ message: 'Failed to get migration status: ' + e.message });
         }
     });
 
