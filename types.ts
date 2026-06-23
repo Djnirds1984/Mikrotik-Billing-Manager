@@ -955,3 +955,15 @@ export interface WanSettings {
   status: 'pending' | 'applied' | 'failed';
   errorMessage?: string;
 }
+
+export interface AvailableInterface {
+  name: string;
+  mac: string;
+  state: string;
+  mtu: number;
+}
+
+export interface AvailableInterfacesResponse {
+  interfaces: AvailableInterface[];
+  defaultInterface: string | null;
+}

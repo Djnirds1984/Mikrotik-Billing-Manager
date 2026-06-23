@@ -2409,6 +2409,59 @@ async function startServer() {
         }
     });
 
+    // Available network interfaces on the host system
+    dbRouter.get('/wan-settings/interfaces', async (req, res) => {
+        try {
+            const { exec } = require('child_process');
+            const util = require('util');
+            const execPromise = util.promisify(exec);
+
+            const { stdout } = await execPromise('ip -j link show 2>/dev/null || echo "[]"');
+            const interfaces = JSON.parse(stdout);
+
+            // Filter to real physical interfaces (exclude lo, docker, veth, bridge, etc.)
+            const physicalInterfaces = interfaces
+                .filter(iface => {
+                    const name = iface.ifname;
+                    const type = iface.link_type || '';
+                    // Include ethernet, exclude loopback and virtual
+                    if (name === 'lo') return false;
+                    if (type !== 'ether') return false;
+                    // Exclude virtual/virtualized interfaces
+                    if (name.startsWith('docker') || name.startsWith('veth') ||
+                        name.startsWith('br-') || name.startsWith('virbr') ||
+                        name.startsWith('tun') || name.startsWith('tap') ||
+                        name.startsWith('wg') || name.startsWith('ppp')) return false;
+                    return true;
+                })
+                .map(iface => ({
+                    name: iface.ifname,
+                    mac: iface.address || '',
+                    state: iface.operstate || 'unknown',
+                    mtu: iface.mtu || 1500
+                }));
+
+            // Also detect the current default route interface
+            let defaultInterface = null;
+            try {
+                const { stdout: routeOutput } = await execPromise('ip -j route show default 2>/dev/null || echo "[]"');
+                const routes = JSON.parse(routeOutput);
+                if (routes.length > 0) {
+                    defaultInterface = routes[0].dev || null;
+                }
+            } catch (e) {
+                // Ignore route detection errors
+            }
+
+            res.json({
+                interfaces: physicalInterfaces,
+                defaultInterface
+            });
+        } catch (e) {
+            res.status(500).json({ message: 'Failed to detect interfaces: ' + e.message });
+        }
+    });
+
     // Notifications
     dbRouter.get('/notifications', async (req, res) => {
         const rows = await db.all('SELECT * FROM notifications ORDER BY timestamp DESC LIMIT 100');

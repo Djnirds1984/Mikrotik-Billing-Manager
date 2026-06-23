@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import type { WanSettings, NetworkStatus } from '../types.ts';
-import { getWanSettings, saveWanSettings, applyWanSettings, getNetworkStatus } from '../services/networkService.ts';
+import type { WanSettings, NetworkStatus, AvailableInterface } from '../types.ts';
+import { getWanSettings, saveWanSettings, applyWanSettings, getNetworkStatus, getAvailableInterfaces } from '../services/networkService.ts';
 
 export const WanSettingsPanel: React.FC = () => {
   const [settings, setSettings] = useState<Partial<WanSettings>>({
@@ -14,15 +14,19 @@ export const WanSettingsPanel: React.FC = () => {
   });
   
   const [networkStatus, setNetworkStatus] = useState<NetworkStatus | null>(null);
+  const [availableInterfaces, setAvailableInterfaces] = useState<AvailableInterface[]>([]);
+  const [defaultInterface, setDefaultInterface] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
 
   useEffect(() => {
     loadSettings();
     loadNetworkStatus();
+    loadInterfaces();
   }, []);
 
   const loadSettings = async () => {
@@ -51,6 +55,23 @@ export const WanSettingsPanel: React.FC = () => {
       setNetworkStatus(status);
     } catch (err) {
       console.error('Failed to load network status:', err);
+    }
+  };
+
+  const loadInterfaces = async () => {
+    try {
+      const data = await getAvailableInterfaces();
+      setAvailableInterfaces(data.interfaces);
+      setDefaultInterface(data.defaultInterface);
+      // Auto-select the default interface if no valid interface is set
+      if (data.defaultInterface && data.interfaces.length > 0) {
+        const hasDefault = data.interfaces.some(i => i.name === data.defaultInterface);
+        if (hasDefault && (!settings.wanInterface || settings.wanInterface === 'eth0')) {
+          setSettings(prev => ({ ...prev, wanInterface: data.defaultInterface! }));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load available interfaces:', err);
     }
   };
 
@@ -197,14 +218,53 @@ export const WanSettingsPanel: React.FC = () => {
         <label htmlFor="wanInterface" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
           WAN Physical Interface
         </label>
-        <input
-          type="text"
-          id="wanInterface"
-          value={settings.wanInterface}
-          onChange={(e) => handleChange('wanInterface', e.target.value)}
-          className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
-          placeholder="eth0"
-        />
+        {availableInterfaces.length > 0 ? (
+          <div className="mt-1 space-y-2">
+            <select
+              id="wanInterface"
+              value={showManualInput ? '__manual__' : settings.wanInterface}
+              onChange={(e) => {
+                if (e.target.value === '__manual__') {
+                  setShowManualInput(true);
+                } else {
+                  setShowManualInput(false);
+                  handleChange('wanInterface', e.target.value);
+                }
+              }}
+              className="block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+            >
+              {availableInterfaces.map(iface => (
+                <option key={iface.name} value={iface.name}>
+                  {iface.name} {iface.name === defaultInterface ? '(Active / Default Route)' : ''} — {iface.state.toUpperCase()} {iface.mac ? `(${iface.mac})` : ''}
+                </option>
+              ))}
+              <option value="__manual__">Enter manually...</option>
+            </select>
+            {showManualInput && (
+              <input
+                type="text"
+                value={settings.wanInterface}
+                onChange={(e) => handleChange('wanInterface', e.target.value)}
+                className="block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                placeholder="e.g. eth0"
+              />
+            )}
+          </div>
+        ) : (
+          <input
+            type="text"
+            id="wanInterface"
+            value={settings.wanInterface}
+            onChange={(e) => handleChange('wanInterface', e.target.value)}
+            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+            placeholder="eth0"
+          />
+        )}
+        {availableInterfaces.length === 0 && (
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Could not detect interfaces automatically. Enter the interface name manually.
+          </p>
+        )}
       </div>
 
       {/* Static IP Fields */}
