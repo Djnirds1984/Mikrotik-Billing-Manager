@@ -127,6 +127,7 @@ async function initDb() {
                 logoBase64 TEXT,
                 telegramSettings TEXT,
                 paymongoSettings TEXT,
+                xenditSettings TEXT,
                 databaseEngine TEXT DEFAULT 'sqlite',
                 dbHost TEXT,
                 dbPort INTEGER,
@@ -144,6 +145,7 @@ async function initDb() {
         const columnNames = columns.map(c => c.name);
         if (!columnNames.includes('telegramSettings')) await db.exec("ALTER TABLE settings ADD COLUMN telegramSettings TEXT");
         if (!columnNames.includes('paymongoSettings')) await db.exec("ALTER TABLE settings ADD COLUMN paymongoSettings TEXT");
+        if (!columnNames.includes('xenditSettings')) await db.exec("ALTER TABLE settings ADD COLUMN xenditSettings TEXT");
         if (!columnNames.includes('databaseEngine')) await db.exec("ALTER TABLE settings ADD COLUMN databaseEngine TEXT DEFAULT 'sqlite'");
         if (!columnNames.includes('notificationSettings')) await db.exec("ALTER TABLE settings ADD COLUMN notificationSettings TEXT");
         if (!columnNames.includes('landingPageConfig')) await db.exec("ALTER TABLE settings ADD COLUMN landingPageConfig TEXT");
@@ -490,6 +492,19 @@ async function initDb() {
             CREATE TABLE IF NOT EXISTS paymongo_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
+                invoice_no TEXT NOT NULL UNIQUE,
+                pppoe_username TEXT NOT NULL,
+                router_id TEXT,
+                plan_name TEXT,
+                amount REAL,
+                status TEXT DEFAULT 'pending',
+                processed_at TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS xendit_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                invoice_id TEXT NOT NULL,
                 invoice_no TEXT NOT NULL UNIQUE,
                 pppoe_username TEXT NOT NULL,
                 router_id TEXT,
@@ -2095,6 +2110,7 @@ async function startServer() {
             if(s) {
                 try { s.telegramSettings = JSON.parse(s.telegramSettings); } catch(e) {}
                 try { s.paymongoSettings = JSON.parse(s.paymongoSettings); } catch(e) {}
+                try { s.xenditSettings = JSON.parse(s.xenditSettings); } catch(e) {}
                 try { s.facebookSettings = JSON.parse(s.facebookSettings); } catch(e) {}
                 try { s.notificationSettings = JSON.parse(s.notificationSettings); } catch(e) {}
                 try { s.landingPageConfig = JSON.parse(s.landingPageConfig); } catch(e) {}
@@ -2235,6 +2251,7 @@ async function startServer() {
             const data = { ...req.body };
             if (data.telegramSettings) data.telegramSettings = JSON.stringify(data.telegramSettings);
             if (data.paymongoSettings) data.paymongoSettings = JSON.stringify(data.paymongoSettings);
+            if (data.xenditSettings) data.xenditSettings = JSON.stringify(data.xenditSettings);
             if (data.facebookSettings) data.facebookSettings = JSON.stringify(data.facebookSettings);
             if (data.notificationSettings) data.notificationSettings = JSON.stringify(data.notificationSettings);
             if (data.landingPageConfig) data.landingPageConfig = JSON.stringify(data.landingPageConfig);
@@ -2935,7 +2952,23 @@ async function startServer() {
             res.status(500).json({ message: e.message });
         }
     });
-    
+
+    // Public Xendit config — exposes only safe fields needed by Client Portal UI
+    app.get('/api/public/xendit-config', async (req, res) => {
+        try {
+            const s = await db.get('SELECT xenditSettings FROM settings WHERE id = 1');
+            let x = {};
+            try { x = JSON.parse(s?.xenditSettings || '{}'); } catch (_) {}
+            res.json({
+                enabled: !!x.enabled,
+                passFeesToCustomer: !!x.passFeesToCustomer,
+                paymentMethods: x.paymentMethods || []
+            });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     // ========================================
     // Customer Store APIs
     // ========================================
@@ -4712,6 +4745,87 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
     app.use('/api/payments', paymongoRouter);
 
+    // --- Xendit API ---
+    app.post('/api/payments/create-xendit-checkout', async (req, res) => {
+        try {
+            const { pppoe_username, plan_name, amount, duration_days, router_id, planType, planId } = req.body;
+
+            // Get Xendit settings
+            const settings = await new Promise((resolve, reject) => {
+                db.get('SELECT xenditSettings FROM settings WHERE id = 1', (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                });
+            });
+
+            const xenditSettings = JSON.parse(settings?.xenditSettings || '{}');
+            if (!xenditSettings.enabled || !xenditSettings.secretKey) {
+                return res.status(400).json({ error: 'Xendit is not configured' });
+            }
+
+            const invoice_no = 'XND-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+
+            // Calculate amount with fee if applicable
+            let finalAmount = amount;
+            if (xenditSettings.passFeesToCustomer) {
+                finalAmount = Math.ceil(amount * 1.03); // 3% convenience fee
+            }
+
+            // Create Xendit invoice via API
+            const response = await fetch('https://api.xendit.co/v2/invoices', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Basic ' + Buffer.from(xenditSettings.secretKey + ':').toString('base64')
+                },
+                body: JSON.stringify({
+                    external_id: invoice_no,
+                    amount: finalAmount,
+                    currency: 'PHP',
+                    description: `Payment for ${plan_name} - ${pppoe_username}`,
+                    payment_methods: xenditSettings.paymentMethods || [],
+                    success_redirect_url: xenditSettings.webhookUrl ? xenditSettings.webhookUrl.replace('/api/xendit-webhook', '/payment-success') : undefined,
+                    failure_redirect_url: xenditSettings.webhookUrl ? xenditSettings.webhookUrl.replace('/api/xendit-webhook', '/payment-failed') : undefined,
+                    metadata: {
+                        pppoe_username,
+                        plan_name,
+                        duration_days,
+                        router_id,
+                        invoice_no,
+                        planType: planType || 'pppoe',
+                        planId: planId || ''
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error('[Xendit] Invoice creation failed:', errorData);
+                return res.status(response.status).json({ error: 'Failed to create Xendit invoice', details: errorData });
+            }
+
+            const invoiceData = await response.json();
+
+            // Store session in database
+            db.run(
+                `INSERT INTO xendit_sessions (session_id, invoice_id, invoice_no, pppoe_username, router_id, plan_name, amount, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+                [invoiceData.id, invoiceData.id, invoice_no, pppoe_username, router_id, plan_name, finalAmount],
+                (err) => {
+                    if (err) console.error('[Xendit] Failed to store session:', err);
+                }
+            );
+
+            res.json({
+                checkout_url: invoiceData.invoice_url,
+                invoice_no: invoice_no,
+                invoice_id: invoiceData.id
+            });
+        } catch (error) {
+            console.error('[Xendit] Checkout error:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+
     // C. PayMongo Webhook Auto-Registration
     async function ensurePayMongoWebhook() {
         const settings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
@@ -5368,6 +5482,104 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.error('[PayMongo Webhook] FATAL UNCAUGHT ERROR:', fatalErr.message);
             console.error('[PayMongo Webhook] Stack:', fatalErr.stack);
             return res.status(200).json({ received: true, error: 'internal_error' });
+        }
+    });
+
+    // --- Xendit Webhook Endpoint (public) ---
+    app.post('/api/xendit-webhook', async (req, res) => {
+        try {
+            console.log('[Xendit Webhook] Received event');
+
+            // Verify webhook token
+            const settings = await new Promise((resolve, reject) => {
+                db.get('SELECT xenditSettings FROM settings WHERE id = 1', (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                });
+            });
+
+            const xenditSettings = JSON.parse(settings?.xenditSettings || '{}');
+            const callbackToken = req.headers['x-callback-token'];
+
+            if (xenditSettings.webhookToken && callbackToken !== xenditSettings.webhookToken) {
+                console.warn('[Xendit Webhook] Invalid callback token');
+                return res.status(403).json({ error: 'Invalid callback token' });
+            }
+
+            const event = req.body;
+
+            // Xendit sends invoice paid callbacks
+            if (event.status === 'PAID' || event.status === 'SETTLED') {
+                const metadata = event.metadata || {};
+                const { pppoe_username, duration_days, router_id, plan_name, invoice_no, planType, planId } = metadata;
+
+                console.log(`[Xendit Webhook] Payment confirmed for ${pppoe_username}, plan: ${plan_name}`);
+
+                // Update session status
+                db.run(
+                    `UPDATE xendit_sessions SET status = 'paid', processed_at = datetime('now') WHERE invoice_no = ?`,
+                    [invoice_no || event.external_id]
+                );
+
+                // Get router configuration and extend subscription (mirror PayMongo's logic)
+                if (pppoe_username && router_id) {
+                    try {
+                        const router = await new Promise((resolve, reject) => {
+                            db.get('SELECT * FROM routers WHERE id = ?', [router_id], (err, row) => {
+                                if (err) reject(err);
+                                else resolve(row);
+                            });
+                        });
+
+                        if (router) {
+                            const RouterOSAPI = require('routeros').RouterOSAPI;
+                            const conn = new RouterOSAPI({
+                                host: router.host,
+                                port: router.port || 8728,
+                                user: router.username,
+                                password: router.password,
+                                timeout: 10
+                            });
+
+                            await conn.connect();
+
+                            // Find PPPoE user and update expiration
+                            const users = await conn.write('/ppp/secret/print', [`?name=${pppoe_username}`]);
+                            if (users.length > 0) {
+                                const user = users[0];
+                                const currentComment = user.comment || '';
+
+                                // Calculate new expiration
+                                const days = parseInt(duration_days) || 30;
+                                const now = new Date();
+                                const expDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+                                const expStr = expDate.toISOString().split('T')[0];
+
+                                // Update comment with new expiration
+                                let newComment = currentComment.replace(/exp=\d{4}-\d{2}-\d{2}/, `exp=${expStr}`);
+                                if (!newComment.includes('exp=')) {
+                                    newComment = `${newComment} exp=${expStr}`.trim();
+                                }
+
+                                await conn.write('/ppp/secret/set', [`=.id=${user['.id']}`, `=comment=${newComment}`]);
+                                console.log(`[Xendit Webhook] Extended ${pppoe_username} to ${expStr}`);
+                            }
+
+                            await conn.close();
+                        }
+                    } catch (routerErr) {
+                        console.error('[Xendit Webhook] Router connection error:', routerErr.message);
+                    }
+                }
+
+                res.json({ status: 'success' });
+            } else {
+                console.log(`[Xendit Webhook] Non-payment event: ${event.status}`);
+                res.json({ status: 'ignored' });
+            }
+        } catch (error) {
+            console.error('[Xendit Webhook] Error:', error);
+            res.status(500).json({ error: 'Internal server error' });
         }
     });
 

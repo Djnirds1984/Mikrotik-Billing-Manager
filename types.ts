@@ -485,6 +485,16 @@ export interface PayMongoSettings {
     paymentMethods?: string[];  // Array of payment method IDs: ['qrph', 'gcash', 'card', etc.]
 }
 
+export interface XenditSettings {
+    enabled: boolean;
+    publicKey: string;
+    secretKey: string;
+    webhookToken: string;
+    webhookUrl?: string;
+    passFeesToCustomer?: boolean;
+    paymentMethods?: string[];
+}
+
 export interface FacebookMessengerSettings {
     enabled: boolean;
     pageId: string;
@@ -572,6 +582,7 @@ export interface PanelSettings {
     };
     telegramSettings?: TelegramSettings;
     paymongoSettings?: PayMongoSettings;
+    xenditSettings?: XenditSettings;
     facebookSettings?: FacebookMessengerSettings;
     landingPageConfig?: LandingPageConfig;
 }
@@ -585,7 +596,7 @@ export interface StoreSettings {
     autoSyncWorkerEnabled: boolean;
     customExpiredMessage: string;
     storeEnabled: boolean;
-    paymentMethods: { paymongo: boolean; manualGcash: boolean };
+    paymentMethods: { paymongo: boolean; manualGcash: boolean; xendit: boolean };
     gcashNumber: string;
     gcashAccountName: string;
     storeBannerText: string;

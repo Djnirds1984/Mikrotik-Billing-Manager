@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import type { PanelSettings, TelegramSettings, PayMongoSettings, FacebookMessengerSettings } from '../types.ts';
+import type { PanelSettings, TelegramSettings, PayMongoSettings, XenditSettings, FacebookMessengerSettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
@@ -16,6 +16,8 @@ const MoonIcon: React.FC<{ className?: string }> = ({ className }) => <svg class
 const ComputerDesktopIcon: React.FC<{ className?: string }> = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" /></svg>;
 const MessageIcon: React.FC<{ className?: string }> = ({ className }) => ( <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.76 9.76 0 01-2.53-.405m-3.038-5.858a2.25 2.25 0 00-3.75-3.75C3.302 4.03 7.056 2.25 12 2.25c4.97 0 9 3.694 9 8.25z" /></svg>);
 const PayMongoIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>);
+
+const XenditIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>);
 
 const FacebookIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -334,6 +336,9 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
         setSettings(s => ({ ...s, paymongoSettings: { ...s.paymongoSettings, [field]: value } as PayMongoSettings }));
     };
 
+    // Mutual exclusion warning
+    const [gatewayWarning, setGatewayWarning] = useState<string | null>(null);
+
     // Webhook diagnostics state
     const [webhookStatus, setWebhookStatus] = useState<{
         configured: boolean;
@@ -471,7 +476,25 @@ const PayMongoTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                 </div>
             )}
             
-            <Toggle label="Enable PayMongo Payments" checked={paymongo.enabled || false} onChange={c => update('enabled', c)} />
+            {/* Gateway Mutual Exclusion Warning */}
+            {gatewayWarning && (
+                <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg flex items-center gap-2">
+                    <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <span className="text-sm text-amber-800 dark:text-amber-200">{gatewayWarning}</span>
+                </div>
+            )}
+
+            <Toggle label="Enable PayMongo Payments" checked={paymongo.enabled || false} onChange={c => {
+                if (c && settings.xenditSettings?.enabled) {
+                    setGatewayWarning('Cannot enable PayMongo while Xendit is active. Please disable Xendit first.');
+                    setTimeout(() => setGatewayWarning(null), 5000);
+                    return;
+                }
+                setGatewayWarning(null);
+                update('enabled', c);
+            }} />
             <div className={`space-y-4 ${!paymongo.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
                 <TextInput label="Public Key" name="publicKey" value={paymongo.publicKey || ''} onChange={e => update('publicKey', e.target.value)} type="password" />
                 <TextInput label="Secret Key" name="secretKey" value={paymongo.secretKey || ''} onChange={e => update('secretKey', e.target.value)} type="password" />
@@ -906,6 +929,132 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
     );
 };
 
+const XenditTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
+    const xendit = settings.xenditSettings || {} as XenditSettings;
+    const update = (field: keyof XenditSettings, value: any) => {
+        setSettings(s => ({ ...s, xenditSettings: { ...s.xenditSettings, [field]: value } as XenditSettings }));
+    };
+
+    // Mutual exclusion warning
+    const [gatewayWarning, setGatewayWarning] = useState<string | null>(null);
+
+    return (
+        <SettingsSection title="Xendit Payment Gateway">
+            {/* Test Mode Warning */}
+            {(xendit.publicKey?.includes('xnd_development_') || xendit.secretKey?.includes('xnd_development_')) && (
+                <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border-2 border-red-500 rounded-lg">
+                    <div className="flex items-start gap-3">
+                        <span className="text-2xl">⚠️</span>
+                        <div>
+                            <h4 className="font-bold text-red-800 dark:text-red-300 text-lg">TEST MODE DETECTED</h4>
+                            <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+                                You are using <strong>TEST API KEYS</strong>. All payments will be <strong>SIMULATED</strong> and no real money will be processed.
+                            </p>
+                            <p className="text-sm text-red-700 dark:text-red-400 mt-2">
+                                To accept <strong>REAL PAYMENTS</strong>, you must use <strong>LIVE API KEYS</strong> from your Xendit dashboard:
+                            </p>
+                            <ul className="text-xs text-red-600 dark:text-red-500 mt-2 list-disc list-inside space-y-1">
+                                <li>Live Public Key starts with: <code className="bg-red-100 dark:bg-red-900 px-2 rounded">xnd_public_live_...</code></li>
+                                <li>Live Secret Key starts with: <code className="bg-red-100 dark:bg-red-900 px-2 rounded">xnd_live_...</code></li>
+                            </ul>
+                            <p className="text-xs text-red-600 dark:text-red-500 mt-2 font-semibold">
+                                🚨 DANGER: Test mode cannot process real transactions!
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Gateway Mutual Exclusion Warning */}
+            {gatewayWarning && (
+                <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg flex items-center gap-2">
+                    <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <span className="text-sm text-amber-800 dark:text-amber-200">{gatewayWarning}</span>
+                </div>
+            )}
+
+            <Toggle label="Enable Xendit Payments" checked={xendit.enabled || false} onChange={c => {
+                if (c && settings.paymongoSettings?.enabled) {
+                    setGatewayWarning('Cannot enable Xendit while PayMongo is active. Please disable PayMongo first.');
+                    setTimeout(() => setGatewayWarning(null), 5000);
+                    return;
+                }
+                setGatewayWarning(null);
+                update('enabled', c);
+            }} />
+            <div className={`space-y-4 ${!xendit.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                <TextInput label="Public Key" name="xenditPublicKey" value={xendit.publicKey || ''} onChange={e => update('publicKey', e.target.value)} type="password" />
+                <TextInput label="Secret Key" name="xenditSecretKey" value={xendit.secretKey || ''} onChange={e => update('secretKey', e.target.value)} type="password" />
+                <TextInput label="Webhook Token" name="xenditWebhookToken" value={xendit.webhookToken || ''} onChange={e => update('webhookToken', e.target.value)} type="password" />
+                <TextInput label="Webhook URL" name="xenditWebhookUrl" value={xendit.webhookUrl || ''} onChange={e => update('webhookUrl', e.target.value)} placeholder="https://yourdomain.com/api/xendit-webhook" />
+                <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2">Full URL where Xendit will send payment events (e.g., https://yourdomain.com/api/xendit-webhook)</p>
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                    <Toggle
+                        label="Pass Convenience Fee to Customer"
+                        checked={xendit.passFeesToCustomer || false}
+                        onChange={c => update('passFeesToCustomer', c)}
+                    />
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        When ON: customers pay an extra convenience fee so you receive 100% of the plan price.
+                        When OFF: you absorb the Xendit gateway fee from the plan price.
+                    </p>
+                </div>
+
+                {/* Payment Methods Selection */}
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                    <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">Available Payment Methods</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2">Select which payment methods to offer customers</p>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        {[
+                            { id: 'gcash', label: 'GCash (E-Wallet)', icon: '💙' },
+                            { id: 'maya', label: 'Maya (E-Wallet)', icon: '💜' },
+                            { id: 'qrph', label: 'QR Code (QR PH)', icon: '📱' },
+                            { id: 'bank_transfer', label: 'Bank Transfer', icon: '🏦' },
+                            { id: 'card', label: 'Credit/Debit Card', icon: '💳' },
+                            { id: 'seven_eleven', label: '7-Eleven (Cash)', icon: '🏪' },
+                            { id: 'cebuarana', label: 'Cebuana (Cash)', icon: '🏪' },
+                            { id: 'dp_mlhuillier', label: 'DP/MLhuillier (Cash)', icon: '🏪' },
+                        ].map(method => {
+                            const methods = xendit.paymentMethods || ['gcash'];
+                            const isChecked = methods.includes(method.id);
+                            return (
+                                <label
+                                    key={method.id}
+                                    className="flex items-center gap-2 p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                            const currentMethods = xendit.paymentMethods || ['gcash'];
+                                            const newMethods = e.target.checked
+                                                ? [...currentMethods, method.id]
+                                                : currentMethods.filter(m => m !== method.id);
+                                            update('paymentMethods', newMethods);
+                                        }}
+                                        className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
+                                    />
+                                    <span className="text-lg">{method.icon}</span>
+                                    <span className="text-sm text-slate-700 dark:text-slate-300">{method.label}</span>
+                                </label>
+                            );
+                        })}
+                    </div>
+
+                    {(xendit.paymentMethods || ['gcash']).length === 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                            ⚠️ At least one payment method must be selected
+                        </p>
+                    )}
+                </div>
+            </div>
+        </SettingsSection>
+    );
+};
+
 const GlobeIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 2c2.21 0 4.21.896 5.656 2.344A8 8 0 0112 20a8 8 0 01-5.656-13.656A7.976 7.976 0 0112 4zm0 2c-1.657 0-3 3.134-3 6s1.343 6 3 6 3-3.134 3-6-1.343-6-3-6zm-8 6c0-.69.111-1.353.316-1.972A9.964 9.964 0 004 12c0 .69.111 1.353.316 1.972A9.964 9.964 0 004 12zm16 0c0-.69-.111-1.353-.316-1.972.205.619.316 1.282.316 1.972 0 .69-.111 1.353-.316 1.972.205-.619.316-1.282.316-1.972z"/>
@@ -1312,7 +1461,7 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
     );
 };
 
-type Tab = 'panel' | 'ai' | 'telegram' | 'paymongo' | 'facebook' | 'landing-page' | 'wan';
+type Tab = 'panel' | 'ai' | 'telegram' | 'paymongo' | 'xendit' | 'facebook' | 'landing-page' | 'wan';
 
 export const SystemSettings: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('panel');
@@ -1378,6 +1527,7 @@ export const SystemSettings: React.FC = () => {
         { id: 'ai', label: 'AI', icon: <KeyIcon className="w-5 h-5" /> },
         { id: 'telegram', label: 'Telegram', icon: <MessageIcon className="w-5 h-5" /> },
         { id: 'paymongo', label: 'PayMongo', icon: <PayMongoIcon className="w-5 h-5" /> },
+        { id: 'xendit', label: 'Xendit', icon: <XenditIcon className="w-5 h-5" /> },
         { id: 'facebook', label: 'Messenger', icon: <FacebookIcon className="w-5 h-5" /> },
         { id: 'landing-page', label: 'Landing Page', icon: <GlobeIcon className="w-5 h-5" /> },
         { id: 'wan', label: 'WAN Settings', icon: <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg> },
@@ -1392,6 +1542,7 @@ export const SystemSettings: React.FC = () => {
             case 'ai': return <AiTab settings={settings} setSettings={setSettings} />;
             case 'telegram': return <TelegramTab settings={settings} setSettings={setSettings} onTest={handleTestTelegram} isTesting={isTesting} />;
             case 'paymongo': return <PayMongoTab settings={settings} setSettings={setSettings} />;
+            case 'xendit': return <XenditTab settings={settings} setSettings={setSettings} />;
             case 'facebook': return <FacebookMessengerTab settings={settings} setSettings={setSettings} />;
             case 'landing-page': return <LandingPageTab settings={settings} setSettings={setSettings} />;
             case 'wan': return <SettingsSection title="System WAN Configuration"><WanSettingsPanel /></SettingsSection>;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import type { StoreSettings } from '../types.ts';
-import { dbApi } from '../services/databaseService.ts';
+import type { StoreSettings, PanelSettings } from '../types.ts';
+import { dbApi, getPanelSettings } from '../services/databaseService.ts';
 import { Loader } from './Loader.tsx';
 import { CodeBlock } from './CodeBlock.tsx';
 
@@ -13,7 +13,7 @@ const defaultSettings: StoreSettings = {
     autoSyncWorkerEnabled: false,
     customExpiredMessage: '',
     storeEnabled: true,
-    paymentMethods: { paymongo: true, manualGcash: true },
+    paymentMethods: { paymongo: true, manualGcash: true, xendit: true },
     gcashNumber: '',
     gcashAccountName: '',
     storeBannerText: '',
@@ -151,6 +151,10 @@ export const StoreSettingsPage: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [activeTab, setActiveTab] = useState<'portal' | 'store' | 'script'>('portal');
     const [saveSuccess, setSaveSuccess] = useState(false);
+    const [paymentProviders, setPaymentProviders] = useState({
+        paymongoEnabled: false,
+        xenditEnabled: false
+    });
 
     useEffect(() => {
         loadSettings();
@@ -159,8 +163,21 @@ export const StoreSettingsPage: React.FC = () => {
     const loadSettings = async () => {
         try {
             setLoading(true);
-            const data = await dbApi.get<StoreSettings>('/store-settings');
-            setSettings({ ...defaultSettings, ...data });
+            const [data, panelSettings] = await Promise.all([
+                dbApi.get<StoreSettings>('/store-settings'),
+                getPanelSettings().catch(() => null as PanelSettings | null)
+            ]);
+            setSettings({
+                ...defaultSettings,
+                ...data,
+                paymentMethods: { ...defaultSettings.paymentMethods, ...(data.paymentMethods || {}) }
+            });
+            if (panelSettings) {
+                setPaymentProviders({
+                    paymongoEnabled: !!panelSettings.paymongoSettings?.enabled,
+                    xenditEnabled: !!panelSettings.xenditSettings?.enabled
+                });
+            }
         } catch (err) {
             console.error('Failed to load store settings:', err);
         } finally {
@@ -318,18 +335,34 @@ export const StoreSettingsPage: React.FC = () => {
                     <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
                         <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Payment Methods</h3>
                         <div className="space-y-3">
-                            <label className="flex items-center gap-3 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={settings.paymentMethods.paymongo}
-                                    onChange={e => updateSetting('paymentMethods', { ...settings.paymentMethods, paymongo: e.target.checked })}
-                                    className="w-4 h-4 rounded border-slate-300 text-[--color-primary-600] focus:ring-[--color-primary-500]"
-                                />
-                                <div>
-                                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">PayMongo (Online Payment)</span>
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">Card, GCash, Maya via PayMongo checkout</p>
-                                </div>
-                            </label>
+                            {paymentProviders.paymongoEnabled && (
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={settings.paymentMethods.paymongo}
+                                        onChange={e => updateSetting('paymentMethods', { ...settings.paymentMethods, paymongo: e.target.checked })}
+                                        className="w-4 h-4 rounded border-slate-300 text-[--color-primary-600] focus:ring-[--color-primary-500]"
+                                    />
+                                    <div>
+                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">PayMongo (Online Payment)</span>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">Card, GCash, Maya via PayMongo checkout</p>
+                                    </div>
+                                </label>
+                            )}
+                            {paymentProviders.xenditEnabled && (
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={settings.paymentMethods.xendit}
+                                        onChange={e => updateSetting('paymentMethods', { ...settings.paymentMethods, xendit: e.target.checked })}
+                                        className="w-4 h-4 rounded border-slate-300 text-[--color-primary-600] focus:ring-[--color-primary-500]"
+                                    />
+                                    <div>
+                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Xendit (Online Payment)</span>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">Card, GCash, Maya via Xendit checkout</p>
+                                    </div>
+                                </label>
+                            )}
                             <label className="flex items-center gap-3 cursor-pointer">
                                 <input
                                     type="checkbox"
