@@ -233,8 +233,9 @@ export const Store: React.FC = () => {
     setLookupMode('accountNumber');
   };
 
-  const getCurrency = (planCurrency?: string) => {
-    return planCurrency || storeSettings?.currency || 'PHP';
+  const getCurrency = (_planCurrency?: string) => {
+    // Always use the system settings currency as the source of truth
+    return storeSettings?.currency || 'PHP';
   };
 
   const formatPrice = (price: number, currency?: string) => {
