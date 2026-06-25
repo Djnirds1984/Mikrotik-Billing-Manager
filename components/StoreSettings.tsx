@@ -17,7 +17,8 @@ const defaultSettings: StoreSettings = {
     gcashNumber: '',
     gcashAccountName: '',
     storeBannerText: '',
-    autoRestoreOnPayment: true
+    autoRestoreOnPayment: true,
+    storeTheme: 'modern'
 };
 
 const TabButton: React.FC<{ label: string; icon: React.ReactNode; isActive: boolean; onClick: () => void }> = ({ label, icon, isActive, onClick }) => (
@@ -145,11 +146,17 @@ const CodeIcon: React.FC<{ className?: string }> = ({ className }) => (
     </svg>
 );
 
+const PaletteIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008z" />
+    </svg>
+);
+
 export const StoreSettingsPage: React.FC = () => {
     const [settings, setSettings] = useState<StoreSettings>(defaultSettings);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [activeTab, setActiveTab] = useState<'portal' | 'store' | 'script'>('portal');
+    const [activeTab, setActiveTab] = useState<'portal' | 'store' | 'themes' | 'script'>('portal');
     const [saveSuccess, setSaveSuccess] = useState(false);
     const [paymentProviders, setPaymentProviders] = useState({
         paymongoEnabled: false,
@@ -236,6 +243,7 @@ export const StoreSettingsPage: React.FC = () => {
                 <div className="flex gap-1">
                     <TabButton label="Expired Portal" icon={<ShieldIcon className="w-5 h-5" />} isActive={activeTab === 'portal'} onClick={() => setActiveTab('portal')} />
                     <TabButton label="Store Config" icon={<StoreIcon className="w-5 h-5" />} isActive={activeTab === 'store'} onClick={() => setActiveTab('store')} />
+                    <TabButton label="Store Themes" icon={<PaletteIcon className="w-5 h-5" />} isActive={activeTab === 'themes'} onClick={() => setActiveTab('themes')} />
                     <TabButton label="MikroTik Script" icon={<CodeIcon className="w-5 h-5" />} isActive={activeTab === 'script'} onClick={() => setActiveTab('script')} />
                 </div>
             </div>
@@ -411,6 +419,216 @@ export const StoreSettingsPage: React.FC = () => {
                             />
                             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Leave empty to hide the banner</p>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'themes' && (
+                <div className="space-y-6">
+                    <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Choose a Store Theme</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Select a theme to customize the appearance of your customer store. Changes will be applied immediately.</p>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Modern Theme */}
+                            <div 
+                                className={`rounded-lg border-2 cursor-pointer transition-all duration-200 overflow-hidden ${
+                                    settings.storeTheme === 'modern' 
+                                        ? 'border-blue-500 shadow-lg ring-2 ring-blue-200 dark:ring-blue-800' 
+                                        : 'border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600'
+                                }`}
+                                onClick={() => updateSetting('storeTheme', 'modern')}
+                            >
+                                {/* Theme Preview */}
+                                <div className="h-48 bg-gradient-to-br from-blue-50 to-white dark:from-slate-800 dark:to-slate-900 p-4 relative">
+                                    <div className="absolute top-3 right-3">
+                                        {settings.storeTheme === 'modern' && (
+                                            <div className="bg-blue-500 text-white rounded-full p-1">
+                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="bg-white dark:bg-slate-700 rounded-lg shadow-sm p-3 mb-3">
+                                        <div className="h-4 bg-blue-600 rounded w-24 mb-2"></div>
+                                        <div className="h-3 bg-slate-200 dark:bg-slate-600 rounded w-32"></div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="bg-white dark:bg-slate-700 rounded-lg p-2 shadow-sm">
+                                            <div className="h-3 bg-blue-500 rounded w-16 mb-1"></div>
+                                            <div className="h-2 bg-slate-200 dark:bg-slate-600 rounded w-20 mb-1"></div>
+                                            <div className="h-4 bg-blue-600 rounded w-12"></div>
+                                        </div>
+                                        <div className="bg-white dark:bg-slate-700 rounded-lg p-2 shadow-sm">
+                                            <div className="h-3 bg-blue-500 rounded w-16 mb-1"></div>
+                                            <div className="h-2 bg-slate-200 dark:bg-slate-600 rounded w-20 mb-1"></div>
+                                            <div className="h-4 bg-blue-600 rounded w-12"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* Theme Info */}
+                                <div className="p-4 bg-white dark:bg-slate-800">
+                                    <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Modern</h4>
+                                    <p className="text-xs text-slate-600 dark:text-slate-400">Clean, professional design with blue accents and card-based layout</p>
+                                </div>
+                            </div>
+
+                            {/* Dark Premium Theme */}
+                            <div 
+                                className={`rounded-lg border-2 cursor-pointer transition-all duration-200 overflow-hidden ${
+                                    settings.storeTheme === 'dark-premium' 
+                                        ? 'border-purple-500 shadow-lg ring-2 ring-purple-200 dark:ring-purple-800' 
+                                        : 'border-slate-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600'
+                                }`}
+                                onClick={() => updateSetting('storeTheme', 'dark-premium')}
+                            >
+                                {/* Theme Preview */}
+                                <div className="h-48 bg-gradient-to-br from-slate-900 to-black p-4 relative">
+                                    <div className="absolute top-3 right-3">
+                                        {settings.storeTheme === 'dark-premium' && (
+                                            <div className="bg-purple-500 text-white rounded-full p-1">
+                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="bg-slate-800 border border-purple-500/30 rounded-lg p-3 mb-3">
+                                        <div className="h-4 bg-purple-500 rounded w-24 mb-2"></div>
+                                        <div className="h-3 bg-slate-600 rounded w-32"></div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="bg-slate-800 border border-purple-500/20 rounded-lg p-2">
+                                            <div className="h-3 bg-purple-500 rounded w-16 mb-1"></div>
+                                            <div className="h-2 bg-slate-600 rounded w-20 mb-1"></div>
+                                            <div className="h-4 bg-gradient-to-r from-purple-500 to-pink-500 rounded w-12"></div>
+                                        </div>
+                                        <div className="bg-slate-800 border border-purple-500/20 rounded-lg p-2">
+                                            <div className="h-3 bg-purple-500 rounded w-16 mb-1"></div>
+                                            <div className="h-2 bg-slate-600 rounded w-20 mb-1"></div>
+                                            <div className="h-4 bg-gradient-to-r from-purple-500 to-pink-500 rounded w-12"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* Theme Info */}
+                                <div className="p-4 bg-white dark:bg-slate-800">
+                                    <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Dark Premium</h4>
+                                    <p className="text-xs text-slate-600 dark:text-slate-400">Elegant dark theme with purple accents and gradient effects</p>
+                                </div>
+                            </div>
+
+                            {/* Colorful Theme */}
+                            <div 
+                                className={`rounded-lg border-2 cursor-pointer transition-all duration-200 overflow-hidden ${
+                                    settings.storeTheme === 'colorful' 
+                                        ? 'border-green-500 shadow-lg ring-2 ring-green-200 dark:ring-green-800' 
+                                        : 'border-slate-200 dark:border-slate-700 hover:border-green-300 dark:hover:border-green-600'
+                                }`}
+                                onClick={() => updateSetting('storeTheme', 'colorful')}
+                            >
+                                {/* Theme Preview */}
+                                <div className="h-48 bg-gradient-to-br from-yellow-50 via-pink-50 to-cyan-50 dark:from-slate-800 dark:to-slate-900 p-4 relative">
+                                    <div className="absolute top-3 right-3">
+                                        {settings.storeTheme === 'colorful' && (
+                                            <div className="bg-green-500 text-white rounded-full p-1">
+                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="bg-white dark:bg-slate-700 rounded-lg shadow-lg p-3 mb-3 border-t-4 border-green-500">
+                                        <div className="h-4 bg-gradient-to-r from-green-500 to-emerald-500 rounded w-24 mb-2"></div>
+                                        <div className="h-3 bg-slate-200 dark:bg-slate-600 rounded w-32"></div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="bg-white dark:bg-slate-700 rounded-lg p-2 shadow-lg border-l-4 border-pink-500">
+                                            <div className="h-3 bg-pink-500 rounded w-16 mb-1"></div>
+                                            <div className="h-2 bg-slate-200 dark:bg-slate-600 rounded w-20 mb-1"></div>
+                                            <div className="h-4 bg-gradient-to-r from-pink-500 to-rose-500 rounded w-12"></div>
+                                        </div>
+                                        <div className="bg-white dark:bg-slate-700 rounded-lg p-2 shadow-lg border-l-4 border-cyan-500">
+                                            <div className="h-3 bg-cyan-500 rounded w-16 mb-1"></div>
+                                            <div className="h-2 bg-slate-200 dark:bg-slate-600 rounded w-20 mb-1"></div>
+                                            <div className="h-4 bg-gradient-to-r from-cyan-500 to-blue-500 rounded w-12"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* Theme Info */}
+                                <div className="p-4 bg-white dark:bg-slate-800">
+                                    <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Colorful</h4>
+                                    <p className="text-xs text-slate-600 dark:text-slate-400">Vibrant multi-color theme with gradients and playful design elements</p>
+                                </div>
+                            </div>
+
+                            {/* Minimal Theme */}
+                            <div 
+                                className={`rounded-lg border-2 cursor-pointer transition-all duration-200 overflow-hidden ${
+                                    settings.storeTheme === 'minimal' 
+                                        ? 'border-slate-500 shadow-lg ring-2 ring-slate-200 dark:ring-slate-700' 
+                                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-500'
+                                }`}
+                                onClick={() => updateSetting('storeTheme', 'minimal')}
+                            >
+                                {/* Theme Preview */}
+                                <div className="h-48 bg-white dark:bg-slate-900 p-4 relative">
+                                    <div className="absolute top-3 right-3">
+                                        {settings.storeTheme === 'minimal' && (
+                                            <div className="bg-slate-500 text-white rounded-full p-1">
+                                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="border-b border-slate-200 dark:border-slate-700 pb-3 mb-3">
+                                        <div className="h-4 bg-slate-900 dark:bg-white rounded w-24 mb-2"></div>
+                                        <div className="h-3 bg-slate-300 dark:bg-slate-600 rounded w-32"></div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="border border-slate-200 dark:border-slate-700 rounded p-2">
+                                            <div className="h-3 bg-slate-900 dark:bg-white rounded w-16 mb-1"></div>
+                                            <div className="h-2 bg-slate-300 dark:bg-slate-600 rounded w-20 mb-1"></div>
+                                            <div className="h-4 bg-slate-900 dark:bg-white rounded w-12"></div>
+                                        </div>
+                                        <div className="border border-slate-200 dark:border-slate-700 rounded p-2">
+                                            <div className="h-3 bg-slate-900 dark:bg-white rounded w-16 mb-1"></div>
+                                            <div className="h-2 bg-slate-300 dark:bg-slate-600 rounded w-20 mb-1"></div>
+                                            <div className="h-4 bg-slate-900 dark:bg-white rounded w-12"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* Theme Info */}
+                                <div className="p-4 bg-white dark:bg-slate-800">
+                                    <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Minimal</h4>
+                                    <p className="text-xs text-slate-600 dark:text-slate-400">Simple, clean design with minimal colors and focus on content</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Theme Customization Tips */}
+                    <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-lg p-6">
+                        <h4 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">Theme Tips</h4>
+                        <ul className="space-y-2 text-sm text-blue-700 dark:text-blue-300">
+                            <li className="flex items-start gap-2">
+                                <span className="mt-1">•</span>
+                                <span><strong>Modern:</strong> Best for professional ISPs, clean and easy to navigate</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <span className="mt-1">•</span>
+                                <span><strong>Dark Premium:</strong> Perfect for premium services, reduces eye strain</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <span className="mt-1">•</span>
+                                <span><strong>Colorful:</strong> Great for attracting attention and younger demographics</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <span className="mt-1">•</span>
+                                <span><strong>Minimal:</strong> Ideal for fast loading and focusing on plans</span>
+                            </li>
+                        </ul>
                     </div>
                 </div>
             )}

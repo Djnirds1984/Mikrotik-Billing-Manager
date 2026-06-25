@@ -35,6 +35,7 @@ export const Store: React.FC = () => {
     gcashNumber: string;
     gcashAccountName: string;
     currency: string;
+    storeTheme: 'modern' | 'dark-premium' | 'colorful' | 'minimal';
   } | null>(null);
 
   // Purchase modal state
@@ -245,8 +246,75 @@ export const Store: React.FC = () => {
     }).format(price);
   };
 
+  // Theme configurations
+  const themeConfigs = {
+    modern: {
+      bg: 'bg-slate-50 dark:bg-slate-900',
+      cardBg: 'bg-white dark:bg-slate-800',
+      headerBg: 'bg-white dark:bg-slate-800',
+      primaryBtn: 'bg-blue-600 hover:bg-blue-700',
+      secondaryBtn: 'bg-blue-600 text-white',
+      accentText: 'text-blue-600 dark:text-blue-400',
+      borderColor: 'border-blue-500',
+      badge: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+      filterActive: 'bg-blue-600 text-white',
+      filterInactive: 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700',
+      planCardBorder: 'border-transparent hover:border-blue-500',
+      modalBg: 'bg-white dark:bg-slate-800',
+      inputBg: 'bg-white dark:bg-slate-700',
+    },
+    'dark-premium': {
+      bg: 'bg-slate-950 dark:bg-black',
+      cardBg: 'bg-slate-900 dark:bg-slate-950',
+      headerBg: 'bg-slate-900 dark:bg-slate-950',
+      primaryBtn: 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700',
+      secondaryBtn: 'bg-gradient-to-r from-purple-600 to-pink-600 text-white',
+      accentText: 'text-purple-400 dark:text-purple-300',
+      borderColor: 'border-purple-500',
+      badge: 'bg-purple-900/30 text-purple-300 dark:text-purple-200',
+      filterActive: 'bg-gradient-to-r from-purple-600 to-pink-600 text-white',
+      filterInactive: 'bg-slate-900 dark:bg-slate-950 text-slate-300 hover:bg-slate-800 dark:hover:bg-slate-900',
+      planCardBorder: 'border-purple-500/20 hover:border-purple-500',
+      modalBg: 'bg-slate-900 dark:bg-slate-950',
+      inputBg: 'bg-slate-800 dark:bg-slate-900',
+    },
+    colorful: {
+      bg: 'bg-gradient-to-br from-yellow-50 via-pink-50 to-cyan-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900',
+      cardBg: 'bg-white dark:bg-slate-800',
+      headerBg: 'bg-white dark:bg-slate-800',
+      primaryBtn: 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600',
+      secondaryBtn: 'bg-gradient-to-r from-pink-500 to-rose-500 text-white',
+      accentText: 'text-green-600 dark:text-green-400',
+      borderColor: 'border-green-500',
+      badge: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
+      filterActive: 'bg-gradient-to-r from-green-500 to-emerald-500 text-white',
+      filterInactive: 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700',
+      planCardBorder: 'border-transparent hover:border-green-500',
+      modalBg: 'bg-white dark:bg-slate-800',
+      inputBg: 'bg-white dark:bg-slate-700',
+    },
+    minimal: {
+      bg: 'bg-white dark:bg-slate-900',
+      cardBg: 'bg-white dark:bg-slate-900',
+      headerBg: 'bg-white dark:bg-slate-900',
+      primaryBtn: 'bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100',
+      secondaryBtn: 'bg-slate-900 dark:bg-white text-white dark:text-slate-900',
+      accentText: 'text-slate-900 dark:text-white',
+      borderColor: 'border-slate-900 dark:border-white',
+      badge: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300',
+      filterActive: 'bg-slate-900 dark:bg-white text-white dark:text-slate-900',
+      filterInactive: 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800',
+      planCardBorder: 'border-slate-200 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-500',
+      modalBg: 'bg-white dark:bg-slate-900',
+      inputBg: 'bg-white dark:bg-slate-900',
+    },
+  };
+
+  const currentTheme = storeSettings?.storeTheme || 'modern';
+  const theme = themeConfigs[currentTheme];
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-6">
+    <div className={`min-h-screen ${theme.bg} p-6`}>
       {/* Store Disabled Banner */}
       {storeSettings && !storeSettings.storeEnabled && (
         <div className="max-w-7xl mx-auto mb-6">
@@ -268,7 +336,7 @@ export const Store: React.FC = () => {
 
       {/* Header */}
       <div className="max-w-7xl mx-auto mb-8">
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6">
+        <div className={`${theme.headerBg} rounded-xl shadow-lg p-6`}>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Customer Store</h1>
           <p className="text-slate-600 dark:text-slate-400 mt-1">Browse and purchase internet plans</p>
         </div>
@@ -281,8 +349,8 @@ export const Store: React.FC = () => {
             onClick={() => setFilter('all')}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
               filter === 'all'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                ? theme.filterActive
+                : theme.filterInactive
             }`}
           >
             All Plans
@@ -291,8 +359,8 @@ export const Store: React.FC = () => {
             onClick={() => setFilter('pppoe')}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
               filter === 'pppoe'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                ? theme.filterActive
+                : theme.filterInactive
             }`}
           >
             PPPoE Plans
@@ -301,8 +369,8 @@ export const Store: React.FC = () => {
             onClick={() => setFilter('dhcp')}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
               filter === 'dhcp'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                ? theme.filterActive
+                : theme.filterInactive
             }`}
           >
             DHCP Plans
@@ -327,22 +395,18 @@ export const Store: React.FC = () => {
             {plans.map((plan) => (
               <div
                 key={plan.id}
-                className="bg-white dark:bg-slate-800 rounded-xl shadow-lg border-2 border-transparent hover:border-blue-500 transition-all overflow-hidden"
+                className={`${theme.cardBg} rounded-xl shadow-lg border-2 ${theme.planCardBorder} transition-all overflow-hidden`}
               >
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xl font-bold text-slate-900 dark:text-white">{plan.name}</h3>
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      plan.planType === 'pppoe'
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                        : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                    }`}>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${theme.badge}`}>
                       {plan.planType.toUpperCase()}
                     </span>
                   </div>
 
                   <div className="mb-4">
-                    <span className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+                    <span className={`text-3xl font-bold ${theme.accentText}`}>
                       {formatPrice(plan.price, plan.currency)}
                     </span>
                     <span className="text-slate-600 dark:text-slate-400 ml-2">
@@ -370,7 +434,7 @@ export const Store: React.FC = () => {
                       setAccountInput('');
                       setLookupError('');
                     }}
-                    className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+                    className={`w-full px-4 py-3 ${theme.primaryBtn} text-white font-semibold rounded-lg transition-colors`}
                   >
                     Purchase Plan
                   </button>
@@ -383,8 +447,8 @@ export const Store: React.FC = () => {
 
       {/* Purchase Modal */}
       {selectedPlan && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+        <div className={`fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4`}>
+          <div className={`${theme.modalBg} rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto`}>
             {/* Modal Header */}
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Complete Purchase</h2>

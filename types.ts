@@ -601,6 +601,7 @@ export interface StoreSettings {
     gcashAccountName: string;
     storeBannerText: string;
     autoRestoreOnPayment: boolean;
+    storeTheme: 'modern' | 'dark-premium' | 'colorful' | 'minimal';
 }
 
 export interface BillingSettings {
