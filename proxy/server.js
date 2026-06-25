@@ -3714,7 +3714,8 @@ async function startServer() {
     // GET: Public store settings (for expired portal)
     app.get('/api/public/store-settings', async (req, res) => {
         try {
-            const s = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+            const s = await db.get('SELECT storeSettings, currency FROM settings WHERE id = 1');
+            const systemCurrency = s?.currency || 'PHP';
             if (s && s.storeSettings) {
                 try {
                     const settings = JSON.parse(s.storeSettings);
@@ -3724,11 +3725,12 @@ async function startServer() {
                         storeEnabled: settings.storeEnabled !== false,
                         paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },
                         gcashNumber: settings.gcashNumber || '',
-                        gcashAccountName: settings.gcashAccountName || ''
+                        gcashAccountName: settings.gcashAccountName || '',
+                        currency: systemCurrency
                     });
-                } catch (_) { res.json({}); }
+                } catch (_) { res.json({ currency: systemCurrency }); }
             } else {
-                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true } });
+                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true }, currency: systemCurrency });
             }
         } catch (e) {
             res.status(500).json({ message: e.message });
@@ -10025,22 +10027,23 @@ WantedBy=multi-user.target`;
     // Public store settings endpoint (for expired portal to read custom message/banner)
     captiveApp.get('/api/public/store-settings', async (req, res) => {
         try {
-            const s = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+            const s = await db.get('SELECT storeSettings, currency FROM settings WHERE id = 1');
+            const systemCurrency = s?.currency || 'PHP';
             if (s && s.storeSettings) {
                 try {
                     const settings = JSON.parse(s.storeSettings);
-                    // Only return public-safe fields
                     res.json({
                         customExpiredMessage: settings.customExpiredMessage || '',
                         storeBannerText: settings.storeBannerText || '',
                         storeEnabled: settings.storeEnabled !== false,
                         paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },
                         gcashNumber: settings.gcashNumber || '',
-                        gcashAccountName: settings.gcashAccountName || ''
+                        gcashAccountName: settings.gcashAccountName || '',
+                        currency: systemCurrency
                     });
-                } catch (_) { res.json({}); }
+                } catch (_) { res.json({ currency: systemCurrency }); }
             } else {
-                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true } });
+                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true }, currency: systemCurrency });
             }
         } catch (e) {
             res.status(500).json({ message: e.message });

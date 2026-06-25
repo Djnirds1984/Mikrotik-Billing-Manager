@@ -34,6 +34,7 @@ export const Store: React.FC = () => {
     paymentMethods: { paymongo: boolean; manualGcash: boolean };
     gcashNumber: string;
     gcashAccountName: string;
+    currency: string;
   } | null>(null);
 
   // Purchase modal state
@@ -232,10 +233,14 @@ export const Store: React.FC = () => {
     setLookupMode('accountNumber');
   };
 
-  const formatPrice = (price: number, currency: string) => {
+  const getCurrency = (planCurrency?: string) => {
+    return planCurrency || storeSettings?.currency || 'PHP';
+  };
+
+  const formatPrice = (price: number, currency?: string) => {
     return new Intl.NumberFormat('en-PH', {
       style: 'currency',
-      currency: currency || 'PHP'
+      currency: getCurrency(currency)
     }).format(price);
   };
 
