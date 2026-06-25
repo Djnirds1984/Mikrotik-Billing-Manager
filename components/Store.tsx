@@ -14,28 +14,20 @@ interface Plan {
   routerId: string;
 }
 
-interface Customer {
-  id: string;
-  username: string;
+interface CustomerInfo {
   fullName: string;
-  accountNumber: string;
+  username: string;
   routerId: string;
-  dueDate?: string;
-  planName?: string;
+  accountNumber: string;
+  routerName: string;
+  contactNumber: string;
 }
 
 export const Store: React.FC = () => {
-  const [customer, setCustomer] = useState<Customer | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
-  const [loginError, setLoginError] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'paymongo' | 'manual' | null>(null);
-  const [processing, setProcessing] = useState(false);
-  const [gcashRef, setGcashRef] = useState('');
   const [filter, setFilter] = useState<'all' | 'pppoe' | 'dhcp'>('all');
-  const [autoLoginLoading, setAutoLoginLoading] = useState(true);
   const [storeSettings, setStoreSettings] = useState<{
     storeEnabled: boolean;
     storeBannerText: string;
@@ -43,6 +35,16 @@ export const Store: React.FC = () => {
     gcashNumber: string;
     gcashAccountName: string;
   } | null>(null);
+
+  // Purchase modal state
+  const [accountInput, setAccountInput] = useState('');
+  const [lookupMode, setLookupMode] = useState<'accountNumber' | 'username'>('accountNumber');
+  const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupError, setLookupError] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'paymongo' | 'manual' | null>(null);
+  const [gcashRef, setGcashRef] = useState('');
+  const [processing, setProcessing] = useState(false);
 
   // Load store settings
   useEffect(() => {
@@ -52,83 +54,52 @@ export const Store: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  // Restore session on mount (supports both regular session and auto-login from expired portal)
+  // Load all plans on mount and when filter changes
   useEffect(() => {
-    const restoreSession = async () => {
-      try {
-        // Check for auto-login token from expired portal redirect
-        const params = new URLSearchParams(window.location.search);
-        const sessionToken = params.get('session');
+    loadPlans();
+  }, [filter]);
 
-        if (sessionToken) {
-          // Auto-login from expired portal - verify token
-          setAutoLoginLoading(true);
-          const resp = await fetch('/api/public/expired/verify-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: sessionToken })
-          });
-
-          if (resp.ok) {
-            const customerData = await resp.json();
-            // Map to Customer interface
-            const customer: Customer = {
-              id: customerData.id,
-              username: customerData.pppoeUsername || customerData.username,
-              fullName: customerData.fullName || customerData.username,
-              accountNumber: customerData.accountNumber,
-              routerId: customerData.routerId,
-            };
-            setCustomer(customer);
-            sessionStorage.setItem('storeSession', JSON.stringify(customer));
-            // Clean up URL
-            window.history.replaceState({}, '', '/store');
-            setAutoLoginLoading(false);
-            return;
-          } else {
-            // Token invalid/expired - clean URL and show login
-            window.history.replaceState({}, '', '/store');
-          }
-        }
-
-        // Restore regular saved session
-        const savedSession = sessionStorage.getItem('storeSession');
-        if (savedSession) {
-          try {
-            const sessionData = JSON.parse(savedSession);
-            setCustomer(sessionData);
-          } catch (e) {
-            console.error('Failed to restore session:', e);
-          }
-        }
-      } catch (e) {
-        console.error('Session restore error:', e);
-      } finally {
-        setAutoLoginLoading(false);
-      }
-    };
-
-    restoreSession();
+  // Check for expired session token to pre-fill account
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionToken = params.get('session');
+    if (sessionToken) {
+      verifySessionToken(sessionToken);
+    }
   }, []);
 
-  useEffect(() => {
-    if (customer) {
-      // After login, load plans for customer's router
-      loadPlans(customer.routerId);
-    } else {
-      // Before login, load all plans (for browsing)
-      loadPlans();
+  const verifySessionToken = async (token: string) => {
+    try {
+      const resp = await fetch('/api/public/expired/verify-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        // Pre-fill account from session
+        if (data.accountNumber) {
+          setAccountInput(data.accountNumber);
+          setLookupMode('accountNumber');
+          // Auto-lookup
+          handleLookup('accountNumber', data.accountNumber);
+        } else if (data.pppoeUsername) {
+          setAccountInput(data.pppoeUsername);
+          setLookupMode('username');
+          handleLookup('username', data.pppoeUsername);
+        }
+      }
+    } catch (e) {
+      console.error('Session verification error:', e);
+    } finally {
+      window.history.replaceState({}, '', '/store');
     }
-  }, [filter, customer]);
+  };
 
-  const loadPlans = async (routerId?: string) => {
+  const loadPlans = async () => {
     try {
       setLoading(true);
-      const url = routerId 
-        ? `/api/public/store/plans?type=${filter}&routerId=${routerId}`
-        : `/api/public/store/plans?type=${filter}`;
-      
-      const response = await fetch(url);
+      const response = await fetch(`/api/public/store/plans?type=${filter}`);
       if (response.ok) {
         const data = await response.json();
         setPlans(Array.isArray(data) ? data : []);
@@ -140,46 +111,80 @@ export const Store: React.FC = () => {
     }
   };
 
-  const handleLogin = async () => {
-    if (!loginForm.username || !loginForm.password) {
-      setLoginError('Please enter username and password');
+  const handleLookup = async (mode?: string, value?: string) => {
+    const effectiveMode = mode || lookupMode;
+    const effectiveValue = value !== undefined ? value : accountInput;
+    
+    if (!effectiveValue.trim()) {
+      setLookupError('Please enter an account number or username');
       return;
     }
 
-    setLoginError('');
+    setLookingUp(true);
+    setLookupError('');
+    setCustomerInfo(null);
+
     try {
-      const response = await fetch('/api/public/client-portal/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginForm)
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setLoginError(data.message || 'Login failed');
-        return;
-      }
-
-      setCustomer(data);
-      sessionStorage.setItem('storeSession', JSON.stringify(data));
+      const param = effectiveMode === 'accountNumber' 
+        ? `accountNumber=${encodeURIComponent(effectiveValue)}`
+        : `username=${encodeURIComponent(effectiveValue)}`;
       
-      // Reload plans for this customer's router
-      loadPlans(data.routerId);
-    } catch (error) {
-      setLoginError('Login failed. Please try again.');
+      const resp = await fetch(`/api/public/store/lookup-account?${param}`);
+      const data = await resp.json();
+
+      if (data.found) {
+        setCustomerInfo({
+          fullName: data.fullName,
+          username: data.username,
+          routerId: data.routerId,
+          accountNumber: data.accountNumber,
+          routerName: data.routerName,
+          contactNumber: data.contactNumber
+        });
+        setLookupError('');
+      } else {
+        setLookupError('Account not found. Please check your account number or PPPoE username.');
+      }
+    } catch (e) {
+      setLookupError('Lookup failed. Please try again.');
+    } finally {
+      setLookingUp(false);
     }
   };
 
-  const handleLogout = () => {
-    setCustomer(null);
-    setSelectedPlan(null);
-    setPaymentMethod(null);
-    sessionStorage.removeItem('storeSession');
+  const handleAutoDetect = async () => {
+    setLookingUp(true);
+    setLookupError('');
+    try {
+      // Use IP auto-detection via the expired lookup endpoint
+      const resp = await fetch('/api/public/expired/lookup?auto=true');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.accountNumber || data.username) {
+          setCustomerInfo({
+            fullName: data.fullName || data.username,
+            username: data.pppoeUsername || data.username,
+            routerId: data.routerId,
+            accountNumber: data.accountNumber || '',
+            routerName: data.routerName || '',
+            contactNumber: data.contactNumber || ''
+          });
+          setAccountInput(data.accountNumber || data.pppoeUsername || data.username);
+        } else {
+          setLookupError('Could not detect your account from the network. Please enter your account number manually.');
+        }
+      } else {
+        setLookupError('Auto-detection is not available. Please enter your account number manually.');
+      }
+    } catch (e) {
+      setLookupError('Auto-detection failed. Please enter your account number manually.');
+    } finally {
+      setLookingUp(false);
+    }
   };
 
   const handlePurchase = async () => {
-    if (!selectedPlan || !customer || !paymentMethod) return;
+    if (!selectedPlan || !customerInfo || !paymentMethod) return;
 
     setProcessing(true);
     try {
@@ -190,8 +195,9 @@ export const Store: React.FC = () => {
           planId: selectedPlan.id,
           planType: selectedPlan.planType,
           paymentMethod,
-          customerUsername: customer.username,
-          routerId: customer.routerId,
+          accountNumber: customerInfo.accountNumber || undefined,
+          pppoeUsername: customerInfo.username || undefined,
+          routerId: customerInfo.routerId,
           gcashReference: paymentMethod === 'manual' ? gcashRef : undefined
         })
       });
@@ -207,15 +213,23 @@ export const Store: React.FC = () => {
         window.location.href = data.checkoutUrl;
       } else if (paymentMethod === 'manual') {
         alert(`Payment submitted! Reference: ${data.paymentId}\n\nPlease wait for admin approval.`);
-        setSelectedPlan(null);
-        setPaymentMethod(null);
-        setGcashRef('');
+        closeModal();
       }
     } catch (error) {
       alert('Purchase failed. Please try again.');
     } finally {
       setProcessing(false);
     }
+  };
+
+  const closeModal = () => {
+    setSelectedPlan(null);
+    setAccountInput('');
+    setCustomerInfo(null);
+    setLookupError('');
+    setPaymentMethod(null);
+    setGcashRef('');
+    setLookupMode('accountNumber');
   };
 
   const formatPrice = (price: number, currency: string) => {
@@ -225,79 +239,6 @@ export const Store: React.FC = () => {
     }).format(price);
   };
 
-  // Login Screen
-  if (autoLoginLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center p-6">
-        <div className="text-center">
-          <Loader />
-          <p className="mt-4 text-slate-600 dark:text-slate-400">Verifying your session...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!customer) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-xl shadow-2xl p-8">
-          <div className="text-center mb-8">
-            <div className="text-6xl mb-4">🛒</div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Customer Store</h1>
-            <p className="text-slate-600 dark:text-slate-400 mt-2">Login to browse and purchase plans</p>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                Username
-              </label>
-              <input
-                type="text"
-                value={loginForm.username}
-                onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter your username"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                Password
-              </label>
-              <input
-                type="password"
-                value={loginForm.password}
-                onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter your password"
-              />
-            </div>
-
-            {loginError && (
-              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                <p className="text-red-700 dark:text-red-300 text-sm">{loginError}</p>
-              </div>
-            )}
-
-            <button
-              onClick={handleLogin}
-              className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
-            >
-              Login to Store
-            </button>
-          </div>
-
-          <div className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
-            <p>Don't have an account? Contact your service provider.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Store Main Screen
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-6">
       {/* Store Disabled Banner */}
@@ -321,22 +262,9 @@ export const Store: React.FC = () => {
 
       {/* Header */}
       <div className="max-w-7xl mx-auto mb-8">
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">🛒 Customer Store</h1>
-            <p className="text-slate-600 dark:text-slate-400 mt-1">
-              Welcome, <span className="font-semibold">{customer.fullName || customer.username}</span>!
-            </p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Account: {customer.accountNumber}
-            </p>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
-          >
-            Logout
-          </button>
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6">
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Customer Store</h1>
+          <p className="text-slate-600 dark:text-slate-400 mt-1">Browse and purchase internet plans</p>
         </div>
       </div>
 
@@ -432,6 +360,9 @@ export const Store: React.FC = () => {
                     onClick={() => {
                       setSelectedPlan(plan);
                       setPaymentMethod(null);
+                      setCustomerInfo(null);
+                      setAccountInput('');
+                      setLookupError('');
                     }}
                     className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
                   >
@@ -444,24 +375,22 @@ export const Store: React.FC = () => {
         )}
       </div>
 
-      {/* Payment Modal */}
+      {/* Purchase Modal */}
       {selectedPlan && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-md w-full p-6">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Complete Purchase</h2>
               <button
-                onClick={() => {
-                  setSelectedPlan(null);
-                  setPaymentMethod(null);
-                  setGcashRef('');
-                }}
-                className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                onClick={closeModal}
+                className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-xl"
               >
                 ✕
               </button>
             </div>
 
+            {/* Plan Summary */}
             <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
               <p className="font-semibold text-slate-900 dark:text-white">{selectedPlan.name}</p>
               <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-2">
@@ -472,39 +401,146 @@ export const Store: React.FC = () => {
               </p>
             </div>
 
-            <div className="space-y-3 mb-6">
-              <p className="font-medium text-slate-700 dark:text-slate-300">Select Payment Method:</p>
-              
-              {(!storeSettings || storeSettings.paymentMethods.paymongo) && (
-                <button
-                  onClick={() => setPaymentMethod('paymongo')}
-                  className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
-                    paymentMethod === 'paymongo'
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-slate-200 dark:border-slate-600 hover:border-blue-300'
-                  }`}
-                >
-                  <div className="font-semibold text-slate-900 dark:text-white">💳 Online Payment</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">PayMongo (Card, GCash, Maya)</div>
-                </button>
-              )}
+            {/* Step 1: Account Lookup */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-3">
+                Step 1: Identify Your Account
+              </h3>
 
-              {(!storeSettings || storeSettings.paymentMethods.manualGcash) && (
-                <button
-                  onClick={() => setPaymentMethod('manual')}
-                  className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
-                    paymentMethod === 'manual'
-                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                      : 'border-slate-200 dark:border-slate-600 hover:border-green-300'
-                  }`}
-                >
-                  <div className="font-semibold text-slate-900 dark:text-white">📱 Manual GCash</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">Send to GCash, wait for approval</div>
-                </button>
+              {customerInfo ? (
+                <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-semibold text-green-800 dark:text-green-200">Account Found</p>
+                      <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+                        <span className="font-medium">Name:</span> {customerInfo.fullName}
+                      </p>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        <span className="font-medium">Username:</span> {customerInfo.username}
+                      </p>
+                      {customerInfo.accountNumber && (
+                        <p className="text-sm text-green-700 dark:text-green-300">
+                          <span className="font-medium">Account #:</span> {customerInfo.accountNumber}
+                        </p>
+                      )}
+                      {customerInfo.routerName && (
+                        <p className="text-sm text-green-700 dark:text-green-300">
+                          <span className="font-medium">Router:</span> {customerInfo.routerName}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => { setCustomerInfo(null); setAccountInput(''); }}
+                      className="text-sm text-green-600 dark:text-green-400 hover:underline"
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Lookup mode toggle */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setLookupMode('accountNumber'); setAccountInput(''); setLookupError(''); }}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        lookupMode === 'accountNumber'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      Account Number
+                    </button>
+                    <button
+                      onClick={() => { setLookupMode('username'); setAccountInput(''); setLookupError(''); }}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        lookupMode === 'username'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      PPPoE Username
+                    </button>
+                  </div>
+
+                  {/* Input field */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={accountInput}
+                      onChange={(e) => setAccountInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleLookup()}
+                      className="flex-1 px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                      placeholder={lookupMode === 'accountNumber' ? 'Enter your account number' : 'Enter your PPPoE username'}
+                    />
+                    <button
+                      onClick={() => handleLookup()}
+                      disabled={lookingUp}
+                      className="px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-medium rounded-lg transition-colors whitespace-nowrap"
+                    >
+                      {lookingUp ? '...' : 'Find'}
+                    </button>
+                  </div>
+
+                  {/* Auto-detect button */}
+                  <button
+                    onClick={handleAutoDetect}
+                    disabled={lookingUp}
+                    className="w-full px-4 py-2.5 border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-colors text-sm font-medium"
+                  >
+                    Auto-detect my account from network
+                  </button>
+
+                  {/* Error message */}
+                  {lookupError && (
+                    <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                      <p className="text-red-700 dark:text-red-300 text-sm">{lookupError}</p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
-            {paymentMethod === 'manual' && (
+            {/* Step 2: Payment Method (only shown after account found) */}
+            {customerInfo && (
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-3">
+                  Step 2: Select Payment Method
+                </h3>
+                <div className="space-y-3">
+                  {(!storeSettings || storeSettings.paymentMethods.paymongo) && (
+                    <button
+                      onClick={() => setPaymentMethod('paymongo')}
+                      className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
+                        paymentMethod === 'paymongo'
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-slate-200 dark:border-slate-600 hover:border-blue-300'
+                      }`}
+                    >
+                      <div className="font-semibold text-slate-900 dark:text-white">Online Payment</div>
+                      <div className="text-sm text-slate-600 dark:text-slate-400">Card, GCash, Maya via PayMongo</div>
+                    </button>
+                  )}
+
+                  {(!storeSettings || storeSettings.paymentMethods.manualGcash) && (
+                    <button
+                      onClick={() => setPaymentMethod('manual')}
+                      className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
+                        paymentMethod === 'manual'
+                          ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                          : 'border-slate-200 dark:border-slate-600 hover:border-green-300'
+                      }`}
+                    >
+                      <div className="font-semibold text-slate-900 dark:text-white">Manual GCash</div>
+                      <div className="text-sm text-slate-600 dark:text-slate-400">Send to GCash, wait for admin approval</div>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Manual GCash Details */}
+            {paymentMethod === 'manual' && customerInfo && (
               <div className="mb-6">
                 {storeSettings?.gcashNumber && (
                   <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg">
@@ -531,20 +567,23 @@ export const Store: React.FC = () => {
               </div>
             )}
 
-            <button
-              onClick={handlePurchase}
-              disabled={processing || (paymentMethod === 'manual' && !gcashRef)}
-              className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold rounded-lg transition-colors"
-            >
-              {processing ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="animate-spin">⏳</span>
-                  Processing...
-                </span>
-              ) : (
-                `Pay ${formatPrice(selectedPlan.price, selectedPlan.currency)}`
-              )}
-            </button>
+            {/* Submit Button */}
+            {customerInfo && paymentMethod && (
+              <button
+                onClick={handlePurchase}
+                disabled={processing || (paymentMethod === 'manual' && !gcashRef)}
+                className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold rounded-lg transition-colors"
+              >
+                {processing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="animate-spin">⏳</span>
+                    Processing...
+                  </span>
+                ) : (
+                  `Pay ${formatPrice(selectedPlan.price, selectedPlan.currency)}`
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}

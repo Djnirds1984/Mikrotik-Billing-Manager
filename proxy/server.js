@@ -3152,16 +3152,108 @@ async function startServer() {
         }
     });
     
+    // GET: Lookup customer account by account number, username, or IP
+    app.get('/api/public/store/lookup-account', async (req, res) => {
+        try {
+            const { accountNumber, username, ip } = req.query;
+            if (!accountNumber && !username && !ip) {
+                return res.status(400).json({ found: false, message: 'Provide accountNumber, username, or ip query parameter' });
+            }
+
+            let customer = null;
+
+            // Lookup by account number
+            if (accountNumber) {
+                customer = await db.get(
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber,
+                            r.name as routerName
+                     FROM customers c
+                     LEFT JOIN routers r ON c.routerId = r.id
+                     WHERE c.accountNumber = ?`,
+                    [accountNumber]
+                );
+            }
+
+            // Lookup by PPPoE username
+            if (!customer && username) {
+                customer = await db.get(
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber,
+                            r.name as routerName
+                     FROM customers c
+                     LEFT JOIN routers r ON c.routerId = r.id
+                     WHERE c.username = ?`,
+                    [username]
+                );
+            }
+
+            // Lookup by IP address (for auto-detection from network)
+            if (!customer && ip) {
+                // Try customers table by IP
+                customer = await db.get(
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber,
+                            r.name as routerName
+                     FROM customers c
+                     LEFT JOIN routers r ON c.routerId = r.id
+                     WHERE c.ipAddress = ? OR c.ip = ?`,
+                    [ip, ip]
+                );
+
+                // Try dhcp_clients table by IP
+                if (!customer) {
+                    customer = await db.get(
+                        `SELECT dc.id, dc.username, dc.fullName, dc.accountNumber, dc.routerId,
+                                dc.contactNumber, r.name as routerName
+                         FROM dhcp_clients dc
+                         LEFT JOIN routers r ON dc.routerId = r.id
+                         WHERE dc.address = ? OR dc.ip = ?`,
+                        [ip, ip]
+                    );
+                    if (customer) {
+                        customer = {
+                            id: customer.id,
+                            username: customer.username,
+                            fullName: customer.fullName,
+                            accountNumber: customer.accountNumber || '',
+                            routerId: customer.routerId,
+                            contactNumber: customer.contactNumber || '',
+                            routerName: customer.routerName
+                        };
+                    }
+                }
+            }
+
+            if (customer) {
+                res.json({
+                    found: true,
+                    fullName: customer.fullName,
+                    username: customer.username,
+                    routerId: customer.routerId,
+                    accountNumber: customer.accountNumber || '',
+                    routerName: customer.routerName || '',
+                    contactNumber: customer.contactNumber || ''
+                });
+            } else {
+                res.json({ found: false });
+            }
+        } catch (e) {
+            console.error('[Store] Account lookup error:', e.message);
+            res.status(500).json({ found: false, message: e.message });
+        }
+    });
+
     // POST: Create store purchase (PayMongo checkout or manual payment)
     app.post('/api/public/store/purchase', async (req, res) => {
         try {
-            const { planId, planType, paymentMethod, customerUsername, routerId, gcashReference, gcashScreenshot } = req.body;
+            const { planId, planType, paymentMethod, accountNumber, pppoeUsername, routerId, gcashReference, gcashScreenshot } = req.body;
             
-            if (!planId || !planType || !paymentMethod || !customerUsername || !routerId) {
-                return res.status(400).json({ message: 'Missing required fields' });
+            if (!planId || !planType || !paymentMethod) {
+                return res.status(400).json({ message: 'Missing required fields: planId, planType, paymentMethod' });
+            }
+            if (!accountNumber && !pppoeUsername) {
+                return res.status(400).json({ message: 'Account number or PPPoE username is required' });
             }
             
-            console.log(`[Store] Purchase request: planId=${planId}, planType=${planType}, paymentMethod=${paymentMethod}, customer=${customerUsername}`);
+            console.log(`[Store] Purchase request: planId=${planId}, planType=${planType}, paymentMethod=${paymentMethod}, accountNumber=${accountNumber || 'N/A'}, pppoeUsername=${pppoeUsername || 'N/A'}`);
             
             // Get plan details
             let plan;
@@ -3175,35 +3267,37 @@ async function startServer() {
                 return res.status(404).json({ message: 'Plan not found' });
             }
             
-            // Get customer details
-            // First, get client_user to find the linked customer
-            const clientUser = await db.get('SELECT * FROM client_users WHERE username = ? AND router_id = ?', [customerUsername, routerId]);
-            
-            if (!clientUser) {
-                console.error(`[Store] Client user not found: username=${customerUsername}, routerId=${routerId}`);
-                return res.status(404).json({ message: 'Customer account not found. Please contact support.' });
-            }
-            
-            // Get the actual customer record using the client user's pppoe_username or account_number
+            // Look up customer directly by account number or PPPoE username (no login required)
             let customer = null;
-            if (clientUser.pppoe_username) {
-                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [clientUser.pppoe_username, routerId]);
+            
+            // Try account number first
+            if (accountNumber) {
+                customer = await db.get(
+                    `SELECT c.*, r.name as routerName FROM customers c
+                     LEFT JOIN routers r ON c.routerId = r.id
+                     WHERE c.accountNumber = ?`,
+                    [accountNumber]
+                );
             }
             
-            // Fallback: try account_number
-            if (!customer && clientUser.account_number) {
-                customer = await db.get('SELECT * FROM customers WHERE accountNumber = ? AND routerId = ?', [clientUser.account_number, routerId]);
+            // Fallback: try PPPoE username
+            if (!customer && pppoeUsername) {
+                customer = await db.get(
+                    `SELECT c.*, r.name as routerName FROM customers c
+                     LEFT JOIN routers r ON c.routerId = r.id
+                     WHERE c.username = ?`,
+                    [pppoeUsername]
+                );
             }
             
-            // Last resort: use username directly
             if (!customer) {
-                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [customerUsername, routerId]);
+                console.error(`[Store] Customer not found: accountNumber=${accountNumber || 'N/A'}, pppoeUsername=${pppoeUsername || 'N/A'}`);
+                return res.status(404).json({ message: 'Customer not found. Please check your account number or PPPoE username.' });
             }
             
-            if (!customer) {
-                console.error(`[Store] Customer not found for client_user: ${customerUsername}`);
-                return res.status(404).json({ message: 'Customer profile not found. Please contact support to link your account.' });
-            }
+            const effectiveRouterId = routerId || customer.routerId;
+            const effectivePppoeUsername = customer.username;
+            const effectiveAccountNumber = customer.accountNumber || '';
             
             // Handle PayMongo payment
             if (paymentMethod === 'paymongo') {
@@ -3226,7 +3320,7 @@ async function startServer() {
                             line_items: [{
                                 currency: 'PHP',
                                 amount: amount,
-                                description: `${plan.name} - ${customer.fullName || customer.accountNumber}`,
+                                description: `${plan.name} - ${customer.fullName || effectiveAccountNumber}`,
                                 quantity: 1
                             }],
                             payment_method_types: ['gcash', 'paymaya', 'card'],
@@ -3235,14 +3329,14 @@ async function startServer() {
                             success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/success`,
                             cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/cancel`,
                             metadata: {
-                                customerUsername: customerUsername,
+                                pppoeUsername: effectivePppoeUsername,
                                 planId: planId,
                                 planType: planType,
-                                routerId: routerId,
+                                routerId: effectiveRouterId,
                                 planName: plan.name,
                                 planPrice: plan.price,
                                 duration_days: plan.cycle_days || 30,
-                                customerAccountNumber: customer.accountNumber,
+                                customerAccountNumber: effectiveAccountNumber,
                                 customerFullName: customer.fullName
                             }
                         }
@@ -3267,16 +3361,11 @@ async function startServer() {
                 });
                 
             } else if (paymentMethod === 'manual') {
-                // Create manual payment record in the same table as Facebook bot
+                // Create manual payment record
                 const paymentId = `manual_pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 const now = new Date().toISOString();
                 
-                // CRITICAL: Use the PPPoE username from clientUser, NOT customer.username
-                // The PPPoE secret name on MikroTik is clientUser.pppoe_username
-                const pppoeUsername = clientUser.pppoe_username || customer.username;
-                const accountNumber = customer.accountNumber || clientUser.account_number || '';
-                
-                console.log(`[Store] Manual payment - pppoeUsername: "${pppoeUsername}", accountNumber: "${accountNumber}"`);
+                console.log(`[Store] Manual payment - pppoeUsername: "${effectivePppoeUsername}", accountNumber: "${effectiveAccountNumber}"`);
                 
                 await db.run(
                     `INSERT INTO manual_payment_requests (
@@ -3287,25 +3376,50 @@ async function startServer() {
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
                     [
                         paymentId,
-                        accountNumber,
-                        pppoeUsername,  // Use PPPoE username (MikroTik secret name)
+                        effectiveAccountNumber,
+                        effectivePppoeUsername,
                         customer.fullName,
-                        routerId,
+                        effectiveRouterId,
                         plan.name,
                         plan.price,
                         gcashReference || '',
-                        customer.contactNumber || '',  // Get from customer record
-                        customer.fullName || '',       // Use full name as GCash name
+                        customer.contactNumber || '',
+                        customer.fullName || '',
                         now,
                         now
                     ]
                 );
                 
-                console.log(`[Store] Manual payment created: ${paymentId}`);
+                // Also create a sales record for tracking
+                const salesId = `sale_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                await db.run(
+                    `INSERT INTO sales_records (
+                        id, routerId, date, clientName, planName, planPrice,
+                        discountAmount, finalAmount, routerName, currency,
+                        clientAddress, clientContact, payment_method, processedBy
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        salesId,
+                        effectiveRouterId,
+                        now,
+                        customer.fullName || effectivePppoeUsername,
+                        plan.name,
+                        plan.price,
+                        plan.price,
+                        plan.currency || 'PHP',
+                        customer.address || '',
+                        customer.contactNumber || '',
+                        'manual',
+                        'store'
+                    ]
+                );
+                
+                console.log(`[Store] Manual payment created: ${paymentId}, sales record: ${salesId}`);
                 
                 res.json({
                     success: true,
                     paymentId: paymentId,
+                    salesId: salesId,
                     message: 'Manual payment submitted for approval',
                     instructions: 'Please send payment to our GCash number and wait for admin approval'
                 });
@@ -10177,12 +10291,58 @@ WantedBy=multi-user.target`;
         }
     });
 
+    // Store account lookup on captive server
+    captiveApp.get('/api/public/store/lookup-account', async (req, res) => {
+        try {
+            const { accountNumber, username, ip } = req.query;
+            if (!accountNumber && !username && !ip) {
+                return res.status(400).json({ found: false, message: 'Provide accountNumber, username, or ip query parameter' });
+            }
+            let customer = null;
+            if (accountNumber) {
+                customer = await db.get(
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, r.name as routerName
+                     FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.accountNumber = ?`, [accountNumber]
+                );
+            }
+            if (!customer && username) {
+                customer = await db.get(
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, r.name as routerName
+                     FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.username = ?`, [username]
+                );
+            }
+            if (!customer && ip) {
+                customer = await db.get(
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, r.name as routerName
+                     FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.ipAddress = ? OR c.ip = ?`, [ip, ip]
+                );
+                if (!customer) {
+                    customer = await db.get(
+                        `SELECT dc.id, dc.username, dc.fullName, dc.accountNumber, dc.routerId, dc.contactNumber, r.name as routerName
+                         FROM dhcp_clients dc LEFT JOIN routers r ON dc.routerId = r.id WHERE dc.address = ? OR dc.ip = ?`, [ip, ip]
+                    );
+                }
+            }
+            if (customer) {
+                res.json({ found: true, fullName: customer.fullName, username: customer.username, routerId: customer.routerId, accountNumber: customer.accountNumber || '', routerName: customer.routerName || '', contactNumber: customer.contactNumber || '' });
+            } else {
+                res.json({ found: false });
+            }
+        } catch (e) {
+            console.error('[Captive Store] Account lookup error:', e.message);
+            res.status(500).json({ found: false, message: e.message });
+        }
+    });
+
     // Store purchase API on captive server
     captiveApp.post('/api/public/store/purchase', async (req, res) => {
         try {
-            const { planId, planType, paymentMethod, customerUsername, routerId, gcashReference } = req.body;
-            if (!planId || !planType || !paymentMethod || !customerUsername || !routerId) {
-                return res.status(400).json({ message: 'Missing required fields' });
+            const { planId, planType, paymentMethod, accountNumber, pppoeUsername, routerId, gcashReference } = req.body;
+            if (!planId || !planType || !paymentMethod) {
+                return res.status(400).json({ message: 'Missing required fields: planId, planType, paymentMethod' });
+            }
+            if (!accountNumber && !pppoeUsername) {
+                return res.status(400).json({ message: 'Account number or PPPoE username is required' });
             }
 
             let plan;
@@ -10193,18 +10353,23 @@ WantedBy=multi-user.target`;
             }
             if (!plan) return res.status(404).json({ message: 'Plan not found' });
 
-            const clientUser = await db.get('SELECT * FROM client_users WHERE username = ? AND router_id = ?', [customerUsername, routerId]);
+            // Look up customer directly by account number or PPPoE username
             let customer = null;
-            if (clientUser?.pppoe_username) {
-                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [clientUser.pppoe_username, routerId]);
+            if (accountNumber) {
+                customer = await db.get(
+                    `SELECT c.*, r.name as routerName FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.accountNumber = ?`, [accountNumber]
+                );
             }
-            if (!customer && clientUser?.account_number) {
-                customer = await db.get('SELECT * FROM customers WHERE accountNumber = ? AND routerId = ?', [clientUser.account_number, routerId]);
+            if (!customer && pppoeUsername) {
+                customer = await db.get(
+                    `SELECT c.*, r.name as routerName FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.username = ?`, [pppoeUsername]
+                );
             }
-            if (!customer) {
-                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [customerUsername, routerId]);
-            }
-            if (!customer) return res.status(404).json({ message: 'Customer profile not found. Please contact support.' });
+            if (!customer) return res.status(404).json({ message: 'Customer not found. Please check your account number or PPPoE username.' });
+
+            const effectiveRouterId = routerId || customer.routerId;
+            const effectivePppoeUsername = customer.username;
+            const effectiveAccountNumber = customer.accountNumber || '';
 
             if (paymentMethod === 'paymongo') {
                 const pmSettings = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
@@ -10216,12 +10381,12 @@ WantedBy=multi-user.target`;
                 const checkoutData = {
                     data: {
                         attributes: {
-                            line_items: [{ currency: 'PHP', amount, description: `${plan.name} - ${customer.fullName || customer.accountNumber}`, quantity: 1 }],
+                            line_items: [{ currency: 'PHP', amount, description: `${plan.name} - ${customer.fullName || effectiveAccountNumber}`, quantity: 1 }],
                             payment_method_types: ['gcash', 'paymaya', 'card'],
                             send_email_receipt: false, show_description: false,
                             success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/success`,
                             cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/cancel`,
-                            metadata: { customerUsername, planId, planType, routerId, planName: plan.name, planPrice: plan.price, duration_days: plan.cycle_days || 30, customerAccountNumber: customer.accountNumber, customerFullName: customer.fullName }
+                            metadata: { pppoeUsername: effectivePppoeUsername, planId, planType, routerId: effectiveRouterId, planName: plan.name, planPrice: plan.price, duration_days: plan.cycle_days || 30, customerAccountNumber: effectiveAccountNumber, customerFullName: customer.fullName }
                         }
                     }
                 };
@@ -10233,13 +10398,17 @@ WantedBy=multi-user.target`;
             } else if (paymentMethod === 'manual') {
                 const paymentId = `manual_pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 const now = new Date().toISOString();
-                const pppoeUsername = clientUser?.pppoe_username || customer.username;
-                const accountNumber = customer.accountNumber || clientUser?.account_number || '';
                 await db.run(
                     `INSERT INTO manual_payment_requests (id, customer_account_number, customer_username, customer_full_name, customer_router_id, plan_name, plan_price, gcash_reference_number, customer_mobile_number, customer_name_on_gcash, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-                    [paymentId, accountNumber, pppoeUsername, customer.fullName, routerId, plan.name, plan.price, gcashReference || '', customer.contactNumber || '', customer.fullName || '', 'pending', now, now]
+                    [paymentId, effectiveAccountNumber, effectivePppoeUsername, customer.fullName, effectiveRouterId, plan.name, plan.price, gcashReference || '', customer.contactNumber || '', customer.fullName || '', 'pending', now, now]
                 );
-                res.json({ success: true, paymentId, message: 'Manual payment submitted for approval' });
+                // Also create sales record
+                const salesId = `sale_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                await db.run(
+                    `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, routerName, currency, clientAddress, clientContact, payment_method, processedBy) VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?,?)`,
+                    [salesId, effectiveRouterId, now, customer.fullName || effectivePppoeUsername, plan.name, plan.price, plan.price, plan.currency || 'PHP', customer.address || '', customer.contactNumber || '', 'manual', 'store']
+                );
+                res.json({ success: true, paymentId, salesId, message: 'Manual payment submitted for approval' });
             } else {
                 res.status(400).json({ message: 'Invalid payment method' });
             }
