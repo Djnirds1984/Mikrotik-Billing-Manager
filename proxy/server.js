@@ -3726,11 +3726,12 @@ async function startServer() {
                         paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },
                         gcashNumber: settings.gcashNumber || '',
                         gcashAccountName: settings.gcashAccountName || '',
-                        currency: systemCurrency
+                        currency: systemCurrency,
+                        storeTheme: settings.storeTheme || 'modern'
                     });
-                } catch (_) { res.json({ currency: systemCurrency }); }
+                } catch (_) { res.json({ currency: systemCurrency, storeTheme: 'modern' }); }
             } else {
-                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true }, currency: systemCurrency });
+                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true }, currency: systemCurrency, storeTheme: 'modern' });
             }
         } catch (e) {
             res.status(500).json({ message: e.message });
@@ -10039,11 +10040,12 @@ WantedBy=multi-user.target`;
                         paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },
                         gcashNumber: settings.gcashNumber || '',
                         gcashAccountName: settings.gcashAccountName || '',
-                        currency: systemCurrency
+                        currency: systemCurrency,
+                        storeTheme: settings.storeTheme || 'modern'
                     });
-                } catch (_) { res.json({ currency: systemCurrency }); }
+                } catch (_) { res.json({ currency: systemCurrency, storeTheme: 'modern' }); }
             } else {
-                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true }, currency: systemCurrency });
+                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true }, currency: systemCurrency, storeTheme: 'modern' });
             }
         } catch (e) {
             res.status(500).json({ message: e.message });
