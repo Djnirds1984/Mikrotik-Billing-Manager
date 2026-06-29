@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { dbApi, getAuthHeader } from '../services/databaseService.ts';
 import type { RouterConfigWithId } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { Loader } from './Loader.tsx';
@@ -44,68 +43,36 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
   const loadClients = async (routerId: string) => {
     try {
       setIsLoading(true);
-      let pppoeUsers: any[] = [];
-      let dhcpClients: any[] = [];
+      let portalUsers: any[] = [];
       
-      // Load PPPoE clients from router secrets
+      // Load client portal users from the authenticated API
       try {
-        const pppoeRes = await fetch(`/mt-api/${routerId}/ppp/secret`, {
-          headers: getAuthHeader()
+        const res = await fetch('/api/client-portal/users', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
         });
-        if (pppoeRes.ok) {
-          const secrets = await pppoeRes.json();
-          // Transform PPPoE secrets to client format
-          pppoeUsers = (Array.isArray(secrets) ? secrets : []).map((secret: any) => {
-            let customerInfo: any = {};
-            try {
-              customerInfo = JSON.parse(secret.comment || '{}');
-            } catch {}
-            
-            return {
-              id: secret['.id'] || secret.id,
-              type: 'pppoe',
-              name: secret.name,
-              username: secret.name,
-              pppoeUsername: secret.name,
-              accountNumber: customerInfo.accountNumber || customerInfo.account_number || '',
-              contactNumber: customerInfo.contactNumber || customerInfo.contact_number || '',
-              email: customerInfo.email || '',
-              fullName: customerInfo.fullName || customerInfo.customer?.fullName || '',
-              routerId: routerId,
-              profile: secret.profile || '',
-              comment: secret.comment || ''
-            };
-          });
+        if (res.ok) {
+          const users = await res.json();
+          // Filter users for the selected router and transform to client format
+          portalUsers = (Array.isArray(users) ? users : [])
+            .filter((user: any) => user.router_id === routerId)
+            .map((user: any) => ({
+              id: user.id,
+              type: 'portal',
+              name: user.username,
+              username: user.username,
+              pppoeUsername: user.pppoe_username,
+              accountNumber: user.account_number || '',
+              routerId: user.router_id,
+              createdAt: user.created_at
+            }));
         } else {
-          console.warn('Failed to fetch PPPoE secrets:', pppoeRes.status);
+          console.warn('Failed to fetch client portal users:', res.status);
         }
       } catch (err) {
-        console.error('Error fetching PPPoE secrets:', err);
+        console.error('Error fetching client portal users:', err);
       }
       
-      // Load DHCP clients
-      try {
-        dhcpClients = await dbApi.get<any[]>(`/dhcp_clients?routerId=${routerId}`);
-      } catch (err) {
-        console.error('Error fetching DHCP clients:', err);
-      }
-      
-      // Combine both types
-      const combined = [
-        ...pppoeUsers,
-        ...(Array.isArray(dhcpClients) ? dhcpClients : []).map((c: any) => ({
-          id: c.id || c.macAddress,
-          type: 'dhcp',
-          name: c.customerInfo || c.hostName || c.macAddress,
-          accountNumber: c.accountNumber || '',
-          contactNumber: c.contactNumber || '',
-          email: c.email || '',
-          routerId: c.routerId,
-          macAddress: c.macAddress
-        }))
-      ];
-      
-      setClients(combined);
+      setClients(portalUsers);
     } catch (error) {
       console.error('Failed to load clients:', error);
     } finally {
@@ -120,8 +87,7 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
     return clients.filter(client => 
       client.name.toLowerCase().includes(query) ||
       client.accountNumber?.toLowerCase().includes(query) ||
-      client.contactNumber?.includes(query) ||
-      client.fullName?.toLowerCase().includes(query)
+      client.pppoeUsername?.toLowerCase().includes(query)
     );
   }, [searchQuery, clients]);
 
@@ -133,37 +99,19 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
     setSelectedClient(client);
     
     try {
-      // Load invoices for this client
-      let invoiceData: any[] = [];
-      
-      if (client.type === 'pppoe') {
-        // Use public API for PPPoE client invoices
-        const res = await fetch(
-          `/api/public/client/invoices?routerId=${selectedRouter.id}&username=${encodeURIComponent(client.name)}`
-        );
-        invoiceData = await res.json();
-      } else {
-        // For DHCP, query client_invoices by routerId and username (lowercase name)
-        const allInvoices = await dbApi.get<any[]>('/client-invoices');
-        invoiceData = (Array.isArray(allInvoices) ? allInvoices : []).filter(
-          inv => inv.routerId === selectedRouter.id && 
-                 inv.source === 'dhcp' &&
-                 (inv.username === client.name.toLowerCase() || 
-                  inv.accountNumber === client.accountNumber)
-        );
-      }
-      
+      // Load invoices for this client using the same API as client portal
+      const res = await fetch(
+        `/api/public/client/invoices?routerId=${selectedRouter.id}&username=${encodeURIComponent(client.pppoeUsername || client.username)}`
+      );
+      const invoiceData = await res.json();
       setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
       
-      // Load payment history from sales_records
-      const allSales = await dbApi.get<any[]>('/sales');
-      const clientPayments = (Array.isArray(allSales) ? allSales : []).filter(
-        sale => sale.routerId === selectedRouter.id &&
-                (sale.clientName?.toLowerCase() === client.name.toLowerCase() ||
-                 sale.clientName === client.accountNumber)
+      // Load payment history using the same API as client portal
+      const payRes = await fetch(
+        `/api/public/client/payments?routerId=${selectedRouter.id}&username=${encodeURIComponent(client.pppoeUsername || client.username)}`
       );
-      
-      setPayments(clientPayments);
+      const paymentData = await payRes.json();
+      setPayments(Array.isArray(paymentData) ? paymentData : []);
     } catch (error) {
       console.error('Failed to generate SOA:', error);
       alert('Failed to generate Statement of Account');
@@ -213,10 +161,10 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
           {/* Client Information */}
           <div className="mb-6 grid grid-cols-2 gap-4">
             <div>
-              <p className="text-sm text-gray-600 mb-1">Client Name:</p>
-              <p className="text-lg font-bold">{selectedClient.fullName || selectedClient.name}</p>
-              {selectedClient.type === 'pppoe' && selectedClient.name && (
-                <p className="text-sm text-gray-600">Username: {selectedClient.name}</p>
+              <p className="text-sm text-gray-600 mb-1">Username:</p>
+              <p className="text-lg font-bold">{selectedClient.name}</p>
+              {selectedClient.pppoeUsername && (
+                <p className="text-sm text-gray-600">PPPoE Username: {selectedClient.pppoeUsername}</p>
               )}
             </div>
             <div>
@@ -226,10 +174,10 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
                   <p className="text-lg font-bold">{selectedClient.accountNumber}</p>
                 </>
               )}
-              {selectedClient.contactNumber && (
+              {selectedClient.createdAt && (
                 <>
-                  <p className="text-sm text-gray-600 mb-1">Contact Number:</p>
-                  <p className="text-base">{selectedClient.contactNumber}</p>
+                  <p className="text-sm text-gray-600 mb-1">Account Created:</p>
+                  <p className="text-base">{new Date(selectedClient.createdAt).toLocaleDateString()}</p>
                 </>
               )}
             </div>
@@ -379,11 +327,10 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs text-slate-700 uppercase bg-slate-50 dark:bg-slate-900/50 dark:text-slate-300">
                       <tr>
-                        <th className="px-4 py-3">Name / Username</th>
+                        <th className="px-4 py-3">Username</th>
+                        <th className="px-4 py-3">PPPoE Username</th>
                         <th className="px-4 py-3">Account Number</th>
-                        <th className="px-4 py-3">Type</th>
-                        <th className="px-4 py-3">Profile</th>
-                        <th className="px-4 py-3">Contact</th>
+                        <th className="px-4 py-3">Created</th>
                         <th className="px-4 py-3 text-right">Action</th>
                       </tr>
                     </thead>
@@ -392,29 +339,17 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
                         <tr key={client.id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                           <td className="px-4 py-3">
                             <div className="font-medium text-slate-900 dark:text-white">
-                              {client.fullName || client.name}
+                              {client.name}
                             </div>
-                            {client.fullName && client.type === 'pppoe' && (
-                              <div className="text-xs text-slate-500">{client.name}</div>
-                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">
+                            {client.pppoeUsername || '—'}
                           </td>
                           <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">
                             {client.accountNumber || '—'}
                           </td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                              client.type === 'pppoe' 
-                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'
-                                : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400'
-                            }`}>
-                              {client.type.toUpperCase()}
-                            </span>
-                          </td>
                           <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
-                            {client.profile || '—'}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
-                            {client.contactNumber || '—'}
+                            {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : '—'}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <button
@@ -441,7 +376,7 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
             {!isLoading && clients.length === 0 && (
               <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
                 <p className="text-sm text-blue-800 dark:text-blue-300">
-                  <strong>No clients found.</strong> PPPoE clients will appear here automatically from the router. DHCP clients will appear when they connect to a portal-enabled DHCP server.
+                  <strong>No client portal users found.</strong> Client portal users will appear here when they are created in the Client Portal Users section.
                 </p>
               </div>
             )}
