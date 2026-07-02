@@ -24,6 +24,15 @@
     top: 0 !important;
     width: 100% !important;
   }
+
+  /* Thermal printable-area: narrow width, centered */
+  .printable-area.thermal-print-area {
+    width: 58mm !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
   
   /* Hide non-printable elements */
   .no-print, .no-print * {
@@ -52,7 +61,7 @@
     visibility: visible !important;
     width: 58mm !important;
     max-width: 58mm !important;
-    margin: 0 auto !important;
+    margin: 0 !important;
     font-family: monospace !important;
     font-size: 11px !important;
     line-height: 1.2 !important;
@@ -60,18 +69,6 @@
     color: black !important;
     padding: 4mm 3mm !important;
     box-sizing: border-box !important;
-  }
-  
-  /* Thermal receipt parent container - constrain to thermal width */
-  .printable-area:has(.thermal-receipt) {
-    width: 58mm !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-  }
-  
-  /* Default @page for normal receipts (letter size) */
-  @page {
-    margin: 10mm;
   }
   
   /* Override any conflicting styles */

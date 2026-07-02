@@ -328,7 +328,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
 
     return (
         <>
-            <div className={receiptToPrint ? 'printable-area' : 'hidden'}>
+            <div className={receiptToPrint ? `printable-area${receiptPrintMode === 'thermal' ? ' thermal-print-area' : ''}` : 'hidden'}>
                 {receiptPrintMode === 'thermal' ? (
                     <PrintableThermalReceipt sale={receiptToPrint} companySettings={companySettings} />
                 ) : (
