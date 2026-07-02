@@ -238,32 +238,39 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     };
 
     const handlePrintReceipt = (sale: SaleRecord, mode: 'normal' | 'thermal') => {
+        // Remove any previous thermal style before setting new one
+        const existingThermalStyle = document.querySelector('style[data-thermal-print]');
+        if (existingThermalStyle && existingThermalStyle.parentNode) {
+            existingThermalStyle.parentNode.removeChild(existingThermalStyle);
+        }
+
         setReceiptPrintMode(mode);
+
+        // Inject thermal @page rule BEFORE print dialog opens
+        if (mode === 'thermal') {
+            const thermalStyle = document.createElement('style');
+            thermalStyle.setAttribute('data-thermal-print', 'true');
+            thermalStyle.textContent = `@page { size: 58mm auto; margin: 0; }`;
+            document.head.appendChild(thermalStyle);
+        }
+
         setReceiptToPrint(sale);
     };
 
     useEffect(() => {
         if (receiptToPrint) {
-            // Inject thermal @page rule if printing thermal
-            let thermalStyle: HTMLStyleElement | null = null;
-            if (receiptPrintMode === 'thermal') {
-                thermalStyle = document.createElement('style');
-                thermalStyle.setAttribute('data-thermal-print', 'true');
-                thermalStyle.textContent = `@media print { @page { size: 58mm auto; margin: 0; } }`;
-                document.head.appendChild(thermalStyle);
-            }
-            const timer = setTimeout(() => window.print(), 100);
-            return () => {
-                clearTimeout(timer);
-                if (thermalStyle && thermalStyle.parentNode) {
-                    thermalStyle.parentNode.removeChild(thermalStyle);
-                }
-            };
+            const timer = setTimeout(() => window.print(), 150);
+            return () => clearTimeout(timer);
         }
-    }, [receiptToPrint, receiptPrintMode]);
+    }, [receiptToPrint]);
 
     useEffect(() => {
         const handleAfterPrint = () => {
+            // Clean up thermal @page style after printing
+            const thermalStyle = document.querySelector('style[data-thermal-print]');
+            if (thermalStyle && thermalStyle.parentNode) {
+                thermalStyle.parentNode.removeChild(thermalStyle);
+            }
             setReceiptToPrint(null);
         };
         window.addEventListener('afterprint', handleAfterPrint);
