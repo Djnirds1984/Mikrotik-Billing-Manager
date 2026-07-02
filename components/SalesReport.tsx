@@ -250,7 +250,19 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         if (mode === 'thermal') {
             const thermalStyle = document.createElement('style');
             thermalStyle.setAttribute('data-thermal-print', 'true');
-            thermalStyle.textContent = `@page { size: 58mm auto; margin: 0; }`;
+            thermalStyle.textContent = `
+                @page {
+                    size: 58mm auto !important;
+                    margin: 0 !important;
+                }
+                @media print {
+                    html, body {
+                        width: 58mm !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
+                }
+            `;
             document.head.appendChild(thermalStyle);
         }
 
@@ -259,7 +271,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
 
     useEffect(() => {
         if (receiptToPrint) {
-            const timer = setTimeout(() => window.print(), 150);
+            const timer = setTimeout(() => window.print(), 300);
             return () => clearTimeout(timer);
         }
     }, [receiptToPrint]);
