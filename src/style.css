@@ -51,19 +51,27 @@
   .thermal-receipt {
     visibility: visible !important;
     width: 58mm !important;
+    max-width: 58mm !important;
     margin: 0 auto !important;
     font-family: monospace !important;
     font-size: 11px !important;
     line-height: 1.2 !important;
     background: white !important;
     color: black !important;
-    padding: 6px !important;
+    padding: 4mm 3mm !important;
+    box-sizing: border-box !important;
   }
   
-  /* Ensure thermal receipt fits thermal paper */
+  /* Thermal receipt parent container - constrain to thermal width */
+  .printable-area:has(.thermal-receipt) {
+    width: 58mm !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+  }
+  
+  /* Default @page for normal receipts (letter size) */
   @page {
-    margin: 0;
-    size: 58mm auto; /* Thermal paper width */
+    margin: 10mm;
   }
   
   /* Override any conflicting styles */
