@@ -238,51 +238,97 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     };
 
     const handlePrintReceipt = (sale: SaleRecord, mode: 'normal' | 'thermal') => {
-        // Remove any previous thermal style before setting new one
-        const existingThermalStyle = document.querySelector('style[data-thermal-print]');
-        if (existingThermalStyle && existingThermalStyle.parentNode) {
-            existingThermalStyle.parentNode.removeChild(existingThermalStyle);
-        }
-
-        setReceiptPrintMode(mode);
-
-        // Inject thermal @page rule BEFORE print dialog opens
         if (mode === 'thermal') {
-            const thermalStyle = document.createElement('style');
-            thermalStyle.setAttribute('data-thermal-print', 'true');
-            thermalStyle.textContent = `
-                @page {
-                    size: 58mm auto !important;
-                    margin: 0 !important;
-                }
-                @media print {
-                    html, body {
-                        width: 58mm !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                    }
-                }
-            `;
-            document.head.appendChild(thermalStyle);
+            // ── Thermal print: use hidden iframe for reliable @page ──
+            // Chromium ignores dynamically injected @page in the main document.
+            // An iframe creates an isolated document whose @page IS respected.
+            const receiptId = sale.id.slice(-6).toUpperCase();
+            const dateStr = new Date(sale.date).toLocaleDateString();
+            const coveredMonth = sale.coveredMonth || new Date(sale.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+            const planType = (sale.planType || 'prepaid').toUpperCase();
+            const priceFormatted = formatCurrency(sale.planPrice);
+            const totalFormatted = formatCurrency(sale.finalAmount);
+            const discountFormatted = formatCurrency(sale.discountAmount);
+
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:58mm;height:0;border:none;';
+            document.body.appendChild(iframe);
+
+            const doc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (!doc) { document.body.removeChild(iframe); return; }
+
+            doc.open();
+            doc.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Receipt</title>
+<style>
+@page { size: 58mm auto; margin: 0; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.3; color: #000; background: #fff; }
+.r { width: 58mm; max-width: 58mm; padding: 4mm 3mm; }
+.ct { text-align: center; }
+.hdr { font-size: 13px; font-weight: bold; text-transform: uppercase; margin-bottom: 3px; }
+.sm { font-size: 9px; }
+.sep { border: none; border-top: 1px dashed #000; margin: 3mm 0; }
+.row { display: flex; justify-content: space-between; margin-bottom: 1mm; font-size: 10px; }
+.trunc { max-width: 35mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.bold { font-weight: bold; }
+.total { font-size: 12px; font-weight: bold; }
+.ww { word-wrap: break-word; overflow-wrap: break-word; }
+</style></head><body>
+<div class="r">
+  <div class="ct" style="margin-bottom:6px">
+    <div class="hdr">${(companySettings.companyName || 'Your Company').replace(/</g, '&lt;')}</div>
+    ${companySettings.address ? `<div class="sm ww" style="margin-bottom:1px">${companySettings.address.replace(/</g, '&lt;')}</div>` : ''}
+    ${companySettings.contactNumber ? `<div class="sm" style="margin-bottom:1px">${companySettings.contactNumber.replace(/</g, '&lt;')}</div>` : ''}
+    ${companySettings.email ? `<div class="sm">${companySettings.email.replace(/</g, '&lt;')}</div>` : ''}
+  </div>
+  <div class="ct sm bold" style="text-transform:uppercase;margin-bottom:4px">ACKNOWLEDGEMENT RECEIPT ONLY</div>
+  <hr class="sep">
+  <div style="margin-bottom:4px;font-size:10px">
+    <div class="row"><span>AR#:</span><span>${receiptId}</span></div>
+    <div class="row"><span>Date:</span><span>${dateStr}</span></div>
+    <div class="row"><span>Type:</span><span style="text-transform:uppercase">${planType}</span></div>
+    <div class="row"><span>Month:</span><span style="font-size:9px">${coveredMonth.replace(/</g, '&lt;')}</span></div>
+    <div class="row"><span style="flex-shrink:0">Name:</span><span class="trunc">${(sale.clientName || '').replace(/</g, '&lt;')}</span></div>
+    ${sale.clientAddress ? `<div class="row"><span style="flex-shrink:0">Addr:</span><span class="trunc">${sale.clientAddress.replace(/</g, '&lt;')}</span></div>` : ''}
+    ${sale.clientContact ? `<div class="row"><span>Contact:</span><span>${sale.clientContact.replace(/</g, '&lt;')}</span></div>` : ''}
+  </div>
+  <hr class="sep">
+  <div style="margin-bottom:4px;font-size:10px">
+    <div class="row"><span class="trunc" style="text-align:left">${(sale.planName || '').replace(/</g, '&lt;')}</span><span style="flex-shrink:0">${priceFormatted}</span></div>
+    ${sale.discountAmount > 0 ? `<div class="row"><span>Discount</span><span>-${discountFormatted}</span></div>` : ''}
+  </div>
+  <hr class="sep">
+  <div class="row total" style="margin-bottom:6px"><span>TOTAL</span><span>${totalFormatted}</span></div>
+  <hr class="sep">
+  <div class="ct sm" style="margin-top:3px"><div>Thank you for your payment!</div></div>
+</div>
+</body></html>`);
+            doc.close();
+
+            const triggerPrint = () => {
+                try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch (_) { /* fallback */ }
+                setTimeout(() => { if (iframe.parentNode) document.body.removeChild(iframe); }, 1000);
+            };
+            // Wait for iframe document to be ready
+            setTimeout(triggerPrint, 300);
+            return; // thermal handled via iframe — skip main-doc flow below
         }
 
+        // ── Normal (A4) print ──
+        setReceiptPrintMode(mode);
         setReceiptToPrint(sale);
     };
 
     useEffect(() => {
-        if (receiptToPrint) {
+        if (receiptToPrint && receiptPrintMode === 'normal') {
             const timer = setTimeout(() => window.print(), 300);
             return () => clearTimeout(timer);
         }
-    }, [receiptToPrint]);
+    }, [receiptToPrint, receiptPrintMode]);
 
     useEffect(() => {
         const handleAfterPrint = () => {
-            // Clean up thermal @page style after printing
-            const thermalStyle = document.querySelector('style[data-thermal-print]');
-            if (thermalStyle && thermalStyle.parentNode) {
-                thermalStyle.parentNode.removeChild(thermalStyle);
-            }
             setReceiptToPrint(null);
         };
         window.addEventListener('afterprint', handleAfterPrint);
