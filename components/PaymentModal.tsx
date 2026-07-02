@@ -3,6 +3,12 @@ import type { PppSecret, BillingPlanWithId, SaleRecord, CompanySettings } from '
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
 
+interface UnpaidMonthEntry {
+    month: string; // YYYY-MM
+    planName?: string;
+    planPrice?: number;
+}
+
 interface PaymentModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -11,32 +17,75 @@ interface PaymentModalProps {
     nonPaymentProfile: string;
     onSave: (data: {
         sale: Omit<SaleRecord, 'id' | 'date' | 'routerName'>;
-        payment: { plan: BillingPlanWithId, nonPaymentProfile: string, discountDays: number, paymentDate: string };
-    }) => Promise<boolean>; // Return true on success, false on failure
+        payment: { plan: BillingPlanWithId, nonPaymentProfile: string, discountDays: number, paymentDate: string, coveredMonth?: string };
+    }) => Promise<boolean>;
     companySettings: CompanySettings;
+    preselectedMonth?: string; // YYYY-MM pre-filled from ledger
+    routerId?: string;
 }
 
-export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, secret, plans, nonPaymentProfile, onSave, companySettings }) => {
+export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, secret, plans, nonPaymentProfile, onSave, companySettings, preselectedMonth, routerId }) => {
     const { t, formatCurrency } = useLocalization();
     const [selectedPlanId, setSelectedPlanId] = useState('');
     const [discountDays, setDiscountDays] = useState('0');
     const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
     const [receiptData, setReceiptData] = useState<SaleRecord | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [selectedMonth, setSelectedMonth] = useState<string>(''); // YYYY-MM for postpaid
+    const [unpaidMonths, setUnpaidMonths] = useState<UnpaidMonthEntry[]>([]);
+    const [isPostpaid, setIsPostpaid] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
-            // Reset state when modal opens
             setReceiptData(null);
             setDiscountDays('0');
             setPaymentDate(new Date().toISOString().split('T')[0]);
             setIsSubmitting(false);
+            setSelectedMonth('');
+            setUnpaidMonths([]);
 
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
             }
+
+            // Detect plan type
+            let planType: 'prepaid' | 'postpaid' = 'prepaid';
+            try {
+                const c = JSON.parse(String(secret?.comment || '{}'));
+                const pt = String(c.planType || '').toLowerCase();
+                if (pt === 'postpaid') planType = 'postpaid';
+            } catch {}
+            setIsPostpaid(planType === 'postpaid');
+
+            // Fetch unpaid months for postpaid
+            if (planType === 'postpaid' && routerId && secret?.name) {
+                fetch(`/api/billing-ledger/unpaid/${encodeURIComponent(routerId)}/${encodeURIComponent(secret.name)}`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                })
+                    .then(res => res.ok ? res.json() : [])
+                    .then((data: UnpaidMonthEntry[]) => {
+                        setUnpaidMonths(data);
+                        // Pre-select month: from prop, or first unpaid, or current month
+                        if (preselectedMonth) {
+                            setSelectedMonth(preselectedMonth);
+                        } else if (data.length > 0) {
+                            setSelectedMonth(data[0].month);
+                        } else {
+                            const now = new Date();
+                            setSelectedMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+                        }
+                    })
+                    .catch(() => {
+                        const now = new Date();
+                        setSelectedMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+                    });
+            } else {
+                // Prepaid: default to current month
+                const now = new Date();
+                setSelectedMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+            }
         }
-    }, [isOpen, plans]);
+    }, [isOpen, plans, secret, preselectedMonth, routerId]);
 
     useEffect(() => {
         if (receiptData) {
@@ -68,29 +117,40 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const discountAmount = pricePerDay * discountDaysValue;
     const finalAmount = Math.max(0, planPrice - discountAmount);
 
+    // Format month for display
+    const formatMonthDisplay = (monthStr: string): string => {
+        const [year, month] = monthStr.split('-');
+        const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+        return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    };
+
+    const isMonthOverdue = (monthStr: string): boolean => {
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        return monthStr < currentMonth;
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedPlan) {
             alert('Please select a billing plan.');
             return;
         }
+        if (isPostpaid && !selectedMonth) {
+            alert('Please select a billing month.');
+            return;
+        }
         
         setIsSubmitting(true);
         
-        // Derive plan type from secret comment
-        let planType: 'prepaid' | 'postpaid' = 'prepaid';
-        try {
-            const c = JSON.parse(String(secret.comment || '{}'));
-            const pt = String(c.planType || '').toLowerCase();
-            if (pt === 'postpaid') planType = 'postpaid';
-        } catch {}
-        // Derive covered month based on payment date and plan type
-        const paymentDT = new Date(paymentDate);
-        const coveredBase = new Date(paymentDT);
-        if (planType === 'postpaid') {
-            coveredBase.setMonth(coveredBase.getMonth() - 1);
-        }
-        const coveredMonth = coveredBase.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+        // For postpaid, use selectedMonth as coveredMonth
+        const coveredMonth = isPostpaid && selectedMonth
+            ? formatMonthDisplay(selectedMonth)
+            : (() => {
+                // Prepaid: auto-calculate from payment date
+                const paymentDT = new Date(paymentDate);
+                return paymentDT.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+            })();
 
         const saleData = {
             clientName: secret.customer?.fullName || secret.name,
@@ -102,7 +162,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             clientAddress: secret.customer?.address,
             clientContact: secret.customer?.contactNumber,
             clientEmail: secret.customer?.email,
-            planType,
+            planType: isPostpaid ? 'postpaid' as const : 'prepaid' as const,
             coveredMonth,
         };
         
@@ -111,6 +171,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             nonPaymentProfile,
             discountDays: discountDaysValue,
             paymentDate,
+            coveredMonth: selectedMonth, // YYYY-MM for backend ledger update
         };
 
         const success = await onSave({ sale: saleData, payment: paymentData });
@@ -134,7 +195,69 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                             <h3 className="text-xl font-bold text-[--color-primary-500] dark:text-[--color-primary-400] mb-1">Process Payment</h3>
                             <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">For user: {secret.customer?.fullName || secret.name}</p>
 
+                            {/* Billing Status Info for Postpaid */}
+                            {isPostpaid && (
+                                <div className="mb-4 bg-slate-50 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-600 rounded-lg p-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Billing Status</span>
+                                    </div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
+                                        {unpaidMonths.length > 0 && (
+                                            <div className="text-red-600 dark:text-red-400 font-medium">
+                                                {unpaidMonths.length} unpaid month{unpaidMonths.length > 1 ? 's' : ''}: {unpaidMonths.map(m => formatMonthDisplay(m.month)).join(', ')}
+                                            </div>
+                                        )}
+                                        {unpaidMonths.length === 0 && (
+                                            <div className="text-green-600 dark:text-green-400 font-medium">All months are paid or up to date.</div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="space-y-4">
+                                {/* Month Selector for Postpaid */}
+                                {isPostpaid && (
+                                    <div>
+                                        <label htmlFor="billingMonth" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Billing Month</label>
+                                        <select
+                                            id="billingMonth"
+                                            value={selectedMonth}
+                                            onChange={(e) => setSelectedMonth(e.target.value)}
+                                            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                                        >
+                                            {unpaidMonths.map(m => (
+                                                <option key={m.month} value={m.month}>
+                                                    {formatMonthDisplay(m.month)} {isMonthOverdue(m.month) ? '(OVERDUE)' : '(CURRENT)'} - {formatCurrency(m.planPrice || planPrice)}
+                                                </option>
+                                            ))}
+                                            {/* If no unpaid months, show current + next few months */}
+                                            {unpaidMonths.length === 0 && (() => {
+                                                const now = new Date();
+                                                const options = [];
+                                                for (let i = 0; i < 3; i++) {
+                                                    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+                                                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                                                    options.push(
+                                                        <option key={key} value={key}>
+                                                            {formatMonthDisplay(key)} {i === 0 ? '(CURRENT)' : '(ADVANCE)'}
+                                                        </option>
+                                                    );
+                                                }
+                                                return options;
+                                            })()}
+                                        </select>
+                                        {selectedMonth && isMonthOverdue(selectedMonth) && (
+                                            <p className="mt-1 text-xs text-red-500">This month is overdue. Payment will reconnect the user.</p>
+                                        )}
+                                        {selectedMonth && !isMonthOverdue(selectedMonth) && (
+                                            <p className="mt-1 text-xs text-blue-500">This payment will be applied as credit for the selected month.</p>
+                                        )}
+                                    </div>
+                                )}
+
                                 <div>
                                     <label htmlFor="plan" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Billing Plan</label>
                                     <select id="plan" value={selectedPlanId} onChange={(e) => setSelectedPlanId(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
@@ -166,6 +289,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                         <span>TOTAL</span>
                                         <span>{formatCurrency(finalAmount)}</span>
                                     </div>
+                                    {isPostpaid && selectedMonth && (
+                                        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                            Covering: <span className="font-semibold">{formatMonthDisplay(selectedMonth)}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

@@ -15,6 +15,7 @@ import { Loader } from './Loader.tsx';
 import { RouterIcon, EditIcon, TrashIcon, ExclamationTriangleIcon, UsersIcon, SignalIcon, CurrencyDollarIcon, KeyIcon, SearchIcon, EyeIcon, EyeSlashIcon, ServerIcon, XMarkIcon } from '../constants.tsx';
 import { PaymentModal } from './PaymentModal.tsx';
 import { GracePeriodModal } from './GracePeriodModal.tsx';
+import { BillingLedgerModal } from './BillingLedgerModal.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -465,7 +466,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [isUserModalOpen, setUserModalOpen] = useState(false);
     const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
     const [isGraceModalOpen, setGraceModalOpen] = useState(false);
+    const [isBillingLedgerOpen, setBillingLedgerOpen] = useState(false);
     const [selectedSecret, setSelectedSecret] = useState<PppSecret | null>(null);
+    const [preselectedPaymentMonth, setPreselectedPaymentMonth] = useState<string>('');
     
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -884,7 +887,36 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         if (!selectedSecret) return false;
         try {
             await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
-            await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString() });
+            const saleResult = await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString() });
+
+            // Update billing ledger for postpaid users
+            const coveredMonth = payment.coveredMonth; // YYYY-MM format
+            if (coveredMonth) {
+                try {
+                    await fetch('/api/billing-ledger', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                        },
+                        body: JSON.stringify({
+                            routerId: selectedRouter.id,
+                            username: selectedSecret.name,
+                            accountNumber: (() => { try { return JSON.parse(selectedSecret.comment || '{}').accountNumber || JSON.parse(selectedSecret.comment || '{}').customer?.accountNumber || null; } catch { return null; } })(),
+                            month: coveredMonth,
+                            status: 'paid',
+                            planName: sale.planName,
+                            planPrice: sale.planPrice,
+                            paidAmount: sale.finalAmount,
+                            saleId: saleResult?.id || null,
+                            paymentDate: payment.paymentDate || new Date().toISOString()
+                        })
+                    });
+                } catch (ledgerErr) {
+                    console.warn('[PPPoE Payment] Failed to update billing ledger:', ledgerErr);
+                }
+            }
+
             await fetchData();
             return true;
         } catch (err) {
@@ -938,8 +970,22 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 isSubmitting={isSubmitting}
                 selectedRouterId={selectedRouter?.id}
             />
-            <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} secret={selectedSecret} plans={plans} nonPaymentProfile={billingSettings.nonPaymentProfile} onSave={handlePayment} companySettings={companySettings} />
+            <PaymentModal isOpen={isPaymentModalOpen} onClose={() => { setPaymentModalOpen(false); setPreselectedPaymentMonth(''); }} secret={selectedSecret} plans={plans} nonPaymentProfile={billingSettings.nonPaymentProfile} onSave={handlePayment} companySettings={companySettings} preselectedMonth={preselectedPaymentMonth} routerId={selectedRouter.id} />
             <GracePeriodModal isOpen={isGraceModalOpen} onClose={() => setGraceModalOpen(false)} subject={selectedSecret} nonPaymentProfile={billingSettings.nonPaymentProfile} defaultGraceDays={billingSettings.gracePeriodDays} onSave={handleGraceSave} />
+            {selectedSecret && (
+                <BillingLedgerModal
+                    isOpen={isBillingLedgerOpen}
+                    onClose={() => setBillingLedgerOpen(false)}
+                    routerId={selectedRouter.id}
+                    username={selectedSecret.name}
+                    fullName={selectedSecret.customer?.fullName || selectedSecret.name}
+                    onPayMonth={(month) => {
+                        setPreselectedPaymentMonth(month);
+                        setBillingLedgerOpen(false);
+                        setPaymentModalOpen(true);
+                    }}
+                />
+            )}
 
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
@@ -1286,6 +1332,15 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                                 </button>
                                             ) : null;
                                         })()}
+                                        {user.subscription.planType === 'postpaid' && (
+                                            <button
+                                                onClick={() => { setSelectedSecret(user); setBillingLedgerOpen(true); }}
+                                                className="px-3 py-1 text-sm bg-indigo-600 text-white rounded-md font-semibold hover:bg-indigo-700 transition-colors"
+                                                title="View Billing Ledger"
+                                            >
+                                                Billing
+                                            </button>
+                                        )}
                                         <button
                                             onClick={() => { setSelectedSecret(user); setUserModalOpen(true); }}
                                             className="px-3 py-1 text-sm bg-sky-600 text-white rounded-md font-semibold hover:bg-sky-700 transition-colors"

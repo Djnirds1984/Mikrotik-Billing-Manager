@@ -8,6 +8,7 @@ import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, ExclamationTriangleIcon } from '../constants.tsx';
 import { ActivationPaymentModal } from './ActivationPaymentModal.tsx';
 import { GracePeriodModalDhcp } from './GracePeriodModalDhcp.tsx';
+import { BillingLedgerModal } from './BillingLedgerModal.tsx';
 import { generateApplicationForm, deleteApplication } from '../services/applicationService.ts';
 
 // New modal for manual editing
@@ -123,6 +124,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
     const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
     const [isEditModalOpen, setEditModalOpen] = useState(false);
     const [isGraceModalOpen, setGraceModalOpen] = useState(false);
+    const [isBillingLedgerOpen, setBillingLedgerOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<DhcpClient | null>(null);
 
     const isLegacyApi = selectedRouter.api_type === 'legacy';
@@ -376,6 +378,15 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 subject={selectedClient}
                 onSave={handleGraceSave}
             />
+            {selectedClient && (
+                <BillingLedgerModal
+                    isOpen={isBillingLedgerOpen}
+                    onClose={() => setBillingLedgerOpen(false)}
+                    routerId={selectedRouter.id}
+                    username={selectedClient.macAddress}
+                    fullName={selectedClient.customerInfo || selectedClient.hostName || selectedClient.macAddress}
+                />
+            )}
 
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">DHCP Client Management</h2>
 
@@ -435,6 +446,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                                             <>
                                                <button onClick={() => { setSelectedClient(client); setPaymentModalOpen(true); }} className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md font-semibold" title="Pay/Renew">Pay/Renew</button>
                                                <button onClick={() => { setSelectedClient(client); setGraceModalOpen(true); }} className="px-3 py-1 text-sm bg紫-600 text-white rounded-md font-semibold" title="Grant Grace Period">Grace</button>
+                                               <button onClick={() => { setSelectedClient(client); setBillingLedgerOpen(true); }} className="px-3 py-1 text-sm bg-indigo-600 text-white rounded-md font-semibold" title="View Billing Ledger">Billing</button>
                                                <button onClick={() => { setSelectedClient(client); setEditModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500" title="Edit Client"><EditIcon className="w-5 h-5"/></button>
                                                <button onClick={() => handleDeactivateOrDelete(client)} className="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md font-semibold" title="Deactivate">Deactivate</button>
                                             </>

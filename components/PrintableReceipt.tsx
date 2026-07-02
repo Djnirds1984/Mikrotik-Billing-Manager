@@ -39,6 +39,26 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
                         <div className="mt-2 text-sm text-gray-700">
                             <div>Plan Type: {(sale.planType || 'prepaid').toUpperCase()}</div>
                             <div>Month Covered: {sale.coveredMonth || new Date(sale.date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
+                            {sale.planType === 'postpaid' && sale.coveredMonth && (() => {
+                                // Check if the covered month is overdue (before current month)
+                                const now = new Date();
+                                const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                                const coveredDate = new Date(sale.date);
+                                const coveredMonthStr = `${coveredDate.getFullYear()}-${String(coveredDate.getMonth() + 1).padStart(2, '0')}`;
+                                // Parse coveredMonth to check if overdue
+                                const monthNames = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+                                let isOverdue = false;
+                                if (sale.coveredMonth) {
+                                    const parts = sale.coveredMonth.split(' ');
+                                    const mIdx = monthNames.indexOf(parts[0]?.toLowerCase());
+                                    const year = parseInt(parts[1]);
+                                    if (mIdx >= 0 && year) {
+                                        const coveredKey = `${year}-${String(mIdx + 1).padStart(2, '0')}`;
+                                        isOverdue = coveredKey < currentMonthStr;
+                                    }
+                                }
+                                return isOverdue ? <div className="text-red-600 font-semibold mt-1">Payment for overdue month</div> : null;
+                            })()}
                         </div>
                     </div>
                     <div className="text-right">

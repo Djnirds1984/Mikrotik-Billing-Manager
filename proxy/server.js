@@ -532,6 +532,21 @@ async function initDb() {
                 processed_at TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS billing_ledger (
+                id TEXT PRIMARY KEY,
+                routerId TEXT NOT NULL,
+                username TEXT NOT NULL,
+                accountNumber TEXT,
+                month TEXT NOT NULL,
+                status TEXT DEFAULT 'unpaid',
+                planName TEXT,
+                planPrice REAL DEFAULT 0,
+                paidAmount REAL DEFAULT 0,
+                saleId TEXT,
+                paymentDate TEXT,
+                createdAt TEXT DEFAULT (datetime('now')),
+                UNIQUE(routerId, username, month)
+            );
             CREATE TABLE IF NOT EXISTS wan_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 connection_type TEXT NOT NULL DEFAULT 'dhcp',
@@ -1534,6 +1549,137 @@ async function startServer() {
     createCrud('/client-invoices', 'client_invoices');
     createCrud('/sales', 'sales_records');
     createCrud('/applications', 'applications');
+
+    // --- Billing Ledger Endpoints ---
+    // Auto-generate unpaid entries for months between billing start and now
+    const autoGenerateUnpaidEntries = async (routerId, username) => {
+        try {
+            // Find the earliest paid month or sale to determine billing start
+            const earliestPaid = await db.get(
+                "SELECT month FROM billing_ledger WHERE routerId = ? AND username = ? AND status = 'paid' ORDER BY month ASC LIMIT 1",
+                [routerId, username]
+            );
+            const earliestSale = await db.get(
+                "SELECT date FROM sales_records WHERE routerId = ? AND clientName = ? ORDER BY date ASC LIMIT 1",
+                [routerId, username]
+            );
+            // Also check customer creation as fallback start
+            const customer = await db.get(
+                "SELECT * FROM customers WHERE username = ? AND routerId = ?",
+                [username, routerId]
+            );
+
+            let startDate = null;
+            if (earliestPaid) {
+                startDate = new Date(earliestPaid.month + '-01');
+            } else if (earliestSale) {
+                startDate = new Date(earliestSale.date);
+            } else if (customer) {
+                // Use customer creation as fallback - no start date, skip auto-gen
+                return;
+            } else {
+                return;
+            }
+
+            // Get account number from customer record
+            const accountNumber = customer?.accountNumber || null;
+
+            // Get existing ledger entries
+            const existing = await db.all(
+                "SELECT month FROM billing_ledger WHERE routerId = ? AND username = ?",
+                [routerId, username]
+            );
+            const existingMonths = new Set(existing.map(e => e.month));
+
+            // Get plan info from latest sale
+            const latestSale = await db.get(
+                "SELECT planName, planPrice FROM sales_records WHERE routerId = ? AND clientName = ? ORDER BY date DESC LIMIT 1",
+                [routerId, username]
+            );
+            const planName = latestSale?.planName || '';
+            const planPrice = latestSale?.planPrice || 0;
+
+            // Generate unpaid entries for each month from start to current month
+            const now = new Date();
+            const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+
+            while (cursor <= now) {
+                const monthKey = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+                if (!existingMonths.has(monthKey)) {
+                    const id = `ledger_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    await db.run(
+                        "INSERT OR IGNORE INTO billing_ledger (id, routerId, username, accountNumber, month, status, planName, planPrice) VALUES (?, ?, ?, ?, ?, 'unpaid', ?, ?)",
+                        [id, routerId, username, accountNumber, monthKey, planName, planPrice]
+                    );
+                }
+                cursor.setMonth(cursor.getMonth() + 1);
+            }
+        } catch (err) {
+            console.error('[Billing Ledger] Auto-generate error:', err.message);
+        }
+    };
+
+    // GET /api/billing-ledger/:routerId/:username - Get all ledger entries
+    app.get('/api/billing-ledger/:routerId/:username', async (req, res) => {
+        try {
+            const { routerId, username } = req.params;
+            // Auto-generate unpaid entries first
+            await autoGenerateUnpaidEntries(routerId, username);
+            const entries = await db.all(
+                "SELECT * FROM billing_ledger WHERE routerId = ? AND username = ? ORDER BY month ASC",
+                [routerId, username]
+            );
+            res.json(entries);
+        } catch (err) {
+            console.error('[Billing Ledger] GET error:', err.message);
+            res.status(500).json({ message: 'Failed to fetch billing ledger' });
+        }
+    });
+
+    // GET /api/billing-ledger/unpaid/:routerId/:username - Get unpaid months only
+    app.get('/api/billing-ledger/unpaid/:routerId/:username', async (req, res) => {
+        try {
+            const { routerId, username } = req.params;
+            await autoGenerateUnpaidEntries(routerId, username);
+            const entries = await db.all(
+                "SELECT * FROM billing_ledger WHERE routerId = ? AND username = ? AND status = 'unpaid' ORDER BY month ASC",
+                [routerId, username]
+            );
+            res.json(entries);
+        } catch (err) {
+            console.error('[Billing Ledger] GET unpaid error:', err.message);
+            res.status(500).json({ message: 'Failed to fetch unpaid months' });
+        }
+    });
+
+    // POST /api/billing-ledger - Create/update a ledger entry
+    app.post('/api/billing-ledger', async (req, res) => {
+        try {
+            const { routerId, username, accountNumber, month, status, planName, planPrice, paidAmount, saleId, paymentDate } = req.body;
+            if (!routerId || !username || !month) {
+                return res.status(400).json({ message: 'routerId, username, and month are required' });
+            }
+            const id = `ledger_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await db.run(
+                `INSERT INTO billing_ledger (id, routerId, username, accountNumber, month, status, planName, planPrice, paidAmount, saleId, paymentDate)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(routerId, username, month) DO UPDATE SET
+                    status = excluded.status,
+                    planName = excluded.planName,
+                    planPrice = excluded.planPrice,
+                    paidAmount = excluded.paidAmount,
+                    saleId = excluded.saleId,
+                    paymentDate = excluded.paymentDate`,
+                [id, routerId, username, accountNumber || null, month, status || 'paid', planName || '', planPrice || 0, paidAmount || 0, saleId || null, paymentDate || new Date().toISOString()]
+            );
+            const entry = await db.get("SELECT * FROM billing_ledger WHERE routerId = ? AND username = ? AND month = ?", [routerId, username, month]);
+            res.json(entry);
+        } catch (err) {
+            console.error('[Billing Ledger] POST error:', err.message);
+            res.status(500).json({ message: 'Failed to save billing ledger entry' });
+        }
+    });
 
     // Helper function to convert currency symbols to currency codes
     const convertCurrencyToCode = (currency) => {

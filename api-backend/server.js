@@ -1730,8 +1730,8 @@ if (shouldKick) {
 
 // 5. PPP Payment Process
 app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
-    const { secret, plan, nonPaymentProfile, discountDays, paymentDate } = req.body;
-    console.log('[ppp/payment/process] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify(maskSensitive({ secret: secret ? { id: secret.id, name: secret.name } : null, plan, nonPaymentProfile, discountDays, paymentDate })));
+    const { secret, plan, nonPaymentProfile, discountDays, paymentDate, coveredMonth } = req.body;
+    console.log('[ppp/payment/process] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify(maskSensitive({ secret: secret ? { id: secret.id, name: secret.name } : null, plan, nonPaymentProfile, discountDays, paymentDate, coveredMonth })));
     if (!secret || !secret.name) return res.status(400).json({ message: 'Invalid input: secret.name is required.' });
     if (!plan || !plan.pppoeProfile) return res.status(400).json({ message: 'Invalid input: plan.pppoeProfile is required.' });
     try {
@@ -1741,6 +1741,16 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
         
         let expires;
         let fixedDay = null;
+
+        // Detect plan type
+        let planType = 'prepaid';
+        try {
+            if (secret && secret.comment) {
+                const c = JSON.parse(secret.comment);
+                const pt = String(c.planType || '').toLowerCase();
+                if (pt === 'postpaid') planType = 'postpaid';
+            }
+        } catch {}
 
         // Smart Due Date Logic
         try {
@@ -1755,7 +1765,19 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
         } catch (e) {}
         if (!fixedDay) fixedDay = start.getDate();
 
-        if (cycleDays >= 28 && cycleDays <= 31) {
+        // For postpaid with coveredMonth: calculate due date from end of covered month
+        if (planType === 'postpaid' && coveredMonth) {
+            const [coverYear, coverMonthNum] = coveredMonth.split('-').map(Number);
+            // Due date = end of the covered month (last day, 23:59:59)
+            const lastDayOfCoveredMonth = new Date(coverYear, coverMonthNum, 0); // day 0 of next month = last day of covered month
+            const lastDay = lastDayOfCoveredMonth.getDate();
+            fixedDay = lastDay;
+            // Set expiry to end of covered month
+            expires = new Date(coverYear, coverMonthNum - 1, lastDay, 23, 59, 59);
+            // If discount, reduce days
+            if (discount > 0) expires.setDate(expires.getDate() - discount);
+            console.log(`[ppp/payment/process] Postpaid coveredMonth=${coveredMonth}, due date=${expires.toISOString()}`);
+        } else if (cycleDays >= 28 && cycleDays <= 31) {
             let targetYear = start.getFullYear();
             let targetMonth = start.getMonth() + 1; // Default to next month
             
