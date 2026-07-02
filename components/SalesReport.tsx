@@ -244,10 +244,23 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
 
     useEffect(() => {
         if (receiptToPrint) {
+            // Inject thermal @page rule if printing thermal
+            let thermalStyle: HTMLStyleElement | null = null;
+            if (receiptPrintMode === 'thermal') {
+                thermalStyle = document.createElement('style');
+                thermalStyle.setAttribute('data-thermal-print', 'true');
+                thermalStyle.textContent = `@media print { @page { size: 58mm auto; margin: 0; } }`;
+                document.head.appendChild(thermalStyle);
+            }
             const timer = setTimeout(() => window.print(), 100);
-            return () => clearTimeout(timer);
+            return () => {
+                clearTimeout(timer);
+                if (thermalStyle && thermalStyle.parentNode) {
+                    thermalStyle.parentNode.removeChild(thermalStyle);
+                }
+            };
         }
-    }, [receiptToPrint]);
+    }, [receiptToPrint, receiptPrintMode]);
 
     useEffect(() => {
         const handleAfterPrint = () => {
