@@ -90,6 +90,7 @@ async function deleteCustomerFromSupabase(id) {
 
 let db;
 let superadminDb;
+let isShuttingDown = false; // Flag to prevent db access during shutdown/factory-reset
 
 // --- Database Initialization ---
 async function initSuperadminDb() {
@@ -751,6 +752,30 @@ async function initDb() {
 }
 
 // --- Helpers ---
+
+// Ensure db connection is alive; auto-reconnect on SQLITE_MISUSE / closed db
+async function ensureDb() {
+    if (isShuttingDown) {
+        throw new Error('Server is shutting down for factory reset. Please retry in a few seconds.');
+    }
+    if (!db) {
+        console.warn('[DB] Connection is null, re-initializing...');
+        await initDb();
+        return;
+    }
+    try {
+        // Lightweight ping to verify the connection is usable
+        await db.get('SELECT 1');
+    } catch (err) {
+        if (err.code === 'SQLITE_MISUSE' || err.code === 'SQLITE_CANTOPEN' || err.message?.includes('closed')) {
+            console.warn('[DB] Connection lost or misuse, re-initializing...', err.message);
+            await initDb();
+        } else {
+            throw err;
+        }
+    }
+}
+
 const getDeviceId = async () => {
     try {
         // Once generated, persist the device ID to the DB so it never changes between runs.
@@ -2676,22 +2701,46 @@ async function startServer() {
 
     // Notifications
     dbRouter.get('/notifications', async (req, res) => {
-        const rows = await db.all('SELECT * FROM notifications ORDER BY timestamp DESC LIMIT 100');
-        res.json(rows);
+        try {
+            await ensureDb();
+            const rows = await db.all('SELECT * FROM notifications ORDER BY timestamp DESC LIMIT 100');
+            res.json(rows);
+        } catch (e) {
+            console.error('[Notifications GET Error]', e.message);
+            res.status(500).json({ message: 'Failed to fetch notifications: ' + e.message });
+        }
     });
     dbRouter.post('/notifications', async (req, res) => {
-        const { id, type, message, is_read, timestamp, link_to, context_json } = req.body;
-        await db.run('INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [id, type, message, is_read, timestamp, link_to, context_json]);
-        res.json({ message: 'Added' });
+        try {
+            await ensureDb();
+            const { id, type, message, is_read, timestamp, link_to, context_json } = req.body;
+            await db.run('INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [id, type, message, is_read, timestamp, link_to, context_json]);
+            res.json({ message: 'Added' });
+        } catch (e) {
+            console.error('[Notifications POST Error]', e.message);
+            res.status(500).json({ message: 'Failed to add notification: ' + e.message });
+        }
     });
     dbRouter.patch('/notifications/:id', async (req, res) => {
-        await db.run('UPDATE notifications SET is_read = ? WHERE id = ?', [req.body.is_read, req.params.id]);
-        res.json({ message: 'Updated' });
+        try {
+            await ensureDb();
+            await db.run('UPDATE notifications SET is_read = ? WHERE id = ?', [req.body.is_read, req.params.id]);
+            res.json({ message: 'Updated' });
+        } catch (e) {
+            console.error('[Notifications PATCH Error]', e.message);
+            res.status(500).json({ message: 'Failed to update notification: ' + e.message });
+        }
     });
     dbRouter.post('/notifications/clear-all', async (req, res) => {
-        await db.run('DELETE FROM notifications');
-        res.json({ message: 'Cleared' });
+        try {
+            await ensureDb();
+            await db.run('DELETE FROM notifications');
+            res.json({ message: 'Cleared' });
+        } catch (e) {
+            console.error('[Notifications Clear Error]', e.message);
+            res.status(500).json({ message: 'Failed to clear notifications: ' + e.message });
+        }
     });
     
     dbRouter.post('/sales/clear-all', async (req, res) => {
@@ -2707,6 +2756,8 @@ async function startServer() {
     // Factory Reset - Delete all database files and return to fresh state
     dbRouter.post('/factory-reset', async (req, res) => {
         try {
+            // Mark as shutting down BEFORE closing db so incoming requests get rejected
+            isShuttingDown = true;
             console.log('[Factory Reset] Initiating factory reset...');
             
             // Step 1: Preserve deviceId and licenseKey before deleting database
@@ -2797,6 +2848,7 @@ async function startServer() {
             }, 1000);
             
         } catch (error) {
+            isShuttingDown = false; // Reset flag so server can recover
             console.error('[Factory Reset] Error during factory reset:', error);
             res.status(500).json({ 
                 message: 'Factory reset failed: ' + error.message,
