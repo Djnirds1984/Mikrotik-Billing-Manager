@@ -6744,8 +6744,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                     await handlePostback(senderId, postbackPayload, fbSettings.pageAccessToken);
                                 } catch (pbErr) {
                                     console.error('[Facebook Bot] Postback handler error:', pbErr.message);
+                                    console.error('[Facebook Bot] Postback error stack:', pbErr.stack);
                                     await sendFacebookMessage(senderId, '⚠️ Sorry, an error occurred. Please try again.', fbSettings.pageAccessToken);
                                 }
+                                continue; // Skip text message handling for postback events
                             }
                             
                             if (senderId && message && message.text) {
@@ -6972,10 +6974,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 break;
             }
             case 'REGISTER_ACCOUNT': {
+                console.log(`[Facebook Bot] REGISTER_ACCOUNT postback from ${senderId}`);
                 conversationStates.set(senderId, { step: 'awaiting_account_number' });
                 await sendFacebookMessage(senderId, 
                     '📝 Please send your account number to link your Facebook account.\n\nExample: 20240001\n\nYou can find your account number on your billing statement.'
                 );
+                console.log(`[Facebook Bot] REGISTER_ACCOUNT: Sent prompt to ${senderId}`);
                 break;
             }
             default: {
@@ -7017,8 +7021,6 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 buttons = [
                     { type: 'postback', title: '📊 Check Bill', payload: 'CHECK_BILL' },
                     { type: 'postback', title: '💳 Pay Now', payload: 'PAY_NOW' },
-                    { type: 'postback', title: '📋 My Tickets', payload: 'MY_TICKETS' },
-                    { type: 'postback', title: '🔧 Report Issue', payload: 'REPORT_ISSUE' },
                     { type: 'postback', title: '📢 Notify Admin', payload: 'NOTIFY_ADMIN' }
                 ];
             } else {
@@ -8068,7 +8070,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log('[Facebook Webhook] Token starts with:', pageAccessToken?.substring(0, 10) + '...');
             
             const response = await axios.post(
-                'https://graph.facebook.com/v18.0/me/messages',
+                'https://graph.facebook.com/v21.0/me/messages',
                 {
                     recipient: { id: recipientId },
                     message: { text: messageText },
@@ -8097,7 +8099,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log('[Facebook Bot] Sending button message to:', recipientId);
             
             const response = await axios.post(
-                'https://graph.facebook.com/v18.0/me/messages',
+                'https://graph.facebook.com/v21.0/me/messages',
                 {
                     recipient: { id: recipientId },
                     message: {
