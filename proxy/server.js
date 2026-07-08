@@ -6735,12 +6735,104 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             const senderId = event.sender?.id;
                             const message = event.message;
 
+                            // Handle postback (button click) events
+                            if (senderId && event.postback) {
+                                const postbackPayload = event.postback.payload;
+                                console.log(`[Facebook Bot] Postback from ${senderId}: "${postbackPayload}"`);
+                                
+                                try {
+                                    await handlePostback(senderId, postbackPayload, fbSettings.pageAccessToken);
+                                } catch (pbErr) {
+                                    console.error('[Facebook Bot] Postback handler error:', pbErr.message);
+                                    await sendFacebookMessage(senderId, '⚠️ Sorry, an error occurred. Please try again.', fbSettings.pageAccessToken);
+                                }
+                            }
+                            
                             if (senderId && message && message.text) {
                                 const userMessage = message.text.trim();
                                 console.log(`[Facebook Bot] Message from ${senderId}: "${userMessage}"`);
                                 
                                 try {
                                     console.log(`[Facebook Bot] Processing message from ${senderId}: "${userMessage}"`);
+                                    
+                                    // Check conversation states first (Notify Admin, Register via button, Repair detail)
+                                    const convState = conversationStates.get(senderId);
+                                    if (convState) {
+                                        if (convState.step === 'awaiting_admin_message') {
+                                            // User typed their message for admin
+                                            conversationStates.delete(senderId);
+                                            
+                                            // Look up customer info
+                                            const fbSettings2 = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                                            const fbConfig2 = JSON.parse(fbSettings2?.facebookSettings || '{}');
+                                            const routerId2 = fbConfig2.routerId;
+                                            let customer2;
+                                            if (routerId2) {
+                                                customer2 = await db.get('SELECT * FROM customers WHERE facebook_psid = ? AND routerId = ?', [senderId, routerId2]);
+                                            } else {
+                                                customer2 = await db.get('SELECT * FROM customers WHERE facebook_psid = ?', [senderId]);
+                                            }
+                                            
+                                            await notifyAdminFromBot(
+                                                customer2?.fullName || 'Unregistered User',
+                                                customer2?.accountNumber || 'N/A',
+                                                senderId,
+                                                userMessage
+                                            );
+                                            
+                                            await sendFacebookButtonMessage(senderId,
+                                                '✅ Your message has been sent to the admin. They will get back to you soon!\n\nIs there anything else I can help you with?',
+                                                [
+                                                    { type: 'postback', title: '📊 Check Bill', payload: 'CHECK_BILL' },
+                                                    { type: 'postback', title: '🔧 Report Issue', payload: 'REPORT_ISSUE' },
+                                                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                                                ],
+                                                fbSettings.pageAccessToken
+                                            );
+                                            return;
+                                        }
+                                        
+                                        if (convState.step === 'awaiting_account_number') {
+                                            // User typed account number via button flow
+                                            conversationStates.delete(senderId);
+                                            const fbSettings2 = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                                            const fbConfig2 = JSON.parse(fbSettings2?.facebookSettings || '{}');
+                                            const routerId2 = fbConfig2.routerId;
+                                            
+                                            const response = await handleRegisterCommand(senderId, `REGISTER ${userMessage}`, routerId2);
+                                            
+                                            // Check if registration was successful
+                                            if (response.includes('Success') || response.includes('linked')) {
+                                                await sendMainMenuWithButtons(senderId, fbSettings.pageAccessToken);
+                                            } else {
+                                                await sendFacebookMessage(senderId, response, fbSettings.pageAccessToken);
+                                            }
+                                            return;
+                                        }
+                                        
+                                        if (convState.step === 'awaiting_repair_detail') {
+                                            // User typed repair detail after picking a category via button
+                                            conversationStates.delete(senderId);
+                                            const category = convState.category || 'other';
+                                            const fbSettings2 = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+                                            const fbConfig2 = JSON.parse(fbSettings2?.facebookSettings || '{}');
+                                            const routerId2 = fbConfig2.routerId;
+                                            
+                                            // Build repair message and process it
+                                            const categoryPrefix = { 'no_internet': 'NO INTERNET', 'slow_connection': 'SLOW', 'intermittent': 'INTERMITTENT' };
+                                            const prefix = categoryPrefix[category] || 'REPAIR';
+                                            const response = await handleRepairTicketCommand(senderId, `${prefix} ${userMessage}`);
+                                            await sendFacebookButtonMessage(senderId, response,
+                                                [
+                                                    { type: 'postback', title: '📋 My Tickets', payload: 'MY_TICKETS' },
+                                                    { type: 'postback', title: '📢 Notify Admin', payload: 'NOTIFY_ADMIN' },
+                                                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                                                ],
+                                                fbSettings.pageAccessToken
+                                            );
+                                            return;
+                                        }
+                                    }
                                     
                                     // First, check if user is in manual payment flow
                                     const manualPaymentResponse = await processManualPaymentSteps(senderId, userMessage);
@@ -6790,6 +6882,161 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // In-memory conversation state storage (for multi-step flows)
     const conversationStates = new Map();
     
+    // ========================================
+    // Postback Handler (Button Clicks)
+    // ========================================
+    async function handlePostback(senderId, payload, pageAccessToken) {
+        console.log(`[Facebook Bot] Handling postback: ${payload} from ${senderId}`);
+        
+        const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+        const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+        const routerId = fbConfig.routerId;
+        
+        switch (payload) {
+            case 'MAIN_MENU': {
+                // Show main menu with buttons
+                await sendMainMenuWithButtons(senderId, pageAccessToken);
+                break;
+            }
+            case 'CHECK_BILL': {
+                const response = await handleBillingCommand(senderId, routerId);
+                await sendFacebookButtonMessage(senderId, response, [
+                    { type: 'postback', title: '💳 Pay Now', payload: 'PAY_NOW' },
+                    { type: 'postback', title: '📋 My Tickets', payload: 'MY_TICKETS' },
+                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                ], pageAccessToken);
+                break;
+            }
+            case 'PAY_NOW': {
+                const response = await handlePaymentCommand(senderId, routerId);
+                await sendFacebookButtonMessage(senderId, response, [
+                    { type: 'postback', title: '💳 Pay Online', payload: 'PAY_ONLINE' },
+                    { type: 'postback', title: '🏦 Pay Manual (GCash)', payload: 'PAY_MANUAL' },
+                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                ], pageAccessToken);
+                break;
+            }
+            case 'PAY_ONLINE': {
+                const response = await handlePayOnlineCommand(senderId, routerId);
+                await sendFacebookMessage(senderId, response, pageAccessToken);
+                break;
+            }
+            case 'PAY_MANUAL': {
+                const response = await handlePayManualCommand(senderId, routerId);
+                await sendFacebookMessage(senderId, response, pageAccessToken);
+                break;
+            }
+            case 'MY_TICKETS': {
+                const response = await handleTicketStatusCommand(senderId);
+                await sendFacebookButtonMessage(senderId, response, [
+                    { type: 'postback', title: '🔧 Report Issue', payload: 'REPORT_ISSUE' },
+                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                ], pageAccessToken);
+                break;
+            }
+            case 'REPORT_ISSUE': {
+                // Set conversation state to collect repair description
+                conversationStates.set(senderId, { step: 'awaiting_repair_description' });
+                await sendFacebookButtonMessage(senderId, 
+                    '🔧 Please describe your issue. What seems to be the problem with your internet connection?',
+                    [
+                        { type: 'postback', title: '📡 No Internet', payload: 'ISSUE_NO_INTERNET' },
+                        { type: 'postback', title: '🐢 Slow Connection', payload: 'ISSUE_SLOW' },
+                        { type: 'postback', title: '📶 Intermittent', payload: 'ISSUE_INTERMITTENT' }
+                    ],
+                    pageAccessToken
+                );
+                break;
+            }
+            case 'ISSUE_NO_INTERNET': {
+                conversationStates.set(senderId, { step: 'awaiting_repair_detail', category: 'no_internet' });
+                await sendFacebookMessage(senderId, '📡 No Internet - Please provide more details about your issue (e.g., "Red light blinking on modem", "No lights at all"):');
+                break;
+            }
+            case 'ISSUE_SLOW': {
+                conversationStates.set(senderId, { step: 'awaiting_repair_detail', category: 'slow_connection' });
+                await sendFacebookMessage(senderId, '🐢 Slow Connection - Please describe the issue (e.g., "Very slow during evening", "Buffering on YouTube"):');
+                break;
+            }
+            case 'ISSUE_INTERMITTENT': {
+                conversationStates.set(senderId, { step: 'awaiting_repair_detail', category: 'intermittent' });
+                await sendFacebookMessage(senderId, '📶 Intermittent - Please describe the issue (e.g., "Disconnects every 30 minutes", "Cuts when it rains"):');
+                break;
+            }
+            case 'NOTIFY_ADMIN': {
+                // Set conversation state to collect message
+                conversationStates.set(senderId, { step: 'awaiting_admin_message' });
+                await sendFacebookMessage(senderId, 
+                    '📢 Please type your message below and our admin will be notified.\n\nWhat would you like to tell the admin?'
+                );
+                break;
+            }
+            case 'REGISTER_ACCOUNT': {
+                conversationStates.set(senderId, { step: 'awaiting_account_number' });
+                await sendFacebookMessage(senderId, 
+                    '📝 Please send your account number to link your Facebook account.\n\nExample: 20240001\n\nYou can find your account number on your billing statement.'
+                );
+                break;
+            }
+            default: {
+                // Unknown postback - show main menu
+                console.warn(`[Facebook Bot] Unknown postback payload: ${payload}`);
+                await sendMainMenuWithButtons(senderId, pageAccessToken);
+            }
+        }
+    }
+    
+    // ========================================
+    // Main Menu with Buttons
+    // ========================================
+    async function sendMainMenuWithButtons(senderId, pageAccessToken) {
+        try {
+            // Check if user is registered
+            const fbSettings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
+            const routerId = fbConfig.routerId;
+            
+            let customer;
+            if (routerId) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ? AND routerId = ?',
+                    [senderId, routerId]
+                );
+            } else {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE facebook_psid = ?',
+                    [senderId]
+                );
+            }
+            
+            let welcomeText;
+            let buttons;
+            
+            if (customer) {
+                welcomeText = `👋 Welcome back, ${customer.fullName || 'Customer'}!\n\n📋 Account: ${customer.accountNumber}\n📦 Plan: ${customer.planName || 'N/A'}\n\nWhat would you like to do?`;
+                buttons = [
+                    { type: 'postback', title: '📊 Check Bill', payload: 'CHECK_BILL' },
+                    { type: 'postback', title: '💳 Pay Now', payload: 'PAY_NOW' },
+                    { type: 'postback', title: '📋 My Tickets', payload: 'MY_TICKETS' },
+                    { type: 'postback', title: '🔧 Report Issue', payload: 'REPORT_ISSUE' },
+                    { type: 'postback', title: '📢 Notify Admin', payload: 'NOTIFY_ADMIN' }
+                ];
+            } else {
+                welcomeText = `👋 Welcome to CityConnect Billing Bot!\n\n🤖 I can help you with:\n• Check your billing\n• Make payments\n• Report internet issues\n• Contact admin\n\nTo get started, please link your account first.`;
+                buttons = [
+                    { type: 'postback', title: '📝 Register Account', payload: 'REGISTER_ACCOUNT' },
+                    { type: 'postback', title: '📢 Notify Admin', payload: 'NOTIFY_ADMIN' }
+                ];
+            }
+            
+            await sendFacebookButtonMessage(senderId, welcomeText, buttons, pageAccessToken);
+        } catch (err) {
+            console.error('[Facebook Bot] sendMainMenuWithButtons error:', err.message);
+            // Fallback to text-only menu
+            await sendFacebookMessage(senderId, getHelpMessage(), pageAccessToken);
+        }
+    }
+    
     async function processFacebookBotMessage(senderId, userMessage, pageAccessToken) {
         try {
             const upperMessage = userMessage.toUpperCase();
@@ -6813,9 +7060,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             return await handleUnregisterCommand(senderId, routerId);
         }
 
-        // Command: END, STOP, EXIT, MAIN, MENU
+        // Command: END, STOP, EXIT, MAIN, MENU - Show button main menu
         if (['END', 'STOP', 'EXIT', 'MAIN', 'MENU', 'HOME', 'BACK'].some(cmd => upperMessage === cmd || upperMessage.startsWith(cmd + ' '))) {
-            return await handleEndCommand(senderId);
+            conversationStates.delete(senderId);
+            await sendMainMenuWithButtons(senderId, pageAccessToken);
+            return null; // Already sent via button message
         }
 
         // Command: BILL, BALANCE, STATUS, ACCOUNT
@@ -6847,13 +7096,15 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             return await handleRepairTicketCommand(senderId, userMessage);
         }
 
-        // Command: HELP
-        if (upperMessage === 'HELP' || upperMessage === 'MENU' || upperMessage === 'COMMANDS') {
-            return getHelpMessage();
+        // Command: HELP - Show button main menu
+        if (upperMessage === 'HELP' || upperMessage === 'COMMANDS') {
+            await sendMainMenuWithButtons(senderId, pageAccessToken);
+            return null; // Already sent via button message
         }
 
-        // Default: Show help menu
-        return getHelpMessage();
+        // Default: Show button main menu
+        await sendMainMenuWithButtons(senderId, pageAccessToken);
+        return null; // Already sent via button message
         } catch (err) {
             console.error('[Facebook Bot] processFacebookBotMessage error:', err.message);
             console.error('[Facebook Bot] Error stack:', err.stack);
@@ -7837,6 +8088,77 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 console.error('[Facebook Webhook] Response data:', JSON.stringify(err.response.data, null, 2));
             }
             throw err;
+        }
+    }
+
+    // Helper function to send messages with buttons via Facebook Graph API
+    async function sendFacebookButtonMessage(recipientId, text, buttons, pageAccessToken) {
+        try {
+            console.log('[Facebook Bot] Sending button message to:', recipientId);
+            
+            const response = await axios.post(
+                'https://graph.facebook.com/v18.0/me/messages',
+                {
+                    recipient: { id: recipientId },
+                    message: {
+                        attachment: {
+                            type: 'template',
+                            payload: {
+                                template_type: 'button',
+                                text: text,
+                                buttons: buttons
+                            }
+                        }
+                    },
+                    messaging_type: 'RESPONSE'
+                },
+                {
+                    params: { access_token: pageAccessToken },
+                    timeout: 10000
+                }
+            );
+            console.log('[Facebook Bot] Button message sent successfully:', response.data);
+            return response.data;
+        } catch (err) {
+            console.error('[Facebook Bot] Send button message error:', err.message);
+            if (err.response) {
+                console.error('[Facebook Bot] Response data:', JSON.stringify(err.response.data, null, 2));
+            }
+            throw err;
+        }
+    }
+
+    // Helper: Send notification to admin via Telegram + in-app
+    async function notifyAdminFromBot(customerName, customerAccount, senderId, message) {
+        try {
+            const settings = await db.get('SELECT telegramSettings FROM settings WHERE id = 1');
+            const telegramSettings = JSON.parse(settings?.telegramSettings || '{}');
+            
+            const notifMessage = `📢 Customer Notification Request\n━━━━━━━━━━━━━━━━━━\n\n👤 Name: ${customerName || 'Unknown'}\n📋 Account: ${customerAccount || 'Unknown'}\n💬 Message: ${message || 'No message provided'}\n\n⏰ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })}`;
+            
+            // Send Telegram notification to admin
+            if (telegramSettings?.enabled && telegramSettings.botToken && telegramSettings.chatId) {
+                try {
+                    await axios.post(`https://api.telegram.org/bot${telegramSettings.botToken}/sendMessage`, {
+                        chat_id: telegramSettings.chatId,
+                        text: notifMessage,
+                        parse_mode: 'HTML'
+                    });
+                    console.log('[Facebook Bot] Admin notified via Telegram');
+                } catch (tgErr) {
+                    console.error('[Facebook Bot] Telegram notification failed:', tgErr.message);
+                }
+            }
+            
+            // Create in-app notification
+            const notifId = `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await db.run(
+                'INSERT INTO notifications (id, type, message, is_read, timestamp, link_to, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [notifId, 'info', notifMessage, 0, new Date().toISOString(), 'facebook-clients', JSON.stringify({ senderId, customerAccount, customerName })]
+            );
+            console.log('[Facebook Bot] In-app notification created for admin');
+        } catch (err) {
+            console.error('[Facebook Bot] notifyAdminFromBot error:', err.message);
         }
     }
 
