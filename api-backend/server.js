@@ -1765,18 +1765,82 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
         } catch (e) {}
         if (!fixedDay) fixedDay = start.getDate();
 
-        // For postpaid with coveredMonth: calculate due date from end of covered month
-        if (planType === 'postpaid' && coveredMonth) {
-            const [coverYear, coverMonthNum] = coveredMonth.split('-').map(Number);
-            // Due date = end of the covered month (last day, 23:59:59)
-            const lastDayOfCoveredMonth = new Date(coverYear, coverMonthNum, 0); // day 0 of next month = last day of covered month
-            const lastDay = lastDayOfCoveredMonth.getDate();
-            fixedDay = lastDay;
-            // Set expiry to end of covered month
-            expires = new Date(coverYear, coverMonthNum - 1, lastDay, 23, 59, 59);
-            // If discount, reduce days
-            if (discount > 0) expires.setDate(expires.getDate() - discount);
-            console.log(`[ppp/payment/process] Postpaid coveredMonth=${coveredMonth}, due date=${expires.toISOString()}`);
+        // For postpaid: preserve the original fixedDay and advance by 1 calendar month
+        if (planType === 'postpaid') {
+            // Extract the original due date day from the secret comment
+            let originalFixedDay = null;
+            try {
+                if (secret && secret.comment) {
+                    const c = JSON.parse(secret.comment);
+                    if (c.fixedDay) {
+                        originalFixedDay = parseInt(c.fixedDay);
+                    } else if (c.dueDate) {
+                        const d = new Date(c.dueDate);
+                        if (!isNaN(d.getTime())) originalFixedDay = d.getDate();
+                    }
+                }
+            } catch (e) {}
+            
+            // If we have an original fixed day, preserve it and advance by 1 month
+            if (originalFixedDay) {
+                fixedDay = originalFixedDay;
+                // Start from payment date and advance by 1 calendar month
+                const baseDate = start;
+                let targetYear = baseDate.getFullYear();
+                let targetMonth = baseDate.getMonth() + 1; // Next month
+                
+                if (targetMonth > 11) { targetMonth = 0; targetYear++; }
+                
+                const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+                let targetDay = fixedDay;
+                
+                // Handle edge case: if target month doesn't have enough days (e.g., Feb 30)
+                if (targetDay > daysInTargetMonth) {
+                    targetDay = daysInTargetMonth;
+                }
+                
+                expires = new Date(targetYear, targetMonth, targetDay, baseDate.getHours(), baseDate.getMinutes(), baseDate.getSeconds());
+                console.log(`[ppp/payment/process] Postpaid: preserved fixedDay=${fixedDay}, advanced to ${expires.toISOString()}`);
+            } else {
+                // No original fixed day found, use covered month logic or fallback
+                if (coveredMonth) {
+                    const [coverYear, coverMonthNum] = coveredMonth.split('-').map(Number);
+                    const lastDayOfCoveredMonth = new Date(coverYear, coverMonthNum, 0);
+                    const lastDay = lastDayOfCoveredMonth.getDate();
+                    fixedDay = lastDay;
+                    expires = new Date(coverYear, coverMonthNum - 1, lastDay, 23, 59, 59);
+                    if (discount > 0) expires.setDate(expires.getDate() - discount);
+                    console.log(`[ppp/payment/process] Postpaid coveredMonth=${coveredMonth}, due date=${expires.toISOString()}`);
+                } else {
+                    // Fallback to standard cycle logic
+                    if (cycleDays >= 28 && cycleDays <= 31) {
+                        let targetYear = start.getFullYear();
+                        let targetMonth = start.getMonth() + 1;
+                        
+                        if (fixedDay >= start.getDate() + 20) {
+                            targetMonth = start.getMonth();
+                        }
+
+                        if (targetMonth > 11) { targetMonth = 0; targetYear++; }
+                        
+                        const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+                        let targetDay = fixedDay;
+                        
+                        if (targetMonth === 1 && fixedDay > daysInTargetMonth) {
+                            targetMonth = 2;
+                            targetDay = 1;
+                        } else if (targetDay > daysInTargetMonth) {
+                            targetDay = daysInTargetMonth;
+                        }
+                        
+                        expires = new Date(targetYear, targetMonth, targetDay, start.getHours(), start.getMinutes(), start.getSeconds());
+                        if (discount > 0) expires.setDate(expires.getDate() - discount);
+                    } else {
+                        const effectiveDays = Math.max(0, cycleDays - discount);
+                        expires = new Date(start.getTime() + effectiveDays * 24 * 60 * 60 * 1000);
+                    }
+                }
+            }
         } else if (cycleDays >= 28 && cycleDays <= 31) {
             let targetYear = start.getFullYear();
             let targetMonth = start.getMonth() + 1; // Default to next month

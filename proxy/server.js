@@ -2937,30 +2937,87 @@ async function startServer() {
             
             console.log(`[Manual Payments] Using duration: ${durationDays} days for plan: ${payment.plan_name}`);
             
-            // Update customer due date (extend by plan cycle from CURRENT due date, not today)
+            // Update customer due date
             const customer = await db.get('SELECT * FROM customers WHERE accountNumber = ?', [payment.customer_account_number]);
             const currentDate = new Date();
             let newDueDate;
             
-            // If customer has existing due date in the future, extend from that date
-            if (customer && customer.dueDate) {
-                const existingDueDate = new Date(customer.dueDate);
-                if (existingDueDate > currentDate) {
-                    // Extend from existing due date
-                    newDueDate = new Date(existingDueDate);
-                    newDueDate.setDate(newDueDate.getDate() + durationDays);
-                    console.log(`[Manual Payments] Extending from existing due date: ${customer.dueDate} -> ${newDueDate.toISOString().split('T')[0]}`);
+            // Detect if postpaid by checking customer record or plan type
+            let isPostpaid = false;
+            let originalFixedDay = null;
+            try {
+                if (customer && customer.planType) {
+                    const pt = String(customer.planType).toLowerCase();
+                    if (pt === 'postpaid' || pt === 'active') isPostpaid = true;
+                }
+                // Try to get original fixedDay from MikroTik secret comment
+                if (customer && customer.routerId) {
+                    const router = await db.get('SELECT * FROM routers WHERE id = ?', [customer.routerId]);
+                    if (router) {
+                        const axios = require('axios');
+                        const apiBase = `http://${router.host}:${router.port}`;
+                        const authHeader = `Basic ${Buffer.from(`${router.user}:${router.password}`).toString('base64')}`;
+                        const secretRes = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                            params: { name: payment.customer_username },
+                            headers: { Authorization: authHeader },
+                            timeout: 5000
+                        });
+                        const secrets = Array.isArray(secretRes.data) ? secretRes.data : [secretRes.data];
+                        const secret = secrets.find(s => s.name === payment.customer_username) || secrets[0];
+                        if (secret && secret.comment) {
+                            const comment = JSON.parse(secret.comment);
+                            if (comment.planType && String(comment.planType).toLowerCase() === 'postpaid') {
+                                isPostpaid = true;
+                            }
+                            if (comment.fixedDay) {
+                                originalFixedDay = parseInt(comment.fixedDay);
+                            } else if (comment.dueDate) {
+                                const d = new Date(comment.dueDate);
+                                if (!isNaN(d.getTime())) originalFixedDay = d.getDate();
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('[Manual Payments] Could not detect plan type from MikroTik:', e.message);
+            }
+            
+            // For postpaid: preserve the original due date day and advance by 1 calendar month
+            if (isPostpaid && originalFixedDay) {
+                const baseDate = (customer && customer.dueDate) ? new Date(customer.dueDate) : currentDate;
+                let targetYear = baseDate.getFullYear();
+                let targetMonth = baseDate.getMonth() + 1; // Next month
+                
+                if (targetMonth > 11) { targetMonth = 0; targetYear++; }
+                
+                const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+                let targetDay = originalFixedDay;
+                
+                // Handle edge case: if target month doesn't have enough days (e.g., Feb 30)
+                if (targetDay > daysInTargetMonth) {
+                    targetDay = daysInTargetMonth;
+                }
+                
+                newDueDate = new Date(targetYear, targetMonth, targetDay, baseDate.getHours(), baseDate.getMinutes(), 0, 0);
+                console.log(`[Manual Payments] Postpaid: preserved fixedDay=${originalFixedDay}, advanced to ${newDueDate.toISOString().split('T')[0]}`);
+            } else {
+                // Prepaid: extend by durationDays
+                if (customer && customer.dueDate) {
+                    const existingDueDate = new Date(customer.dueDate);
+                    if (existingDueDate > currentDate) {
+                        newDueDate = new Date(existingDueDate);
+                        newDueDate.setDate(newDueDate.getDate() + durationDays);
+                        console.log(`[Manual Payments] Prepaid: extending from existing due date: ${customer.dueDate} -> ${newDueDate.toISOString().split('T')[0]}`);
+                    } else {
+                        newDueDate = new Date(currentDate);
+                        newDueDate.setDate(newDueDate.getDate() + durationDays);
+                        console.log(`[Manual Payments] Prepaid: due date expired, extending from today: ${newDueDate.toISOString().split('T')[0]}`);
+                    }
                 } else {
-                    // Due date is in the past, extend from today
                     newDueDate = new Date(currentDate);
                     newDueDate.setDate(newDueDate.getDate() + durationDays);
-                    console.log(`[Manual Payments] Due date expired, extending from today: ${newDueDate.toISOString().split('T')[0]}`);
+                    console.log(`[Manual Payments] Prepaid: no due date, starting from today: ${newDueDate.toISOString().split('T')[0]}`);
                 }
-            } else {
-                // No existing due date, start from today
-                newDueDate = new Date(currentDate);
-                newDueDate.setDate(newDueDate.getDate() + durationDays);
-                console.log(`[Manual Payments] No due date, starting from today: ${newDueDate.toISOString().split('T')[0]}`);
             }
             
             const dueDateStr = newDueDate.toISOString().split('T')[0];
@@ -5836,11 +5893,52 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         let comment = {};
                         try { comment = JSON.parse(secret.comment || '{}'); } catch (e) { comment = {}; }
 
+                        // Detect if postpaid
+                        let isPostpaid = false;
+                        let originalFixedDay = null;
+                        try {
+                            if (comment.planType && String(comment.planType).toLowerCase() === 'postpaid') {
+                                isPostpaid = true;
+                            }
+                            if (comment.fixedDay) {
+                                originalFixedDay = parseInt(comment.fixedDay);
+                            } else if (comment.dueDate) {
+                                const d = new Date(comment.dueDate);
+                                if (!isNaN(d.getTime())) originalFixedDay = d.getDate();
+                            }
+                        } catch (e) {}
+
                         // Calculate new due date
                         const now = new Date();
-                        const currentDue = comment.dueDateTime ? new Date(comment.dueDateTime) : now;
-                        const baseDate = currentDue > now ? currentDue : now;
-                        const newDue = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+                        let newDue;
+                        
+                        // For postpaid: preserve the original fixedDay and advance by 1 calendar month
+                        if (isPostpaid && originalFixedDay) {
+                            const currentDue = comment.dueDateTime ? new Date(comment.dueDateTime) : now;
+                            const baseDate = currentDue > now ? currentDue : now;
+                            let targetYear = baseDate.getFullYear();
+                            let targetMonth = baseDate.getMonth() + 1; // Next month
+                            
+                            if (targetMonth > 11) { targetMonth = 0; targetYear++; }
+                            
+                            const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+                            let targetDay = originalFixedDay;
+                            
+                            // Handle edge case: if target month doesn't have enough days (e.g., Feb 30)
+                            if (targetDay > daysInTargetMonth) {
+                                targetDay = daysInTargetMonth;
+                            }
+                            
+                            newDue = new Date(targetYear, targetMonth, targetDay, baseDate.getHours(), baseDate.getMinutes(), 0, 0);
+                            console.log(`[PayMongo Webhook] Postpaid: preserved fixedDay=${originalFixedDay}, advanced to ${newDue.toISOString()}`);
+                        } else {
+                            // Prepaid: extend by durationDays
+                            const currentDue = comment.dueDateTime ? new Date(comment.dueDateTime) : now;
+                            const baseDate = currentDue > now ? currentDue : now;
+                            newDue = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+                            console.log(`[PayMongo Webhook] Prepaid: extended by ${durationDays} days to ${newDue.toISOString()}`);
+                        }
+                        
                         const newDueStr = newDue.toISOString().replace('T', ' ').substring(0, 16);
 
                         // Find active profile from billing plan
