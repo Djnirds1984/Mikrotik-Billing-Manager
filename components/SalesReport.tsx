@@ -670,7 +670,7 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                         <tr key={sale.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                             <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">{new Date(sale.date).toLocaleDateString()}</td>
                                             <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-200">{sale.clientName}</td>
-                                            <td className="px-4 py-3">{sale.planName}</td>
+                                            <td className="px-4 py-3">{sale.planName}{sale.payment_method === 'invoice' && (<span className="ml-2 px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded font-medium">Invoice</span>)}</td>
                                             <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{sale.routerName}</td>
                                             <td className="px-4 py-3 text-right font-mono text-sky-600 dark:text-sky-400">{formatCurrency(sale.planPrice)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-yellow-600 dark:text-yellow-400">{formatCurrency(sale.discountAmount)}</td>

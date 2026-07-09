@@ -21,6 +21,33 @@ import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { generateApplicationForm, deleteApplication } from '../services/applicationService.ts';
 import { dbApi } from '../services/databaseService.ts';
+import { PrintableReceipt } from './PrintableReceipt.tsx';
+
+// --- Helper Functions ---
+
+const calculateProrate = (plan: any, dueDateString: string): { amount: number; days: number } => {
+    if (!plan || !dueDateString) return { amount: plan?.price || 0, days: 0 };
+    
+    const planPrice = plan.price || 0;
+    const cycleDays = plan.cycle_days || 30;
+    const dailyRate = planPrice / cycleDays;
+    
+    const now = new Date();
+    const dueDate = new Date(dueDateString);
+    
+    // Calculate days from today to end of current month
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const daysRemaining = Math.ceil((endOfMonth.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) + 1; // +1 to include today
+    
+    // If due date is in the current month, use days until due date
+    if (dueDate.getMonth() === now.getMonth() && dueDate.getFullYear() === now.getFullYear()) {
+        const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        return { amount: Math.max(0, dailyRate * daysUntilDue), days: daysUntilDue };
+    }
+    
+    // Otherwise, prorate for remaining days in installation month
+    return { amount: Math.max(0, dailyRate * daysRemaining), days: daysRemaining };
+};
 
 // --- Reusable Components ---
 
@@ -430,6 +457,20 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                                 <option value="postpaid">Postpaid</option>
                             </select>
                         </div>
+                        {planType === 'postpaid' && dueDate && !initialData && (() => {
+                            const selectedPlan = plans.find(p => p.id === secret.profile);
+                            const prorate = calculateProrate(selectedPlan, dueDate);
+                            const dueDateObj = new Date(dueDate);
+                            return (
+                                <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs space-y-1">
+                                    <p className="font-semibold text-blue-900 dark:text-blue-300">Prorate Billing Preview:</p>
+                                    <p className="text-blue-800 dark:text-blue-400">Installation: {new Date().toLocaleDateString()}</p>
+                                    <p className="text-blue-800 dark:text-blue-400">First due date: {dueDateObj.toLocaleDateString()}</p>
+                                    <p className="text-blue-800 dark:text-blue-400">Prorate ({prorate.days} days): ₱{prorate.amount.toFixed(2)}</p>
+                                    <p className="text-blue-800 dark:text-blue-400">Regular monthly: ₱{(selectedPlan?.price || 0).toFixed(2)}</p>
+                                </div>
+                            );
+                        })()}
                         <hr className="my-4 border-slate-200 dark:border-slate-700" />
                         <h4 className="font-semibold">Customer Information (Optional)</h4>
                         <div><label>Full Name</label><input type="text" value={customer.fullName} onChange={e => setCustomer(c => ({...c, fullName: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
@@ -469,6 +510,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [isBillingLedgerOpen, setBillingLedgerOpen] = useState(false);
     const [selectedSecret, setSelectedSecret] = useState<PppSecret | null>(null);
     const [preselectedPaymentMonth, setPreselectedPaymentMonth] = useState<string>('');
+    const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
     
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -865,6 +907,68 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 }
             }
             
+            // Generate invoice for new users only (not edits)
+            if (!selectedSecret && (subscriptionData.planType === 'postpaid' || subscriptionData.planType === 'prepaid')) {
+                const shouldGenerateInvoice = window.confirm(
+                    'User created successfully. Generate an invoice for this client?'
+                );
+                
+                if (shouldGenerateInvoice) {
+                    try {
+                        // Calculate invoice amount (prorate for first month if postpaid)
+                        let invoiceAmount = selectedPlan?.price || 0;
+                        if (subscriptionData.planType === 'postpaid' && subscriptionData.dueDate) {
+                            const prorate = calculateProrate(selectedPlan, subscriptionData.dueDate);
+                            invoiceAmount = prorate.amount;
+                        }
+                        
+                        const invoiceData = {
+                            id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                            routerId: selectedRouter.id,
+                            username: secretData.name,
+                            accountNumber: enrichedCustomerData.accountNumber,
+                            source: 'pppoe',
+                            planName: selectedPlan?.name,
+                            planId: selectedPlan?.id,
+                            amount: invoiceAmount,
+                            currency: selectedPlan?.currency || 'PHP',
+                            dueDateTime: subscriptionData.dueDate,
+                            issueDate: new Date().toISOString(),
+                            status: 'PENDING'
+                        };
+                        
+                        // Save to client_invoices
+                        await dbApi.post('/client-invoices', invoiceData);
+                        
+                        // Add to sales_records
+                        const saleData: SaleRecord = {
+                            id: `sale_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                            routerId: selectedRouter.id,
+                            routerName: selectedRouter.name,
+                            date: new Date().toISOString(),
+                            clientName: enrichedCustomerData.fullName || secretData.name,
+                            planName: selectedPlan?.name || '',
+                            planPrice: invoiceAmount,
+                            discountAmount: 0,
+                            finalAmount: invoiceAmount,
+                            payment_method: 'invoice',
+                            processedBy: 'admin',
+                            currency: selectedPlan?.currency || 'PHP'
+                        } as SaleRecord;
+                        
+                        await addSale(saleData);
+                        
+                        // Set receipt for printing
+                        setReceiptToPrint(saleData);
+                        
+                        console.log('[PPPoE Save] Invoice generated successfully');
+                    } catch (invoiceError) {
+                        console.error('[PPPoE Save] Failed to generate invoice:', invoiceError);
+                        // Don't block the process if invoice generation fails
+                    }
+                }
+            }
+            
             setUserModalOpen(false);
             setSelectedSecret(null);
             await fetchData();
@@ -985,6 +1089,71 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         setPaymentModalOpen(true);
                     }}
                 />
+            )}
+
+            {/* Invoice Print Dialog */}
+            {receiptToPrint && (
+                <>
+                    <div className="printable-area">
+                        <PrintableReceipt sale={receiptToPrint} companySettings={companySettings} />
+                    </div>
+                    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-2xl w-full">
+                            <div className="p-6 border-b border-slate-200 dark:border-slate-700">
+                                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-200">Invoice Generated</h3>
+                            </div>
+                            <div className="p-6">
+                                <p className="text-slate-600 dark:text-slate-400 mb-4">
+                                    Invoice has been created for <strong>{receiptToPrint.clientName}</strong>
+                                </p>
+                                <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg mb-4">
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                        <div>
+                                            <span className="text-slate-500">Amount:</span>
+                                            <div className="font-semibold text-lg">₱{receiptToPrint.finalAmount.toFixed(2)}</div>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-500">Plan:</span>
+                                            <div>{receiptToPrint.planName}</div>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-500">Date:</span>
+                                            <div>{new Date(receiptToPrint.date).toLocaleDateString()}</div>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-500">Status:</span>
+                                            <div className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">PENDING</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                                    Click "Print Invoice" to print the invoice now. You can also print it later from the Sales Report section.
+                                </p>
+                            </div>
+                            <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-3 rounded-b-lg">
+                                <button
+                                    type="button"
+                                    onClick={() => setReceiptToPrint(null)}
+                                    className="px-4 py-2 text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600"
+                                >
+                                    Close
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const timer = setTimeout(() => {
+                                            window.print();
+                                            setReceiptToPrint(null);
+                                        }, 100);
+                                    }}
+                                    className="px-4 py-2 text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                                >
+                                    Print Invoice
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </>
             )}
 
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
