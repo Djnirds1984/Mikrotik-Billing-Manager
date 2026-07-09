@@ -21,8 +21,8 @@ async function runMigrations(db) {
     );
   `);
 
-  // Get list of migration files
-  const migrationsDir = path.join(__dirname, 'migrations');
+  // Get list of migration files (runner.js is inside the migrations folder)
+  const migrationsDir = __dirname;
   if (!fs.existsSync(migrationsDir)) {
     console.log('[Migration] No migrations directory found, skipping.');
     return { applied: [], pending: [] };
@@ -102,7 +102,7 @@ async function runMigrations(db) {
  * Get migration status (for API endpoint)
  */
 async function getMigrationStatus(db) {
-  const migrationsDir = path.join(__dirname, 'migrations');
+  const migrationsDir = __dirname;
   const files = fs.existsSync(migrationsDir)
     ? fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort()
     : [];

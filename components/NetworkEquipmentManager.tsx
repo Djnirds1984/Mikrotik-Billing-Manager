@@ -194,8 +194,8 @@ const NapPortDetailModal: React.FC<{
         if (isOpen && nap) {
             setLoading(true);
             fetch(`/api/olt-nap-ports?nap_id=${nap.id}`, { headers: authHeaders() })
-                .then(r => r.json()).then(data => { setPorts(Array.isArray(data) ? data : []); setLoading(false); })
-                .catch(() => setLoading(false));
+                .then(r => r.ok ? r.json() : []).then(data => { setPorts(Array.isArray(data) ? data : []); setLoading(false); })
+                .catch(() => { setPorts([]); setLoading(false); });
         }
     }, [isOpen, nap]);
     if (!isOpen || !nap) return null;
@@ -268,22 +268,27 @@ export const NetworkEquipmentManager: React.FC = () => {
     const [napPortModalOpen, setNapPortModalOpen] = useState(false);
     const [selectedOlForPon, setSelectedOlForPon] = useState<string>('');
 
+    const safeArray = async (res: Response): Promise<any[]> => {
+        if (!res.ok) return [];
+        try { const data = await res.json(); return Array.isArray(data) ? data : []; }
+        catch { return []; }
+    };
+
     const fetchAll = useCallback(async () => {
         setIsLoading(true);
         try {
-            const [eqRes, ponRes, splRes, napRes] = await Promise.all([
+            const [eqRes, splRes, napRes] = await Promise.all([
                 fetch('/api/network-equipment', { headers: authHeaders() }),
-                fetch('/api/olt-splitters', { headers: authHeaders() }),
                 fetch('/api/olt-splitters', { headers: authHeaders() }),
                 fetch('/api/olt-naps', { headers: authHeaders() })
             ]);
-            setEquipment(await eqRes.json());
-            setSplitters(await splRes.json());
-            setNaps(await napRes.json());
+            setEquipment(await safeArray(eqRes));
+            setSplitters(await safeArray(splRes));
+            setNaps(await safeArray(napRes));
             // Fetch PON ports for selected equipment or all
             if (selectedOlForPon) {
                 const r = await fetch(`/api/network-equipment/${selectedOlForPon}/pon-ports`, { headers: authHeaders() });
-                setPonPorts(await r.json());
+                setPonPorts(await safeArray(r));
             }
         } catch (e) { console.error(e); }
         setIsLoading(false);
@@ -376,7 +381,7 @@ export const NetworkEquipmentManager: React.FC = () => {
         setSelectedOlForPon(eqId);
         if (eqId) {
             const r = await fetch(`/api/network-equipment/${eqId}/pon-ports`, { headers: authHeaders() });
-            setPonPorts(await r.json());
+            setPonPorts(await safeArray(r));
         } else {
             setPonPorts([]);
         }
@@ -539,8 +544,8 @@ const NetworkTopologyPlaceholder: React.FC<{ equipment: NetworkEquipment[] }> = 
     useEffect(() => {
         setLoading(true);
         fetch('/api/network-topology', { headers: authHeaders() })
-            .then(r => r.json()).then(data => { setTopology(data); setLoading(false); })
-            .catch(() => setLoading(false));
+            .then(r => r.ok ? r.json() : { equipment: [] }).then(data => { setTopology(data); setLoading(false); })
+            .catch(() => { setTopology({ equipment: [] }); setLoading(false); });
     }, [equipment]);
 
     if (loading) return <Loader />;
