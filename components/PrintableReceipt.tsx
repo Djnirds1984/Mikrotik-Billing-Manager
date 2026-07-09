@@ -83,6 +83,15 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
                         </td>
                         <td className="p-2 border border-black text-right">{formatCurrency(sale.planPrice)}</td>
                     </tr>
+                    {sale.installationFee && sale.installationFee > 0 && (
+                        <tr>
+                            <td className="p-2 border border-black">
+                                <p className="font-semibold">Installation Fee</p>
+                                <p className="text-xs text-gray-600">One-time installation charge</p>
+                            </td>
+                            <td className="p-2 border border-black text-right">{formatCurrency(sale.installationFee)}</td>
+                        </tr>
+                    )}
                 </tbody>
             </table>
 
@@ -90,7 +99,7 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
                 <div className="w-1/2">
                     <div className="flex justify-between">
                         <span>Subtotal:</span>
-                        <span>{formatCurrency(sale.planPrice)}</span>
+                        <span>{formatCurrency((sale.planPrice || 0) + (sale.installationFee || 0))}</span>
                     </div>
                     <div className="flex justify-between">
                         <span>Discount:</span>

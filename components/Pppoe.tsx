@@ -252,6 +252,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [planType, setPlanType] = useState<'prepaid' | 'postpaid'>('prepaid');
     const [createPortalAccount, setCreatePortalAccount] = useState(false);
     const [portalAccountExists, setPortalAccountExists] = useState(false);
+    const [hasInstallation, setHasInstallation] = useState(false);
+    const [installationFee, setInstallationFee] = useState<number>(0);
     const toDatetimeLocal = (s: string) => {
         try {
             const d = new Date(s);
@@ -340,6 +342,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: generatedAccNum, gps: '' });
             setDueDate('');
             setPlanType('prepaid');
+            setHasInstallation(false);
+            setInstallationFee(0);
         }
     }, [isOpen, initialData, plans, customers, profiles]);
 
@@ -405,7 +409,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType }, { createPortalAccount });
+        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType, installationFee: hasInstallation ? installationFee : 0 }, { createPortalAccount });
     }
 
     return (
@@ -457,17 +461,68 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                                 <option value="postpaid">Postpaid</option>
                             </select>
                         </div>
-                        {planType === 'postpaid' && dueDate && !initialData && (() => {
+                        <div className="flex items-start gap-2 mt-3">
+                            <input
+                                type="checkbox"
+                                id="hasInstallation"
+                                checked={hasInstallation}
+                                onChange={e => {
+                                    setHasInstallation(e.target.checked);
+                                    if (!e.target.checked) setInstallationFee(0);
+                                }}
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <div className="text-sm">
+                                <label htmlFor="hasInstallation" className="cursor-pointer select-none font-medium">
+                                    Has Installation Fee
+                                </label>
+                            </div>
+                        </div>
+                        {hasInstallation && (
+                            <div className="mt-2">
+                                <label>Installation Fee Amount</label>
+                                <input
+                                    type="number"
+                                    value={installationFee}
+                                    onChange={e => setInstallationFee(parseFloat(e.target.value) || 0)}
+                                    min="0"
+                                    step="0.01"
+                                    className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700"
+                                    placeholder="Enter installation fee"
+                                />
+                            </div>
+                        )}
+                        {!initialData && (() => {
                             const selectedPlan = plans.find(p => p.id === secret.profile);
-                            const prorate = calculateProrate(selectedPlan, dueDate);
-                            const dueDateObj = new Date(dueDate);
+                            const showProrate = planType === 'postpaid' && dueDate;
+                            const prorate = showProrate ? calculateProrate(selectedPlan, dueDate) : null;
+                            const subscriptionAmount = showProrate ? prorate.amount : (selectedPlan?.price || 0);
+                            const totalAmount = subscriptionAmount + (hasInstallation ? installationFee : 0);
+                            
                             return (
                                 <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs space-y-1">
-                                    <p className="font-semibold text-blue-900 dark:text-blue-300">Prorate Billing Preview:</p>
-                                    <p className="text-blue-800 dark:text-blue-400">Installation: {new Date().toLocaleDateString()}</p>
-                                    <p className="text-blue-800 dark:text-blue-400">First due date: {dueDateObj.toLocaleDateString()}</p>
-                                    <p className="text-blue-800 dark:text-blue-400">Prorate ({prorate.days} days): ₱{prorate.amount.toFixed(2)}</p>
-                                    <p className="text-blue-800 dark:text-blue-400">Regular monthly: ₱{(selectedPlan?.price || 0).toFixed(2)}</p>
+                                    <p className="font-semibold text-blue-900 dark:text-blue-300">
+                                        {showProrate ? 'Prorate Billing Preview:' : 'Invoice Preview:'}
+                                    </p>
+                                    {showProrate && (
+                                        <>
+                                            <p className="text-blue-800 dark:text-blue-400">Installation: {new Date().toLocaleDateString()}</p>
+                                            <p className="text-blue-800 dark:text-blue-400">First due date: {new Date(dueDate).toLocaleDateString()}</p>
+                                            <p className="text-blue-800 dark:text-blue-400">Prorate ({prorate.days} days): ₱{prorate.amount.toFixed(2)}</p>
+                                            <p className="text-blue-800 dark:text-blue-400">Regular monthly: ₱{(selectedPlan?.price || 0).toFixed(2)}</p>
+                                        </>
+                                    )}
+                                    {!showProrate && (
+                                        <p className="text-blue-800 dark:text-blue-400">Plan: ₱{(selectedPlan?.price || 0).toFixed(2)}</p>
+                                    )}
+                                    {hasInstallation && installationFee > 0 && (
+                                        <p className="text-blue-800 dark:text-blue-400">Installation Fee: ₱{installationFee.toFixed(2)}</p>
+                                    )}
+                                    {hasInstallation && installationFee > 0 && (
+                                        <p className="text-blue-900 dark:text-blue-300 font-semibold border-t border-blue-300 dark:border-blue-700 pt-1 mt-1">
+                                            Total: ₱{totalAmount.toFixed(2)}
+                                        </p>
+                                    )}
                                 </div>
                             );
                         })()}
@@ -717,7 +772,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         setSortConfig({ key, direction });
     };
 
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid' }, portalOptions?: { createPortalAccount?: boolean }) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid'; installationFee?: number }, portalOptions?: { createPortalAccount?: boolean }) => {
         setIsSubmitting(true);
         try {
             // Find existing customer by username (username is UNIQUE in the customers table)
@@ -916,11 +971,14 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 if (shouldGenerateInvoice) {
                     try {
                         // Calculate invoice amount (prorate for first month if postpaid)
-                        let invoiceAmount = selectedPlan?.price || 0;
+                        let subscriptionAmount = selectedPlan?.price || 0;
                         if (subscriptionData.planType === 'postpaid' && subscriptionData.dueDate) {
                             const prorate = calculateProrate(selectedPlan, subscriptionData.dueDate);
-                            invoiceAmount = prorate.amount;
+                            subscriptionAmount = prorate.amount;
                         }
+                        
+                        const installationFee = subscriptionData.installationFee || 0;
+                        const totalInvoiceAmount = subscriptionAmount + installationFee;
                         
                         const invoiceData = {
                             id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -930,7 +988,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             source: 'pppoe',
                             planName: selectedPlan?.name,
                             planId: selectedPlan?.id,
-                            amount: invoiceAmount,
+                            amount: totalInvoiceAmount,
                             currency: selectedPlan?.currency || 'PHP',
                             dueDateTime: subscriptionData.dueDate,
                             issueDate: new Date().toISOString(),
@@ -948,12 +1006,13 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             date: new Date().toISOString(),
                             clientName: enrichedCustomerData.fullName || secretData.name,
                             planName: selectedPlan?.name || '',
-                            planPrice: invoiceAmount,
+                            planPrice: subscriptionAmount,
                             discountAmount: 0,
-                            finalAmount: invoiceAmount,
+                            finalAmount: totalInvoiceAmount,
                             payment_method: 'invoice',
                             processedBy: 'admin',
-                            currency: selectedPlan?.currency || 'PHP'
+                            currency: selectedPlan?.currency || 'PHP',
+                            installationFee: installationFee
                         } as SaleRecord;
                         
                         await addSale(saleData);

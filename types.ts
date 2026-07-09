@@ -338,6 +338,8 @@ export interface SaleRecord {
     planType?: 'prepaid' | 'postpaid';
     coveredMonth?: string;
     processedBy?: string; // Username of employee/admin who processed the payment
+    installationFee?: number; // One-time installation charge
+    payment_method?: string;
 }
 
 export interface InventoryItem {
