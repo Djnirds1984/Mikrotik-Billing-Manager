@@ -254,7 +254,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [portalAccountExists, setPortalAccountExists] = useState(false);
     const [hasInstallation, setHasInstallation] = useState(false);
     const [installationFee, setInstallationFee] = useState<number>(0);
-    const [installationDeducts, setInstallationDeducts] = useState(false);
+    const [deductFromProrate, setDeductFromProrate] = useState(false);
+    const [deductFromMonthly, setDeductFromMonthly] = useState(false);
     const toDatetimeLocal = (s: string) => {
         try {
             const d = new Date(s);
@@ -345,7 +346,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             setPlanType('prepaid');
             setHasInstallation(false);
             setInstallationFee(0);
-            setInstallationDeducts(false);
+            setDeductFromProrate(false);
+            setDeductFromMonthly(false);
         }
     }, [isOpen, initialData, plans, customers, profiles]);
 
@@ -411,7 +413,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType, installationFee: hasInstallation ? installationFee : 0, installationDeducts: hasInstallation ? installationDeducts : false }, { createPortalAccount });
+        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType, installationFee: hasInstallation ? installationFee : 0, deductFromProrate: hasInstallation ? deductFromProrate : false, deductFromMonthly: hasInstallation ? deductFromMonthly : false }, { createPortalAccount });
     }
 
     return (
@@ -497,17 +499,34 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                                 <div className="flex items-start gap-2">
                                     <input
                                         type="checkbox"
-                                        id="installationDeducts"
-                                        checked={installationDeducts}
-                                        onChange={e => setInstallationDeducts(e.target.checked)}
+                                        id="deductFromProrate"
+                                        checked={deductFromProrate}
+                                        onChange={e => setDeductFromProrate(e.target.checked)}
                                         className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                     />
                                     <div className="text-sm">
-                                        <label htmlFor="installationDeducts" className="cursor-pointer select-none">
-                                            Deduct from monthly subscription / prorate
+                                        <label htmlFor="deductFromProrate" className="cursor-pointer select-none">
+                                            Deduct from prorate (first bill)
                                         </label>
                                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                                            Installation fee reduces the first month's bill instead of being added on top.
+                                            Installation fee reduces the first prorated bill only.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                    <input
+                                        type="checkbox"
+                                        id="deductFromMonthly"
+                                        checked={deductFromMonthly}
+                                        onChange={e => setDeductFromMonthly(e.target.checked)}
+                                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <div className="text-sm">
+                                        <label htmlFor="deductFromMonthly" className="cursor-pointer select-none">
+                                            Deduct from monthly payments (credit balance)
+                                        </label>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                            Installation fee becomes a credit that reduces future monthly bills.
                                         </p>
                                     </div>
                                 </div>
@@ -518,7 +537,20 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             const showProrate = planType === 'postpaid' && dueDate;
                             const prorate = showProrate ? calculateProrate(selectedPlan, dueDate) : null;
                             const subscriptionAmount = showProrate ? prorate.amount : (selectedPlan?.price || 0);
-                            const totalAmount = subscriptionAmount + (hasInstallation ? (installationDeducts ? -installationFee : installationFee) : 0);
+                            // Calculate total based on deduction modes
+                            let totalAmount = subscriptionAmount;
+                            if (hasInstallation && installationFee > 0) {
+                                if (deductFromProrate && showProrate) {
+                                    // Deduct from prorate only, cap at 0 (no credit carryover)
+                                    totalAmount = Math.max(0, subscriptionAmount - installationFee);
+                                } else if (deductFromMonthly) {
+                                    // Full deduction, can go negative (creates credit balance)
+                                    totalAmount = subscriptionAmount - installationFee;
+                                } else {
+                                    // No deduction — add on top
+                                    totalAmount = subscriptionAmount + installationFee;
+                                }
+                            }
                             
                             return (
                                 <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs space-y-1">
@@ -538,7 +570,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                                     )}
                                     {hasInstallation && installationFee > 0 && (
                                         <p className="text-blue-800 dark:text-blue-400">
-                                            Installation Fee{installationDeducts ? ' (deducted)' : ''}: {installationDeducts ? '-' : '+'}₱{installationFee.toFixed(2)}
+                                            Installation Fee{deductFromProrate && showProrate ? ' (deducted from prorate)' : deductFromMonthly ? ' (credit balance)' : ''}:{' '}
+                                            {(deductFromProrate && showProrate) || deductFromMonthly ? '-' : '+'}₱{installationFee.toFixed(2)}
                                         </p>
                                     )}
                                     {hasInstallation && installationFee > 0 && (
@@ -795,7 +828,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         setSortConfig({ key, direction });
     };
 
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid'; installationFee?: number; installationDeducts?: boolean }, portalOptions?: { createPortalAccount?: boolean }) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid'; installationFee?: number; deductFromProrate?: boolean; deductFromMonthly?: boolean }, portalOptions?: { createPortalAccount?: boolean }) => {
         setIsSubmitting(true);
         try {
             // Find existing customer by username (username is UNIQUE in the customers table)
@@ -1001,10 +1034,28 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         }
                         
                         const rawInstallFee = subscriptionData.installationFee || 0;
-                        const installationDeducts = subscriptionData.installationDeducts || false;
-                        // When deduction mode is on, store as negative so receipts show it as a reduction
-                        const installationFee = installationDeducts ? -rawInstallFee : rawInstallFee;
-                        const totalInvoiceAmount = subscriptionAmount + installationFee;
+                        const deductFromProrate = subscriptionData.deductFromProrate || false;
+                        const deductFromMonthly = subscriptionData.deductFromMonthly || false;
+                        const isPostpaid = subscriptionData.planType === 'postpaid';
+                        
+                        let installationFee = 0;
+                        let totalInvoiceAmount = subscriptionAmount;
+                        
+                        if (rawInstallFee > 0) {
+                            if (deductFromProrate && isPostpaid) {
+                                // Deduct from prorate only — cap at 0, no credit carryover
+                                installationFee = -Math.min(rawInstallFee, subscriptionAmount);
+                                totalInvoiceAmount = Math.max(0, subscriptionAmount - rawInstallFee);
+                            } else if (deductFromMonthly) {
+                                // Full deduction — can go negative (creates credit balance)
+                                installationFee = -rawInstallFee;
+                                totalInvoiceAmount = subscriptionAmount - rawInstallFee;
+                            } else {
+                                // No deduction — add on top
+                                installationFee = rawInstallFee;
+                                totalInvoiceAmount = subscriptionAmount + rawInstallFee;
+                            }
+                        }
                         
                         const invoiceData = {
                             id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
