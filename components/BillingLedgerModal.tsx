@@ -55,10 +55,18 @@ export const BillingLedgerModal: React.FC<BillingLedgerModalProps> = ({
     const [entries, setEntries] = useState<LedgerEntry[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [accountCredit, setAccountCredit] = useState<number>(0); // negative = credit available
 
     useEffect(() => {
         if (isOpen && routerId && username) {
             fetchLedger();
+            // Fetch client account credit balance
+            fetch(`/api/client-balance/${encodeURIComponent(routerId)}/${encodeURIComponent(username)}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+            })
+                .then(res => res.ok ? res.json() : { balance: 0 })
+                .then(data => setAccountCredit(data.balance || 0))
+                .catch(() => setAccountCredit(0));
         }
     }, [isOpen, routerId, username]);
 
@@ -106,7 +114,7 @@ export const BillingLedgerModal: React.FC<BillingLedgerModalProps> = ({
                 </div>
 
                 {/* Summary Cards */}
-                <div className="p-4 grid grid-cols-3 gap-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+                <div className="p-4 grid grid-cols-4 gap-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
                     <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 text-center">
                         <div className="text-2xl font-bold text-green-600 dark:text-green-400">{paidMonths.length}</div>
                         <div className="text-xs text-green-700 dark:text-green-300 font-medium">Months Paid</div>
@@ -117,7 +125,13 @@ export const BillingLedgerModal: React.FC<BillingLedgerModalProps> = ({
                     </div>
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-center">
                         <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{creditMonths.length}</div>
-                        <div className="text-xs text-blue-700 dark:text-blue-300 font-medium">Credit Balance ({formatCurrency(totalCredit)})</div>
+                        <div className="text-xs text-blue-700 dark:text-blue-300 font-medium">Credit Months ({formatCurrency(totalCredit)})</div>
+                    </div>
+                    <div className={`border rounded-lg p-3 text-center ${accountCredit < 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-slate-50 dark:bg-slate-700/30 border-slate-200 dark:border-slate-600'}`}>
+                        <div className={`text-2xl font-bold ${accountCredit < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                            {accountCredit < 0 ? formatCurrency(Math.abs(accountCredit)) : formatCurrency(0)}
+                        </div>
+                        <div className={`text-xs font-medium ${accountCredit < 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>Account Credit</div>
                     </div>
                 </div>
 
@@ -221,6 +235,9 @@ export const BillingLedgerModal: React.FC<BillingLedgerModalProps> = ({
                         )}
                         {creditMonths.length > 0 && (
                             <span className="text-blue-500 ml-2">| Credit: {formatCurrency(totalCredit)}</span>
+                        )}
+                        {accountCredit < 0 && (
+                            <span className="text-emerald-600 dark:text-emerald-400 ml-2 font-semibold">| Account Credit: {formatCurrency(Math.abs(accountCredit))}</span>
                         )}
                     </div>
                     <button

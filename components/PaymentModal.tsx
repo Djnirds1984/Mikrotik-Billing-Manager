@@ -34,6 +34,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const [selectedMonth, setSelectedMonth] = useState<string>(''); // YYYY-MM for postpaid
     const [unpaidMonths, setUnpaidMonths] = useState<UnpaidMonthEntry[]>([]);
     const [isPostpaid, setIsPostpaid] = useState(false);
+    const [clientBalance, setClientBalance] = useState<number>(0); // negative = credit available
 
     useEffect(() => {
         if (isOpen) {
@@ -43,6 +44,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             setIsSubmitting(false);
             setSelectedMonth('');
             setUnpaidMonths([]);
+            setClientBalance(0);
 
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
@@ -84,6 +86,18 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                 const now = new Date();
                 setSelectedMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
             }
+
+            // Fetch client balance (credit from installation fee deduction, etc.)
+            if (routerId && secret?.name) {
+                fetch(`/api/client-balance/${encodeURIComponent(routerId)}/${encodeURIComponent(secret.name)}`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                })
+                    .then(res => res.ok ? res.json() : { balance: 0 })
+                    .then((data: any) => {
+                        setClientBalance(data.balance || 0);
+                    })
+                    .catch(() => setClientBalance(0));
+            }
         }
     }, [isOpen, plans, secret, preselectedMonth, routerId]);
 
@@ -115,7 +129,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const pricePerDay = daysInCycle > 0 ? planPrice / daysInCycle : 0;
     const discountDaysValue = parseInt(discountDays, 10) || 0;
     const discountAmount = pricePerDay * discountDaysValue;
-    const finalAmount = Math.max(0, planPrice - discountAmount);
+    // Apply client credit (negative balance = credit available)
+    const creditAvailable = clientBalance < 0 ? Math.abs(clientBalance) : 0;
+    const creditApplied = Math.min(creditAvailable, Math.max(0, planPrice - discountAmount));
+    const finalAmount = Math.max(0, planPrice - discountAmount - creditApplied);
 
     // Format month for display
     const formatMonthDisplay = (monthStr: string): string => {
@@ -172,6 +189,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             discountDays: discountDaysValue,
             paymentDate,
             coveredMonth: selectedMonth, // YYYY-MM for backend ledger update
+            creditApplied, // amount of credit deducted from this payment
         };
 
         const success = await onSave({ sale: saleData, payment: paymentData });
@@ -214,6 +232,21 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                             <div className="text-green-600 dark:text-green-400 font-medium">All months are paid or up to date.</div>
                                         )}
                                     </div>
+                                </div>
+                            )}
+
+                            {/* Client Credit Balance */}
+                            {creditAvailable > 0 && (
+                                <div className="mb-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <svg className="w-4 h-4 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <span className="text-sm font-semibold text-green-800 dark:text-green-300">Client Credit Available</span>
+                                    </div>
+                                    <p className="text-xs text-green-700 dark:text-green-400">
+                                        Current credit: <span className="font-bold">{formatCurrency(creditAvailable)}</span> — will be automatically applied to this payment.
+                                    </p>
                                 </div>
                             )}
 
@@ -285,10 +318,21 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                         <span>Discount</span>
                                         <span>- {formatCurrency(discountAmount)}</span>
                                     </div>
+                                    {creditApplied > 0 && (
+                                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400">
+                                            <span>Credit Applied</span>
+                                            <span>- {formatCurrency(creditApplied)}</span>
+                                        </div>
+                                    )}
                                     <div className="flex justify-between text-lg font-bold text-slate-900 dark:text-white mt-2">
                                         <span>TOTAL</span>
                                         <span>{formatCurrency(finalAmount)}</span>
                                     </div>
+                                    {creditApplied > 0 && creditApplied < creditAvailable && (
+                                        <p className="mt-1 text-xs text-green-600 dark:text-green-400">
+                                            Remaining credit after payment: {formatCurrency(creditAvailable - creditApplied)}
+                                        </p>
+                                    )}
                                     {isPostpaid && selectedMonth && (
                                         <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                             Covering: <span className="font-semibold">{formatMonthDisplay(selectedMonth)}</span>

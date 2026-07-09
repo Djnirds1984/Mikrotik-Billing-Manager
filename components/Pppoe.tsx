@@ -1043,6 +1043,28 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         
                         await addSale(saleData);
                         
+                        // If total is negative (deduction exceeds subscription), record credit for the client
+                        if (totalInvoiceAmount < 0) {
+                            try {
+                                await fetch('/api/client-balance', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                                    },
+                                    body: JSON.stringify({
+                                        routerId: selectedRouter.id,
+                                        username: secretData.name,
+                                        accountNumber: enrichedCustomerData.accountNumber,
+                                        amount: totalInvoiceAmount // negative = credit
+                                    })
+                                });
+                                console.log(`[PPPoE Save] Client credit recorded: ${totalInvoiceAmount}`);
+                            } catch (balErr) {
+                                console.warn('[PPPoE Save] Failed to record client credit:', balErr);
+                            }
+                        }
+                        
                         // Set receipt for printing
                         setReceiptToPrint(saleData);
                         
@@ -1103,6 +1125,28 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     });
                 } catch (ledgerErr) {
                     console.warn('[PPPoE Payment] Failed to update billing ledger:', ledgerErr);
+                }
+            }
+
+            // Update client balance: reduce credit by the amount applied
+            const creditApplied = payment.creditApplied || 0;
+            if (creditApplied > 0) {
+                try {
+                    await fetch('/api/client-balance', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                        },
+                        body: JSON.stringify({
+                            routerId: selectedRouter.id,
+                            username: selectedSecret.name,
+                            amount: creditApplied // positive amount reduces the credit (balance + positive)
+                        })
+                    });
+                    console.log(`[PPPoE Payment] Client credit reduced by ${creditApplied}`);
+                } catch (balErr) {
+                    console.warn('[PPPoE Payment] Failed to update client balance:', balErr);
                 }
             }
 

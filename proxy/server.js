@@ -548,6 +548,15 @@ async function initDb() {
                 createdAt TEXT DEFAULT (datetime('now')),
                 UNIQUE(routerId, username, month)
             );
+            CREATE TABLE IF NOT EXISTS client_balances (
+                id TEXT PRIMARY KEY,
+                routerId TEXT NOT NULL,
+                username TEXT NOT NULL,
+                accountNumber TEXT,
+                balance REAL DEFAULT 0,
+                updatedAt TEXT DEFAULT (datetime('now')),
+                UNIQUE(routerId, username)
+            );
             CREATE TABLE IF NOT EXISTS wan_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 connection_type TEXT NOT NULL DEFAULT 'dhcp',
@@ -1703,6 +1712,48 @@ async function startServer() {
         } catch (err) {
             console.error('[Billing Ledger] POST error:', err.message);
             res.status(500).json({ message: 'Failed to save billing ledger entry' });
+        }
+    });
+
+    // --- Client Balance (Credit/Debit) API ---
+    // GET /api/client-balance/:routerId/:username
+    app.get('/api/client-balance/:routerId/:username', async (req, res) => {
+        try {
+            const { routerId, username } = req.params;
+            const entry = await db.get(
+                "SELECT * FROM client_balances WHERE routerId = ? AND username = ?",
+                [routerId, username]
+            );
+            res.json(entry || { balance: 0 });
+        } catch (err) {
+            console.error('[Client Balance] GET error:', err.message);
+            res.status(500).json({ message: 'Failed to fetch client balance' });
+        }
+    });
+
+    // POST /api/client-balance - Create or update client balance
+    // body: { routerId, username, accountNumber?, amount } — amount is added to existing balance
+    app.post('/api/client-balance', async (req, res) => {
+        try {
+            const { routerId, username, accountNumber, amount } = req.body;
+            if (!routerId || !username || amount === undefined) {
+                return res.status(400).json({ message: 'routerId, username, and amount are required' });
+            }
+            const id = `bal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await db.run(
+                `INSERT INTO client_balances (id, routerId, username, accountNumber, balance, updatedAt)
+                 VALUES (?, ?, ?, ?, ?, datetime('now'))
+                 ON CONFLICT(routerId, username) DO UPDATE SET
+                    balance = balance + excluded.balance,
+                    accountNumber = COALESCE(excluded.accountNumber, client_balances.accountNumber),
+                    updatedAt = datetime('now')`,
+                [id, routerId, username, accountNumber || null, amount]
+            );
+            const entry = await db.get("SELECT * FROM client_balances WHERE routerId = ? AND username = ?", [routerId, username]);
+            res.json(entry);
+        } catch (err) {
+            console.error('[Client Balance] POST error:', err.message);
+            res.status(500).json({ message: 'Failed to update client balance' });
         }
     });
 
