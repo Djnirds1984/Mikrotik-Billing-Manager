@@ -735,6 +735,7 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
     const [isTesting, setIsTesting] = useState(false);
     const [testMessage, setTestMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [isValidating, setIsValidating] = useState(false);
+    const [isSettingMenu, setIsSettingMenu] = useState(false);
 
     const handleGenerateToken = () => {
         const randomToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -802,6 +803,49 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
             setTestMessage({ type: 'error', text: `Validation failed: ${(err as Error).message}` });
         } finally {
             setIsValidating(false);
+        }
+    };
+
+    const handleSetPersistentMenu = async () => {
+        setIsSettingMenu(true);
+        setTestMessage(null);
+        try {
+            const res = await fetch('/api/facebook-persistent-menu', {
+                method: 'POST',
+                headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }
+            });
+            const data = await res.json();
+            if (data.success) {
+                setTestMessage({ type: 'success', text: data.message });
+            } else {
+                setTestMessage({ type: 'error', text: data.message || 'Failed to set persistent menu.' });
+            }
+        } catch (err) {
+            setTestMessage({ type: 'error', text: `Failed: ${(err as Error).message}` });
+        } finally {
+            setIsSettingMenu(false);
+        }
+    };
+
+    const handleRemovePersistentMenu = async () => {
+        if (!confirm('Remove the floating menu from Messenger?')) return;
+        setIsSettingMenu(true);
+        setTestMessage(null);
+        try {
+            const res = await fetch('/api/facebook-persistent-menu', {
+                method: 'DELETE',
+                headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            if (data.success) {
+                setTestMessage({ type: 'success', text: data.message });
+            } else {
+                setTestMessage({ type: 'error', text: data.message || 'Failed to remove persistent menu.' });
+            }
+        } catch (err) {
+            setTestMessage({ type: 'error', text: `Failed: ${(err as Error).message}` });
+        } finally {
+            setIsSettingMenu(false);
         }
     };
 
@@ -896,7 +940,7 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
 
                 {/* Test Connection Button */}
                 <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-3">
                         <button 
                             onClick={handleValidateConfig} 
                             disabled={isValidating}
@@ -911,6 +955,30 @@ const FacebookMessengerTab: React.FC<{ settings: PanelSettings, setSettings: Rea
                         >
                             {isTesting ? 'Validating...' : 'Validate Token'}
                         </button>
+                    </div>
+                    
+                    {/* Persistent Menu Section */}
+                    <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                        <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">☰ Floating Menu (Persistent Menu)</h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                            Set up a floating menu button (☰) inside Messenger so customers can easily tap through options like Check Bill, Pay, Report Issue, etc.
+                        </p>
+                        <div className="flex flex-wrap gap-3">
+                            <button 
+                                onClick={handleSetPersistentMenu} 
+                                disabled={isSettingMenu || !facebook.pageAccessToken}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                            >
+                                {isSettingMenu ? 'Setting up...' : '☰ Set Persistent Menu'}
+                            </button>
+                            <button 
+                                onClick={handleRemovePersistentMenu} 
+                                disabled={isSettingMenu || !facebook.pageAccessToken}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                            >
+                                {isSettingMenu ? 'Removing...' : '✕ Remove Menu'}
+                            </button>
+                        </div>
                     </div>
                     
                     {/* Test Result Message */}

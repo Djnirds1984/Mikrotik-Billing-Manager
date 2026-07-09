@@ -8233,6 +8233,110 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     });
 
+    // Endpoint to set Facebook Persistent Menu (floating menu in Messenger)
+    app.post('/api/facebook-persistent-menu', protect, async (req, res) => {
+        try {
+            const settings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            const fbSettings = JSON.parse(settings?.facebookSettings || '{}');
+            
+            if (!fbSettings.pageAccessToken) {
+                return res.status(400).json({ success: false, message: 'Page Access Token is not configured. Please set it in Facebook Messenger settings.' });
+            }
+            
+            console.log('[Facebook Persistent Menu] Setting up persistent menu...');
+            
+            // Set persistent menu via Messenger Profile API
+            const response = await axios.post(
+                'https://graph.facebook.com/v21.0/me/messenger_profile',
+                {
+                    persistent_menu: [
+                        {
+                            locale: 'default',
+                            composer_input_disabled: false,
+                            call_to_actions: [
+                                {
+                                    type: 'postback',
+                                    title: '📊 Check Bill',
+                                    payload: 'CHECK_BILL'
+                                },
+                                {
+                                    type: 'postback',
+                                    title: '💳 Pay Now',
+                                    payload: 'PAY_NOW'
+                                },
+                                {
+                                    type: 'postback',
+                                    title: '🔧 Report Issue',
+                                    payload: 'REPORT_ISSUE'
+                                },
+                                {
+                                    type: 'postback',
+                                    title: '📋 My Tickets',
+                                    payload: 'MY_TICKETS'
+                                },
+                                {
+                                    type: 'postback',
+                                    title: '📢 Notify Admin',
+                                    payload: 'NOTIFY_ADMIN'
+                                },
+                                {
+                                    type: 'postback',
+                                    title: '🏠 Main Menu',
+                                    payload: 'MAIN_MENU'
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    params: { access_token: fbSettings.pageAccessToken },
+                    timeout: 10000
+                }
+            );
+            
+            console.log('[Facebook Persistent Menu] Success:', response.data);
+            res.json({ 
+                success: true, 
+                message: '✅ Persistent menu set successfully!\n\nUsers will now see a floating menu (☰) in the Messenger conversation with:\n• 📊 Check Bill\n• 💳 Pay Now\n• 🔧 Report Issue\n• 📋 My Tickets\n• 📢 Notify Admin\n• 🏠 Main Menu\n\nNote: It may take a few minutes to appear in Messenger.'
+            });
+        } catch (err) {
+            console.error('[Facebook Persistent Menu] Error:', err.message);
+            const fbError = err.response?.data?.error;
+            let errorMessage = err.message;
+            if (fbError) {
+                errorMessage = `Facebook API Error: ${fbError.message || 'Unknown error'} (Code: ${fbError.code || 'N/A'})`;
+                if (fbError.code === 100) {
+                    errorMessage += '\n\n💡 Hint: Invalid parameter. Make sure your Page Access Token has pages_messaging permission.';
+                }
+            }
+            res.status(500).json({ success: false, message: errorMessage });
+        }
+    });
+
+    // Endpoint to delete Facebook Persistent Menu
+    app.delete('/api/facebook-persistent-menu', protect, async (req, res) => {
+        try {
+            const settings = await db.get('SELECT facebookSettings FROM settings WHERE id = 1');
+            const fbSettings = JSON.parse(settings?.facebookSettings || '{}');
+            
+            if (!fbSettings.pageAccessToken) {
+                return res.status(400).json({ success: false, message: 'Page Access Token is not configured.' });
+            }
+            
+            await axios.delete('https://graph.facebook.com/v21.0/me/messenger_profile', {
+                params: { access_token: fbSettings.pageAccessToken },
+                data: { fields: ['persistent_menu'] },
+                timeout: 10000
+            });
+            
+            console.log('[Facebook Persistent Menu] Deleted successfully');
+            res.json({ success: true, message: '✅ Persistent menu removed successfully.' });
+        } catch (err) {
+            console.error('[Facebook Persistent Menu] Delete error:', err.message);
+            res.status(500).json({ success: false, message: err.message });
+        }
+    });
+
     // Endpoint to validate Facebook configuration
     app.get('/api/facebook-validate', protect, async (req, res) => {
         try {
