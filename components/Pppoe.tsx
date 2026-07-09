@@ -254,6 +254,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [portalAccountExists, setPortalAccountExists] = useState(false);
     const [hasInstallation, setHasInstallation] = useState(false);
     const [installationFee, setInstallationFee] = useState<number>(0);
+    const [installationDeducts, setInstallationDeducts] = useState(false);
     const toDatetimeLocal = (s: string) => {
         try {
             const d = new Date(s);
@@ -344,6 +345,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             setPlanType('prepaid');
             setHasInstallation(false);
             setInstallationFee(0);
+            setInstallationDeducts(false);
         }
     }, [isOpen, initialData, plans, customers, profiles]);
 
@@ -409,7 +411,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
         if (secret.password) {
             secretPayload.password = secret.password;
         }
-        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType, installationFee: hasInstallation ? installationFee : 0 }, { createPortalAccount });
+        onSave(secretPayload, customer, { dueDate, planId: secret.profile, planType, installationFee: hasInstallation ? installationFee : 0, installationDeducts: hasInstallation ? installationDeducts : false }, { createPortalAccount });
     }
 
     return (
@@ -479,17 +481,36 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             </div>
                         </div>
                         {hasInstallation && (
-                            <div className="mt-2">
-                                <label>Installation Fee Amount</label>
-                                <input
-                                    type="number"
-                                    value={installationFee}
-                                    onChange={e => setInstallationFee(parseFloat(e.target.value) || 0)}
-                                    min="0"
-                                    step="0.01"
-                                    className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700"
-                                    placeholder="Enter installation fee"
-                                />
+                            <div className="mt-2 space-y-2">
+                                <div>
+                                    <label>Installation Fee Amount</label>
+                                    <input
+                                        type="number"
+                                        value={installationFee}
+                                        onChange={e => setInstallationFee(parseFloat(e.target.value) || 0)}
+                                        min="0"
+                                        step="0.01"
+                                        className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700"
+                                        placeholder="Enter installation fee"
+                                    />
+                                </div>
+                                <div className="flex items-start gap-2">
+                                    <input
+                                        type="checkbox"
+                                        id="installationDeducts"
+                                        checked={installationDeducts}
+                                        onChange={e => setInstallationDeducts(e.target.checked)}
+                                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <div className="text-sm">
+                                        <label htmlFor="installationDeducts" className="cursor-pointer select-none">
+                                            Deduct from monthly subscription / prorate
+                                        </label>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                            Installation fee reduces the first month's bill instead of being added on top.
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
                         )}
                         {!initialData && (() => {
@@ -497,7 +518,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             const showProrate = planType === 'postpaid' && dueDate;
                             const prorate = showProrate ? calculateProrate(selectedPlan, dueDate) : null;
                             const subscriptionAmount = showProrate ? prorate.amount : (selectedPlan?.price || 0);
-                            const totalAmount = subscriptionAmount + (hasInstallation ? installationFee : 0);
+                            const totalAmount = subscriptionAmount + (hasInstallation ? (installationDeducts ? -installationFee : installationFee) : 0);
                             
                             return (
                                 <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs space-y-1">
@@ -516,7 +537,9 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                                         <p className="text-blue-800 dark:text-blue-400">Plan: ₱{(selectedPlan?.price || 0).toFixed(2)}</p>
                                     )}
                                     {hasInstallation && installationFee > 0 && (
-                                        <p className="text-blue-800 dark:text-blue-400">Installation Fee: ₱{installationFee.toFixed(2)}</p>
+                                        <p className="text-blue-800 dark:text-blue-400">
+                                            Installation Fee{installationDeducts ? ' (deducted)' : ''}: {installationDeducts ? '-' : '+'}₱{installationFee.toFixed(2)}
+                                        </p>
                                     )}
                                     {hasInstallation && installationFee > 0 && (
                                         <p className="text-blue-900 dark:text-blue-300 font-semibold border-t border-blue-300 dark:border-blue-700 pt-1 mt-1">
@@ -772,7 +795,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         setSortConfig({ key, direction });
     };
 
-    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid'; installationFee?: number }, portalOptions?: { createPortalAccount?: boolean }) => {
+    const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid'; installationFee?: number; installationDeducts?: boolean }, portalOptions?: { createPortalAccount?: boolean }) => {
         setIsSubmitting(true);
         try {
             // Find existing customer by username (username is UNIQUE in the customers table)
@@ -977,7 +1000,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             subscriptionAmount = prorate.amount;
                         }
                         
-                        const installationFee = subscriptionData.installationFee || 0;
+                        const rawInstallFee = subscriptionData.installationFee || 0;
+                        const installationDeducts = subscriptionData.installationDeducts || false;
+                        // When deduction mode is on, store as negative so receipts show it as a reduction
+                        const installationFee = installationDeducts ? -rawInstallFee : rawInstallFee;
                         const totalInvoiceAmount = subscriptionAmount + installationFee;
                         
                         const invoiceData = {

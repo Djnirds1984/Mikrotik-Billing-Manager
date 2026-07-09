@@ -83,11 +83,11 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
                         </td>
                         <td className="p-2 border border-black text-right">{formatCurrency(sale.planPrice)}</td>
                     </tr>
-                    {sale.installationFee && sale.installationFee > 0 && (
+                    {sale.installationFee && sale.installationFee !== 0 && (
                         <tr>
                             <td className="p-2 border border-black">
-                                <p className="font-semibold">Installation Fee</p>
-                                <p className="text-xs text-gray-600">One-time installation charge</p>
+                                <p className="font-semibold">Installation Fee{sale.installationFee < 0 ? ' (Deduction)' : ''}</p>
+                                <p className="text-xs text-gray-600">{sale.installationFee < 0 ? 'Deducted from subscription' : 'One-time installation charge'}</p>
                             </td>
                             <td className="p-2 border border-black text-right">{formatCurrency(sale.installationFee)}</td>
                         </tr>

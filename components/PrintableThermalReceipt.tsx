@@ -74,9 +74,9 @@ export const PrintableThermalReceipt: React.FC<PrintableThermalReceiptProps> = (
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '35mm' }}>{sale.planName}</span>
                     <span style={{ flexShrink: 0 }}>{formatCurrency(sale.planPrice)}</span>
                 </div>
-                {sale.installationFee && sale.installationFee > 0 && (
+                {sale.installationFee && sale.installationFee !== 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1px' }}>
-                        <span>Installation Fee</span>
+                        <span>Installation{sale.installationFee < 0 ? ' (Deduct)' : ''}</span>
                         <span>{formatCurrency(sale.installationFee)}</span>
                     </div>
                 )}

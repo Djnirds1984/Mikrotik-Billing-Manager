@@ -249,7 +249,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
             const priceFormatted = formatCurrency(sale.planPrice);
             const totalFormatted = formatCurrency(sale.finalAmount);
             const discountFormatted = formatCurrency(sale.discountAmount);
-            const installFormatted = sale.installationFee && sale.installationFee > 0 ? formatCurrency(sale.installationFee) : null;
+            const installFormatted = sale.installationFee && sale.installationFee !== 0 ? formatCurrency(sale.installationFee) : null;
 
             const iframe = document.createElement('iframe');
             iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:58mm;height:0;border:none;';
@@ -297,7 +297,7 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
   <hr class="sep">
   <div style="margin-bottom:4px;font-size:10px">
     <div class="row"><span class="trunc" style="text-align:left">${(sale.planName || '').replace(/</g, '&lt;')}</span><span style="flex-shrink:0">${priceFormatted}</span></div>
-    ${installFormatted ? `<div class="row"><span>Installation Fee</span><span>${installFormatted}</span></div>` : ''}
+    ${installFormatted ? `<div class="row"><span>Installation${sale.installationFee < 0 ? ' (Deduct)' : ''}</span><span>${installFormatted}</span></div>` : ''}
     ${sale.discountAmount > 0 ? `<div class="row"><span>Discount</span><span>-${discountFormatted}</span></div>` : ''}
   </div>
   <hr class="sep">
@@ -672,7 +672,7 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                         <tr key={sale.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                             <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">{new Date(sale.date).toLocaleDateString()}</td>
                                             <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-200">{sale.clientName}</td>
-                                            <td className="px-4 py-3">{sale.planName}{sale.payment_method === 'invoice' && (<span className="ml-2 px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded font-medium">Invoice</span>)}{sale.installationFee && sale.installationFee > 0 && (<span className="ml-2 px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded font-medium">+Install</span>)}</td>
+                                            <td className="px-4 py-3">{sale.planName}{sale.payment_method === 'invoice' && (<span className="ml-2 px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded font-medium">Invoice</span>)}{sale.installationFee && sale.installationFee !== 0 && (<span className={`ml-2 px-2 py-1 text-xs rounded font-medium ${sale.installationFee < 0 ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}`}>{sale.installationFee < 0 ? '−Install' : '+Install'}</span>)}</td>
                                             <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{sale.routerName}</td>
                                             <td className="px-4 py-3 text-right font-mono text-sky-600 dark:text-sky-400">{formatCurrency(sale.planPrice)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-yellow-600 dark:text-yellow-400">{formatCurrency(sale.discountAmount)}</td>
