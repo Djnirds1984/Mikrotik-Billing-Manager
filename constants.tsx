@@ -315,3 +315,9 @@ export const PaperAirplaneIcon: React.FC<{ className?: string }> = ({ className 
     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12l16.5-7.5-5.25 15-4.5-6-6.75-1.5z" />
   </svg>
 );
+
+export const NetworkEquipmentIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-13.5-9a3 3 0 013-3h7.5a3 3 0 013 3v9m-13.5 0h13.5m-13.5 0a3 3 0 01-3-3v-9a3 3 0 013-3m13.5 0a3 3 0 013 3v9a3 3 0 01-3 3m0 0h-7.5" />
+  </svg>
+);

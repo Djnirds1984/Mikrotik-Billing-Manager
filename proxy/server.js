@@ -699,6 +699,16 @@ async function initDb() {
             }
         } catch (_) {}
 
+        // Add oltNapPortId to customers table for fiber network mapping
+        try {
+            const custCols2 = await db.all("PRAGMA table_info(customers)");
+            const custColNames2 = custCols2.map(c => c.name);
+            if (!custColNames2.includes('oltNapPortId')) {
+                await db.exec("ALTER TABLE customers ADD COLUMN oltNapPortId TEXT");
+                console.log('[Migration] \u2713 oltNapPortId column added to customers');
+            }
+        } catch (_) {}
+
         // Add custom invoice columns to client_invoices
         try {
             const invCols = await db.all("PRAGMA table_info(client_invoices)");
@@ -979,6 +989,14 @@ async function startServer() {
     hotspotSessionManager.startExpiryChecker(db, 30000);
     // Heartbeat checker every 2 minutes
     setInterval(() => hotspotSessionManager.checkEspDeviceHeartbeats(db, 120000), 120000);
+
+    // --- SNMP OLT Monitoring ---
+    try {
+        const snmpService = require('../services/snmpService');
+        snmpService.startPolling(db, 5 * 60 * 1000); // Poll every 5 minutes
+    } catch (e) {
+        console.warn('[SNMP] Failed to start SNMP monitoring:', e.message);
+    }
 
     // --- NodeMCU Compatibility Endpoints ---
     // These bridge the existing ESP firmware's API to the hotspot controller backend.
@@ -10686,6 +10704,306 @@ WantedBy=multi-user.target`;
     });
     app.put('/api/roles/:roleId/permissions', protect, async (req, res) => {
         await forward('PUT', `/api/roles/${req.params.roleId}/permissions`, req, res, req.body);
+    });
+
+    // --- Network Equipment (OLT/PON/Splitter/NAP) CRUD ---
+    const genId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // List all equipment
+    app.get('/api/network-equipment', protect, async (req, res) => {
+        try {
+            const rows = await db.all('SELECT * FROM network_equipment ORDER BY created_at DESC');
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Add equipment
+    app.post('/api/network-equipment', protect, async (req, res) => {
+        const { router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes } = req.body;
+        if (!name) return res.status(400).json({ message: 'Name is required' });
+        try {
+            const id = genId('olt');
+            await db.run(
+                `INSERT INTO network_equipment (id, router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+                [id, router_id || null, name, type || 'olt', brand || null, model || null, ip_address || null, snmp_community || 'public', snmp_port || 161, total_pon_ports || 0, status || 'active', notes || null]
+            );
+            const row = await db.get('SELECT * FROM network_equipment WHERE id = ?', [id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Update equipment
+    app.put('/api/network-equipment/:id', protect, async (req, res) => {
+        const { router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes } = req.body;
+        try {
+            await db.run(
+                `UPDATE network_equipment SET router_id=?, name=?, type=?, brand=?, model=?, ip_address=?, snmp_community=?, snmp_port=?, total_pon_ports=?, status=?, notes=?, updated_at=datetime('now') WHERE id=?`,
+                [router_id || null, name, type || 'olt', brand || null, model || null, ip_address || null, snmp_community || 'public', snmp_port || 161, total_pon_ports || 0, status || 'active', notes || null, req.params.id]
+            );
+            const row = await db.get('SELECT * FROM network_equipment WHERE id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete equipment
+    app.delete('/api/network-equipment/:id', protect, async (req, res) => {
+        try {
+            // Cascade: delete PON ports, then splitters, NAPs, NAP ports
+            const ponPorts = await db.all('SELECT id FROM olt_pon_ports WHERE equipment_id = ?', [req.params.id]);
+            for (const pon of ponPorts) {
+                const splitters = await db.all('SELECT id FROM olt_splitters WHERE pon_port_id = ?', [pon.id]);
+                for (const spl of splitters) {
+                    const naps = await db.all('SELECT id FROM olt_naps WHERE splitter_id = ?', [spl.id]);
+                    for (const nap of naps) {
+                        await db.run('DELETE FROM olt_nap_ports WHERE nap_id = ?', [nap.id]);
+                    }
+                    await db.run('DELETE FROM olt_naps WHERE splitter_id = ?', [spl.id]);
+                }
+                await db.run('DELETE FROM olt_splitters WHERE pon_port_id = ?', [pon.id]);
+            }
+            await db.run('DELETE FROM olt_pon_ports WHERE equipment_id = ?', [req.params.id]);
+            await db.run('DELETE FROM network_equipment WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Equipment and related data deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // List PON ports for an OLT
+    app.get('/api/network-equipment/:id/pon-ports', protect, async (req, res) => {
+        try {
+            const rows = await db.all('SELECT * FROM olt_pon_ports WHERE equipment_id = ? ORDER BY port_index', [req.params.id]);
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Add PON port
+    app.post('/api/network-equipment/:id/pon-ports', protect, async (req, res) => {
+        const { port_index, port_name, splitter_id, status, total_bandwidth_mbps, notes } = req.body;
+        if (!port_index) return res.status(400).json({ message: 'port_index is required' });
+        try {
+            const id = genId('pon');
+            await db.run(
+                `INSERT INTO olt_pon_ports (id, equipment_id, port_index, port_name, splitter_id, status, total_bandwidth_mbps, notes) VALUES (?,?,?,?,?,?,?,?)`,
+                [id, req.params.id, port_index, port_name || null, splitter_id || null, status || 'active', total_bandwidth_mbps || null, notes || null]
+            );
+            const row = await db.get('SELECT * FROM olt_pon_ports WHERE id = ?', [id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Update PON port
+    app.put('/api/olt-pon-ports/:id', protect, async (req, res) => {
+        const { port_index, port_name, splitter_id, status, total_bandwidth_mbps, used_ports, notes } = req.body;
+        try {
+            await db.run(
+                `UPDATE olt_pon_ports SET port_index=?, port_name=?, splitter_id=?, status=?, total_bandwidth_mbps=?, used_ports=?, notes=? WHERE id=?`,
+                [port_index, port_name || null, splitter_id || null, status || 'active', total_bandwidth_mbps || null, used_ports || 0, notes || null, req.params.id]
+            );
+            const row = await db.get('SELECT * FROM olt_pon_ports WHERE id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete PON port
+    app.delete('/api/olt-pon-ports/:id', protect, async (req, res) => {
+        try {
+            const splitters = await db.all('SELECT id FROM olt_splitters WHERE pon_port_id = ?', [req.params.id]);
+            for (const spl of splitters) {
+                const naps = await db.all('SELECT id FROM olt_naps WHERE splitter_id = ?', [spl.id]);
+                for (const nap of naps) {
+                    await db.run('DELETE FROM olt_nap_ports WHERE nap_id = ?', [nap.id]);
+                }
+                await db.run('DELETE FROM olt_naps WHERE splitter_id = ?', [spl.id]);
+            }
+            await db.run('DELETE FROM olt_splitters WHERE pon_port_id = ?', [req.params.id]);
+            await db.run('DELETE FROM olt_pon_ports WHERE id = ?', [req.params.id]);
+            res.json({ message: 'PON port and related data deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // List all splitters
+    app.get('/api/olt-splitters', protect, async (req, res) => {
+        try {
+            const rows = await db.all('SELECT s.*, p.equipment_id, p.port_index FROM olt_splitters s LEFT JOIN olt_pon_ports p ON s.pon_port_id = p.id ORDER BY s.created_at DESC');
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Add splitter
+    app.post('/api/olt-splitters', protect, async (req, res) => {
+        const { pon_port_id, name, split_ratio, location, max_ports, installed_ports, status, notes } = req.body;
+        if (!name) return res.status(400).json({ message: 'Name is required' });
+        try {
+            const id = genId('split');
+            const ratio = split_ratio || '1:8';
+            const computedMax = max_ports || parseInt(ratio.split(':')[1]) || 8;
+            await db.run(
+                `INSERT INTO olt_splitters (id, pon_port_id, name, split_ratio, location, max_ports, installed_ports, status, notes) VALUES (?,?,?,?,?,?,?,?,?)`,
+                [id, pon_port_id || null, name, ratio, location || null, computedMax, installed_ports || 0, status || 'active', notes || null]
+            );
+            const row = await db.get('SELECT * FROM olt_splitters WHERE id = ?', [id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Update splitter
+    app.put('/api/olt-splitters/:id', protect, async (req, res) => {
+        const { pon_port_id, name, split_ratio, location, max_ports, installed_ports, status, notes } = req.body;
+        try {
+            await db.run(
+                `UPDATE olt_splitters SET pon_port_id=?, name=?, split_ratio=?, location=?, max_ports=?, installed_ports=?, status=?, notes=? WHERE id=?`,
+                [pon_port_id || null, name, split_ratio || '1:8', location || null, max_ports || 8, installed_ports || 0, status || 'active', notes || null, req.params.id]
+            );
+            const row = await db.get('SELECT * FROM olt_splitters WHERE id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete splitter
+    app.delete('/api/olt-splitters/:id', protect, async (req, res) => {
+        try {
+            const naps = await db.all('SELECT id FROM olt_naps WHERE splitter_id = ?', [req.params.id]);
+            for (const nap of naps) {
+                await db.run('DELETE FROM olt_nap_ports WHERE nap_id = ?', [nap.id]);
+            }
+            await db.run('DELETE FROM olt_naps WHERE splitter_id = ?', [req.params.id]);
+            await db.run('DELETE FROM olt_splitters WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Splitter and related data deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // List all NAPs
+    app.get('/api/olt-naps', protect, async (req, res) => {
+        try {
+            const rows = await db.all('SELECT n.*, s.name as splitter_name, s.pon_port_id FROM olt_naps n LEFT JOIN olt_splitters s ON n.splitter_id = s.id ORDER BY n.created_at DESC');
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Add NAP
+    app.post('/api/olt-naps', protect, async (req, res) => {
+        const { splitter_id, name, location, gps, total_ports, status, notes } = req.body;
+        if (!name) return res.status(400).json({ message: 'Name is required' });
+        try {
+            const id = genId('nap');
+            const ports = total_ports || 8;
+            await db.run(
+                `INSERT INTO olt_naps (id, splitter_id, name, location, gps, total_ports, used_ports, status, notes) VALUES (?,?,?,?,?,?,0,?,?)`,
+                [id, splitter_id || null, name, location || null, gps || null, ports, status || 'active', notes || null]
+            );
+            // Auto-create NAP port entries
+            for (let i = 1; i <= ports; i++) {
+                await db.run(
+                    'INSERT INTO olt_nap_ports (id, nap_id, port_number, status) VALUES (?,?,?,?)',
+                    [genId('napport'), id, i, 'available']
+                );
+            }
+            const row = await db.get('SELECT * FROM olt_naps WHERE id = ?', [id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Update NAP
+    app.put('/api/olt-naps/:id', protect, async (req, res) => {
+        const { splitter_id, name, location, gps, total_ports, used_ports, status, notes } = req.body;
+        try {
+            await db.run(
+                `UPDATE olt_naps SET splitter_id=?, name=?, location=?, gps=?, total_ports=?, used_ports=?, status=?, notes=? WHERE id=?`,
+                [splitter_id || null, name, location || null, gps || null, total_ports || 8, used_ports || 0, status || 'active', notes || null, req.params.id]
+            );
+            const row = await db.get('SELECT * FROM olt_naps WHERE id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete NAP
+    app.delete('/api/olt-naps/:id', protect, async (req, res) => {
+        try {
+            await db.run('DELETE FROM olt_nap_ports WHERE nap_id = ?', [req.params.id]);
+            await db.run('DELETE FROM olt_naps WHERE id = ?', [req.params.id]);
+            res.json({ message: 'NAP and ports deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // List NAP ports
+    app.get('/api/olt-nap-ports', protect, async (req, res) => {
+        const { nap_id } = req.query;
+        try {
+            let rows;
+            if (nap_id) {
+                rows = await db.all('SELECT * FROM olt_nap_ports WHERE nap_id = ? ORDER BY port_number', [nap_id]);
+            } else {
+                rows = await db.all('SELECT * FROM olt_nap_ports ORDER BY nap_id, port_number');
+            }
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Update NAP port (assign client, change status)
+    app.put('/api/olt-nap-ports/:id', protect, async (req, res) => {
+        const { status, client_id, onu_serial, onu_signal_dbm, notes } = req.body;
+        try {
+            await db.run(
+                `UPDATE olt_nap_ports SET status=?, client_id=?, onu_serial=?, onu_signal_dbm=?, notes=?, last_seen=datetime('now') WHERE id=?`,
+                [status || 'available', client_id || null, onu_serial || null, onu_signal_dbm || null, notes || null, req.params.id]
+            );
+            // Update NAP used_ports count
+            const port = await db.get('SELECT nap_id FROM olt_nap_ports WHERE id = ?', [req.params.id]);
+            if (port) {
+                const occupied = await db.get('SELECT COUNT(*) as cnt FROM olt_nap_ports WHERE nap_id = ? AND status = ?', [port.nap_id, 'occupied']);
+                await db.run('UPDATE olt_naps SET used_ports = ? WHERE id = ?', [occupied?.cnt || 0, port.nap_id]);
+            }
+            const row = await db.get('SELECT * FROM olt_nap_ports WHERE id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Network Topology — full tree as nested JSON
+    app.get('/api/network-topology', protect, async (req, res) => {
+        try {
+            const equipment = await db.all('SELECT * FROM network_equipment ORDER BY name');
+            const result = [];
+
+            for (const eq of equipment) {
+                const ponPorts = await db.all('SELECT * FROM olt_pon_ports WHERE equipment_id = ? ORDER BY port_index', [eq.id]);
+                const ponData = [];
+
+                for (const pon of ponPorts) {
+                    let splitterData = null;
+                    if (pon.splitter_id) {
+                        const splitter = await db.get('SELECT * FROM olt_splitters WHERE id = ?', [pon.splitter_id]);
+                        if (splitter) {
+                            const naps = await db.all('SELECT * FROM olt_naps WHERE splitter_id = ? ORDER BY name', [splitter.id]);
+                            const napData = [];
+
+                            for (const nap of naps) {
+                                const ports = await db.all('SELECT * FROM olt_nap_ports WHERE nap_id = ? ORDER BY port_number', [nap.id]);
+                                napData.push({ ...nap, ports });
+                            }
+
+                            splitterData = { ...splitter, naps: napData };
+                        }
+                    }
+                    ponData.push({ ...pon, splitter: splitterData });
+                }
+
+                result.push({ ...eq, ponPorts: ponData });
+            }
+
+            res.json({ equipment: result });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // SNMP Monitor readings
+    app.get('/api/network-equipment/:id/monitor', protect, async (req, res) => {
+        try {
+            const { hours } = req.query;
+            const h = parseInt(hours) || 24;
+            const rows = await db.all(
+                `SELECT * FROM olt_monitor_readings WHERE equipment_id = ? AND recorded_at >= datetime('now', ?) ORDER BY recorded_at DESC LIMIT 500`,
+                [req.params.id, `-${h} hours`]
+            );
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
     // --- LOCALE FILES ROUTE (must come before static files) ---

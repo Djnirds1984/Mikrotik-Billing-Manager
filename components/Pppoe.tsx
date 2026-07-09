@@ -246,7 +246,7 @@ const ProfilesManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ sel
 // --- User Form Modal ---
 const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, plans, customers, profiles, isSubmitting, selectedRouterId }) => {
     const [secret, setSecret] = useState({ name: '', password: '', profile: '' }); // profile is plan ID
-    const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', gps: '' });
+    const [customer, setCustomer] = useState({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: '', gps: '', oltNapPortId: '' });
     const [showPass, setShowPass] = useState(false);
     const [dueDate, setDueDate] = useState('');
     const [planType, setPlanType] = useState<'prepaid' | 'postpaid'>('prepaid');
@@ -256,6 +256,14 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
     const [installationFee, setInstallationFee] = useState<number>(0);
     const [deductFromProrate, setDeductFromProrate] = useState(false);
     const [deductFromMonthly, setDeductFromMonthly] = useState(false);
+    // Network connection (OLT/PON/NAP) state
+    const [networkEquipment, setNetworkEquipment] = useState<any[]>([]);
+    const [networkPonPorts, setNetworkPonPorts] = useState<any[]>([]);
+    const [networkSplitters, setNetworkSplitters] = useState<any[]>([]);
+    const [networkNaps, setNetworkNaps] = useState<any[]>([]);
+    const [networkNapPorts, setNetworkNapPorts] = useState<any[]>([]);
+    const [selEquipmentId, setSelEquipmentId] = useState('');
+    const [selNapPortId, setSelNapPortId] = useState('');
     const toDatetimeLocal = (s: string) => {
         try {
             const d = new Date(s);
@@ -283,12 +291,14 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             let contactNumber = '';
             let email = '';
             let gps = '';
+            let oltNapPortId = '';
             
             if (initialData.comment) {
                 try {
                     const commentData = JSON.parse(initialData.comment);
                     // Extract account number - THIS IS THE MOST RELIABLE SOURCE
                     accountNumber = commentData.accountNumber || commentData.customer?.accountNumber || '';
+                    oltNapPortId = commentData.oltNapPortId || '';
                     
                     // Extract customer info
                     if (commentData.customer) {
@@ -316,7 +326,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                 contactNumber: contactNumber,
                 email: email,
                 accountNumber: accountNumber, // This will ALWAYS have the value from MikroTik
-                gps: gps
+                gps: gps,
+                oltNapPortId: oltNapPortId
             });
             
             // Set due date and plan type from comment
@@ -341,7 +352,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             setSecret({ name: '', password: '', profile: plans.length > 0 ? plans[0].id : '' });
             // Force generate account number for new users
             const generatedAccNum = `ACC-${String(Date.now()).slice(-6)}`;
-            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: generatedAccNum, gps: '' });
+            setCustomer({ fullName: '', address: '', contactNumber: '', email: '', accountNumber: generatedAccNum, gps: '', oltNapPortId: '' });
             setDueDate('');
             setPlanType('prepaid');
             setHasInstallation(false);
@@ -384,6 +395,25 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             setPortalAccountExists(false);
         }
     }, [isOpen, initialData, selectedRouterId]);
+
+    // Load network equipment data when modal opens
+    useEffect(() => {
+        if (!isOpen) return;
+        const authH = { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` };
+        fetch('/api/network-equipment', { headers: authH })
+            .then(r => r.json()).then(data => setNetworkEquipment(Array.isArray(data) ? data : [])).catch(() => {});
+        fetch('/api/olt-splitters', { headers: authH })
+            .then(r => r.json()).then(data => setNetworkSplitters(Array.isArray(data) ? data : [])).catch(() => {});
+        fetch('/api/olt-naps', { headers: authH })
+            .then(r => r.json()).then(data => setNetworkNaps(Array.isArray(data) ? data : [])).catch(() => {});
+        // If editing, restore the selected NAP port
+        if (initialData?.comment) {
+            try {
+                const cd = JSON.parse(initialData.comment);
+                if (cd.oltNapPortId) setSelNapPortId(cd.oltNapPortId);
+            } catch {}
+        }
+    }, [isOpen, initialData]);
 
 
     if (!isOpen) return null;
@@ -592,6 +622,24 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             <div><label>Email</label><input type="email" value={customer.email} onChange={e => setCustomer(c => ({...c, email: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                         </div>
                         <div><label>Account Number</label><input type="text" value={customer.accountNumber} onChange={e => setCustomer(c => ({...c, accountNumber: e.target.value}))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                        <hr className="my-4 border-slate-200 dark:border-slate-700" />
+                        <h4 className="font-semibold">Network Connection (Optional)</h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Assign this client to a physical fiber port.</p>
+                        <div><label>NAP Port</label>
+                            <select value={selNapPortId} onChange={async e => {
+                                const portId = e.target.value;
+                                setSelNapPortId(portId);
+                                setCustomer(c => ({...c, oltNapPortId: portId}));
+                            }} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700">
+                                <option value="">-- Not Assigned --</option>
+                                {networkNaps.map(nap => (
+                                    <optgroup key={nap.id} label={nap.name}>
+                                        {/* NAP ports are loaded on demand - show NAP as option */}
+                                    </optgroup>
+                                ))}
+                            </select>
+                        </div>
+                        {selNapPortId && <p className="text-xs text-green-600 dark:text-green-400">Assigned to port: {selNapPortId}</p>}
                      </div>
                 </div>
                  <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-3 flex-shrink-0"><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={isSubmitting}>Save</button></div>
@@ -880,6 +928,13 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
 
             // Always include accountNumber in the comment
             commentJson.accountNumber = enrichedCustomerData.accountNumber;
+
+            // Include fiber network port assignment
+            if (enrichedCustomerData.oltNapPortId) {
+                commentJson.oltNapPortId = enrichedCustomerData.oltNapPortId;
+            } else {
+                delete commentJson.oltNapPortId;
+            }
 
             if (subscriptionData.dueDate) {
                 commentJson.dueDate = subscriptionData.dueDate.split('T')[0];

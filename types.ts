@@ -35,7 +35,8 @@ export type View =
   | 'manual_payments'
   | 'ntc-compliance'
   | 'store_settings'
-  | 'soa';
+  | 'soa'
+  | 'network_equipment';
 
 export interface Notification {
   id: string;
@@ -632,6 +633,7 @@ export interface Customer {
     planName?: string;
     planType?: string;
     password?: string;
+    oltNapPortId?: string; // fiber network port assignment
 }
 
 export interface WanRoute {
@@ -1001,4 +1003,113 @@ export interface ClientInvoice {
   laborCost?: number;
   partsCost?: number;
   invoiceType?: InvoiceType;
+}
+
+// --- Network Equipment (OLT/PON/Splitter/NAP) Types ---
+
+export interface NetworkEquipment {
+    id: string;
+    router_id?: string;
+    name: string;
+    type: 'olt' | 'switch' | 'router';
+    brand?: string;
+    model?: string;
+    ip_address?: string;
+    snmp_community?: string;
+    snmp_port?: number;
+    total_pon_ports: number;
+    status: 'active' | 'inactive' | 'maintenance';
+    notes?: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface OltPonPort {
+    id: string;
+    equipment_id: string;
+    port_index: string;
+    port_name?: string;
+    splitter_id?: string;
+    status: 'active' | 'inactive' | 'maintenance';
+    total_bandwidth_mbps?: number;
+    used_ports: number;
+    notes?: string;
+    created_at?: string;
+}
+
+export interface OltSplitter {
+    id: string;
+    pon_port_id?: string;
+    name: string;
+    split_ratio: string;
+    location?: string;
+    max_ports: number;
+    installed_ports: number;
+    status: 'active' | 'inactive' | 'maintenance';
+    notes?: string;
+    created_at?: string;
+    equipment_id?: string;
+    port_index?: string;
+}
+
+export interface OltNap {
+    id: string;
+    splitter_id?: string;
+    name: string;
+    location?: string;
+    gps?: string;
+    total_ports: number;
+    used_ports: number;
+    status: 'active' | 'inactive' | 'maintenance';
+    notes?: string;
+    created_at?: string;
+    splitter_name?: string;
+    pon_port_id?: string;
+}
+
+export interface OltNapPort {
+    id: string;
+    nap_id: string;
+    port_number: number;
+    status: 'available' | 'occupied' | 'faulty';
+    client_id?: string; // JSON: {type, routerId, username|macAddress}
+    onu_serial?: string;
+    onu_signal_dbm?: number;
+    last_seen?: string;
+    notes?: string;
+}
+
+export interface OltMonitorReading {
+    id: number;
+    equipment_id: string;
+    metric_type: string;
+    metric_key?: string;
+    metric_value?: number;
+    unit?: string;
+    recorded_at: string;
+}
+
+// Topology tree node types
+export interface TopologyNapPort {
+    portNumber: number;
+    status: string;
+    client?: { name?: string; type?: string; username?: string } | null;
+    onu_serial?: string;
+    onu_signal_dbm?: number;
+}
+
+export interface TopologyNap extends OltNap {
+    ports: TopologyNapPort[];
+}
+
+export interface TopologySplitter extends OltSplitter {
+    naps: TopologyNap[];
+}
+
+export interface TopologyPonPort extends OltPonPort {
+    splitter: TopologySplitter | null;
+}
+
+export interface TopologyEquipment extends NetworkEquipment {
+    ponPorts: TopologyPonPort[];
 }
