@@ -36,7 +36,8 @@ export type View =
   | 'ntc-compliance'
   | 'store_settings'
   | 'soa'
-  | 'network_equipment';
+  | 'network_equipment'
+  | 'database';
 
 export interface Notification {
   id: string;

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon, CloudIcon, ChatBubbleLeftRightIcon, NetworkEquipmentIcon } from '../constants.tsx';
+import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon, CloudIcon, ChatBubbleLeftRightIcon, NetworkEquipmentIcon, CircleStackIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { View, CompanySettings, LicenseStatus } from '../types.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -107,6 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'company', label: t('sidebar.company'), icon: <BuildingOffice2Icon className="w-6 h-6" /> },
     { id: 'ntc-compliance', label: 'NTC Compliance', icon: <ShieldCheckIcon className="w-6 h-6" /> },
     { id: 'system', label: t('sidebar.system_settings'), icon: <CogIcon className="w-6 h-6" /> },
+    { id: 'database', label: 'Database', icon: <CircleStackIcon className="w-6 h-6" /> },
     { id: 'panel_roles', label: t('sidebar.panel_roles'), icon: <KeyIcon className="w-6 h-6" /> },
     { id: 'client_portal_users', label: t('sidebar.client_portal_users'), icon: <ShieldCheckIcon className="w-6 h-6" /> },
     { id: 'repair_tickets', label: t('sidebar.repair_tickets') || 'Repair Tickets', icon: <CogIcon className="w-6 h-6" /> },

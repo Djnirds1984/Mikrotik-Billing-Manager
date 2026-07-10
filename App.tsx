@@ -65,6 +65,7 @@ const ExpiredPortal = React.lazy(() => import('./components/ExpiredPortal.tsx').
 const StoreSettingsPage = React.lazy(() => import('./components/StoreSettings.tsx').then(m => ({ default: m.StoreSettingsPage })));
 const NtcCompliance = React.lazy(() => import('./components/NtcCompliance.tsx').then(m => ({ default: m.NtcCompliance })));
 const NetworkEquipmentManager = React.lazy(() => import('./components/NetworkEquipmentManager.tsx').then(m => ({ default: m.NetworkEquipmentManager })));
+const DatabaseSettings = React.lazy(() => import('./components/DatabaseSettings.tsx').then(m => ({ default: m.DatabaseSettings })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -312,6 +313,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <NtcCompliance />;
                   case 'network_equipment':
                     return <NetworkEquipmentManager />;
+                  case 'database':
+                    return <DatabaseSettings />;
                   case 'license':
                       return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
                   case 'super_admin':
