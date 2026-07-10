@@ -1,4 +1,4 @@
-// Build script that ensures adequate heap for Vite production builds
+// Build script — lightweight production build
 import { spawn } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -14,7 +14,7 @@ const child = spawn(process.execPath, viteArgs, {
   stdio: 'inherit',
   env: {
     ...process.env,
-    NODE_OPTIONS: `--max-old-space-size=4096 ${process.env.NODE_OPTIONS || ''}`.trim(),
+    NODE_OPTIONS: `--max-old-space-size=2048 ${process.env.NODE_OPTIONS || ''}`.trim(),
   },
 });
 

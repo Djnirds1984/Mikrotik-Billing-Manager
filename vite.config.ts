@@ -52,11 +52,13 @@ export default defineConfig(({ mode, command }) => {
       }
     },
     build: {
+      target: 'es2020',
       minify: true,
+      cssMinify: true,
       sourcemap: false,
       cssCodeSplit: true,
       assetsDir: 'assets',
-      chunkSizeWarningLimit: 1000,
+      chunkSizeWarningLimit: 500,
       rollupOptions: {
         output: {
           entryFileNames: 'assets/[name].[hash].js',
@@ -64,7 +66,8 @@ export default defineConfig(({ mode, command }) => {
           assetFileNames: 'assets/[name].[hash][extname]',
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
-            'vendor-charts': ['chart.js', 'react-chartjs-2', 'recharts'],
+            'vendor-charts': ['chart.js', 'react-chartjs-2'],
+            'vendor-recharts': ['recharts'],
             'vendor-maps': ['leaflet'],
           }
         }
