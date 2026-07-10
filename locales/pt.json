@@ -47,7 +47,15 @@
         "panel_roles": "Gerenciamento de Funções do Painel",
         "mikrotik_files": "Editor de Arquivos Mikrotik",
         "license": "Licenciamento de Aplicativo",
-        "super_admin": "Super Admin: Gerador de Licença"
+        "super_admin": "Super Admin: Gerador de Licença",
+        "network_equipment": "Gerenciamento de Equipamentos de Rede",
+        "captive_chat": "Administração de Chat Cativo",
+        "facebook-clients": "Clientes do Facebook",
+        "soa": "Extrato da Conta",
+        "accounting": "Contabilidade",
+        "ntc-compliance": "Conformidade NTC",
+        "manual_payments": "Pagamentos Manuais",
+        "store_settings": "Configurações da Loja"
     },
     "topbar": {
         "add_router_title": "Vá para a página de Roteadores para adicionar um novo roteador",

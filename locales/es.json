@@ -51,7 +51,15 @@
         "license": "Licencia de Aplicación",
         "super_admin": "Super Admin: Generador de Licencias",
         "notifications": "Notificaciones del Sistema",
-        "application_form": "Formulario de Aplicación"
+        "application_form": "Formulario de Aplicación",
+        "network_equipment": "Gestión de Equipos de Red",
+        "captive_chat": "Administración de Chat Cautivo",
+        "facebook-clients": "Clientes de Facebook",
+        "soa": "Estado de Cuenta",
+        "accounting": "Contabilidad",
+        "ntc-compliance": "Cumplimiento NTC",
+        "manual_payments": "Pagos Manuales",
+        "store_settings": "Configuración de Tienda"
     },
     "topbar": {
         "add_router_title": "Vaya a la página de Routers para agregar un nuevo router",

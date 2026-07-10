@@ -49,7 +49,15 @@
         "mikrotik_files": "Editor ng File ng Mikrotik",
         "license": "Paglilisensya ng Application",
         "super_admin": "Super Admin: Tagabuo ng Lisensya",
-        "application_form": "Application Form"
+        "application_form": "Application Form",
+        "network_equipment": "Tagapamahala ng Kagamitan sa Network",
+        "captive_chat": "Captive Chat Admin",
+        "facebook-clients": "Mga Kliyente sa Facebook",
+        "soa": "Pahayag ng Account",
+        "accounting": "Accounting",
+        "ntc-compliance": "NTC Compliance",
+        "manual_payments": "Mga Manual na Pagbabayad",
+        "store_settings": "Mga Setting ng Store"
     },
     "topbar": {
         "add_router_title": "Pumunta sa pahina ng Mga Router para magdagdag ng bagong router",

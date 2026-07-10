@@ -55,7 +55,15 @@
         "license": "Application Licensing",
         "super_admin": "Super Admin: License Generator",
         "notifications": "System Notifications",
-        "application_form": "Application Form"
+        "application_form": "Application Form",
+        "network_equipment": "Network Equipment Manager",
+        "captive_chat": "Captive Chat Admin",
+        "facebook-clients": "Facebook Clients",
+        "soa": "Statement of Account",
+        "accounting": "Accounting",
+        "ntc-compliance": "NTC Compliance",
+        "manual_payments": "Manual Payments",
+        "store_settings": "Store Settings"
     },
     "topbar": {
         "add_router_title": "Go to Routers page to add a new router",
