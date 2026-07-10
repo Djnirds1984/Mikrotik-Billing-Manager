@@ -3405,6 +3405,32 @@ async function startServer() {
         }
     });
 
+    // --- Landing Page HTML Editor API ---
+    const landingPageHtmlPath = path.join(__dirname, '..', 'public', 'landing-page.html');
+    app.get('/api/landing-page-html', protect, (req, res) => {
+        try {
+            if (!fs.existsSync(landingPageHtmlPath)) {
+                return res.json({ html: '' });
+            }
+            const html = fs.readFileSync(landingPageHtmlPath, 'utf-8');
+            res.json({ html });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+    app.put('/api/landing-page-html', protect, express.json({ limit: '5mb' }), (req, res) => {
+        try {
+            const { html } = req.body;
+            if (typeof html !== 'string') {
+                return res.status(400).json({ message: 'Invalid HTML content.' });
+            }
+            fs.writeFileSync(landingPageHtmlPath, html, 'utf-8');
+            res.json({ message: 'Landing page HTML saved successfully.' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     // Public PayMongo config — exposes only safe fields needed by Client Portal UI
     app.get('/api/public/paymongo-config', async (req, res) => {
         try {

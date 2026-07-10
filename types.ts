@@ -547,7 +547,9 @@ export interface LandingPageConfig {
     navClientPortalLabel?: string;
     templateId?: string;
     templateName?: string;
+    themePreset?: 'ocean' | 'sunset' | 'forest' | 'cosmic';
     theme?: {
+        primary300?: string;
         primary500?: string;
         primary600?: string;
         primary700?: string;

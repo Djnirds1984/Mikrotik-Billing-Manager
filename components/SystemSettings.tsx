@@ -1376,6 +1376,45 @@ const GlobeIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<React.SetStateAction<PanelSettings>> }> = ({ settings, setSettings }) => {
     const cfg = settings.landingPageConfig || {};
+    const [htmlContent, setHtmlContent] = useState<string>('');
+    const [htmlLoading, setHtmlLoading] = useState(false);
+    const [htmlSaving, setHtmlSaving] = useState(false);
+    const [htmlStatus, setHtmlStatus] = useState<string>('');
+
+    const loadHtml = async () => {
+        setHtmlLoading(true);
+        setHtmlStatus('');
+        try {
+            const res = await fetch('/api/landing-page-html', { headers: { ...getAuthHeader() } });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message || 'Failed to load.');
+            setHtmlContent(data.html || '');
+            setHtmlStatus('Loaded successfully.');
+        } catch (e) {
+            setHtmlStatus((e as Error).message);
+        } finally {
+            setHtmlLoading(false);
+        }
+    };
+
+    const saveHtml = async () => {
+        setHtmlSaving(true);
+        setHtmlStatus('');
+        try {
+            const res = await fetch('/api/landing-page-html', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+                body: JSON.stringify({ html: htmlContent })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message || 'Failed to save.');
+            setHtmlStatus('Landing page saved successfully!');
+        } catch (e) {
+            setHtmlStatus((e as Error).message);
+        } finally {
+            setHtmlSaving(false);
+        }
+    };
     const templates = [
         {
             id: 'classic',
@@ -1548,6 +1587,49 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
 
     return (
         <div className="space-y-8">
+            <SettingsSection title="Landing Page Theme">
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Choose a color theme for your landing page. Each theme includes light &amp; dark mode with animated buttons.</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[
+                        { id: 'ocean', name: 'Ocean', emoji: '\ud83c\udf0a', colors: ['#3b82f6','#2563eb','#60a5fa','#1d4ed8'], bg: 'from-blue-50 to-blue-200', bgDark: 'from-blue-900 to-slate-900' },
+                        { id: 'sunset', name: 'Sunset', emoji: '\ud83c\udf05', colors: ['#f97316','#ea580c','#fb923c','#c2410c'], bg: 'from-orange-50 to-orange-200', bgDark: 'from-orange-900 to-stone-900' },
+                        { id: 'forest', name: 'Forest', emoji: '\ud83c\udf32', colors: ['#10b981','#059669','#34d399','#047857'], bg: 'from-emerald-50 to-emerald-200', bgDark: 'from-emerald-900 to-green-950' },
+                        { id: 'cosmic', name: 'Cosmic', emoji: '\ud83c\udf0c', colors: ['#a855f7','#9333ea','#c084fc','#7e22ce'], bg: 'from-purple-50 to-purple-200', bgDark: 'from-purple-950 to-indigo-950' },
+                    ].map(theme => {
+                        const isSelected = (cfg.themePreset || 'ocean') === theme.id;
+                        return (
+                            <button
+                                key={theme.id}
+                                onClick={() => updateCfg('themePreset', theme.id)}
+                                className={`relative rounded-2xl p-4 text-left transition-all duration-300 hover:scale-[1.03] hover:shadow-lg border-2 ${
+                                    isSelected
+                                        ? 'border-slate-900 dark:border-white shadow-lg scale-[1.02]'
+                                        : 'border-transparent hover:border-slate-300 dark:hover:border-slate-600'
+                                }`}
+                            >
+                                {/* Gradient preview bar */}
+                                <div className={`h-16 rounded-xl bg-gradient-to-br ${theme.bg} dark:${theme.bgDark} mb-3 flex items-end justify-between px-3 pb-2`}>
+                                    <div className="flex gap-1">
+                                        {theme.colors.slice(0,3).map((c, i) => (
+                                            <div key={i} className="w-4 h-4 rounded-full border border-white/30" style={{ background: c }} />
+                                        ))}
+                                    </div>
+                                    <div className="w-12 h-5 rounded-md" style={{ background: theme.colors[0] }}></div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg">{theme.emoji}</span>
+                                    <span className="font-semibold text-sm text-slate-800 dark:text-slate-200">{theme.name}</span>
+                                </div>
+                                {/* Selected indicator */}
+                                {isSelected && (
+                                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 grid place-content-center text-xs font-bold">&#10003;</div>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </SettingsSection>
+
             <SettingsSection title="Template & Theme">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
@@ -1768,6 +1850,49 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
                             </div>
                         )}
                     </div>
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="HTML Editor">
+                <div className="space-y-4">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                        Edit the landing page HTML directly. This is the standalone <code className="px-1 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-xs">public/landing-page.html</code> file served at <code className="px-1 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-xs">/</code>.
+                    </p>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={loadHtml}
+                            disabled={htmlLoading}
+                            className="px-4 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-600 disabled:opacity-50"
+                        >
+                            {htmlLoading ? 'Loading...' : 'Load HTML'}
+                        </button>
+                        <button
+                            onClick={saveHtml}
+                            disabled={htmlSaving || !htmlContent}
+                            className="px-4 py-2 bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white rounded-md disabled:opacity-50"
+                        >
+                            {htmlSaving ? 'Saving...' : 'Save HTML'}
+                        </button>
+                        <a
+                            href="/landing-page.html"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm hover:bg-slate-50 dark:hover:bg-slate-700"
+                        >
+                            Preview
+                        </a>
+                        {htmlStatus && (
+                            <span className="text-sm text-green-600 dark:text-green-400">{htmlStatus}</span>
+                        )}
+                    </div>
+                    <textarea
+                        value={htmlContent}
+                        onChange={(e) => setHtmlContent(e.target.value)}
+                        placeholder="Click 'Load HTML' to edit the landing page..."
+                        spellCheck={false}
+                        className="w-full h-[500px] font-mono text-xs leading-relaxed p-4 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md text-slate-900 dark:text-slate-100 resize-y focus:outline-none focus:ring-2 focus:ring-[--color-primary-500]"
+                        style={{ tabSize: 2 }}
+                    />
                 </div>
             </SettingsSection>
         </div>
