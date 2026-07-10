@@ -406,6 +406,8 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             .then(r => r.json()).then(data => setNetworkSplitters(Array.isArray(data) ? data : [])).catch(() => {});
         fetch('/api/olt-naps', { headers: authH })
             .then(r => r.json()).then(data => setNetworkNaps(Array.isArray(data) ? data : [])).catch(() => {});
+        fetch('/api/olt-nap-ports', { headers: authH })
+            .then(r => r.json()).then(data => setNetworkNapPorts(Array.isArray(data) ? data : [])).catch(() => {});
         // If editing, restore the selected NAP port
         if (initialData?.comment) {
             try {
@@ -632,11 +634,19 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                                 setCustomer(c => ({...c, oltNapPortId: portId}));
                             }} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700">
                                 <option value="">-- Not Assigned --</option>
-                                {networkNaps.map(nap => (
-                                    <optgroup key={nap.id} label={nap.name}>
-                                        {/* NAP ports are loaded on demand - show NAP as option */}
-                                    </optgroup>
-                                ))}
+                                {networkNaps.map(nap => {
+                                    const ports = networkNapPorts.filter(p => p.nap_id === nap.id);
+                                    return (
+                                        <optgroup key={nap.id} label={`${nap.name} (${ports.filter(p => p.status === 'available').length} available)`}>
+                                            {ports.map(port => (
+                                                <option key={port.id} value={port.id} disabled={port.status === 'faulty'}>
+                                                    Port {port.port_number}{port.status === 'occupied' ? ' (Occupied)' : port.status === 'faulty' ? ' (Faulty)' : ''}
+                                                </option>
+                                            ))}
+                                            {ports.length === 0 && <option disabled>No ports configured</option>}
+                                        </optgroup>
+                                    );
+                                })}
                             </select>
                         </div>
                         {selNapPortId && <p className="text-xs text-green-600 dark:text-green-400">Assigned to port: {selNapPortId}</p>}
