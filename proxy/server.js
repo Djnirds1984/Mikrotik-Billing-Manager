@@ -3510,18 +3510,8 @@ async function startServer() {
                 );
             }
 
-            // Lookup by IP address (for auto-detection from network)
+            // Lookup by IP address (for auto-detection from network) — only DHCP clients have stored IPs
             if (!customer && ip) {
-                // Try customers table by IP
-                customer = await db.get(
-                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber,
-                            r.name as routerName
-                     FROM customers c
-                     LEFT JOIN routers r ON c.routerId = r.id
-                     WHERE c.ipAddress = ? OR c.ip = ?`,
-                    [ip, ip]
-                );
-
                 // Try dhcp_clients table by IP
                 if (!customer) {
                     customer = await db.get(
@@ -3797,15 +3787,15 @@ async function startServer() {
                     clientType = 'dhcp';
                 }
 
-                // Look in customers table by IP
+                // Look in dhcp_clients table by IP
                 if (!customer) {
                     customer = await db.get(
-                        `SELECT c.*, r.name as routerName FROM customers c 
-                         LEFT JOIN routers r ON c.routerId = r.id 
-                         WHERE c.ipAddress = ? OR c.ip = ?`,
+                        `SELECT dc.*, r.name as routerName FROM dhcp_clients dc 
+                         LEFT JOIN routers r ON dc.routerId = r.id 
+                         WHERE dc.address = ? OR dc.ip = ?`,
                         [ip, ip]
                     );
-                    if (customer) clientType = customer.clientType || 'pppoe';
+                    if (customer) clientType = 'dhcp';
                 }
             }
 
@@ -11263,11 +11253,11 @@ WantedBy=multi-user.target`;
 
                 if (!customer) {
                     customer = await db.get(
-                        `SELECT c.*, r.name as routerName FROM customers c 
-                         LEFT JOIN routers r ON c.routerId = r.id 
-                         WHERE c.ipAddress = ? OR c.ip = ?`, [ip, ip]
+                        `SELECT dc.*, r.name as routerName FROM dhcp_clients dc 
+                         LEFT JOIN routers r ON dc.routerId = r.id 
+                         WHERE dc.address = ? OR dc.ip = ?`, [ip, ip]
                     );
-                    if (customer) clientType = customer.clientType || 'pppoe';
+                    if (customer) clientType = 'dhcp';
                 }
             }
 
@@ -11510,15 +11500,9 @@ WantedBy=multi-user.target`;
             }
             if (!customer && ip) {
                 customer = await db.get(
-                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, r.name as routerName
-                     FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.ipAddress = ? OR c.ip = ?`, [ip, ip]
+                    `SELECT dc.id, dc.username, dc.fullName, dc.accountNumber, dc.routerId, dc.contactNumber, r.name as routerName
+                     FROM dhcp_clients dc LEFT JOIN routers r ON dc.routerId = r.id WHERE dc.address = ? OR dc.ip = ?`, [ip, ip]
                 );
-                if (!customer) {
-                    customer = await db.get(
-                        `SELECT dc.id, dc.username, dc.fullName, dc.accountNumber, dc.routerId, dc.contactNumber, r.name as routerName
-                         FROM dhcp_clients dc LEFT JOIN routers r ON dc.routerId = r.id WHERE dc.address = ? OR dc.ip = ?`, [ip, ip]
-                    );
-                }
             }
             if (customer) {
                 res.json({ found: true, fullName: customer.fullName, username: customer.username, routerId: customer.routerId, accountNumber: customer.accountNumber || '', routerName: customer.routerName || '', contactNumber: customer.contactNumber || '' });
@@ -11798,19 +11782,78 @@ async function syncExpiredClientsToAddressList() {
                 const apiBase = `http://${routerIp}:${routerPort}`;
                 const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
 
-                // Find PPPoE customers with expired due dates for this router
                 const now = new Date().toISOString();
-                const expiredCustomers = await db.all(
-                    `SELECT c.*, r.host, r.port FROM customers c 
-                     JOIN routers r ON c.routerId = r.id 
+
+                // ─── PPPoE: Disable/enable secrets based on due date ───
+                const expiredPppoeCustomers = await db.all(
+                    `SELECT c.username FROM customers c 
                      WHERE c.routerId = ? 
                      AND c.dueDate IS NOT NULL AND c.dueDate != '' 
                      AND c.dueDate < ?
-                     AND (c.ipAddress IS NOT NULL AND c.ipAddress != '')`,
+                     AND c.username IS NOT NULL AND c.username != ''`,
                     [router.id, now]
                 );
 
-                // Find DHCP clients with expired due dates
+                const activePppoeCustomers = await db.all(
+                    `SELECT c.username FROM customers c 
+                     WHERE c.routerId = ? 
+                     AND c.username IS NOT NULL AND c.username != ''
+                     AND (c.dueDate IS NULL OR c.dueDate = '' OR c.dueDate >= ?)`,
+                    [router.id, now]
+                );
+
+                // Disable expired PPPoE secrets
+                for (const c of expiredPppoeCustomers) {
+                    try {
+                        // Check if secret exists and is enabled
+                        const secrets = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                            params: { name: c.username },
+                            headers: { Authorization: authHeader },
+                            timeout: 10000
+                        });
+                        const secretList = Array.isArray(secrets.data) ? secrets.data : [];
+                        for (const s of secretList) {
+                            if (s.disabled !== 'true') {
+                                await axios.patch(`${apiBase}/rest/ppp/secret/${s['.id']}`, {
+                                    disabled: 'true'
+                                }, {
+                                    headers: { Authorization: authHeader },
+                                    timeout: 10000
+                                });
+                                console.log(`[Expired Worker] Disabled PPPoe secret ${c.username} on ${router.name}`);
+                            }
+                        }
+                    } catch (pppoeErr) {
+                        console.warn(`[Expired Worker] Failed to disable ${c.username} on ${router.name}:`, pppoeErr.message);
+                    }
+                }
+
+                // Re-enable active (renewed) PPPoE secrets
+                for (const c of activePppoeCustomers) {
+                    try {
+                        const secrets = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                            params: { name: c.username },
+                            headers: { Authorization: authHeader },
+                            timeout: 10000
+                        });
+                        const secretList = Array.isArray(secrets.data) ? secrets.data : [];
+                        for (const s of secretList) {
+                            if (s.disabled === 'true') {
+                                await axios.patch(`${apiBase}/rest/ppp/secret/${s['.id']}`, {
+                                    disabled: 'false'
+                                }, {
+                                    headers: { Authorization: authHeader },
+                                    timeout: 10000
+                                });
+                                console.log(`[Expired Worker] Re-enabled PPPoE secret ${c.username} on ${router.name} (renewed)`);
+                            }
+                        }
+                    } catch (pppoeErr) {
+                        console.warn(`[Expired Worker] Failed to re-enable ${c.username} on ${router.name}:`, pppoeErr.message);
+                    }
+                }
+
+                // ─── DHCP: IP-based firewall address-list ───
                 const expiredDhcpClients = await db.all(
                     `SELECT dc.*, r.host, r.port FROM dhcp_clients dc
                      JOIN routers r ON dc.routerId = r.id
@@ -11822,63 +11865,44 @@ async function syncExpiredClientsToAddressList() {
                 );
 
                 const expiredIps = new Set();
-
-                // Collect IPs from expired PPPoE customers
-                for (const c of expiredCustomers) {
-                    const ip = c.ipAddress || c.ip;
-                    if (ip) expiredIps.add(ip);
-                }
-
-                // Collect IPs from expired DHCP clients
                 for (const c of expiredDhcpClients) {
                     const ip = c.address || c.ip;
                     if (ip) expiredIps.add(ip);
                 }
 
-                if (expiredIps.size === 0) continue;
+                if (expiredIps.size > 0) {
+                    let currentEntries = [];
+                    try {
+                        const resp = await axios.get(`${apiBase}/rest/ip/firewall/address-list`, {
+                            params: { list: 'EXPIRED_CLIENTS' },
+                            headers: { Authorization: authHeader },
+                            timeout: 10000
+                        });
+                        currentEntries = Array.isArray(resp.data) ? resp.data : [];
+                    } catch (_) {}
 
-                // Get current address list entries
-                let currentEntries = [];
-                try {
-                    const resp = await axios.get(`${apiBase}/rest/ip/firewall/address-list`, {
-                        params: { list: 'EXPIRED_CLIENTS' },
-                        headers: { Authorization: authHeader },
-                        timeout: 10000
-                    });
-                    currentEntries = Array.isArray(resp.data) ? resp.data : [];
-                } catch (_) {
-                    // Address list might not exist yet - that's okay
-                }
+                    const currentIps = new Set(currentEntries.map(e => e.address));
 
-                const currentIps = new Set(currentEntries.map(e => e.address));
-
-                // Add missing expired IPs
-                for (const ip of expiredIps) {
-                    if (!currentIps.has(ip)) {
-                        try {
-                            await axios.put(`${apiBase}/rest/ip/firewall/address-list`, {
-                                list: 'EXPIRED_CLIENTS',
-                                address: ip,
-                                comment: `Auto-added: expired client`
-                            }, {
-                                headers: { Authorization: authHeader },
-                                timeout: 10000
-                            });
-                            console.log(`[Expired Worker] Added ${ip} to EXPIRED_CLIENTS on ${router.name}`);
-                        } catch (addErr) {
-                            console.warn(`[Expired Worker] Failed to add ${ip} on ${router.name}:`, addErr.message);
+                    for (const ip of expiredIps) {
+                        if (!currentIps.has(ip)) {
+                            try {
+                                await axios.put(`${apiBase}/rest/ip/firewall/address-list`, {
+                                    list: 'EXPIRED_CLIENTS',
+                                    address: ip,
+                                    comment: `Auto-added: expired client`
+                                }, {
+                                    headers: { Authorization: authHeader },
+                                    timeout: 10000
+                                });
+                                console.log(`[Expired Worker] Added ${ip} to EXPIRED_CLIENTS on ${router.name}`);
+                            } catch (addErr) {
+                                console.warn(`[Expired Worker] Failed to add ${ip} on ${router.name}:`, addErr.message);
+                            }
                         }
                     }
                 }
 
-                // Find active (non-expired) customers to remove from list
-                const activeCustomers = await db.all(
-                    `SELECT c.ipAddress, c.ip FROM customers c 
-                     WHERE c.routerId = ? 
-                     AND (c.dueDate IS NULL OR c.dueDate = '' OR c.dueDate >= ?)
-                     AND (c.ipAddress IS NOT NULL AND c.ipAddress != '')`,
-                    [router.id, now]
-                );
+                // Remove renewed DHCP clients from EXPIRED_CLIENTS
                 const activeDhcpClients = await db.all(
                     `SELECT dc.address, dc.ip FROM dhcp_clients dc
                      WHERE dc.routerId = ?
@@ -11888,11 +11912,19 @@ async function syncExpiredClientsToAddressList() {
                 );
 
                 const activeIps = new Set();
-                for (const c of activeCustomers) activeIps.add(c.ipAddress || c.ip);
                 for (const c of activeDhcpClients) activeIps.add(c.address || c.ip);
 
-                // Remove active IPs from EXPIRED_CLIENTS list
-                for (const entry of currentEntries) {
+                let dhcpCurrentEntries = [];
+                try {
+                    const resp = await axios.get(`${apiBase}/rest/ip/firewall/address-list`, {
+                        params: { list: 'EXPIRED_CLIENTS' },
+                        headers: { Authorization: authHeader },
+                        timeout: 10000
+                    });
+                    dhcpCurrentEntries = Array.isArray(resp.data) ? resp.data : [];
+                } catch (_) {}
+
+                for (const entry of dhcpCurrentEntries) {
                     if (activeIps.has(entry.address)) {
                         try {
                             await axios.delete(`${apiBase}/rest/ip/firewall/address-list/${entry['.id']}`, {
