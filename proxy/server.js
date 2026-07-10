@@ -3647,7 +3647,7 @@ async function startServer() {
                                 description: `${plan.name} - ${customer.fullName || effectiveAccountNumber}`,
                                 quantity: 1
                             }],
-                            payment_method_types: ['gcash', 'paymaya', 'card'],
+                            payment_method_types: pmConfig.paymentMethods || ['qrph'],
                             send_email_receipt: false,
                             show_description: false,
                             success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/success`,
@@ -5239,8 +5239,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 card: ['card'],
             };
             const allowedMethods = passFees
-                ? (methodMap[method] || ['gcash'])
-                : ['gcash', 'card', 'paymaya', 'grab_pay'];
+                ? (methodMap[method] || ['qrph'])
+                : (pSettings.paymentMethods || ['qrph']);
 
             // Build dynamic success_url back to the client's own portal with invoice details
             const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '') || 'http://localhost';
@@ -11579,7 +11579,7 @@ WantedBy=multi-user.target`;
                     data: {
                         attributes: {
                             line_items: [{ currency: 'PHP', amount, description: `${plan.name} - ${customer.fullName || effectiveAccountNumber}`, quantity: 1 }],
-                            payment_method_types: ['gcash', 'paymaya', 'card'],
+                            payment_method_types: pmConfig.paymentMethods || ['qrph'],
                             send_email_receipt: false, show_description: false,
                             success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/success`,
                             cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/cancel`,
