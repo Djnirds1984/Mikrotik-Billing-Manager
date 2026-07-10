@@ -661,8 +661,12 @@ async function initDb() {
         try {
             const dhcpClientCols = await db.all("PRAGMA table_info(dhcp_clients)");
             const dhcpClientColNames = dhcpClientCols.map(c => c.name);
-            if (!dhcpClientColNames.includes('accountNumber')) {
-                await db.exec("ALTER TABLE dhcp_clients ADD COLUMN accountNumber TEXT");
+            const dhcpMissing = ['accountNumber', 'dueDate', 'address', 'ip', 'username', 'fullName', 'planName'];
+            for (const col of dhcpMissing) {
+                if (!dhcpClientColNames.includes(col)) {
+                    await db.exec(`ALTER TABLE dhcp_clients ADD COLUMN ${col} TEXT`);
+                    console.log(`[Migration] ✓ ${col} column added to dhcp_clients`);
+                }
             }
         } catch (_) {}
         try {
