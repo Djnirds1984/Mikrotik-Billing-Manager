@@ -3,7 +3,7 @@ import type { NetworkEquipment, OltPonPort, OltSplitter, OltNap, OltNapPort } fr
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, PlusIcon, XMarkIcon } from '../constants.tsx';
 
-type Tab = 'equipment' | 'pon' | 'splitter' | 'nap' | 'topology';
+type Tab = 'dashboard' | 'equipment' | 'pon' | 'splitter' | 'nap' | 'topology';
 
 const authHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` });
 
@@ -250,7 +250,7 @@ const NapPortDetailModal: React.FC<{
 
 // ─── Main Component ────────────────────────────────────────────
 export const NetworkEquipmentManager: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<Tab>('equipment');
+    const [activeTab, setActiveTab] = useState<Tab>('dashboard');
     const [equipment, setEquipment] = useState<NetworkEquipment[]>([]);
     const [ponPorts, setPonPorts] = useState<OltPonPort[]>([]);
     const [splitters, setSplitters] = useState<OltSplitter[]>([]);
@@ -393,6 +393,7 @@ export const NetworkEquipmentManager: React.FC = () => {
                 <h2 className="text-2xl font-bold">Network Equipment</h2>
             </div>
             <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
+                <TabButton label="Dashboard" isActive={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
                 <TabButton label="Equipment" isActive={activeTab === 'equipment'} onClick={() => setActiveTab('equipment')} />
                 <TabButton label="PON Ports" isActive={activeTab === 'pon'} onClick={() => setActiveTab('pon')} />
                 <TabButton label="Splitters" isActive={activeTab === 'splitter'} onClick={() => setActiveTab('splitter')} />
@@ -401,6 +402,11 @@ export const NetworkEquipmentManager: React.FC = () => {
             </div>
 
             {isLoading && <Loader />}
+
+            {/* ─── Dashboard Tab ─── */}
+            {activeTab === 'dashboard' && !isLoading && (
+                <SnmpDashboard equipment={equipment} />
+            )}
 
             {/* ─── Equipment Tab ─── */}
             {activeTab === 'equipment' && !isLoading && (
@@ -532,6 +538,237 @@ export const NetworkEquipmentManager: React.FC = () => {
             <SplitterFormModal isOpen={splitModalOpen} onClose={() => { setSplitModalOpen(false); setSelectedSplitter(null); }} onSave={handleSaveSplitter} initialData={selectedSplitter} isSubmitting={isSubmitting} ponPorts={ponPorts} />
             <NapFormModal isOpen={napModalOpen} onClose={() => { setNapModalOpen(false); setSelectedNap(null); }} onSave={handleSaveNap} initialData={selectedNap} isSubmitting={isSubmitting} splitters={splitters} />
             <NapPortDetailModal isOpen={napPortModalOpen} onClose={() => { setNapPortModalOpen(false); setSelectedNap(null); }} nap={selectedNap} onUpdatePort={handleUpdateNapPort} />
+        </div>
+    );
+};
+
+// ─── SNMP Dashboard ────────────────────────────────────────────
+interface DashboardEquipment {
+    id: string; name: string; brand: string; model: string; ip_address: string;
+    status: string; metrics: Record<string, { value: number; unit: string; recorded_at: string }>;
+    last_poll: string | null; port_stats: { total: number; occupied: number; available: number };
+}
+
+const GaugeCard: React.FC<{ label: string; value: number; unit: string; max?: number; color: string; icon: string }> = ({ label, value, unit, max = 100, color, icon }) => {
+    const pct = Math.min(Math.round((value / max) * 100), 100);
+    return (
+        <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">{icon} {label}</span>
+                <span className={`text-lg font-bold ${color}`}>{value}{unit}</span>
+            </div>
+            <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-500 ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${pct}%` }} />
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">{pct}% of {max}{unit}</p>
+        </div>
+    );
+};
+
+const SnmpDashboard: React.FC<{ equipment: NetworkEquipment[] }> = ({ equipment }) => {
+    const [dashboardData, setDashboardData] = useState<DashboardEquipment[]>([]);
+    const [snmpStatus, setSnmpStatus] = useState<{ available: boolean; message: string } | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [testingId, setTestingId] = useState<string | null>(null);
+    const [testResult, setTestResult] = useState<Record<string, { success: boolean; message: string; metrics?: any }>>({});
+    const [lastRefresh, setLastRefresh] = useState<string>('');
+
+    const fetchDashboard = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [statusRes, dashRes] = await Promise.all([
+                fetch('/api/snmp/status', { headers: authHeaders() }),
+                fetch('/api/network-equipment/dashboard', { headers: authHeaders() })
+            ]);
+            if (statusRes.ok) setSnmpStatus(await statusRes.json());
+            const dashData = await dashRes.ok ? await dashRes.json() : [];
+            setDashboardData(Array.isArray(dashData) ? dashData : []);
+            setLastRefresh(new Date().toLocaleTimeString());
+        } catch (e) { console.error(e); }
+        setLoading(false);
+    }, []);
+
+    useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+
+    const handleTestConnection = async (eqId: string) => {
+        setTestingId(eqId);
+        setTestResult(prev => ({ ...prev, [eqId]: undefined as any }));
+        try {
+            const res = await fetch(`/api/network-equipment/${eqId}/snmp-test`, {
+                method: 'POST', headers: authHeaders()
+            });
+            const data = await res.json();
+            setTestResult(prev => ({ ...prev, [eqId]: data }));
+            if (data.success) fetchDashboard(); // Refresh if successful
+        } catch (e: any) {
+            setTestResult(prev => ({ ...prev, [eqId]: { success: false, message: e.message } }));
+        }
+        setTestingId(null);
+    };
+
+    const formatTimeAgo = (dateStr: string | null) => {
+        if (!dateStr) return 'Never';
+        const diff = Date.now() - new Date(dateStr + 'Z').getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return 'Just now';
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        return `${Math.floor(hrs / 24)}d ago`;
+    };
+
+    if (loading) return <Loader />;
+
+    const oltDevices = dashboardData.filter(d => d.type === 'olt');
+    const hasAnyEquipment = dashboardData.length > 0;
+
+    return (
+        <div className="space-y-6">
+            {/* SNMP Service Status Banner */}
+            {snmpStatus && !snmpStatus.available && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                        <div className="text-2xl">⚠️</div>
+                        <div className="flex-1">
+                            <h4 className="font-semibold text-amber-800 dark:text-amber-300">SNMP Monitoring Not Available</h4>
+                            <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">{snmpStatus.message}</p>
+                            <div className="mt-3 bg-amber-100 dark:bg-amber-900/40 rounded p-3">
+                                <p className="text-xs font-mono text-amber-800 dark:text-amber-300">cd proxy && npm install net-snmp</p>
+                            </div>
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">Without SNMP, you can still manage equipment inventory and topology. Use "Test Connection" to verify SNMP after installing.</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {snmpStatus?.available && (
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700 rounded-lg p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="text-green-600 dark:text-green-400 text-lg">✓</span>
+                        <span className="text-sm font-medium text-green-800 dark:text-green-300">SNMP monitoring active — polling every 5 minutes</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <span className="text-xs text-green-600 dark:text-green-400">Last refresh: {lastRefresh}</span>
+                        <button onClick={fetchDashboard} className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700">Refresh</button>
+                    </div>
+                </div>
+            )}
+
+            {/* No Equipment State */}
+            {!hasAnyEquipment && (
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-12 text-center">
+                    <div className="text-5xl mb-4">📡</div>
+                    <h3 className="text-xl font-bold text-slate-700 dark:text-slate-300">No Equipment Added Yet</h3>
+                    <p className="text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto">Add your OLTs, switches, and routers in the <strong>Equipment</strong> tab to start monitoring them here.</p>
+                </div>
+            )}
+
+            {/* Equipment Dashboard Cards */}
+            {hasAnyEquipment && (
+                <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Equipment Overview</h3>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {dashboardData.map(eq => {
+                            const hasMetrics = eq.metrics && Object.keys(eq.metrics).length > 0;
+                            const test = testResult[eq.id];
+                            return (
+                                <div key={eq.id} className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                    {/* Card Header */}
+                                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <StatusBadge status={eq.status} />
+                                                <div>
+                                                    <h4 className="font-bold text-sm">{eq.name}</h4>
+                                                    <p className="text-xs text-slate-500 capitalize">{eq.brand} {eq.model} • {eq.ip_address || 'No IP'}</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {eq.ip_address && (
+                                                    <button
+                                                        onClick={() => handleTestConnection(eq.id)}
+                                                        disabled={testingId === eq.id}
+                                                        className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+                                                    >
+                                                        {testingId === eq.id ? '⟳ Testing...' : '⚡ Test SNMP'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {/* Last poll info */}
+                                        <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
+                                            <span>Last poll: <strong className={eq.last_poll ? 'text-green-600 dark:text-green-400' : 'text-slate-400'}>{formatTimeAgo(eq.last_poll)}</strong></span>
+                                            {eq.port_stats?.total > 0 && (
+                                                <span>Ports: <strong>{eq.port_stats.occupied}/{eq.port_stats.total}</strong> occupied</span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Test Result */}
+                                    {test && (
+                                        <div className={`px-4 py-2 text-xs border-b ${test.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'}`}>
+                                            {test.success ? '✓' : '✗'} {test.message}
+                                        </div>
+                                    )}
+
+                                    {/* Metrics */}
+                                    <div className="p-4">
+                                        {hasMetrics ? (
+                                            <div className="grid grid-cols-3 gap-3">
+                                                {eq.metrics.cpuUsage && (
+                                                    <GaugeCard label="CPU" value={eq.metrics.cpuUsage.value} unit="%" color="text-blue-600 dark:text-blue-400" icon="🔲" />
+                                                )}
+                                                {eq.metrics.memoryUsage && (
+                                                    <GaugeCard label="Memory" value={eq.metrics.memoryUsage.value} unit="%" color="text-purple-600 dark:text-purple-400" icon="💾" />
+                                                )}
+                                                {eq.metrics.temperature && (
+                                                    <GaugeCard label="Temp" value={eq.metrics.temperature.value} unit="°C" max={100} color={eq.metrics.temperature.value > 70 ? 'text-red-600' : 'text-green-600 dark:text-green-400'} icon="🌡️" />
+                                                )}
+                                                {!eq.metrics.cpuUsage && !eq.metrics.memoryUsage && !eq.metrics.temperature && (
+                                                    <p className="col-span-3 text-xs text-slate-400 text-center py-2">Metrics received but no recognized keys</p>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="text-center py-6">
+                                                {eq.ip_address ? (
+                                                    <>
+                                                        <div className="text-3xl mb-2">📡</div>
+                                                        <p className="text-sm text-slate-500 dark:text-slate-400">No SNMP data yet</p>
+                                                        <p className="text-xs text-slate-400 mt-1">
+                                                            {snmpStatus?.available
+                                                                ? 'Click "Test SNMP" to poll this device now'
+                                                                : 'Install net-snmp package to enable monitoring'}
+                                                        </p>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <div className="text-3xl mb-2">🔌</div>
+                                                        <p className="text-sm text-slate-500 dark:text-slate-400">No IP address configured</p>
+                                                        <p className="text-xs text-slate-400 mt-1">Edit this equipment and add an IP address</p>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Port Usage Bar */}
+                                        {eq.port_stats?.total > 0 && (
+                                            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700">
+                                                <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                                                    <span>Port Usage</span>
+                                                    <span>{eq.port_stats.occupied}/{eq.port_stats.total} occupied ({eq.port_stats.available} available)</span>
+                                                </div>
+                                                <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-green-500 rounded-full" style={{ width: `${(eq.port_stats.occupied / eq.port_stats.total) * 100}%` }} />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

@@ -11006,6 +11006,105 @@ WantedBy=multi-user.target`;
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
+    // SNMP service availability status
+    app.get('/api/snmp/status', protect, async (req, res) => {
+        try {
+            const snmpService = require('../services/snmpService');
+            res.json({
+                available: snmpService.isAvailable(),
+                brands: snmpService.getSupportedBrands(),
+                message: snmpService.isAvailable()
+                    ? 'SNMP monitoring is active'
+                    : 'net-snmp package not installed. Run: cd proxy && npm install net-snmp'
+            });
+        } catch (e) {
+            res.json({ available: false, brands: [], message: e.message });
+        }
+    });
+
+    // Manual SNMP test/poll for a single equipment
+    app.post('/api/network-equipment/:id/snmp-test', protect, async (req, res) => {
+        try {
+            const snmpService = require('../services/snmpService');
+            if (!snmpService.isAvailable()) {
+                return res.status(503).json({ success: false, message: 'SNMP service not available. Install net-snmp package.' });
+            }
+            const eq = await db.get('SELECT * FROM network_equipment WHERE id = ?', [req.params.id]);
+            if (!eq) return res.status(404).json({ success: false, message: 'Equipment not found' });
+            if (!eq.ip_address) return res.status(400).json({ success: false, message: 'No IP address configured for this equipment' });
+
+            const metrics = await snmpService.pollSystemMetrics(eq);
+            if (!metrics || Object.keys(metrics).length === 0) {
+                return res.json({
+                    success: false,
+                    message: `SNMP timeout or no response from ${eq.ip_address}:${eq.snmp_port || 161}. Check community string and firewall rules.`,
+                    equipment: { name: eq.name, ip: eq.ip_address, brand: eq.brand }
+                });
+            }
+
+            // Store the reading
+            for (const [key, data] of Object.entries(metrics)) {
+                await snmpService.pollEquipment ? 
+                    db.run('INSERT INTO olt_monitor_readings (equipment_id, metric_type, metric_key, metric_value, unit) VALUES (?,?,?,?,?)',
+                        [eq.id, 'system', key, data.value, data.unit]) : null;
+            }
+
+            // Update equipment status
+            await db.run("UPDATE network_equipment SET status = 'active', updated_at = datetime('now') WHERE id = ? AND status != 'maintenance'", [eq.id]);
+
+            res.json({ success: true, metrics, equipment: { name: eq.name, ip: eq.ip_address, brand: eq.brand } });
+        } catch (e) {
+            res.status(500).json({ success: false, message: e.message });
+        }
+    });
+
+    // Dashboard summary: latest readings for all equipment
+    app.get('/api/network-equipment/dashboard', protect, async (req, res) => {
+        try {
+            const equipment = await db.all("SELECT * FROM network_equipment WHERE status != 'inactive' ORDER BY name");
+            const result = [];
+            for (const eq of equipment) {
+                // Get latest reading for each metric
+                const latestReadings = await db.all(
+                    `SELECT metric_key, metric_value, unit, recorded_at FROM olt_monitor_readings 
+                     WHERE equipment_id = ? 
+                     AND recorded_at = (SELECT MAX(recorded_at) FROM olt_monitor_readings WHERE equipment_id = ? AND metric_key = olt_monitor_readings.metric_key)
+                     GROUP BY metric_key`,
+                    [eq.id, eq.id]
+                );
+                // Get last poll time
+                const lastPoll = await db.get(
+                    'SELECT MAX(recorded_at) as last_poll FROM olt_monitor_readings WHERE equipment_id = ?',
+                    [eq.id]
+                );
+                // Count NAP ports
+                const portStats = await db.get(
+                    `SELECT COUNT(*) as total,
+                            SUM(CASE WHEN np.status = 'occupied' THEN 1 ELSE 0 END) as occupied,
+                            SUM(CASE WHEN np.status = 'available' THEN 1 ELSE 0 END) as available
+                     FROM olt_nap_ports np JOIN olt_naps n ON np.nap_id = n.id
+                     JOIN olt_splitters s ON n.splitter_id = s.id
+                     JOIN olt_pon_ports p ON s.pon_port_id = p.id
+                     WHERE p.equipment_id = ?`,
+                    [eq.id]
+                );
+
+                const metricsMap = {};
+                for (const r of latestReadings) {
+                    metricsMap[r.metric_key] = { value: r.metric_value, unit: r.unit, recorded_at: r.recorded_at };
+                }
+
+                result.push({
+                    ...eq,
+                    metrics: metricsMap,
+                    last_poll: lastPoll?.last_poll || null,
+                    port_stats: portStats || { total: 0, occupied: 0, available: 0 }
+                });
+            }
+            res.json(result);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
     // --- LOCALE FILES ROUTE (must come before static files) ---
     app.get('/locales/:file', (req, res) => {
         const file = req.params.file;
