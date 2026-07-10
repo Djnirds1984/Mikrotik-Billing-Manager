@@ -11789,74 +11789,7 @@ async function syncExpiredClientsToAddressList() {
                 // Use date-only format to match how dueDate is stored (e.g., "2025-07-10")
                 const now = new Date().toISOString().split('T')[0];
 
-                // ─── PPPoE: Disable/enable secrets based on due date ───
-                const expiredPppoeCustomers = await db.all(
-                    `SELECT c.username FROM customers c 
-                     WHERE c.routerId = ? 
-                     AND c.dueDate IS NOT NULL AND c.dueDate != '' 
-                     AND c.dueDate < ?
-                     AND c.username IS NOT NULL AND c.username != ''`,
-                    [router.id, now]
-                );
-
-                const activePppoeCustomers = await db.all(
-                    `SELECT c.username FROM customers c 
-                     WHERE c.routerId = ? 
-                     AND c.username IS NOT NULL AND c.username != ''
-                     AND (c.dueDate IS NULL OR c.dueDate = '' OR c.dueDate >= ?)`,
-                    [router.id, now]
-                );
-
-                // Disable expired PPPoE secrets
-                for (const c of expiredPppoeCustomers) {
-                    try {
-                        // Check if secret exists and is enabled
-                        const secrets = await axios.get(`${apiBase}/rest/ppp/secret`, {
-                            params: { name: c.username },
-                            headers: { Authorization: authHeader },
-                            timeout: 10000
-                        });
-                        const secretList = Array.isArray(secrets.data) ? secrets.data : [];
-                        for (const s of secretList) {
-                            if (s.disabled !== 'true') {
-                                await axios.patch(`${apiBase}/rest/ppp/secret/${s['.id']}`, {
-                                    disabled: 'true'
-                                }, {
-                                    headers: { Authorization: authHeader },
-                                    timeout: 10000
-                                });
-                                console.log(`[Expired Worker] Disabled PPPoe secret ${c.username} on ${router.name}`);
-                            }
-                        }
-                    } catch (pppoeErr) {
-                        console.warn(`[Expired Worker] Failed to disable ${c.username} on ${router.name}:`, pppoeErr.message);
-                    }
-                }
-
-                // Re-enable active (renewed) PPPoE secrets
-                for (const c of activePppoeCustomers) {
-                    try {
-                        const secrets = await axios.get(`${apiBase}/rest/ppp/secret`, {
-                            params: { name: c.username },
-                            headers: { Authorization: authHeader },
-                            timeout: 10000
-                        });
-                        const secretList = Array.isArray(secrets.data) ? secrets.data : [];
-                        for (const s of secretList) {
-                            if (s.disabled === 'true') {
-                                await axios.patch(`${apiBase}/rest/ppp/secret/${s['.id']}`, {
-                                    disabled: 'false'
-                                }, {
-                                    headers: { Authorization: authHeader },
-                                    timeout: 10000
-                                });
-                                console.log(`[Expired Worker] Re-enabled PPPoE secret ${c.username} on ${router.name} (renewed)`);
-                            }
-                        }
-                    } catch (pppoeErr) {
-                        console.warn(`[Expired Worker] Failed to re-enable ${c.username} on ${router.name}:`, pppoeErr.message);
-                    }
-                }
+                // ─── PPPoE: No auto-disable. PPPoE secrets are managed manually by admin. ───
 
                 // ─── DHCP: IP-based firewall address-list ───
                 const expiredDhcpClients = await db.all(
