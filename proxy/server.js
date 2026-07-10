@@ -10933,25 +10933,92 @@ WantedBy=multi-user.target`;
     };
     
     app.get('/api/roles', protect, async (req, res) => {
-        await forward('GET', '/api/roles', req, res);
+        try {
+            const roles = await db.all('SELECT id, name, description FROM roles');
+            res.json(roles);
+        } catch (e) { res.status(500).json({ message: e.message }); }
     });
     app.get('/api/permissions', protect, async (req, res) => {
-        await forward('GET', '/api/permissions', req, res);
+        try {
+            const perms = await db.all('SELECT id, name, description FROM permissions');
+            res.json(perms);
+        } catch (e) { res.status(500).json({ message: e.message }); }
     });
     app.get('/api/panel-users', protect, async (req, res) => {
-        await forward('GET', '/api/panel-users', req, res);
+        try {
+            const users = await db.all('SELECT u.id, u.username, r.name as roleName FROM users u JOIN roles r ON u.role_id = r.id');
+            res.json(users.map(u => ({ id: u.id, username: u.username, role: { name: u.roleName } })));
+        } catch (e) { res.status(500).json({ message: e.message }); }
     });
     app.post('/api/panel-users', protect, async (req, res) => {
-        await forward('POST', '/api/panel-users', req, res, req.body);
+        const { username, password, role_id } = req.body || {};
+        if (!username || !password || !role_id) {
+            return res.status(400).json({ message: 'Username, password, and role_id are required.' });
+        }
+        try {
+            const role = await db.get('SELECT id FROM roles WHERE id = ?', [role_id]);
+            if (!role) {
+                return res.status(400).json({ message: 'Invalid role_id specified.' });
+            }
+            const hash = await bcrypt.hash(password, 10);
+            const id = `user_${Date.now()}`;
+            await db.run('INSERT INTO users (id, username, password, role_id) VALUES (?, ?, ?, ?)', [id, username, hash, role_id]);
+            console.log('[Panel Users] Created user:', username, 'with role_id:', role_id);
+            const row = await db.get(`SELECT u.id, u.username, r.id AS role_id, r.name AS role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = ?`, [id]);
+            res.status(201).json({ id: row.id, username: row.username, role: { id: row.role_id, name: row.role_name || '' } });
+        } catch (e) {
+            if (String(e.message).includes('UNIQUE')) {
+                return res.status(409).json({ message: 'Username already exists.' });
+            }
+            res.status(500).json({ message: e.message });
+        }
     });
     app.delete('/api/panel-users/:id', protect, async (req, res) => {
-        await forward('DELETE', `/api/panel-users/${req.params.id}`, req, res);
+        try {
+            const id = req.params.id;
+            if (req.user.id === id) {
+                return res.status(403).json({ message: 'You cannot delete your own account.' });
+            }
+            const result = await db.run('DELETE FROM users WHERE id = ?', [id]);
+            if (result.changes === 0) {
+                return res.status(404).json({ message: 'User not found.' });
+            }
+            res.status(204).send();
+        } catch (e) { res.status(500).json({ message: e.message }); }
     });
     app.get('/api/roles/:roleId/permissions', protect, async (req, res) => {
-        await forward('GET', `/api/roles/${req.params.roleId}/permissions`, req, res);
+        try {
+            const rows = await db.all(`SELECT permission_id FROM role_permissions WHERE role_id = ?`, [req.params.roleId]);
+            res.json(rows.map(r => r.permission_id));
+        } catch (e) { res.status(500).json({ message: e.message }); }
     });
     app.put('/api/roles/:roleId/permissions', protect, async (req, res) => {
-        await forward('PUT', `/api/roles/${req.params.roleId}/permissions`, req, res, req.body);
+        let transactionStarted = false;
+        try {
+            const { roleId } = req.params;
+            const { permissionIds } = req.body;
+            if (!Array.isArray(permissionIds)) {
+                return res.status(400).json({ message: 'permissionIds must be an array.' });
+            }
+            const role = await db.get('SELECT name FROM roles WHERE id = ?', roleId);
+            if (role && role.name.toLowerCase() === 'administrator') {
+                return res.status(403).json({ message: 'Administrator permissions cannot be modified.' });
+            }
+            await db.exec('BEGIN TRANSACTION;');
+            transactionStarted = true;
+            await db.run('DELETE FROM role_permissions WHERE role_id = ?', roleId);
+            for (const permId of permissionIds) {
+                await db.run('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', roleId, permId);
+            }
+            await db.exec('COMMIT;');
+            transactionStarted = false;
+            res.json({ message: 'Permissions updated successfully.' });
+        } catch (e) {
+            if (transactionStarted) {
+                try { await db.exec('ROLLBACK;'); } catch (rbErr) { console.error('Rollback failed:', rbErr.message); }
+            }
+            res.status(500).json({ message: e.message });
+        }
     });
 
     // --- Network Equipment (OLT/PON/Splitter/NAP) CRUD ---
