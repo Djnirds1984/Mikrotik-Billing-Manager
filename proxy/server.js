@@ -11786,7 +11786,8 @@ async function syncExpiredClientsToAddressList() {
                 const apiBase = `http://${routerIp}:${routerPort}`;
                 const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
 
-                const now = new Date().toISOString();
+                // Use date-only format to match how dueDate is stored (e.g., "2025-07-10")
+                const now = new Date().toISOString().split('T')[0];
 
                 // ─── PPPoE: Disable/enable secrets based on due date ───
                 const expiredPppoeCustomers = await db.all(
