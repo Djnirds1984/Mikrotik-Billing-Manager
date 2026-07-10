@@ -1853,6 +1853,59 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
                 </div>
             </SettingsSection>
 
+            <SettingsSection title="Hero Background Image">
+                <div className="space-y-4">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Upload a background image for the hero section. This replaces the gradient background.</p>
+                    <div className="flex items-center gap-4">
+                        <label className="px-4 py-2 bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white rounded-md cursor-pointer text-sm font-medium">
+                            Choose Image
+                            <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    if (file.size > 8 * 1024 * 1024) { alert('Image must be under 8MB.'); return; }
+                                    const reader = new FileReader();
+                                    reader.onload = async () => {
+                                        const base64 = reader.result as string;
+                                        try {
+                                            const res = await fetch('/api/landing/bg-image-upload', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+                                                body: JSON.stringify({ base64 })
+                                            });
+                                            const data = await res.json();
+                                            if (!res.ok) throw new Error(data.message || 'Upload failed.');
+                                            updateCfg('bgImageBase64', base64);
+                                        } catch (err) {
+                                            alert((err as Error).message);
+                                        }
+                                    };
+                                    reader.readAsDataURL(file);
+                                }}
+                            />
+                        </label>
+                        <button
+                            className="px-4 py-2 bg-slate-600 text-white rounded-md text-sm hover:bg-slate-500"
+                            onClick={() => updateCfg('bgImageBase64', '')}
+                        >
+                            Remove Background
+                        </button>
+                    </div>
+                    <div className="mt-2">
+                        {cfg.bgImageBase64 ? (
+                            <img src={cfg.bgImageBase64} alt="Hero Background" className="w-full max-w-xl rounded-lg border border-slate-200 dark:border-slate-700 object-cover h-48" />
+                        ) : (
+                            <div className="w-full max-w-xl h-32 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 grid place-content-center text-slate-400 text-sm">
+                                No background image — gradient theme will show
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </SettingsSection>
+
             <SettingsSection title="HTML Editor">
                 <div className="space-y-4">
                     <p className="text-sm text-slate-600 dark:text-slate-400">

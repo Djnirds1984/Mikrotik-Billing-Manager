@@ -559,6 +559,7 @@ export interface LandingPageConfig {
     adImageBase64?: string;
     adImageAlt?: string;
     adImageLink?: string;
+    bgImageBase64?: string;
     pages?: LandingPagePage[];
     features?: LandingPageFeature[];
     plans?: LandingPagePlan[];

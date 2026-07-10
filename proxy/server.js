@@ -8610,6 +8610,24 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     });
 
+    // --- Landing Page Background Image Upload ---
+    app.post('/api/landing/bg-image-upload', protect, express.json({ limit: '10mb' }), async (req, res) => {
+        try {
+            const { base64 } = req.body;
+            if (!base64 || typeof base64 !== 'string' || !base64.startsWith('data:image/')) {
+                return res.status(400).json({ message: 'Invalid image data. Upload a valid image file.' });
+            }
+            const s = await db.get('SELECT landingPageConfig FROM settings WHERE id = 1');
+            let cfg = {};
+            try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            cfg.bgImageBase64 = base64;
+            await db.run('UPDATE settings SET landingPageConfig = ? WHERE id = 1', JSON.stringify(cfg));
+            res.json({ message: 'Background image saved.', bgImageBase64: base64 });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
 
     // --- Client Portal Endpoints ---
     const clientPortalRouter = express.Router();
