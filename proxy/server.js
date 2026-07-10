@@ -145,7 +145,8 @@ async function initDb() {
                 dbPassword TEXT,
                 dbName TEXT,
                 notificationSettings TEXT,
-                landingPageConfig TEXT
+                landingPageConfig TEXT,
+                autoBackupSettings TEXT
             );
             INSERT OR IGNORE INTO settings (id) VALUES (1);
         `);
@@ -174,6 +175,9 @@ async function initDb() {
 
         // Billing settings JSON column (non-payment profile, default plan, grace period, expiry time)
         if (!columnNames.includes('billingSettings')) await db.exec("ALTER TABLE settings ADD COLUMN billingSettings TEXT");
+
+        // Auto backup settings JSON column (enabled, intervalHours, maxBackups, lastBackup)
+        if (!columnNames.includes('autoBackupSettings')) await db.exec("ALTER TABLE settings ADD COLUMN autoBackupSettings TEXT");
 
         // Manual payment requests table (for existing databases)
         try {
