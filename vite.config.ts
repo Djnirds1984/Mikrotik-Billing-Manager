@@ -56,11 +56,17 @@ export default defineConfig(({ mode, command }) => {
       sourcemap: false,
       cssCodeSplit: true,
       assetsDir: 'assets',
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
           entryFileNames: 'assets/[name].[hash].js',
           chunkFileNames: 'assets/[name].[hash].js',
-          assetFileNames: 'assets/[name].[hash][extname]'
+          assetFileNames: 'assets/[name].[hash][extname]',
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-charts': ['chart.js', 'react-chartjs-2', 'recharts'],
+            'vendor-maps': ['leaflet'],
+          }
         }
       }
     }
