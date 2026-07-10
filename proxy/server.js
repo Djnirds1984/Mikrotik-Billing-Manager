@@ -11366,9 +11366,15 @@ WantedBy=multi-user.target`;
     // Serve the standalone landing page at root paths before SPA catch-all
     const landingPagePath = path.join(__dirname, '..', 'public', 'landing-page.html');
     app.get('/', (req, res) => {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
         res.sendFile(landingPagePath);
     });
     app.get('/home', (req, res) => {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
         res.sendFile(landingPagePath);
     });
 

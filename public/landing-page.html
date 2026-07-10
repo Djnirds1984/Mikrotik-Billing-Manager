@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, proxy-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>ISP Panel</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -181,8 +184,7 @@
     /* ══════════════════════════════════════════════
        FADE-IN ON SCROLL
        ══════════════════════════════════════════════ */
-    .fade-section { opacity: 0; transform: translateY(30px); transition: opacity .7s ease, transform .7s ease; }
-    .fade-section.visible { opacity: 1; transform: translateY(0); }
+    .fade-section { opacity: 1; transform: none; }
 
     /* ══════════════════════════════════════════════
        SKELETON
@@ -219,6 +221,7 @@
     .chat-user { background: var(--c-primary-600); color: #fff; }
     .chat-model { background: var(--c-surface-alt); color: var(--c-on-surface); border: 1px solid var(--c-border); }
   </style>
+  <noscript><style>.fade-section { opacity: 1 !important; transform: none !important; }</style></noscript>
 </head>
 <body data-theme="ocean" id="lp-root">
 
@@ -427,10 +430,14 @@ function applyCustomTheme(t) {
    SCROLL REVEAL
    ═══════════════════════════════════════════ */
 function initScrollReveal() {
+  const els = document.querySelectorAll('.fade-section');
+  els.forEach(el => { el.style.opacity = '0'; el.style.transform = 'translateY(30px)'; el.style.transition = 'opacity .7s ease, transform .7s ease'; });
   const obs = new IntersectionObserver((entries) => {
-    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); } });
-  }, { threshold: 0.1 });
-  document.querySelectorAll('.fade-section').forEach(el => obs.observe(el));
+    entries.forEach(e => { if (e.isIntersecting) { e.target.style.opacity = '1'; e.target.style.transform = 'none'; obs.unobserve(e.target); } });
+  }, { threshold: 0.05 });
+  els.forEach(el => obs.observe(el));
+  // Fallback: force-show all sections after 4s in case observer misses
+  setTimeout(() => { els.forEach(el => { el.style.opacity = '1'; el.style.transform = 'none'; }); }, 4000);
 }
 
 /* ═══════════════════════════════════════════
@@ -497,11 +504,11 @@ function render() {
   // ── Hero background image ──
   const heroSection = $('hero-section');
   if (cfg.bgImageBase64) {
-    heroSection.style.background = `url(${cfg.bgImageBase64}) center/cover no-repeat`;
-    heroSection.style.animation = 'none';
+    heroSection.style.setProperty('background', `url(${cfg.bgImageBase64}) center/cover no-repeat`, 'important');
+    heroSection.style.setProperty('animation', 'none', 'important');
   } else {
-    heroSection.style.background = '';
-    heroSection.style.animation = '';
+    heroSection.style.removeProperty('background');
+    heroSection.style.removeProperty('animation');
   }
 
   const imgArea = $('hero-image-area');
@@ -559,14 +566,20 @@ function render() {
   `).join('');
 
   // ── Contact ──
-  $('contact-title').textContent = cfg.contactTitle || 'Contact';
   const contactEmail = cfg.contactEmail || company.email;
-  let ch = '';
-  if (contactEmail) ch += `<div class="p-6 rounded-2xl card-lift" style="${bc};${cardBg}"><div class="font-semibold" style="color:var(--c-on-surface)">Email</div><a class="mt-1 block font-medium" style="color:var(--c-primary-600)" href="mailto:${esc(contactEmail)}">${esc(contactEmail)}</a></div>`;
-  if (cfg.contactPhone) ch += `<div class="p-6 rounded-2xl card-lift" style="${bc};${cardBg}"><div class="font-semibold" style="color:var(--c-on-surface)">Phone</div><a class="mt-1 block font-medium" style="color:var(--c-primary-600)" href="tel:${esc(cfg.contactPhone)}">${esc(cfg.contactPhone)}</a></div>`;
-  if (cfg.contactAddress) ch += `<div class="p-6 rounded-2xl card-lift" style="${bc};${cardBg}"><div class="font-semibold" style="color:var(--c-on-surface)">Address</div><div class="mt-1" style="color:var(--c-on-muted)">${esc(cfg.contactAddress)}</div></div>`;
-  if (cfg.contactFacebookUrl) ch += `<div class="p-6 rounded-2xl card-lift" style="${bc};${cardBg}"><div class="font-semibold" style="color:var(--c-on-surface)">Facebook</div><a class="mt-1 block font-medium" style="color:var(--c-primary-600)" href="${esc(cfg.contactFacebookUrl)}" target="_blank" rel="noreferrer">${esc(cfg.contactFacebookUrl)}</a></div>`;
-  $('contact-grid').innerHTML = ch;
+  const hasContact = contactEmail || cfg.contactPhone || cfg.contactAddress || cfg.contactFacebookUrl;
+  if (hasContact) {
+    $('contact').style.display = '';
+    $('contact-title').textContent = cfg.contactTitle || 'Contact';
+    let ch = '';
+    if (contactEmail) ch += `<div class="p-6 rounded-2xl card-lift" style="${bc};${cardBg}"><div class="font-semibold" style="color:var(--c-on-surface)">Email</div><a class="mt-1 block font-medium" style="color:var(--c-primary-600)" href="mailto:${esc(contactEmail)}">${esc(contactEmail)}</a></div>`;
+    if (cfg.contactPhone) ch += `<div class="p-6 rounded-2xl card-lift" style="${bc};${cardBg}"><div class="font-semibold" style="color:var(--c-on-surface)">Phone</div><a class="mt-1 block font-medium" style="color:var(--c-primary-600)" href="tel:${esc(cfg.contactPhone)}">${esc(cfg.contactPhone)}</a></div>`;
+    if (cfg.contactAddress) ch += `<div class="p-6 rounded-2xl card-lift" style="${bc};${cardBg}"><div class="font-semibold" style="color:var(--c-on-surface)">Address</div><div class="mt-1" style="color:var(--c-on-muted)">${esc(cfg.contactAddress)}</div></div>`;
+    if (cfg.contactFacebookUrl) ch += `<div class="p-6 rounded-2xl card-lift" style="${bc};${cardBg}"><div class="font-semibold" style="color:var(--c-on-surface)">Facebook</div><a class="mt-1 block font-medium" style="color:var(--c-primary-600)" href="${esc(cfg.contactFacebookUrl)}" target="_blank" rel="noreferrer">${esc(cfg.contactFacebookUrl)}</a></div>`;
+    $('contact-grid').innerHTML = ch;
+  } else {
+    $('contact').style.display = 'none';
+  }
 
   // ── Footer ──
   $('footer-copy').textContent = `© ${new Date().getFullYear()} ${displayName()}`;
