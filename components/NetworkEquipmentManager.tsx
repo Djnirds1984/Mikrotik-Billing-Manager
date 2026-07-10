@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { NetworkEquipment, OltPonPort, OltSplitter, OltNap, OltNapPort } from '../types.ts';
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, PlusIcon, XMarkIcon } from '../constants.tsx';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-type Tab = 'dashboard' | 'equipment' | 'pon' | 'splitter' | 'nap' | 'topology';
+type Tab = 'dashboard' | 'equipment' | 'pon' | 'splitter' | 'nap' | 'topology' | 'map';
 
 const authHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` });
 
@@ -399,6 +401,7 @@ export const NetworkEquipmentManager: React.FC = () => {
                 <TabButton label="Splitters" isActive={activeTab === 'splitter'} onClick={() => setActiveTab('splitter')} />
                 <TabButton label="NAPs" isActive={activeTab === 'nap'} onClick={() => setActiveTab('nap')} />
                 <TabButton label="Topology" isActive={activeTab === 'topology'} onClick={() => setActiveTab('topology')} />
+                <TabButton label="Map" isActive={activeTab === 'map'} onClick={() => setActiveTab('map')} />
             </div>
 
             {isLoading && <Loader />}
@@ -532,12 +535,178 @@ export const NetworkEquipmentManager: React.FC = () => {
                 <NetworkTopologyPlaceholder equipment={equipment} />
             )}
 
+            {/* ─── Map Tab ─── */}
+            {activeTab === 'map' && (
+                <NapMap naps={naps} />
+            )}
+
             {/* ─── Modals ─── */}
             <EquipmentFormModal isOpen={eqModalOpen} onClose={() => { setEqModalOpen(false); setSelectedEquipment(null); }} onSave={handleSaveEquipment} initialData={selectedEquipment} isSubmitting={isSubmitting} />
             <PonPortFormModal isOpen={ponModalOpen} onClose={() => { setPonModalOpen(false); setSelectedPon(null); }} onSave={handleSavePonPort} initialData={selectedPon} isSubmitting={isSubmitting} />
             <SplitterFormModal isOpen={splitModalOpen} onClose={() => { setSplitModalOpen(false); setSelectedSplitter(null); }} onSave={handleSaveSplitter} initialData={selectedSplitter} isSubmitting={isSubmitting} ponPorts={ponPorts} />
             <NapFormModal isOpen={napModalOpen} onClose={() => { setNapModalOpen(false); setSelectedNap(null); }} onSave={handleSaveNap} initialData={selectedNap} isSubmitting={isSubmitting} splitters={splitters} />
             <NapPortDetailModal isOpen={napPortModalOpen} onClose={() => { setNapPortModalOpen(false); setSelectedNap(null); }} nap={selectedNap} onUpdatePort={handleUpdateNapPort} />
+        </div>
+    );
+};
+
+// ─── NAP Map Component ────────────────────────────────────────────
+const NapMap: React.FC<{ naps: OltNap[] }> = ({ naps }) => {
+    const mapRef = useRef<HTMLDivElement>(null);
+    const mapInstanceRef = useRef<L.Map | null>(null);
+    const [napsWithGps, setNapsWithGps] = useState<Array<OltNap & { lat: number; lng: number }>>([]);
+
+    // Parse GPS coordinates from NAPs
+    useEffect(() => {
+        const parsed = naps
+            .filter(nap => nap.gps && nap.gps.trim())
+            .map(nap => {
+                const parts = nap.gps.split(',').map(s => parseFloat(s.trim()));
+                if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                    return { ...nap, lat: parts[0], lng: parts[1] };
+                }
+                return null;
+            })
+            .filter((n): n is OltNap & { lat: number; lng: number } => n !== null);
+        setNapsWithGps(parsed);
+    }, [naps]);
+
+    // Initialize and update map
+    useEffect(() => {
+        if (!mapRef.current) return;
+
+        // Create map if it doesn't exist
+        if (!mapInstanceRef.current) {
+            mapInstanceRef.current = L.map(mapRef.current).setView([14.5995, 120.9842], 12); // Default: Manila
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                maxZoom: 19
+            }).addTo(mapInstanceRef.current);
+        }
+
+        const map = mapInstanceRef.current;
+
+        // Clear existing markers
+        map.eachLayer(layer => {
+            if (layer instanceof L.Marker || layer instanceof L.CircleMarker) {
+                map.removeLayer(layer);
+            }
+        });
+
+        // Add markers for NAPs with GPS
+        if (napsWithGps.length > 0) {
+            const bounds: L.LatLngBoundsExpression = [];
+
+            napsWithGps.forEach(nap => {
+                const statusColor = nap.status === 'active' ? '#22c55e' : nap.status === 'maintenance' ? '#eab308' : '#6b7280';
+                const marker = L.circleMarker([nap.lat, nap.lng], {
+                    radius: 10,
+                    fillColor: statusColor,
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+
+                const occupancyPct = nap.total_ports > 0 ? Math.round((nap.used_ports / nap.total_ports) * 100) : 0;
+                marker.bindPopup(`
+                    <div style="min-width: 200px;">
+                        <h3 style="margin:0 0 8px 0; font-size: 14px; font-weight: bold;">${nap.name}</h3>
+                        <p style="margin: 2px 0; font-size: 12px; color: #666;">${nap.location || 'No location'}</p>
+                        <p style="margin: 2px 0; font-size: 11px; color: #888;">GPS: ${nap.lat.toFixed(6)}, ${nap.lng.toFixed(6)}</p>
+                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee; font-size: 12px;">
+                            <span style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; background: ${statusColor}20; color: ${statusColor}; text-transform: uppercase;">${nap.status}</span>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 12px;">
+                            <strong>Ports:</strong> ${nap.used_ports}/${nap.total_ports} occupied (${occupancyPct}%)
+                        </div>
+                        <div style="margin-top: 4px; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden;">
+                            <div style="height: 100%; width: ${occupancyPct}%; background: ${occupancyPct >= 90 ? '#ef4444' : occupancyPct >= 70 ? '#eab308' : '#22c55e'};"></div>
+                        </div>
+                    </div>
+                `);
+
+                bounds.push([nap.lat, nap.lng]);
+            });
+
+            // Fit map to show all markers
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+            }
+        }
+
+        // Force a resize after a short delay to fix rendering issues
+        setTimeout(() => map.invalidateSize(), 100);
+    }, [napsWithGps]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (mapInstanceRef.current) {
+                mapInstanceRef.current.remove();
+                mapInstanceRef.current = null;
+            }
+        };
+    }, []);
+
+    const napsWithoutGps = naps.filter(n => !n.gps || !n.gps.trim() || isNaN(parseFloat(n.gps.split(',')[0])));
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">NAP Locations</h3>
+                <div className="flex items-center gap-4 text-xs">
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500 inline-block"></span> Active</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-500 inline-block"></span> Maintenance</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-gray-500 inline-block"></span> Inactive</span>
+                </div>
+            </div>
+
+            {/* Map Container */}
+            <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700" style={{ height: '500px' }}>
+                <div ref={mapRef} className="w-full h-full" />
+                {napsWithGps.length === 0 && (
+                    <div className="absolute inset-0 bg-white/80 dark:bg-slate-900/80 flex items-center justify-center z-[1000]">
+                        <div className="text-center p-8 bg-white dark:bg-slate-800 rounded-lg shadow-lg max-w-md">
+                            <div className="text-5xl mb-4">📍</div>
+                            <h4 className="text-lg font-bold text-slate-700 dark:text-slate-300">No NAP Locations Plotted</h4>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+                                {naps.length === 0
+                                    ? 'No NAPs have been created yet. Add NAPs in the NAPs tab first.'
+                                    : 'None of your NAPs have GPS coordinates. Edit each NAP and add a GPS coordinate in "latitude, longitude" format (e.g., 14.5995, 120.9842).'}
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* NAP List Summary */}
+            {napsWithGps.length > 0 && (
+                <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+                    <h4 className="font-semibold text-sm mb-3">Plotted NAPs ({napsWithGps.length})</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {napsWithGps.map(nap => {
+                            const occupancyPct = nap.total_ports > 0 ? Math.round((nap.used_ports / nap.total_ports) * 100) : 0;
+                            return (
+                                <div key={nap.id} className="flex items-center gap-3 p-2 rounded-lg bg-slate-50 dark:bg-slate-700/50">
+                                    <span className={`w-3 h-3 rounded-full flex-shrink-0 ${nap.status === 'active' ? 'bg-green-500' : nap.status === 'maintenance' ? 'bg-yellow-500' : 'bg-gray-500'}`} />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium truncate">{nap.name}</p>
+                                        <p className="text-xs text-slate-500 truncate">{nap.location || 'No location'}</p>
+                                    </div>
+                                    <div className="text-xs text-slate-400 flex-shrink-0">
+                                        {nap.used_ports}/{nap.total_ports}
+                                        <span className={`ml-1 ${occupancyPct >= 90 ? 'text-red-500' : occupancyPct >= 70 ? 'text-yellow-500' : 'text-green-500'}`}>({occupancyPct}%)</span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {napsWithoutGps.length > 0 && (
+                        <p className="text-xs text-slate-400 mt-3">+ {napsWithoutGps.length} NAP{napsWithoutGps.length > 1 ? 's' : ''} without GPS coordinates</p>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
