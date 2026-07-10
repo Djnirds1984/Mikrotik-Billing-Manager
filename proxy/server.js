@@ -3393,11 +3393,11 @@ async function startServer() {
 
     app.get('/api/public/landing-page', async (req, res) => {
         try {
-            const s = await db.get('SELECT companyName, logoBase64, landingPageConfig FROM settings WHERE id = 1');
+            const s = await db.get('SELECT companyName, logoBase64, email, landingPageConfig FROM settings WHERE id = 1');
             let cfg = {};
             try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
             res.json({
-                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '' },
+                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '', email: s?.email || '' },
                 config: cfg
             });
         } catch (e) {
@@ -11250,6 +11250,16 @@ WantedBy=multi-user.target`;
                 res.status(404).json({ error: 'Locale file not found' });
             }
         });
+    });
+
+    // --- LANDING PAGE (pure HTML) ---
+    // Serve the standalone landing page at root paths before SPA catch-all
+    const landingPagePath = path.join(__dirname, '..', 'public', 'landing-page.html');
+    app.get('/', (req, res) => {
+        res.sendFile(landingPagePath);
+    });
+    app.get('/home', (req, res) => {
+        res.sendFile(landingPagePath);
     });
 
     // --- PRODUCTION STATIC FILES ---

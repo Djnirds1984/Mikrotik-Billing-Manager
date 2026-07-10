@@ -57,7 +57,7 @@ const HotspotLoginPage = React.lazy(() => import('./components/HotspotController
 const NotificationsPage = React.lazy(() => import('./components/NotificationsPage.tsx').then(m => ({ default: m.NotificationsPage })));
 const Payroll = React.lazy(() => import('./components/Payroll.tsx').then(m => ({ default: m.Payroll })));
 const CaptiveChatAdmin = React.lazy(() => import('./components/CaptiveChatAdmin.tsx').then(m => ({ default: m.CaptiveChatAdmin })));
-const LandingPage = React.lazy(() => import('./components/LandingPage.tsx').then(m => ({ default: m.LandingPage })));
+// LandingPage removed - now served as standalone HTML at /landing-page.html
 const ApplicationForm = React.lazy(() => import('./components/ApplicationForm.tsx').then(m => ({ default: m.ApplicationForm })));
 const ManualPayments = React.lazy(() => import('./components/ManualPayments.tsx').then(m => ({ default: m.ManualPayments })));
 const Store = React.lazy(() => import('./components/Store.tsx').then(m => ({ default: m.Store })));
@@ -521,11 +521,13 @@ const AppRouter: React.FC = () => {
 
     if (!user) {
         if (path === '/' || path === '/home') {
+            // Redirect to the standalone HTML landing page
+            window.location.href = '/landing-page.html';
             return (
                 <ThemeProvider>
                     <LocalizationProvider>
                         <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
-                            <LandingPage />
+                            <div />
                         </Suspense>
                     </LocalizationProvider>
                 </ThemeProvider>
