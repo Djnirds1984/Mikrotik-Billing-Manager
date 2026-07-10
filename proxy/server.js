@@ -1190,7 +1190,14 @@ async function startServer() {
                 LEFT JOIN roles r ON u.role_id = r.id 
                 WHERE u.username = ?`, [username]);
 
-            if (!user || !(await bcrypt.compare(password, user.password))) {
+            if (!user) {
+                console.warn('[Auth] Login failed: user not found:', username);
+                return res.status(401).json({ message: 'Invalid credentials' });
+            }
+
+            const passwordMatch = await bcrypt.compare(password, user.password);
+            if (!passwordMatch) {
+                console.warn('[Auth] Login failed: password mismatch for user:', username, '| stored hash prefix:', user.password ? user.password.substring(0, 10) : 'NO_HASH');
                 return res.status(401).json({ message: 'Invalid credentials' });
             }
 
