@@ -10769,9 +10769,20 @@ WantedBy=multi-user.target`;
         restore();
     });
 
-    app.get('/download-backup/:filename', protect, (req, res) => {
+    app.get('/download-backup/:filename', (req, res, next) => {
+        // Accept token from query param for direct download links
+        const token = req.query.token || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
+        if (!token) {
+            return res.status(401).json({ message: 'Authentication required.' });
+        }
+        jwt.verify(token, SECRET_KEY, (err, user) => {
+            if (err) return res.status(403).json({ message: 'Invalid or expired token.' });
+            req.user = user;
+            next();
+        });
+    }, (req, res) => {
         const { filename } = req.params;
-        if (filename.includes('..') || !filename.endsWith('.mk')) {
+        if (filename.includes('..') || (!filename.endsWith('.db') && !filename.endsWith('.mk'))) {
             return res.status(400).json({ message: 'Invalid filename' });
         }
         const filePath = path.join(BACKUP_DIR, filename);

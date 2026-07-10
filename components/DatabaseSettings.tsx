@@ -21,6 +21,7 @@ export const DatabaseSettings: React.FC = () => {
   const [isSavingBackup, setIsSavingBackup] = useState(false);
   const [isRunningBackup, setIsRunningBackup] = useState(false);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const [backupList, setBackupList] = useState<string[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -32,6 +33,14 @@ export const DatabaseSettings: React.FC = () => {
         });
         const abs = await getAutoBackupSettings();
         setAutoBackup(abs);
+        // Load backup list
+        const listRes = await fetch('/api/list-backups', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+        });
+        if (listRes.ok) {
+          const list = await listRes.json();
+          setBackupList(list);
+        }
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -113,6 +122,14 @@ export const DatabaseSettings: React.FC = () => {
       // Refresh to get updated lastBackup
       const abs = await getAutoBackupSettings();
       setAutoBackup(abs);
+      // Refresh backup list
+      const listRes = await fetch('/api/list-backups', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+      });
+      if (listRes.ok) {
+        const list = await listRes.json();
+        setBackupList(list);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -313,6 +330,29 @@ export const DatabaseSettings: React.FC = () => {
                 <p className="text-xs text-green-600 dark:text-green-400">{backupMsg}</p>
               )}
             </div>
+          </div>
+
+          {/* Backup List Section */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
+            <h4 className="text-md font-semibold text-slate-700 dark:text-slate-300 mb-4">Backup Files</h4>
+            
+            {backupList.length === 0 ? (
+              <p className="text-sm text-slate-500">No backups found.</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {backupList.map((file) => (
+                  <div key={file} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900 rounded">
+                    <span className="text-sm text-slate-700 dark:text-slate-300 truncate mr-2">{file}</span>
+                    <a
+                      href={`/download-backup/${file}?token=${localStorage.getItem('authToken')}`}
+                      className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded whitespace-nowrap"
+                    >
+                      Download
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
