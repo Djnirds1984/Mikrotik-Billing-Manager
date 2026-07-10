@@ -71,3 +71,35 @@ export const migrateSqliteToMariaDb = (): Promise<{ message: string }> => {
 export const factoryReset = (): Promise<{ message: string; success: boolean }> => {
     return dbApi.post<{ message: string; success: boolean }>('/factory-reset', {});
 };
+
+// --- Auto Backup ---
+export interface AutoBackupSettings {
+    enabled: boolean;
+    intervalHours: number;
+    maxBackups: number;
+    lastBackup: string | null;
+}
+
+export const getAutoBackupSettings = (): Promise<AutoBackupSettings> => {
+    return fetch('/api/auto-backup-settings', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+    }).then(r => r.json());
+};
+
+export const saveAutoBackupSettings = (settings: Omit<AutoBackupSettings, 'lastBackup'>): Promise<{ message: string; settings: AutoBackupSettings }> => {
+    return fetch('/api/auto-backup-settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify(settings)
+    }).then(r => r.json());
+};
+
+export const runAutoBackup = (): Promise<{ message: string }> => {
+    return fetch('/api/run-auto-backup', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+    }).then(r => r.json());
+};

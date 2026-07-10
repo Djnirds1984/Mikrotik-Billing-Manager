@@ -5,8 +5,9 @@ import React, { useEffect, useState } from 'react';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { CircleStackIcon } from '../constants.tsx';
 // FIX: Import missing functions for MariaDB operations.
-import { getPanelSettings, savePanelSettings, initMariaDb, migrateSqliteToMariaDb } from '../services/databaseService.ts';
+import { getPanelSettings, savePanelSettings, initMariaDb, migrateSqliteToMariaDb, getAutoBackupSettings, saveAutoBackupSettings, runAutoBackup } from '../services/databaseService.ts';
 import type { PanelSettings } from '../types.ts';
+import type { AutoBackupSettings } from '../services/databaseService.ts';
 
 export const DatabaseSettings: React.FC = () => {
   const { t } = useLocalization();
@@ -16,6 +17,10 @@ export const DatabaseSettings: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationMsg, setMigrationMsg] = useState<string | null>(null);
+  const [autoBackup, setAutoBackup] = useState<AutoBackupSettings>({ enabled: false, intervalHours: 24, maxBackups: 10, lastBackup: null });
+  const [isSavingBackup, setIsSavingBackup] = useState(false);
+  const [isRunningBackup, setIsRunningBackup] = useState(false);
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -25,6 +30,8 @@ export const DatabaseSettings: React.FC = () => {
           ...s,
           databaseEngine: s.databaseEngine || 'sqlite',
         });
+        const abs = await getAutoBackupSettings();
+        setAutoBackup(abs);
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -76,6 +83,40 @@ export const DatabaseSettings: React.FC = () => {
       setError((e as Error).message);
     } finally {
       setIsMigrating(false);
+    }
+  };
+
+  const handleSaveAutoBackup = async () => {
+    setIsSavingBackup(true);
+    setBackupMsg(null);
+    try {
+      const res = await saveAutoBackupSettings({
+        enabled: autoBackup.enabled,
+        intervalHours: autoBackup.intervalHours,
+        maxBackups: autoBackup.maxBackups
+      });
+      setAutoBackup(res.settings);
+      setBackupMsg(res.message);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsSavingBackup(false);
+    }
+  };
+
+  const handleRunBackupNow = async () => {
+    setIsRunningBackup(true);
+    setBackupMsg(null);
+    try {
+      const res = await runAutoBackup();
+      setBackupMsg(res.message);
+      // Refresh to get updated lastBackup
+      const abs = await getAutoBackupSettings();
+      setAutoBackup(abs);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsRunningBackup(false);
     }
   };
 
@@ -204,6 +245,75 @@ export const DatabaseSettings: React.FC = () => {
           {migrationMsg && (
             <p className="text-xs text-slate-500 mt-2 whitespace-pre-wrap">{migrationMsg}</p>
           )}
+
+          {/* Auto Backup Section */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
+            <h4 className="text-md font-semibold text-slate-700 dark:text-slate-300 mb-4">Auto Backup Database</h4>
+            
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoBackup.enabled}
+                    onChange={(e) => setAutoBackup(prev => ({ ...prev, enabled: e.target.checked }))}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Enable Auto Backup</span>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Interval (hours)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-2"
+                    value={autoBackup.intervalHours}
+                    onChange={(e) => setAutoBackup(prev => ({ ...prev, intervalHours: parseInt(e.target.value) || 1 }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Max Backups to Keep</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-2"
+                    value={autoBackup.maxBackups}
+                    onChange={(e) => setAutoBackup(prev => ({ ...prev, maxBackups: parseInt(e.target.value) || 1 }))}
+                  />
+                </div>
+              </div>
+
+              {autoBackup.lastBackup && (
+                <p className="text-xs text-slate-500">
+                  Last backup: {new Date(autoBackup.lastBackup).toLocaleString()}
+                </p>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleSaveAutoBackup}
+                  disabled={isSavingBackup}
+                  className="px-4 py-2 rounded-md bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-semibold disabled:opacity-50"
+                >
+                  {isSavingBackup ? 'Saving…' : 'Save Auto Backup Settings'}
+                </button>
+                <button
+                  onClick={handleRunBackupNow}
+                  disabled={isRunningBackup}
+                  className="px-4 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white font-semibold disabled:opacity-50"
+                >
+                  {isRunningBackup ? 'Backing up…' : 'Backup Now'}
+                </button>
+              </div>
+
+              {backupMsg && (
+                <p className="text-xs text-green-600 dark:text-green-400">{backupMsg}</p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

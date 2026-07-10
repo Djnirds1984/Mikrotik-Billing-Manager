@@ -9330,6 +9330,132 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     });
 
+    // --- Auto Backup Settings ---
+    let autoBackupTimer = null;
+
+    const getAutoBackupSettings = async () => {
+        const s = await db.get('SELECT autoBackupSettings FROM settings WHERE id = 1');
+        if (s && s.autoBackupSettings) {
+            try { return JSON.parse(s.autoBackupSettings); } catch (e) {}
+        }
+        return { enabled: false, intervalHours: 24, maxBackups: 10, lastBackup: null };
+    };
+
+    const performAutoBackup = async () => {
+        try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const backupName = `auto_backup_${timestamp}.db`;
+            const backupPath = path.join(BACKUP_DIR, backupName);
+            await fs.promises.copyFile(DB_PATH, backupPath);
+            console.log(`[AutoBackup] Backup created: ${backupName}`);
+
+            // Update lastBackup timestamp
+            const settings = await getAutoBackupSettings();
+            settings.lastBackup = new Date().toISOString();
+            await db.run('UPDATE settings SET autoBackupSettings = ? WHERE id = 1', [JSON.stringify(settings)]);
+
+            // Cleanup old backups beyond maxBackups
+            const files = await fs.promises.readdir(BACKUP_DIR);
+            const autoBackups = files.filter(f => f.startsWith('auto_backup_') && f.endsWith('.db'))
+                .sort((a, b) => a.localeCompare(b)); // oldest first
+            
+            while (autoBackups.length > settings.maxBackups) {
+                const oldest = autoBackups.shift();
+                await fs.promises.unlink(path.join(BACKUP_DIR, oldest));
+                console.log(`[AutoBackup] Deleted old backup: ${oldest}`);
+            }
+        } catch (e) {
+            console.error('[AutoBackup] Error:', e.message);
+        }
+    };
+
+    const scheduleAutoBackup = () => {
+        if (autoBackupTimer) {
+            clearInterval(autoBackupTimer);
+            autoBackupTimer = null;
+        }
+
+        getAutoBackupSettings().then(settings => {
+            if (settings.enabled && settings.intervalHours > 0) {
+                const intervalMs = settings.intervalHours * 60 * 60 * 1000;
+                
+                // Check if we need to run immediately (past due)
+                if (settings.lastBackup) {
+                    const lastBackupTime = new Date(settings.lastBackup).getTime();
+                    const nextDue = lastBackupTime + intervalMs;
+                    const now = Date.now();
+                    
+                    if (now >= nextDue) {
+                        console.log('[AutoBackup] Backup overdue, running immediately...');
+                        performAutoBackup();
+                    }
+                }
+
+                autoBackupTimer = setInterval(() => {
+                    performAutoBackup();
+                }, intervalMs);
+                
+                console.log(`[AutoBackup] Scheduled every ${settings.intervalHours} hour(s)`);
+            }
+        }).catch(e => {
+            console.error('[AutoBackup] Schedule error:', e.message);
+        });
+    };
+
+    // Start auto backup scheduler
+    scheduleAutoBackup();
+
+    app.get('/api/auto-backup-settings', protect, requireSuperadminOrAdmin, async (req, res) => {
+        try {
+            const settings = await getAutoBackupSettings();
+            res.json(settings);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.post('/api/auto-backup-settings', protect, requireSuperadminOrAdmin, async (req, res) => {
+        try {
+            const { enabled, intervalHours, maxBackups } = req.body;
+            
+            if (typeof enabled !== 'boolean') {
+                return res.status(400).json({ message: 'enabled must be boolean' });
+            }
+            if (!Number.isInteger(intervalHours) || intervalHours < 1) {
+                return res.status(400).json({ message: 'intervalHours must be a positive integer' });
+            }
+            if (!Number.isInteger(maxBackups) || maxBackups < 1) {
+                return res.status(400).json({ message: 'maxBackups must be a positive integer' });
+            }
+
+            const currentSettings = await getAutoBackupSettings();
+            const newSettings = {
+                ...currentSettings,
+                enabled,
+                intervalHours,
+                maxBackups
+            };
+
+            await db.run('UPDATE settings SET autoBackupSettings = ? WHERE id = 1', [JSON.stringify(newSettings)]);
+            
+            // Reschedule auto backup
+            scheduleAutoBackup();
+            
+            res.json({ message: 'Auto backup settings saved', settings: newSettings });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.post('/api/run-auto-backup', protect, requireSuperadminOrAdmin, async (req, res) => {
+        try {
+            await performAutoBackup();
+            res.json({ message: 'Backup created successfully' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     app.get('/api/update-status', protect, (req, res) => {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
