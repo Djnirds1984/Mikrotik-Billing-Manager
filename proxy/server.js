@@ -9486,6 +9486,68 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     });
 
+    // --- Restore Backup ---
+    app.post('/api/restore-backup', protect, requireSuperadminOrAdmin, express.json({ limit: '50mb' }), async (req, res) => {
+        try {
+            const { base64Data, filename } = req.body;
+            if (!base64Data || !filename) {
+                return res.status(400).json({ message: 'Missing file data or filename' });
+            }
+            if (!filename.endsWith('.db')) {
+                return res.status(400).json({ message: 'Only .db backup files are allowed' });
+            }
+            if (filename.includes('..')) {
+                return res.status(400).json({ message: 'Invalid filename' });
+            }
+
+            // Create a safety backup of current database before restoring
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const safetyBackup = path.join(BACKUP_DIR, `pre_restore_${timestamp}.db`);
+            await fs.promises.copyFile(DB_PATH, safetyBackup);
+            console.log(`[Restore] Safety backup created: pre_restore_${timestamp}.db`);
+
+            // Decode and write the uploaded backup over the current database
+            const buffer = Buffer.from(base64Data, 'base64');
+            await fs.promises.writeFile(DB_PATH, buffer);
+            console.log(`[Restore] Database restored from uploaded file: ${filename}`);
+
+            res.json({ message: 'Database restored successfully. A safety backup was created before restoring. The server may need a restart.' });
+        } catch (e) {
+            res.status(500).json({ message: 'Restore failed: ' + e.message });
+        }
+    });
+
+    // --- Restore Backup from existing file in backups directory ---
+    app.post('/api/restore-backup-from-file', protect, requireSuperadminOrAdmin, async (req, res) => {
+        try {
+            const { backupFile } = req.body;
+            if (!backupFile) {
+                return res.status(400).json({ message: 'Missing backup filename' });
+            }
+            if (backupFile.includes('..') || !backupFile.endsWith('.db')) {
+                return res.status(400).json({ message: 'Invalid backup filename' });
+            }
+            const filePath = path.join(BACKUP_DIR, backupFile);
+            if (!fs.existsSync(filePath)) {
+                return res.status(404).json({ message: 'Backup file not found' });
+            }
+
+            // Create a safety backup of current database before restoring
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const safetyBackup = path.join(BACKUP_DIR, `pre_restore_${timestamp}.db`);
+            await fs.promises.copyFile(DB_PATH, safetyBackup);
+            console.log(`[Restore] Safety backup created: pre_restore_${timestamp}.db`);
+
+            // Copy the selected backup over the current database
+            await fs.promises.copyFile(filePath, DB_PATH);
+            console.log(`[Restore] Database restored from: ${backupFile}`);
+
+            res.json({ message: `Database restored from ${backupFile}. A safety backup was created. The server may need a restart.` });
+        } catch (e) {
+            res.status(500).json({ message: 'Restore failed: ' + e.message });
+        }
+    });
+
     app.get('/api/update-status', protect, (req, res) => {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');

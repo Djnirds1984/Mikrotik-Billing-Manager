@@ -22,6 +22,8 @@ export const DatabaseSettings: React.FC = () => {
   const [isRunningBackup, setIsRunningBackup] = useState(false);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [backupList, setBackupList] = useState<string[]>([]);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     (async () => {
@@ -134,6 +136,87 @@ export const DatabaseSettings: React.FC = () => {
       setError((e as Error).message);
     } finally {
       setIsRunningBackup(false);
+    }
+  };
+
+  const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.db')) {
+      setError('Only .db backup files are allowed.');
+      return;
+    }
+
+    const confirmed = confirm(
+      `WARNING: This will replace your current database with "${file.name}".\n\nA safety backup of your current database will be created before restoring.\n\nAre you sure you want to continue?`
+    );
+    if (!confirmed) {
+      e.target.value = '';
+      return;
+    }
+
+    setIsRestoring(true);
+    setBackupMsg(null);
+    setError(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          // Strip the data:application/octet-stream;base64, prefix
+          const base64Only = result.split(',')[1];
+          resolve(base64Only);
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch('/api/restore-backup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ base64Data: base64, filename: file.name })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setBackupMsg(data.message);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsRestoring(false);
+      // Reset file input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRestoreExisting = async (filename: string) => {
+    const confirmed = confirm(
+      `WARNING: This will replace your current database with "${filename}".\n\nA safety backup of your current database will be created before restoring.\n\nAre you sure you want to continue?`
+    );
+    if (!confirmed) return;
+
+    setIsRestoring(true);
+    setBackupMsg(null);
+    setError(null);
+    try {
+      const res = await fetch('/api/restore-backup-from-file', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ backupFile: filename })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setBackupMsg(data.message);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -334,7 +417,25 @@ export const DatabaseSettings: React.FC = () => {
 
           {/* Backup List Section */}
           <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
-            <h4 className="text-md font-semibold text-slate-700 dark:text-slate-300 mb-4">Backup Files</h4>
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-md font-semibold text-slate-700 dark:text-slate-300">Backup Files</h4>
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".db"
+                  onChange={handleRestore}
+                  className="hidden"
+                  id="restore-file-input"
+                />
+                <label
+                  htmlFor="restore-file-input"
+                  className="px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded cursor-pointer font-semibold inline-flex items-center gap-1 disabled:opacity-50"
+                >
+                  {isRestoring ? 'Restoring…' : 'Restore from Backup'}
+                </label>
+              </div>
+            </div>
             
             {backupList.length === 0 ? (
               <p className="text-sm text-slate-500">No backups found.</p>
@@ -343,12 +444,21 @@ export const DatabaseSettings: React.FC = () => {
                 {backupList.map((file) => (
                   <div key={file} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900 rounded">
                     <span className="text-sm text-slate-700 dark:text-slate-300 truncate mr-2">{file}</span>
-                    <a
-                      href={`/download-backup/${file}?token=${localStorage.getItem('authToken')}`}
-                      className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded whitespace-nowrap"
-                    >
-                      Download
-                    </a>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => handleRestoreExisting(file)}
+                        disabled={isRestoring}
+                        className="px-3 py-1 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded whitespace-nowrap disabled:opacity-50"
+                      >
+                        Restore
+                      </button>
+                      <a
+                        href={`/download-backup/${file}?token=${localStorage.getItem('authToken')}`}
+                        className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded whitespace-nowrap"
+                      >
+                        Download
+                      </a>
+                    </div>
                   </div>
                 ))}
               </div>
