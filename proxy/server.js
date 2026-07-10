@@ -992,7 +992,7 @@ async function startServer() {
 
     // --- SNMP OLT Monitoring ---
     try {
-        const snmpService = require('../services/snmpService');
+        const snmpService = require('../services/snmpService.cjs');
         snmpService.startPolling(db, 5 * 60 * 1000); // Poll every 5 minutes
     } catch (e) {
         console.warn('[SNMP] Failed to start SNMP monitoring:', e.message);
@@ -10999,7 +10999,7 @@ WantedBy=multi-user.target`;
     // SNMP service availability status
     app.get('/api/snmp/status', protect, async (req, res) => {
         try {
-            const snmpService = require('../services/snmpService');
+            const snmpService = require('../services/snmpService.cjs');
             res.json({
                 available: snmpService.isAvailable(),
                 brands: snmpService.getSupportedBrands(),
@@ -11015,7 +11015,7 @@ WantedBy=multi-user.target`;
     // Manual SNMP test/poll for a single equipment
     app.post('/api/network-equipment/:id/snmp-test', protect, async (req, res) => {
         try {
-            const snmpService = require('../services/snmpService');
+            const snmpService = require('../services/snmpService.cjs');
             if (!snmpService.isAvailable()) {
                 return res.status(503).json({ success: false, message: 'SNMP service not available. Install net-snmp package.' });
             }
