@@ -203,7 +203,18 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
         const success = await onSave({ sale: saleData, payment: paymentData });
         if (success) {
             setIsSubmitting(false);
-            onClose();
+            // Ask user if they want to print acknowledgement receipt
+            const wantPrint = window.confirm('Payment successful! Do you want to print the acknowledgement receipt?');
+            if (wantPrint) {
+                setReceiptData({
+                    ...saleData,
+                    id: `sale_${Date.now()}`,
+                    date: new Date().toISOString(),
+                    routerName: '',
+                } as SaleRecord);
+            } else {
+                onClose();
+            }
             return;
         }
         setIsSubmitting(false);
