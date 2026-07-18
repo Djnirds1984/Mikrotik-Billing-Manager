@@ -353,6 +353,20 @@ export interface InventoryItem {
     dateAdded: string;
 }
 
+export interface EquipmentWithdrawal {
+    id: string;
+    inventoryItemId: string;
+    itemName: string;
+    quantity: number;
+    customerId?: string;
+    customerName?: string;
+    customerUsername?: string;
+    notes?: string;
+    withdrawnBy?: string;
+    withdrawnDate: string;
+    routerId?: string;
+}
+
 export interface ExpenseRecord {
     id: string;
     date: string;

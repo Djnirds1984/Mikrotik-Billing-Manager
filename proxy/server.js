@@ -382,6 +382,19 @@ async function initDb() {
                 serialNumber TEXT,
                 dateAdded TEXT
             );
+            CREATE TABLE IF NOT EXISTS equipment_withdrawals (
+                id TEXT PRIMARY KEY,
+                inventoryItemId TEXT NOT NULL,
+                itemName TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                customerId TEXT,
+                customerName TEXT,
+                customerUsername TEXT,
+                notes TEXT,
+                withdrawnBy TEXT,
+                withdrawnDate TEXT NOT NULL,
+                routerId TEXT
+            );
             CREATE TABLE IF NOT EXISTS expenses (
                 id TEXT PRIMARY KEY,
                 date TEXT NOT NULL,
@@ -1602,6 +1615,7 @@ async function startServer() {
 
     createCrud('/billing-plans', 'billing_plans');
     createCrud('/inventory', 'inventory');
+    createCrud('/equipment-withdrawals', 'equipment_withdrawals');
     createCrud('/expenses', 'expenses');
     createCrud('/pisowifi-income', 'pisowifi_income');
     createCrud('/pisowifi-resellers', 'pisowifi_resellers');
@@ -1805,6 +1819,43 @@ async function startServer() {
         } catch (err) {
             console.error('[Client Balance] POST error:', err.message);
             res.status(500).json({ message: 'Failed to update client balance' });
+        }
+    });
+
+    // POST /api/equipment-withdrawals/process - Withdraw equipment and deduct from inventory
+    app.post('/api/equipment-withdrawals/process', async (req, res) => {
+        try {
+            const { inventoryItemId, itemName, quantity, customerId, customerName, customerUsername, notes, withdrawnBy, withdrawnDate, routerId } = req.body;
+            if (!inventoryItemId || !itemName || !quantity || quantity <= 0) {
+                return res.status(400).json({ message: 'inventoryItemId, itemName, and valid quantity are required' });
+            }
+
+            // Check available stock
+            const item = await db.get('SELECT * FROM inventory WHERE id = ?', [inventoryItemId]);
+            if (!item) {
+                return res.status(404).json({ message: 'Inventory item not found' });
+            }
+            if (item.quantity < quantity) {
+                return res.status(400).json({ message: `Insufficient stock. Available: ${item.quantity}, Requested: ${quantity}` });
+            }
+
+            // Deduct inventory
+            await db.run('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', [quantity, inventoryItemId]);
+
+            // Create withdrawal record
+            const withdrawalId = `wd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await db.run(
+                `INSERT INTO equipment_withdrawals (id, inventoryItemId, itemName, quantity, customerId, customerName, customerUsername, notes, withdrawnBy, withdrawnDate, routerId)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [withdrawalId, inventoryItemId, itemName, quantity, customerId || null, customerName || null, customerUsername || null, notes || null, withdrawnBy || null, withdrawnDate || new Date().toISOString(), routerId || null]
+            );
+
+            const withdrawal = await db.get('SELECT * FROM equipment_withdrawals WHERE id = ?', [withdrawalId]);
+            const updatedItem = await db.get('SELECT * FROM inventory WHERE id = ?', [inventoryItemId]);
+            res.json({ withdrawal, updatedStock: updatedItem.quantity });
+        } catch (err) {
+            console.error('[Equipment Withdrawal] Process error:', err.message);
+            res.status(500).json({ message: 'Failed to process withdrawal: ' + err.message });
         }
     });
 

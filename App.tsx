@@ -117,7 +117,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     selectedRouterId,
     currentView === 'sales' || currentView === 'dhcp-portal' || currentView === 'pppoe'
   );
-  const { items, addItem, updateItem, deleteItem } = useInventoryData(currentView === 'inventory');
+  const { items, addItem, updateItem, deleteItem, reload: reloadInventory } = useInventoryData(currentView === 'inventory');
   const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData(currentView === 'inventory' || currentView === 'accounting' || currentView === 'payroll');
   const { records: pisowifiIncome, addRecord: addPisowifiIncome, updateRecord: updatePisowifiIncome, deleteRecord: deletePisowifiIncome } = usePisowifiIncomeData(currentView === 'inventory' || currentView === 'accounting');
   const { resellers: pisowifiResellers, addReseller: addPisowifiReseller, updateReseller: updatePisowifiReseller, deleteReseller: deletePisowifiReseller } = usePisowifiResellersData(currentView === 'inventory');
@@ -279,6 +279,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                             addItem={addItem} 
                             updateItem={updateItem} 
                             deleteItem={deleteItem}
+                            reload={reloadInventory}
+                            selectedRouter={selectedRouter}
                         />
                       );
                   case 'accounting':
