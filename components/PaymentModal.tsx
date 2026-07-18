@@ -17,7 +17,7 @@ interface PaymentModalProps {
     nonPaymentProfile: string;
     onSave: (data: {
         sale: Omit<SaleRecord, 'id' | 'date' | 'routerName'>;
-        payment: { plan: BillingPlanWithId, nonPaymentProfile: string, discountDays: number, paymentDate: string, coveredMonth?: string };
+        payment: { plan: BillingPlanWithId, nonPaymentProfile: string, discountDays: number, paymentDate: string, coveredMonth?: string, creditApplied?: number, overpaymentCredit?: number };
     }) => Promise<boolean>;
     companySettings: CompanySettings;
     preselectedMonth?: string; // YYYY-MM pre-filled from ledger
@@ -35,6 +35,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const [unpaidMonths, setUnpaidMonths] = useState<UnpaidMonthEntry[]>([]);
     const [isPostpaid, setIsPostpaid] = useState(false);
     const [clientBalance, setClientBalance] = useState<number>(0); // negative = credit available
+    const [customAmount, setCustomAmount] = useState<string>('');
 
     useEffect(() => {
         if (isOpen) {
@@ -45,6 +46,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             setSelectedMonth('');
             setUnpaidMonths([]);
             setClientBalance(0);
+            setCustomAmount('');
 
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
@@ -132,7 +134,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     // Apply client credit (negative balance = credit available)
     const creditAvailable = clientBalance < 0 ? Math.abs(clientBalance) : 0;
     const creditApplied = Math.min(creditAvailable, Math.max(0, planPrice - discountAmount));
-    const finalAmount = Math.max(0, planPrice - discountAmount - creditApplied);
+    // Custom amount (overpayment) logic
+    const customAmountValue = parseFloat(customAmount) || 0;
+    const hasCustomAmount = customAmountValue > 0;
+    const amountDue = Math.max(0, planPrice - discountAmount - creditApplied);
+    const overpaymentCredit = hasCustomAmount ? Math.max(0, customAmountValue - amountDue) : 0;
+    const finalAmount = hasCustomAmount ? customAmountValue : amountDue;
 
     // Format month for display
     const formatMonthDisplay = (monthStr: string): string => {
@@ -190,6 +197,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             paymentDate,
             coveredMonth: selectedMonth, // YYYY-MM for backend ledger update
             creditApplied, // amount of credit deducted from this payment
+            overpaymentCredit, // extra amount to add as client credit
         };
 
         const success = await onSave({ sale: saleData, payment: paymentData });
@@ -261,24 +269,50 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                             onChange={(e) => setSelectedMonth(e.target.value)}
                                             className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
                                         >
-                                            {unpaidMonths.map(m => (
-                                                <option key={m.month} value={m.month}>
-                                                    {formatMonthDisplay(m.month)} {isMonthOverdue(m.month) ? '(OVERDUE)' : '(CURRENT)'} - {formatCurrency(m.planPrice || planPrice)}
-                                                </option>
-                                            ))}
-                                            {/* If no unpaid months, show current + next few months */}
-                                            {unpaidMonths.length === 0 && (() => {
+                                            {(() => {
                                                 const now = new Date();
-                                                const options = [];
-                                                for (let i = 0; i < 3; i++) {
-                                                    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-                                                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                                                const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                                                const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                                                const prevMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+                                                
+                                                // Build set of months already in unpaid list
+                                                const unpaidMonthKeys = new Set(unpaidMonths.map(m => m.month));
+                                                
+                                                const options: React.ReactNode[] = [];
+                                                
+                                                // Add previous month if not already in unpaid list
+                                                if (!unpaidMonthKeys.has(prevMonthKey)) {
                                                     options.push(
-                                                        <option key={key} value={key}>
-                                                            {formatMonthDisplay(key)} {i === 0 ? '(CURRENT)' : '(ADVANCE)'}
+                                                        <option key={prevMonthKey} value={prevMonthKey}>
+                                                            {formatMonthDisplay(prevMonthKey)} (PREVIOUS)
                                                         </option>
                                                     );
                                                 }
+                                                
+                                                // Add unpaid months
+                                                unpaidMonths.forEach(m => {
+                                                    options.push(
+                                                        <option key={m.month} value={m.month}>
+                                                            {formatMonthDisplay(m.month)} {isMonthOverdue(m.month) ? '(OVERDUE)' : '(CURRENT)'} - {formatCurrency(m.planPrice || planPrice)}
+                                                        </option>
+                                                    );
+                                                });
+                                                
+                                                // If no unpaid months, also add current + advance months
+                                                if (unpaidMonths.length === 0) {
+                                                    for (let i = 0; i < 3; i++) {
+                                                        const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+                                                        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                                                        // Skip if this is the previous month we already added
+                                                        if (key === prevMonthKey) continue;
+                                                        options.push(
+                                                            <option key={key} value={key}>
+                                                                {formatMonthDisplay(key)} {i === 0 ? '(CURRENT)' : '(ADVANCE)'}
+                                                            </option>
+                                                        );
+                                                    }
+                                                }
+                                                
                                                 return options;
                                             })()}
                                         </select>
@@ -309,6 +343,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                     <label htmlFor="discountDays" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Discount for Downtime (Days)</label>
                                     <input type="number" id="discountDays" value={discountDays} onChange={(e) => setDiscountDays(e.target.value)} min="0" step="1" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
                                 </div>
+                                <div>
+                                    <label htmlFor="customAmount" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Custom Amount Paid <span className="text-xs text-slate-400">(optional — leave empty for exact amount)</span></label>
+                                    <input type="number" id="customAmount" value={customAmount} onChange={(e) => setCustomAmount(e.target.value)} min="0" step="0.01" placeholder={`Exact: ${formatCurrency(amountDue)}`} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white placeholder-slate-400" />
+                                    {hasCustomAmount && overpaymentCredit > 0 && (
+                                        <p className="mt-1 text-xs text-green-600 dark:text-green-400 font-medium">
+                                            Overpayment of <span className="font-bold">{formatCurrency(overpaymentCredit)}</span> will be added as client credit.
+                                        </p>
+                                    )}
+                                    {hasCustomAmount && overpaymentCredit === 0 && customAmountValue < amountDue && (
+                                        <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-400 font-medium">
+                                            Amount is less than the amount due ({formatCurrency(amountDue)}).
+                                        </p>
+                                    )}
+                                </div>
                                 <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
                                     <div className="flex justify-between text-sm text-slate-500 dark:text-slate-400">
                                         <span>Subtotal</span>
@@ -322,6 +370,22 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                         <div className="flex justify-between text-sm text-green-600 dark:text-green-400">
                                             <span>Credit Applied</span>
                                             <span>- {formatCurrency(creditApplied)}</span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1">
+                                        <span>Amount Due</span>
+                                        <span>{formatCurrency(amountDue)}</span>
+                                    </div>
+                                    {hasCustomAmount && (
+                                        <div className="flex justify-between text-sm text-blue-600 dark:text-blue-400">
+                                            <span>Amount Paid (Custom)</span>
+                                            <span>{formatCurrency(customAmountValue)}</span>
+                                        </div>
+                                    )}
+                                    {overpaymentCredit > 0 && (
+                                        <div className="flex justify-between text-sm font-bold text-green-600 dark:text-green-400">
+                                            <span>New Client Credit</span>
+                                            <span>+ {formatCurrency(overpaymentCredit)}</span>
                                         </div>
                                     )}
                                     <div className="flex justify-between text-lg font-bold text-slate-900 dark:text-white mt-2">

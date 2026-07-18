@@ -680,6 +680,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [selectedSecret, setSelectedSecret] = useState<PppSecret | null>(null);
     const [preselectedPaymentMonth, setPreselectedPaymentMonth] = useState<string>('');
     const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
+    const [clientBalances, setClientBalances] = useState<Record<string, number>>({});
     
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -727,6 +728,19 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             ]);
             setSecrets(secretsData);
             setProfiles(profilesData);
+            
+            // Fetch client balances (credits)
+            try {
+                const balRes = await fetch(`/api/client-balances/${encodeURIComponent(selectedRouter.id)}`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                });
+                if (balRes.ok) {
+                    const balMap = await balRes.json();
+                    setClientBalances(balMap);
+                }
+            } catch (balErr) {
+                console.warn('[PPPoE Users] Failed to fetch client balances:', balErr);
+            }
             
             // Debug logging
             console.log(`[PPPoE Users] Loaded ${secretsData.length} secrets from MikroTik`);
@@ -1266,6 +1280,28 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 }
             }
 
+            // Add overpayment credit to client balance
+            const overpaymentCredit = payment.overpaymentCredit || 0;
+            if (overpaymentCredit > 0) {
+                try {
+                    await fetch('/api/client-balance', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                        },
+                        body: JSON.stringify({
+                            routerId: selectedRouter.id,
+                            username: selectedSecret.name,
+                            amount: -overpaymentCredit // negative amount adds credit (balance + negative)
+                        })
+                    });
+                    console.log(`[PPPoE Payment] Client credit increased by ${overpaymentCredit} (overpayment)`);
+                } catch (balErr) {
+                    console.warn('[PPPoE Payment] Failed to add overpayment credit:', balErr);
+                }
+            }
+
             await fetchData();
             return true;
         } catch (err) {
@@ -1504,6 +1540,12 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                             <p className="text-xs text-slate-500 truncate">
                                                 <HighlightText text={user.customer?.fullName || ''} highlight={searchTerm} />
                                             </p>
+                                            {clientBalances[user.name] && clientBalances[user.name] < 0 && (
+                                                <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 text-[10px] font-bold rounded bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                    Credit: {Math.abs(clientBalances[user.name]).toFixed(2)}
+                                                </span>
+                                            )}
                                         </div>
                                         {isPostpaid ? (
                                             <span className="shrink-0 px-2 py-1 text-xs font-semibold rounded-full bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300">Postpaid</span>
@@ -1677,6 +1719,12 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                         <p className="text-xs text-slate-500">
                                             <HighlightText text={user.customer?.fullName || ''} highlight={searchTerm} />
                                         </p>
+                                        {clientBalances[user.name] && clientBalances[user.name] < 0 && (
+                                            <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 text-[10px] font-bold rounded bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                Credit: {Math.abs(clientBalances[user.name]).toFixed(2)}
+                                            </span>
+                                        )}
                                     </td>
                                     <td className="text-center">
                                         {(() => {

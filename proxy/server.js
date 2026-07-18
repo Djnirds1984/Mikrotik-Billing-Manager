@@ -1749,6 +1749,24 @@ async function startServer() {
     });
 
     // --- Client Balance (Credit/Debit) API ---
+    // GET /api/client-balances/:routerId - Fetch all client balances for a router
+    app.get('/api/client-balances/:routerId', async (req, res) => {
+        try {
+            const { routerId } = req.params;
+            const entries = await db.all(
+                "SELECT username, balance FROM client_balances WHERE routerId = ? AND balance < 0",
+                [routerId]
+            );
+            // Return as a map: { username: balance }
+            const balanceMap = {};
+            entries.forEach(e => { balanceMap[e.username] = e.balance; });
+            res.json(balanceMap);
+        } catch (err) {
+            console.error('[Client Balances] GET error:', err.message);
+            res.status(500).json({ message: 'Failed to fetch client balances' });
+        }
+    });
+
     // GET /api/client-balance/:routerId/:username
     app.get('/api/client-balance/:routerId/:username', async (req, res) => {
         try {
