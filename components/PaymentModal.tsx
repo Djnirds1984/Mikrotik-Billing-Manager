@@ -215,9 +215,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                 <PrintableReceipt sale={receiptData} companySettings={companySettings} />
             </div>
             <div className={`fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 ${receiptData ? 'hidden' : ''}`}>
-                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg border border-slate-200 dark:border-slate-700">
-                    <form onSubmit={handleSubmit}>
-                        <div className="p-6">
+                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg border border-slate-200 dark:border-slate-700 max-h-[90vh] flex flex-col">
+                    <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+                        <div className="p-6 overflow-y-auto flex-1">
                             <h3 className="text-xl font-bold text-[--color-primary-500] dark:text-[--color-primary-400] mb-1">Process Payment</h3>
                             <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">For user: {secret.customer?.fullName || secret.name}</p>
 
@@ -405,7 +405,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                 </div>
                             </div>
                         </div>
-                        <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end space-x-3 rounded-b-lg">
+                        <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end space-x-3 rounded-b-lg shrink-0">
                             <button type="button" onClick={onClose} disabled={isSubmitting} className="px-4 py-2 text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600">Cancel</button>
                             <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm font-medium rounded-md text-white bg-[--color-primary-600] hover:bg-[--color-primary-500] disabled:opacity-50">
                                 {isSubmitting ? 'Processing...' : 'Process Payment & Print'}
