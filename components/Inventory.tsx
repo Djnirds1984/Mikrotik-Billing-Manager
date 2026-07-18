@@ -187,6 +187,7 @@ const WithdrawEquipment: React.FC<{
     // Withdraw form state
     const [selectedItemId, setSelectedItemId] = useState('');
     const [withdrawQuantity, setWithdrawQuantity] = useState(1);
+    const [serialNumber, setSerialNumber] = useState('');
     const [selectedCustomerId, setSelectedCustomerId] = useState('');
     const [notes, setNotes] = useState('');
 
@@ -228,6 +229,7 @@ const WithdrawEquipment: React.FC<{
                     inventoryItemId: selectedItem.id,
                     itemName: selectedItem.name,
                     quantity: withdrawQuantity,
+                    serialNumber: serialNumber || null,
                     customerId: selectedCustomer?.id || null,
                     customerName: selectedCustomer?.fullName || null,
                     customerUsername: selectedCustomer?.username || null,
@@ -247,6 +249,7 @@ const WithdrawEquipment: React.FC<{
             // Reset form
             setSelectedItemId('');
             setWithdrawQuantity(1);
+            setSerialNumber('');
             setSelectedCustomerId('');
             setNotes('');
 
@@ -304,6 +307,17 @@ const WithdrawEquipment: React.FC<{
                                 className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
                             />
                         </div>
+                    </div>
+                    <div>
+                        <label htmlFor="withdrawSerial" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Serial Number (Optional)</label>
+                        <input
+                            type="text"
+                            id="withdrawSerial"
+                            value={serialNumber}
+                            onChange={e => setSerialNumber(e.target.value)}
+                            placeholder="e.g., SN123456789"
+                            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        />
                     </div>
                     <div>
                         <label htmlFor="withdrawCustomer" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Assign to Client (Optional)</label>
@@ -364,6 +378,7 @@ const WithdrawEquipment: React.FC<{
                                     <th className="px-6 py-3">Date</th>
                                     <th className="px-6 py-3">Item</th>
                                     <th className="px-6 py-3">Qty</th>
+                                    <th className="px-6 py-3">Serial Number</th>
                                     <th className="px-6 py-3">Client</th>
                                     <th className="px-6 py-3">Withdrawn By</th>
                                     <th className="px-6 py-3">Notes</th>
@@ -381,6 +396,7 @@ const WithdrawEquipment: React.FC<{
                                                 {w.quantity}
                                             </span>
                                         </td>
+                                        <td className="px-6 py-4 font-mono text-xs text-slate-500">{w.serialNumber || '—'}</td>
                                         <td className="px-6 py-4">
                                             {w.customerName ? (
                                                 <div>

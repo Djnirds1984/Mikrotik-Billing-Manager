@@ -358,6 +358,7 @@ export interface EquipmentWithdrawal {
     inventoryItemId: string;
     itemName: string;
     quantity: number;
+    serialNumber?: string;
     customerId?: string;
     customerName?: string;
     customerUsername?: string;

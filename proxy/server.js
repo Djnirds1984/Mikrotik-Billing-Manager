@@ -387,6 +387,7 @@ async function initDb() {
                 inventoryItemId TEXT NOT NULL,
                 itemName TEXT NOT NULL,
                 quantity INTEGER NOT NULL DEFAULT 1,
+                serialNumber TEXT,
                 customerId TEXT,
                 customerName TEXT,
                 customerUsername TEXT,
@@ -1825,7 +1826,7 @@ async function startServer() {
     // POST /api/equipment-withdrawals/process - Withdraw equipment and deduct from inventory
     app.post('/api/equipment-withdrawals/process', async (req, res) => {
         try {
-            const { inventoryItemId, itemName, quantity, customerId, customerName, customerUsername, notes, withdrawnBy, withdrawnDate, routerId } = req.body;
+            const { inventoryItemId, itemName, quantity, serialNumber, customerId, customerName, customerUsername, notes, withdrawnBy, withdrawnDate, routerId } = req.body;
             if (!inventoryItemId || !itemName || !quantity || quantity <= 0) {
                 return res.status(400).json({ message: 'inventoryItemId, itemName, and valid quantity are required' });
             }
@@ -1845,9 +1846,9 @@ async function startServer() {
             // Create withdrawal record
             const withdrawalId = `wd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             await db.run(
-                `INSERT INTO equipment_withdrawals (id, inventoryItemId, itemName, quantity, customerId, customerName, customerUsername, notes, withdrawnBy, withdrawnDate, routerId)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [withdrawalId, inventoryItemId, itemName, quantity, customerId || null, customerName || null, customerUsername || null, notes || null, withdrawnBy || null, withdrawnDate || new Date().toISOString(), routerId || null]
+                `INSERT INTO equipment_withdrawals (id, inventoryItemId, itemName, quantity, serialNumber, customerId, customerName, customerUsername, notes, withdrawnBy, withdrawnDate, routerId)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [withdrawalId, inventoryItemId, itemName, quantity, serialNumber || null, customerId || null, customerName || null, customerUsername || null, notes || null, withdrawnBy || null, withdrawnDate || new Date().toISOString(), routerId || null]
             );
 
             const withdrawal = await db.get('SELECT * FROM equipment_withdrawals WHERE id = ?', [withdrawalId]);
