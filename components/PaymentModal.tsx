@@ -105,7 +105,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
 
     useEffect(() => {
         if (receiptData) {
-            const timer = setTimeout(() => window.print(), 100);
+            const timer = setTimeout(() => window.print(), 300);
             return () => clearTimeout(timer);
         }
     }, [receiptData]);
@@ -206,12 +206,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             // Ask user if they want to print acknowledgement receipt
             const wantPrint = window.confirm('Payment successful! Do you want to print the acknowledgement receipt?');
             if (wantPrint) {
-                setReceiptData({
-                    ...saleData,
-                    id: `sale_${Date.now()}`,
-                    date: new Date().toISOString(),
-                    routerName: '',
-                } as SaleRecord);
+                // Use setTimeout to ensure state updates properly after blocking confirm
+                setTimeout(() => {
+                    setReceiptData({
+                        ...saleData,
+                        id: `sale_${Date.now()}`,
+                        date: new Date().toISOString(),
+                        routerName: '',
+                    } as SaleRecord);
+                }, 50);
             } else {
                 onClose();
             }
