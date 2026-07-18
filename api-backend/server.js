@@ -1752,7 +1752,27 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
             }
         } catch {}
 
-        // Smart Due Date Logic
+        // CRITICAL: Get client's existing due date from database to preserve their fixed day
+        // This ensures the due date is ALWAYS preserved regardless of when they pay
+        let clientExistingDueDate = null;
+        try {
+            const database = await getDb();
+            const customer = await database.get(
+                'SELECT dueDate FROM customers WHERE username = ? OR accountNumber = ? LIMIT 1',
+                [secret.name, secret.name]
+            );
+            if (customer && customer.dueDate) {
+                const d = new Date(customer.dueDate);
+                if (!isNaN(d.getTime())) {
+                    clientExistingDueDate = d;
+                    console.log(`[ppp/payment/process] Found client existing dueDate from DB: ${customer.dueDate}, day=${d.getDate()}`);
+                }
+            }
+        } catch (e) {
+            console.log('[ppp/payment/process] Could not fetch customer dueDate from DB:', e.message);
+        }
+
+        // Smart Due Date Logic - Priority: 1) Client DB dueDate, 2) Secret comment fixedDay/dueDate, 3) Payment date
         try {
             if (secret && secret.comment) {
                 const c = JSON.parse(secret.comment);
@@ -1763,7 +1783,15 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
                 }
             }
         } catch (e) {}
-        if (!fixedDay) fixedDay = start.getDate();
+        
+        // Use client's existing due date from database if available (highest priority for preserving client's set date)
+        if (clientExistingDueDate) {
+            fixedDay = clientExistingDueDate.getDate();
+            console.log(`[ppp/payment/process] Using client existing dueDate day from DB: ${fixedDay}`);
+        } else if (!fixedDay) {
+            fixedDay = start.getDate();
+            console.log(`[ppp/payment/process] No existing dueDate found, using payment date day: ${fixedDay}`);
+        }
 
         // For postpaid: preserve the original fixedDay and advance by 1 calendar month
         if (planType === 'postpaid') {
@@ -1780,6 +1808,16 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
                     }
                 }
             } catch (e) {}
+            
+            // CRITICAL: Use client's existing due date from database (highest priority)
+            if (clientExistingDueDate) {
+                originalFixedDay = clientExistingDueDate.getDate();
+                console.log(`[ppp/payment/process] Postpaid: Using client existing dueDate day from DB: ${originalFixedDay}`);
+            } else if (!originalFixedDay && fixedDay) {
+                // Fallback to fixedDay (which may be from comment or payment date)
+                originalFixedDay = fixedDay;
+                console.log(`[ppp/payment/process] Postpaid: Using fixedDay as fallback: ${fixedDay}`);
+            }
             
             // If we have an original fixed day, preserve it and advance by 1 month
             if (originalFixedDay) {

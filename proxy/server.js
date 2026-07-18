@@ -3136,6 +3136,16 @@ async function startServer() {
                 console.log('[Manual Payments] Could not detect plan type from MikroTik:', e.message);
             }
             
+            // CRITICAL FALLBACK: If we couldn't get fixedDay from MikroTik, get it from customer's existing dueDate
+            // This ensures the due date is ALWAYS preserved based on the client's set date
+            if (isPostpaid && !originalFixedDay && customer && customer.dueDate) {
+                const existingDueDate = new Date(customer.dueDate);
+                if (!isNaN(existingDueDate.getTime())) {
+                    originalFixedDay = existingDueDate.getDate();
+                    console.log(`[Manual Payments] Using fixedDay from customer.dueDate: ${originalFixedDay}`);
+                }
+            }
+            
             // For postpaid: preserve the original due date day and advance by 1 calendar month
             if (isPostpaid && originalFixedDay) {
                 const baseDate = (customer && customer.dueDate) ? new Date(customer.dueDate) : currentDate;

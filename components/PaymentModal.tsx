@@ -36,6 +36,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const [isPostpaid, setIsPostpaid] = useState(false);
     const [clientBalance, setClientBalance] = useState<number>(0); // negative = credit available
     const [customAmount, setCustomAmount] = useState<string>('');
+    const [showPrintConfirm, setShowPrintConfirm] = useState(false);
+    const [pendingSaleData, setPendingSaleData] = useState<any>(null);
 
     useEffect(() => {
         if (isOpen) {
@@ -47,6 +49,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             setUnpaidMonths([]);
             setClientBalance(0);
             setCustomAmount('');
+            setShowPrintConfirm(false);
+            setPendingSaleData(null);
 
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
@@ -203,21 +207,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
         const success = await onSave({ sale: saleData, payment: paymentData });
         if (success) {
             setIsSubmitting(false);
-            // Ask user if they want to print acknowledgement receipt
-            const wantPrint = window.confirm('Payment successful! Do you want to print the acknowledgement receipt?');
-            if (wantPrint) {
-                // Use setTimeout to ensure state updates properly after blocking confirm
-                setTimeout(() => {
-                    setReceiptData({
-                        ...saleData,
-                        id: `sale_${Date.now()}`,
-                        date: new Date().toISOString(),
-                        routerName: '',
-                    } as SaleRecord);
-                }, 50);
-            } else {
-                onClose();
-            }
+            // Show custom print confirmation dialog
+            setPendingSaleData(saleData);
+            setShowPrintConfirm(true);
             return;
         }
         setIsSubmitting(false);
@@ -228,6 +220,54 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             <div className={receiptData ? 'printable-area' : 'hidden'}>
                 <PrintableReceipt sale={receiptData} companySettings={companySettings} />
             </div>
+            {/* Print Confirmation Modal */}
+            {showPrintConfirm && (
+                <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-sm border border-slate-200 dark:border-slate-700">
+                        <div className="p-6">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                                    <svg className="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Payment Successful!</h3>
+                            </div>
+                            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">Do you want to print the acknowledgement receipt?</p>
+                            <div className="flex gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowPrintConfirm(false);
+                                        if (pendingSaleData) {
+                                            setReceiptData({
+                                                ...pendingSaleData,
+                                                id: `sale_${Date.now()}`,
+                                                date: new Date().toISOString(),
+                                                routerName: '',
+                                            } as SaleRecord);
+                                        }
+                                    }}
+                                    className="flex-1 px-4 py-2 bg-[--color-primary-500] hover:bg-[--color-primary-600] text-white rounded-lg font-medium transition-colors"
+                                >
+                                    Print Receipt
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowPrintConfirm(false);
+                                        setPendingSaleData(null);
+                                        onClose();
+                                    }}
+                                    className="flex-1 px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-900 dark:text-white rounded-lg font-medium transition-colors"
+                                >
+                                    Skip
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className={`fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 ${receiptData ? 'hidden' : ''}`}>
                 <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg border border-slate-200 dark:border-slate-700 max-h-[90vh] flex flex-col">
                     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
