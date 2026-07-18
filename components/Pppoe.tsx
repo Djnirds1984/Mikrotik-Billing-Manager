@@ -662,6 +662,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
 // --- Users Management Sub-component ---
 const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void> }> = ({ selectedRouter, addSale }) => {
     const { hasPermission } = useAuth();
+    const { t, formatCurrency } = useLocalization();
     const [secrets, setSecrets] = useState<PppSecret[]>([]);
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const { plans } = useBillingPlans(selectedRouter.id);
@@ -1690,13 +1691,18 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     )}
                                 </div>
                             </th>
+                            <th className="px-6 py-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                    Credit
+                                </div>
+                            </th>
                             <th className="px-6 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {sortedUsers.length === 0 ? (
                             <tr>
-                                <td colSpan={6} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                <td colSpan={7} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
                                     {searchTerm ? (
                                         <div className="flex flex-col items-center gap-2">
                                             <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1719,12 +1725,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                         <p className="text-xs text-slate-500">
                                             <HighlightText text={user.customer?.fullName || ''} highlight={searchTerm} />
                                         </p>
-                                        {clientBalances[user.name] && clientBalances[user.name] < 0 && (
-                                            <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 text-[10px] font-bold rounded bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
-                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                                Credit: {Math.abs(clientBalances[user.name]).toFixed(2)}
-                                            </span>
-                                        )}
                                     </td>
                                     <td className="text-center">
                                         {(() => {
@@ -1758,6 +1758,16 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                     </td>
                                     <td className="text-center">
                                         <HighlightText text={user.subscription.dueDate || ''} highlight={searchTerm} />
+                                    </td>
+                                    <td className="text-center">
+                                        {clientBalances[user.name] && clientBalances[user.name] < 0 ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold rounded-full bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                {formatCurrency(Math.abs(clientBalances[user.name]))}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
+                                        )}
                                     </td>
                                     <td className="px-3 py-2 md:px-6 md:py-4 text-right">
                                         <div className="flex flex-wrap gap-2 justify-end">
