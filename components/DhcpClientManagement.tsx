@@ -4,6 +4,7 @@ import { getDhcpClients, getDhcpServers, updateDhcpClientDetails, deleteDhcpClie
 import type { DhcpClient, DhcpClientDbRecord, DhcpClientActionParams, RouterConfigWithId, SaleRecord, DhcpBillingPlanWithId } from '../types.ts';
 import { useDhcpBillingPlans } from '../hooks/useDhcpBillingPlans.ts';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, ExclamationTriangleIcon } from '../constants.tsx';
 import { ActivationPaymentModal } from './ActivationPaymentModal.tsx';
@@ -113,6 +114,10 @@ interface DhcpClientManagementProps {
 }
 
 export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ selectedRouter, addSale }) => {
+    const { user } = useAuth();
+    const processedByLabel = user?.role?.name?.toLowerCase() === 'administrator' || user?.role?.name?.toLowerCase() === 'superadmin'
+        ? 'admin'
+        : user?.username || 'admin';
     const [clients, setClients] = useState<DhcpClient[]>([]);
     const [dbClients, setDbClients] = useState<DhcpClientDbRecord[]>([]);
     const { plans, isLoading: isLoadingPlans } = useDhcpBillingPlans(selectedRouter.id);
@@ -255,7 +260,8 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 clientEmail: params.email,
                 routerId: selectedRouter.id,
                 routerName: selectedRouter.name,
-                date: new Date().toISOString()
+                date: new Date().toISOString(),
+                processedBy: processedByLabel
             });
             
             await upsertDbClient({

@@ -661,8 +661,13 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
 
 // --- Users Management Sub-component ---
 const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void> }> = ({ selectedRouter, addSale }) => {
-    const { hasPermission } = useAuth();
+    const { hasPermission, user } = useAuth();
     const { t, formatCurrency } = useLocalization();
+
+    // Determine processedBy label based on user role
+    const processedByLabel = user?.role?.name?.toLowerCase() === 'administrator' || user?.role?.name?.toLowerCase() === 'superadmin'
+        ? 'admin'
+        : user?.username || 'admin';
     const [secrets, setSecrets] = useState<PppSecret[]>([]);
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const { plans } = useBillingPlans(selectedRouter.id);
@@ -1167,7 +1172,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             discountAmount: 0,
                             finalAmount: totalInvoiceAmount,
                             payment_method: 'invoice',
-                            processedBy: 'admin',
+                            processedBy: processedByLabel,
                             currency: selectedPlan?.currency || 'PHP',
                             installationFee: installationFee
                         } as SaleRecord;
@@ -1229,7 +1234,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         if (!selectedSecret) return false;
         try {
             await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
-            const saleResult = await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString() });
+            const saleResult = await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString(), processedBy: processedByLabel });
 
             // Update billing ledger for postpaid users
             const coveredMonth = payment.coveredMonth; // YYYY-MM format
