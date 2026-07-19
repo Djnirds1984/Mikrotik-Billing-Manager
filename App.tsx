@@ -317,6 +317,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <NetworkEquipmentManager />;
                   case 'database':
                     return <DatabaseSettings />;
+                  case 'ai_assistant':
+                    return <Help currentView={currentView} selectedRouter={selectedRouter} />;
                   case 'license':
                       return <License onLicenseChange={onLicenseChange} licenseStatus={licenseStatus} />;
                   case 'super_admin':
@@ -361,9 +363,6 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           </div>
         </div>
       </main>
-      <Suspense fallback={null}>
-        <Help currentView={currentView} selectedRouter={selectedRouter} />
-      </Suspense>
     </div>
   );
 };

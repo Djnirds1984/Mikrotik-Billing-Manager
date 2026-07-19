@@ -23,6 +23,7 @@ export type View =
   | 'logs'
   | 'panel_roles'
   | 'help'
+  | 'ai_assistant'
   | 'mikrotik_files'
   | 'license'
   | 'super_admin'
