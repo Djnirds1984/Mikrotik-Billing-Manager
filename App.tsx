@@ -106,10 +106,29 @@ interface AppContentProps {
 }
 
 const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange }) => {
-  const [currentView, setCurrentView] = useState<View>('dashboard');
+  const [currentView, setCurrentView] = useState<View>(() => {
+    const saved = localStorage.getItem('currentView');
+    return (saved as View) || 'dashboard';
+  });
+
+  // Persist current view to localStorage
+  useEffect(() => {
+    localStorage.setItem('currentView', currentView);
+  }, [currentView]);
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
   const [isSidebarOpen, setIsSidebarOpen] = useState(isLargeScreen);
-  const [selectedRouterId, setSelectedRouterId] = useState<string | null>(null);
+  const [selectedRouterId, setSelectedRouterId] = useState<string | null>(() => {
+    return localStorage.getItem('selectedRouterId');
+  });
+
+  // Persist selected router to localStorage
+  useEffect(() => {
+    if (selectedRouterId) {
+      localStorage.setItem('selectedRouterId', selectedRouterId);
+    } else {
+      localStorage.removeItem('selectedRouterId');
+    }
+  }, [selectedRouterId]);
   
   const { hasPermission } = useAuth();
   const { routers, addRouter, updateRouter, deleteRouter, isLoading: isLoadingRouters } = useRouters();
