@@ -68,11 +68,18 @@ const ShoppingCartIcon: React.FC<{ className?: string }> = ({ className }) => (
 );
 
 
+const SearchIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+    </svg>
+);
+
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, companySettings, isOpen, setIsOpen, licenseStatus }) => {
   const { user, hasPermission } = useAuth();
   const { t } = useLocalization();
   const { unreadCount } = useNotifications();
   const [appVersion, setAppVersion] = useState('v2.0.0');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     getAppVersion().then(data => {
@@ -133,6 +140,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     });
   }, [navItems, user, hasPermission]);
 
+  const searchedNavItems = useMemo(() => {
+    if (!searchQuery.trim()) return filteredNavItems;
+    const q = searchQuery.toLowerCase();
+    return filteredNavItems.filter(item => item.label.toLowerCase().includes(q));
+  }, [filteredNavItems, searchQuery]);
+
   const licensedViews: View[] = [
       'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'facebook-clients', 'billing', 'sales',
       'inventory', 'accounting', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'repair_tickets', 'network_equipment'
@@ -161,8 +174,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
           </button>
       </div>
       <div className="h-[calc(100vh-4rem)] px-3 py-4 overflow-y-auto flex flex-col justify-between">
+        <div>
+        <div className="relative mb-3">
+          <SearchIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search pages..."
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[--color-primary-500]/40 focus:border-[--color-primary-500] transition"
+          />
+        </div>
         <ul className="space-y-2">
-          {filteredNavItems.map((item) => (
+          {searchedNavItems.map((item) => (
             <NavItem
               key={item.id}
               label={item.label}
@@ -174,6 +198,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
             />
           ))}
         </ul>
+        </div>
         <div className="text-center text-xs text-slate-400 dark:text-slate-600 mt-4">
             {appVersion}
         </div>
