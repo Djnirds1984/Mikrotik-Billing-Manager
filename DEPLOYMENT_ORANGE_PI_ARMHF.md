@@ -176,6 +176,21 @@ server {
     server_name _;  # Replace with your IP or domain for production
     client_max_body_size 10m;
 
+    # PayMongo Webhook — MUST be before location /
+    location /api/paymongo-webhook {
+        proxy_pass http://localhost:3001/api/paymongo-webhook;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Paymongo-Signature $http_x_paymongo_signature;
+        proxy_buffering off;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
     # Main application UI and its APIs (port 3001)
     location / {
         proxy_pass http://localhost:3001;
@@ -229,28 +244,17 @@ pm2 restart all
 
 ---
 
-## Step 9: PayMongo Webhook (Optional)
+## Step 9: Configure PayMongo Payment Gateway
 
-If you need PayMongo payment integration, add this block **before** `location /` in your Nginx config:
+After Nginx is running, configure PayMongo credentials in the admin panel:
 
-```nginx
-# PayMongo Webhook — MUST be before location /
-location /api/paymongo-webhook {
-    proxy_pass http://localhost:3001/api/paymongo-webhook;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Paymongo-Signature $http_x_paymongo_signature;
-    proxy_buffering off;
-    proxy_connect_timeout 60s;
-    proxy_send_timeout 60s;
-    proxy_read_timeout 60s;
-}
-```
+1. Log in to the admin panel
+2. Go to **System Settings > PayMongo** tab
+3. Enter your **Public Key**, **Secret Key**, **Webhook URL**, and **Webhook Secret**
+4. Enable PayMongo and click **Save Settings**
+5. Click **Re-register Webhook** to register your webhook URL with PayMongo
 
-Then configure credentials in **System Settings > PayMongo** in the admin panel.
+> Webhook URL format: `https://yourdomain.com/api/paymongo-webhook` (must be HTTPS in production)
 
 ---
 
