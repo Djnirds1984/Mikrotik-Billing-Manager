@@ -3128,7 +3128,7 @@ async function startServer() {
             try {
                 if (customer && customer.planType) {
                     const pt = String(customer.planType).toLowerCase();
-                    if (pt === 'postpaid' || pt === 'active') isPostpaid = true;
+                    if (pt === 'postpaid') isPostpaid = true;
                 }
                 // Try to get original fixedDay from MikroTik secret comment
                 if (customer && customer.routerId) {
@@ -3212,11 +3212,20 @@ async function startServer() {
             
             const dueDateStr = newDueDate.toISOString().split('T')[0];
             
+            // Determine the plan's billingType (prepaid/postpaid) from the purchased plan
+            const planBillingType = (plan.billingType || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
+            
+            // Preserve customer's existing planType - only update if customer has no planType set
+            const existingPlanType = customer?.planType || '';
+            const isCurrentlyPostpaid = existingPlanType.toLowerCase() === 'postpaid' || existingPlanType.toLowerCase() === 'active';
+            // Keep the customer's original planType, don't overwrite
+            const preservedPlanType = existingPlanType || (planBillingType === 'postpaid' ? 'Postpaid' : 'Prepaid');
+            
             // ALWAYS update customer AND MikroTik PPP secret (same as Facebook bot)
             console.log(`[Manual Payments] Updating PPPoE customer record and MikroTik secret`);
             await db.run(
                 'UPDATE customers SET dueDate = ?, planType = ? WHERE accountNumber = ?',
-                [dueDateStr, 'Active', payment.customer_account_number]
+                [dueDateStr, preservedPlanType, payment.customer_account_number]
             );
             
             // CRITICAL: Update MikroTik PPPoE secret with new due date (same as PayMongo)
@@ -3328,13 +3337,17 @@ async function startServer() {
                         }
                         
                         // Update PPP secret comment with new due date
+                        // Preserve the planType from customer's existing comment or use the plan's billingType
+                        const existingCommentPlanType = comment.planType || '';
+                        const secretPlanType = existingCommentPlanType || (planBillingType === 'postpaid' ? 'Postpaid' : 'Prepaid');
+                        
                         const updatedComment = JSON.stringify({
                             ...comment,
                             planName: payment.plan_name || comment.planName,
                             planPrice: payment.plan_price || comment.planPrice,
                             dueDate: dueDateStr,
                             dueDateTime: newDueDateTimeStr,
-                            planType: 'Postpaid',
+                            planType: secretPlanType,
                             accountNumber: payment.customer_account_number,
                             customerName: payment.customer_full_name || comment.customerName,
                             fullName: payment.customer_full_name || comment.fullName
@@ -6446,12 +6459,14 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         }
 
                         // 4b. Update PPP secret profile and comment
+                        // Preserve existing planType, fall back to 'Prepaid' for new customers
+                        const secretPlanType = comment.planType || 'Prepaid';
                         const updatedComment = JSON.stringify({
                             ...comment,
                             planName: planName || comment.planName,
                             dueDate: newDueStr.split(' ')[0],
                             dueDateTime: newDueStr,
-                            planType: comment.planType || 'Postpaid'
+                            planType: secretPlanType
                         });
 
                         try {

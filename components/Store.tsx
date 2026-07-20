@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Loader } from './Loader.tsx';
 
 interface Plan {
@@ -50,6 +50,7 @@ export const Store: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState<'paymongo' | 'manual' | null>(null);
   const [gcashRef, setGcashRef] = useState('');
   const [processing, setProcessing] = useState(false);
+  const loadPlansRef = useRef(0);
 
   // Load store settings
   useEffect(() => {
@@ -102,20 +103,24 @@ export const Store: React.FC = () => {
   };
 
   const loadPlans = async (billingType?: string) => {
+    const requestId = ++loadPlansRef.current;
     try {
       setLoading(true);
       const effectiveBillingType = billingType || customerBillingType;
       const params = new URLSearchParams({ type: filter });
       if (effectiveBillingType) params.set('billingType', effectiveBillingType);
       const response = await fetch(`/api/public/store/plans?${params.toString()}`);
+      // Only update state if this is still the latest request
+      if (requestId !== loadPlansRef.current) return;
       if (response.ok) {
         const data = await response.json();
         setPlans(Array.isArray(data) ? data : []);
       }
     } catch (error) {
+      if (requestId !== loadPlansRef.current) return;
       console.error('Failed to load plans:', error);
     } finally {
-      setLoading(false);
+      if (requestId === loadPlansRef.current) setLoading(false);
     }
   };
 
