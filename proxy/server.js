@@ -4363,10 +4363,9 @@ async function startServer() {
             expiredSessionTokens.set(token, sessionData);
             console.log(`[Expired Portal] Auto-login token created for ${username || ip || mac}`);
 
-            // Build store URL
+            // Build store URL pointing to main app (PORT 3001)
             const reqHost = (req.headers.host || '').split(':')[0];
-            const reqProto = req.headers['x-forwarded-proto'] || 'http';
-            const storeUrl = `${reqProto}://${reqHost}/store?session=${encodeURIComponent(token)}`;
+            const storeUrl = `http://${reqHost}:${PORT}/store?session=${encodeURIComponent(token)}`;
 
             res.json({ token, expiresIn: 600, storeUrl }); // 10 minutes
         } catch (e) {
@@ -12183,10 +12182,9 @@ WantedBy=multi-user.target`;
             };
             expiredSessionTokens.set(token, sessionData);
             
-            // Build store URL - use request hostname but point to main app (port 80/443 or same host)
+            // Build store URL pointing to main app (PORT 3001), not captive portal (8080)
             const reqHost = (req.headers.host || '').split(':')[0];
-            const reqProto = req.headers['x-forwarded-proto'] || 'http';
-            const storeUrl = `${reqProto}://${reqHost}/store?session=${encodeURIComponent(token)}`;
+            const storeUrl = `http://${reqHost}:${PORT}/store?session=${encodeURIComponent(token)}`;
             
             res.json({ token, expiresIn: 600, storeUrl });
         } catch (e) {
