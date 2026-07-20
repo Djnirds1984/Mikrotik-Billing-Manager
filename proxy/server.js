@@ -3122,15 +3122,23 @@ async function startServer() {
             const currentDate = new Date();
             let newDueDate;
             
-            // Detect if postpaid by checking customer record or plan type
+            // Detect if postpaid by checking customer record (authoritative) first
             let isPostpaid = false;
             let originalFixedDay = null;
+            let dbPlanTypeResolved = false;
             try {
                 if (customer && customer.planType) {
                     const pt = String(customer.planType).toLowerCase();
-                    if (pt === 'postpaid') isPostpaid = true;
+                    if (pt === 'postpaid') {
+                        isPostpaid = true;
+                        dbPlanTypeResolved = true;
+                    } else if (pt === 'prepaid') {
+                        dbPlanTypeResolved = true;
+                        // DB says prepaid - don't check MikroTik comment for planType
+                    }
                 }
                 // Try to get original fixedDay from MikroTik secret comment
+                // Only use comment's planType if DB planType is not clearly set
                 if (customer && customer.routerId) {
                     const router = await db.get('SELECT * FROM routers WHERE id = ?', [customer.routerId]);
                     if (router) {
@@ -3146,7 +3154,8 @@ async function startServer() {
                         const secret = secrets.find(s => s.name === payment.customer_username) || secrets[0];
                         if (secret && secret.comment) {
                             const comment = JSON.parse(secret.comment);
-                            if (comment.planType && String(comment.planType).toLowerCase() === 'postpaid') {
+                            // Only use comment planType if DB didn't have a clear value
+                            if (!dbPlanTypeResolved && comment.planType && String(comment.planType).toLowerCase() === 'postpaid') {
                                 isPostpaid = true;
                             }
                             if (comment.fixedDay) {
@@ -6400,11 +6409,22 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         let comment = {};
                         try { comment = JSON.parse(secret.comment || '{}'); } catch (e) { comment = {}; }
 
-                        // Detect if postpaid
+                        // Detect if postpaid - DB planType is authoritative
                         let isPostpaid = false;
                         let originalFixedDay = null;
+                        let dbPlanTypeResolved = false;
                         try {
-                            if (comment.planType && String(comment.planType).toLowerCase() === 'postpaid') {
+                            if (customer && customer.planType) {
+                                const pt = String(customer.planType).toLowerCase();
+                                if (pt === 'postpaid') {
+                                    isPostpaid = true;
+                                    dbPlanTypeResolved = true;
+                                } else if (pt === 'prepaid') {
+                                    dbPlanTypeResolved = true;
+                                }
+                            }
+                            // Only use comment planType if DB didn't have a clear value
+                            if (!dbPlanTypeResolved && comment.planType && String(comment.planType).toLowerCase() === 'postpaid') {
                                 isPostpaid = true;
                             }
                             if (comment.fixedDay) {
