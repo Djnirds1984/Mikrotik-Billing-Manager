@@ -220,8 +220,21 @@ export const ExpiredPortal: React.FC = () => {
             try {
                 setLoading(true);
                 const params = new URLSearchParams(window.location.search);
-                const ip = params.get('ip') || '';
-                const mac = params.get('mac') || '';
+                let ip = params.get('ip') || '';
+                let mac = params.get('mac') || '';
+
+                // If no IP/MAC from query params, try to get it from the server
+                // (server detects client IP from the TCP connection)
+                if (!ip && !mac) {
+                    try {
+                        const ipResp = await fetch('/api/public/client-ip');
+                        if (ipResp.ok) {
+                            const ipData = await ipResp.json();
+                            ip = ipData.ip || '';
+                            mac = ipData.mac || '';
+                        }
+                    } catch (_) {}
+                }
 
                 if (!ip && !mac) {
                     setError('No client information provided. Please access this page through your network connection.');

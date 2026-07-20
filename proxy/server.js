@@ -601,7 +601,7 @@ async function initDb() {
             console.log('[Migration] Customers table columns:', customerColNames);
             
             // Add missing columns for billing and authentication
-            const missingColumns = ['dueDate', 'planType', 'planName', 'password', 'facebook_psid'];
+            const missingColumns = ['dueDate', 'planType', 'planName', 'password', 'facebook_psid', 'lastKnownMac'];
             for (const col of missingColumns) {
                 if (!customerColNames.includes(col)) {
                     console.log(`[Migration] Adding ${col} column to customers table...`);
@@ -3884,6 +3884,162 @@ async function startServer() {
         }
     }, 5 * 60 * 1000);
 
+    // Helper: Check if IP belongs to the configured non-payment pool
+    async function isInNonPaymentPool(ip) {
+        // Default pool
+        let pool = '172.16.44.0/24';
+        try {
+            const s = await db.get('SELECT storeSettings FROM settings WHERE id = 1');
+            if (s && s.storeSettings) {
+                const settings = JSON.parse(s.storeSettings);
+                if (settings.nonPaymentPool) pool = settings.nonPaymentPool;
+            }
+        } catch (_) {}
+        // Parse CIDR (e.g., "172.16.44.0/24")
+        const match = pool.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
+        if (!match) return ip.startsWith('172.16.44.');
+        const [, network, bitsStr] = match;
+        const bits = parseInt(bitsStr, 10);
+        const netParts = network.split('.').map(Number);
+        const ipParts = ip.split('.').map(Number);
+        if (ipParts.length !== 4) return false;
+        const netInt = (netParts[0] << 24) | (netParts[1] << 16) | (netParts[2] << 8) | netParts[3];
+        const ipInt = (ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3];
+        const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+        return (netInt >>> 0 & mask) === (ipInt >>> 0 & mask);
+    }
+
+    // Shared helper: Lookup PPPoE customer by matching ARP MAC to PPP secret caller-id
+    // Used when client is on non-payment pool and has no active PPPoE session
+    async function lookupPppoeByArpAndSecret(ip) {
+        const axios = require('axios');
+        const routers = await db.all('SELECT * FROM routers');
+        for (const router of routers) {
+            try {
+                const routerIp = router.host || router.ip;
+                const routerPort = router.port || 3002;
+                const routerUser = router.user || router.username || 'admin';
+                const routerPass = router.password || '';
+                const apiBase = `http://${routerIp}:${routerPort}`;
+                const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
+
+                // Step 1: Get MAC address from ARP table for this IP
+                const arpResp = await axios.get(`${apiBase}/rest/ip/arp`, {
+                    params: { address: ip },
+                    headers: { Authorization: authHeader },
+                    timeout: 10000
+                });
+                const arpEntries = Array.isArray(arpResp.data) ? arpResp.data : [];
+                if (arpEntries.length === 0) continue;
+
+                const macAddress = arpEntries[0]['mac-address'];
+                if (!macAddress) continue;
+                const normalizedArpMac = macAddress.toUpperCase().replace(/[:-]/g, ':');
+
+                console.log(`[Expired PPPoE ARP Lookup] IP=${ip}, MAC=${normalizedArpMac}, Router=${router.name}`);
+
+                // Step 2: Try to find customer by lastKnownMac (most reliable - stored from previous active sessions)
+                const customerByMac = await db.get(
+                    `SELECT c.*, r.name as routerName FROM customers c 
+                     LEFT JOIN routers r ON c.routerId = r.id 
+                     WHERE c.routerId = ? AND UPPER(c.lastKnownMac) = ?`,
+                    [router.id, normalizedArpMac]
+                );
+                if (customerByMac) {
+                    console.log(`[Expired PPPoE ARP Lookup] Found customer by lastKnownMac: ${customerByMac.username || customerByMac.fullName}`);
+                    return { customer: customerByMac, clientType: customerByMac.clientType || 'pppoe', routerName: router.name };
+                }
+
+                // Step 3: Get all PPPoE secrets and match by caller-id
+                const secretsResp = await axios.get(`${apiBase}/rest/ppp/secret`, {
+                    headers: { Authorization: authHeader },
+                    timeout: 10000
+                });
+                const secrets = Array.isArray(secretsResp.data) ? secretsResp.data : [];
+
+                const matchedSecret = secrets.find(s => {
+                    if (!s['caller-id']) return false;
+                    const callerMac = String(s['caller-id']).toUpperCase().replace(/[:-]/g, ':');
+                    return callerMac === normalizedArpMac;
+                });
+
+                if (!matchedSecret || !matchedSecret.name) {
+                    console.log(`[Expired PPPoE ARP Lookup] No caller-id match on router ${router.name}`);
+                    continue;
+                }
+
+                console.log(`[Expired PPPoE ARP Lookup] Matched secret by caller-id: ${matchedSecret.name} on router ${router.name}`);
+
+                // Step 4: Look up customer in DB by username (secret name)
+                let customer = await db.get(
+                    `SELECT c.*, r.name as routerName FROM customers c 
+                     LEFT JOIN routers r ON c.routerId = r.id 
+                     WHERE (c.username = ? OR c.name = ?) AND c.routerId = ?`,
+                    [matchedSecret.name, matchedSecret.name, router.id]
+                );
+
+                if (customer) {
+                    return { customer, clientType: 'pppoe', routerName: router.name };
+                }
+
+                // Fallback: look in client_users table
+                const clientUser = await db.get(
+                    'SELECT * FROM client_users WHERE pppoe_username = ? AND router_id = ?',
+                    [matchedSecret.name, router.id]
+                );
+                if (clientUser) {
+                    customer = await db.get(
+                        `SELECT c.*, r.name as routerName FROM customers c 
+                         LEFT JOIN routers r ON c.routerId = r.id 
+                         WHERE c.routerId = ? AND (c.username = ? OR c.accountNumber = ?)`,
+                        [router.id, clientUser.pppoe_username || matchedSecret.name, clientUser.account_number || '']
+                    );
+                    if (!customer) {
+                        // Build synthetic customer from client_user data
+                        customer = {
+                            username: matchedSecret.name,
+                            name: matchedSecret.name,
+                            fullName: clientUser.pppoe_username || matchedSecret.name,
+                            accountNumber: clientUser.account_number || '',
+                            routerId: router.id,
+                            routerName: router.name,
+                            planName: '',
+                            dueDate: ''
+                        };
+                    }
+                    return { customer, clientType: 'pppoe', routerName: router.name };
+                }
+
+                // Last fallback: build customer from secret data alone
+                customer = {
+                    username: matchedSecret.name,
+                    name: matchedSecret.name,
+                    fullName: matchedSecret.name,
+                    accountNumber: '',
+                    routerId: router.id,
+                    routerName: router.name,
+                    planName: matchedSecret.profile || '',
+                    dueDate: ''
+                };
+                // Try to parse comment for more info
+                try {
+                    const comment = matchedSecret.comment || '';
+                    if (comment.startsWith('{')) {
+                        const parsed = JSON.parse(comment);
+                        customer.fullName = parsed.customerName || parsed.fullName || matchedSecret.name;
+                        customer.dueDate = parsed.dueDate || '';
+                        customer.planName = parsed.planName || parsed.plan || matchedSecret.profile || '';
+                    }
+                } catch (_) {}
+                return { customer, clientType: 'pppoe', routerName: router.name };
+
+            } catch (routerErr) {
+                console.warn(`[Expired PPPoE ARP Lookup] Failed on ${router.name}:`, routerErr.message);
+            }
+        }
+        return null;
+    }
+
     // GET: Lookup customer by IP or MAC address
     app.get('/api/public/expired/lookup', async (req, res) => {
         try {
@@ -3946,9 +4102,9 @@ async function startServer() {
                 }
             }
 
-            // If IP is from non-payment pool (172.16.44.0/24) and DB lookup failed,
+            // If IP is from non-payment pool and DB lookup failed,
             // query MikroTik PPPoE active sessions to find the secret name
-            if (!customer && ip && ip.startsWith('172.16.44.')) {
+            if (!customer && ip && (await isInNonPaymentPool(ip))) {
                 const routers = await db.all('SELECT * FROM routers');
                 for (const router of routers) {
                     try {
@@ -3970,6 +4126,16 @@ async function startServer() {
                         const session = activeSessions.find(s => s.address === ip);
 
                         if (session && session.name) {
+                            // Store MAC address from active session for future expired lookups
+                            const sessionMac = session['caller-id'] || '';
+                            if (sessionMac) {
+                                const normalizedMac = String(sessionMac).toUpperCase().replace(/[:-]/g, ':');
+                                try {
+                                    await db.run('UPDATE customers SET lastKnownMac = ? WHERE username = ? AND routerId = ?',
+                                        [normalizedMac, session.name, router.id]);
+                                } catch (_) {}
+                            }
+
                             // Found the PPPoE secret name - look up the customer by username
                             customer = await db.get(
                                 `SELECT c.*, r.name as routerName FROM customers c 
@@ -4014,6 +4180,18 @@ async function startServer() {
                     } catch (routerErr) {
                         console.warn(`[Expired Portal] PPPoE active lookup failed on ${router.name}:`, routerErr.message);
                     }
+                }
+            }
+
+            // Fallback: If still not found and IP is from non-payment pool,
+            // try matching via ARP table MAC → PPP secret caller-id
+            // This works even when PPPoE session is terminated (secret disabled/expired)
+            if (!customer && ip && (await isInNonPaymentPool(ip))) {
+                console.log(`[Expired Portal] Active session lookup failed for ${ip}, trying ARP+Secret matching...`);
+                const arpResult = await lookupPppoeByArpAndSecret(ip);
+                if (arpResult) {
+                    customer = arpResult.customer;
+                    clientType = arpResult.clientType;
                 }
             }
 
@@ -4144,6 +4322,14 @@ async function startServer() {
             console.error('[Expired Portal] Verify session error:', e.message);
             res.status(500).json({ message: e.message });
         }
+    });
+
+    // GET: Detect client IP from TCP connection (for expired portal)
+    app.get('/api/public/client-ip', (req, res) => {
+        let clientIp = String(req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress || '').trim();
+        if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
+        clientIp = clientIp.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
+        res.json({ ip: clientIp });
     });
 
     // GET: Public store settings (for expired portal)
@@ -4998,6 +5184,15 @@ async function startServer() {
                 if (!match) continue;
                 console.log(`[Non-Payment Lookup] Found active connection: ${match.name} on router ${router.name} (${router.id})`);
                 const username = match.name;
+                // Store MAC address from active session for future expired lookups
+                const sessionMac = match['caller-id'] || '';
+                if (sessionMac) {
+                    const normalizedSessionMac = String(sessionMac).toUpperCase().replace(/[:-]/g, ':');
+                    try {
+                        await db.run('UPDATE customers SET lastKnownMac = ? WHERE username = ? AND routerId = ?',
+                            [normalizedSessionMac, username, router.id]);
+                    } catch (_) {}
+                }
                 // Get the PPPoE secret for plan/due info
                 const secretResp = await axios.get(
                     `http://127.0.0.1:3002/${router.id}/ppp/secret?name=${encodeURIComponent(username)}`,
@@ -11608,6 +11803,15 @@ WantedBy=multi-user.target`;
         }
     });
 
+    // Public endpoint: detect client IP from the TCP connection
+    // Used by expired portal when no query params are provided
+    captiveApp.get('/api/public/client-ip', (req, res) => {
+        let clientIp = String(req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress || '').trim();
+        if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
+        clientIp = clientIp.replace('::ffff:', '').replace(/^::1$/, '127.0.0.1');
+        res.json({ ip: clientIp });
+    });
+
     // Public company settings for captive/expired portal (no auth required)
     captiveApp.get('/api/company-settings', async (req, res) => {
         try {
@@ -11703,8 +11907,8 @@ WantedBy=multi-user.target`;
                 }
             }
 
-            // If IP is from non-payment pool (172.16.44.0/24), query MikroTik PPPoE active sessions
-            if (!customer && ip && ip.startsWith('172.16.44.')) {
+            // If IP is from non-payment pool, query MikroTik PPPoE active sessions
+            if (!customer && ip && (await isInNonPaymentPool(ip))) {
                 const routers = await db.all('SELECT * FROM routers');
                 for (const router of routers) {
                     try {
@@ -11721,6 +11925,15 @@ WantedBy=multi-user.target`;
                         const activeSessions = Array.isArray(activeResp.data) ? activeResp.data : [];
                         const session = activeSessions.find(s => s.address === ip);
                         if (session && session.name) {
+                            // Store MAC address from active session for future expired lookups
+                            const sessionMac = session['caller-id'] || '';
+                            if (sessionMac) {
+                                const normalizedSessionMac = String(sessionMac).toUpperCase().replace(/[:-]/g, ':');
+                                try {
+                                    await db.run('UPDATE customers SET lastKnownMac = ? WHERE username = ? AND routerId = ?',
+                                        [normalizedSessionMac, session.name, router.id]);
+                                } catch (_) {}
+                            }
                             customer = await db.get(
                                 `SELECT c.*, r.name as routerName FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE (c.username = ? OR c.name = ?) AND c.routerId = ?`,
                                 [session.name, session.name, router.id]
@@ -11739,6 +11952,17 @@ WantedBy=multi-user.target`;
                     } catch (routerErr) {
                         console.warn(`[Captive Expired] PPPoE lookup failed on ${router.name}:`, routerErr.message);
                     }
+                }
+            }
+
+            // Fallback: If still not found and IP is from non-payment pool,
+            // try matching via ARP table MAC → PPP secret caller-id
+            if (!customer && ip && (await isInNonPaymentPool(ip))) {
+                console.log(`[Captive Expired] Active session lookup failed for ${ip}, trying ARP+Secret matching...`);
+                const arpResult = await lookupPppoeByArpAndSecret(ip);
+                if (arpResult) {
+                    customer = arpResult.customer;
+                    clientType = arpResult.clientType;
                 }
             }
 
@@ -12308,5 +12532,58 @@ async function syncExpiredClientsToAddressList() {
 setInterval(syncExpiredClientsToAddressList, 2 * 60 * 1000);
 // Also run once after server starts (delayed 30s to let everything initialize)
 setTimeout(syncExpiredClientsToAddressList, 30000);
+
+// ========================================
+// PPPoE MAC Address Cache Worker
+// Periodically captures MAC addresses from active PPPoE sessions
+// and stores them in customers.lastKnownMac for expired portal lookups
+// ========================================
+async function syncPppoeMacAddresses() {
+    try {
+        const routers = await db.all('SELECT * FROM routers');
+        const axios = require('axios');
+
+        for (const router of routers) {
+            try {
+                const routerIp = router.host || router.ip;
+                const routerPort = router.port || 3002;
+                const routerUser = router.user || router.username || 'admin';
+                const routerPass = router.password || '';
+                const apiBase = `http://${routerIp}:${routerPort}`;
+                const authHeader = 'Basic ' + Buffer.from(`${routerUser}:${routerPass}`).toString('base64');
+
+                // Get all active PPPoE sessions
+                const activeResp = await axios.get(`${apiBase}/rest/ppp/active`, {
+                    headers: { Authorization: authHeader },
+                    timeout: 10000
+                });
+                const sessions = Array.isArray(activeResp.data) ? activeResp.data : [];
+
+                for (const session of sessions) {
+                    if (!session.name || !session['caller-id']) continue;
+                    const mac = String(session['caller-id']).toUpperCase().replace(/[:-]/g, ':');
+                    // Only update if MAC looks valid (XX:XX:XX:XX:XX:XX format)
+                    if (!/^[0-9A-F]{1,2}(:[0-9A-F]{1,2}){5}$/i.test(mac)) continue;
+
+                    try {
+                        await db.run(
+                            'UPDATE customers SET lastKnownMac = ? WHERE username = ? AND routerId = ?',
+                            [mac, session.name, router.id]
+                        );
+                    } catch (_) {}
+                }
+            } catch (routerErr) {
+                // Silently skip router errors
+            }
+        }
+    } catch (e) {
+        console.warn('[MAC Sync Worker] Error:', e.message);
+    }
+}
+
+// Run MAC sync every 5 minutes
+setInterval(syncPppoeMacAddresses, 5 * 60 * 1000);
+// Run once on startup (delayed 60s to let things initialize)
+setTimeout(syncPppoeMacAddresses, 60000);
 
 startServer();
