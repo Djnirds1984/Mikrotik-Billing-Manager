@@ -11,6 +11,7 @@ interface Plan {
   description?: string;
   currency: string;
   planType: 'pppoe' | 'dhcp';
+  billingType?: 'prepaid' | 'postpaid';
   routerId: string;
 }
 
@@ -21,6 +22,7 @@ interface CustomerInfo {
   accountNumber: string;
   routerName: string;
   contactNumber: string;
+  billingType?: 'prepaid' | 'postpaid';
 }
 
 export const Store: React.FC = () => {
@@ -28,6 +30,7 @@ export const Store: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [filter, setFilter] = useState<'all' | 'pppoe' | 'dhcp'>('all');
+  const [customerBillingType, setCustomerBillingType] = useState<'prepaid' | 'postpaid' | null>(null);
   const [storeSettings, setStoreSettings] = useState<{
     storeEnabled: boolean;
     storeBannerText: string;
@@ -56,10 +59,10 @@ export const Store: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  // Load all plans on mount and when filter changes
+  // Load all plans on mount and when filter or customerBillingType changes
   useEffect(() => {
     loadPlans();
-  }, [filter]);
+  }, [filter, customerBillingType]);
 
   // Check for expired session token to pre-fill account
   useEffect(() => {
@@ -98,10 +101,13 @@ export const Store: React.FC = () => {
     }
   };
 
-  const loadPlans = async () => {
+  const loadPlans = async (billingType?: string) => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/public/store/plans?type=${filter}`);
+      const effectiveBillingType = billingType || customerBillingType;
+      const params = new URLSearchParams({ type: filter });
+      if (effectiveBillingType) params.set('billingType', effectiveBillingType);
+      const response = await fetch(`/api/public/store/plans?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         setPlans(Array.isArray(data) ? data : []);
@@ -135,15 +141,20 @@ export const Store: React.FC = () => {
       const data = await resp.json();
 
       if (data.found) {
+        const bt = (data.billingType || 'prepaid') as 'prepaid' | 'postpaid';
         setCustomerInfo({
           fullName: data.fullName,
           username: data.username,
           routerId: data.routerId,
           accountNumber: data.accountNumber,
           routerName: data.routerName,
-          contactNumber: data.contactNumber
+          contactNumber: data.contactNumber,
+          billingType: bt
         });
+        setCustomerBillingType(bt);
         setLookupError('');
+        // Reload plans filtered by customer's billing type
+        loadPlans(bt);
       } else {
         setLookupError('Account not found. Please check your account number or PPPoE username.');
       }
@@ -163,15 +174,19 @@ export const Store: React.FC = () => {
       if (resp.ok) {
         const data = await resp.json();
         if (data.accountNumber || data.username) {
+          const bt = (data.planType || data.billingType || 'prepaid') as 'prepaid' | 'postpaid';
           setCustomerInfo({
             fullName: data.fullName || data.username,
             username: data.pppoeUsername || data.username,
             routerId: data.routerId,
             accountNumber: data.accountNumber || '',
             routerName: data.routerName || '',
-            contactNumber: data.contactNumber || ''
+            contactNumber: data.contactNumber || '',
+            billingType: bt
           });
           setAccountInput(data.accountNumber || data.pppoeUsername || data.username);
+          setCustomerBillingType(bt);
+          loadPlans(bt);
         } else {
           setLookupError('Could not detect your account from the network. Please enter your account number manually.');
         }
@@ -232,6 +247,7 @@ export const Store: React.FC = () => {
     setPaymentMethod(null);
     setGcashRef('');
     setLookupMode('accountNumber');
+    setCustomerBillingType(null);
   };
 
   const getCurrency = (_planCurrency?: string) => {
@@ -380,6 +396,18 @@ export const Store: React.FC = () => {
 
       {/* Plans Grid */}
       <div className="max-w-7xl mx-auto">
+        {/* Billing Type Indicator */}
+        {customerBillingType && (
+          <div className="mb-4 flex items-center justify-center gap-2">
+            <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+              customerBillingType === 'postpaid' 
+                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' 
+                : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+            }`}>
+              Showing {customerBillingType === 'postpaid' ? 'Postpaid' : 'Prepaid'} Plans
+            </span>
+          </div>
+        )}
         {loading ? (
           <div className="flex justify-center p-12">
             <Loader />

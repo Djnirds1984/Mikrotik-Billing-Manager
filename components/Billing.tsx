@@ -16,7 +16,7 @@ const PlanForm: React.FC<{
     isLoadingProfiles: boolean;
 }> = ({ onSave, onCancel, initialData, profiles, isLoadingProfiles }) => {
     const { t, currency } = useLocalization();
-    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', cycle_days: 30, pppoeProfile: '', description: '', currency, store_enabled: 1 };
+    const defaultPlanState: BillingPlan = { name: '', price: 0, cycle: 'Monthly', cycle_days: 30, pppoeProfile: '', description: '', currency, store_enabled: 1, billingType: 'prepaid' };
     const [plan, setPlan] = useState<BillingPlan>(initialData || defaultPlanState);
     
     useEffect(() => {
@@ -49,6 +49,15 @@ const PlanForm: React.FC<{
                         <label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.plan_name')}</label>
                         <input type="text" name="name" value={plan.name} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]" placeholder={t('billing.plan_name_placeholder')} />
                     </div>
+                    <div>
+                        <label htmlFor="billingType" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Billing Type</label>
+                        <select name="billingType" value={plan.billingType || 'prepaid'} onChange={handleChange} required className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]">
+                            <option value="prepaid">Prepaid</option>
+                            <option value="postpaid">Postpaid</option>
+                        </select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label htmlFor="pppoeProfile" className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t('billing.pppoe_profile')}</label>
                         <select name="pppoeProfile" value={plan.pppoeProfile} onChange={handleChange} required disabled={isLoadingProfiles || profiles.length === 0} className="mt-1 block w-full bg-white dark:bg-slate-900/50 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500] disabled:opacity-50">
@@ -339,7 +348,16 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                                         <div className="flex items-center gap-4 mb-2 sm:mb-0">
                                             <SignalIcon className="h-8 w-8 text-[--color-primary-500] dark:text-[--color-primary-400] flex-shrink-0" />
                                             <div>
-                                                <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{plan.name}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{plan.name}</p>
+                                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                                        plan.billingType === 'postpaid' 
+                                                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' 
+                                                            : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                                    }`}>
+                                                        {plan.billingType === 'postpaid' ? 'Postpaid' : 'Prepaid'}
+                                                    </span>
+                                                </div>
                                                 <p className="text-sm text-slate-500 dark:text-slate-400">
                                                     <span className="font-bold text-slate-800 dark:text-slate-200">{formatCurrency(plan.price)}</span> / {plan.cycle_days || 30} {t('billing.days')}
                                                     <span className="mx-2 text-slate-300 dark:text-slate-600">|</span>

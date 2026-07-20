@@ -223,6 +223,7 @@ export interface BillingPlan {
     currency: string;
     routerId?: string;
     store_enabled?: number;
+    billingType?: 'prepaid' | 'postpaid';
 }
 
 export interface BillingPlanWithId extends BillingPlan {
@@ -250,6 +251,7 @@ export interface DhcpBillingPlan {
     speedLimit?: string;
     currency: string;
     store_enabled?: number;
+    billingType?: 'prepaid' | 'postpaid';
 }
 
 export interface DhcpBillingPlanWithId extends DhcpBillingPlan {

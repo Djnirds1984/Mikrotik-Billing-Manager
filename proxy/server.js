@@ -639,6 +639,32 @@ async function initDb() {
         } catch (err) {
             console.error('[Migration] billing_plans cycle_days migration error:', err.message);
         }
+
+        // Add billingType column to billing_plans (prepaid/postpaid)
+        try {
+            const billingPlanTypeCols = await db.all("PRAGMA table_info(billing_plans)");
+            const billingPlanTypeColNames = billingPlanTypeCols.map(c => c.name);
+            if (!billingPlanTypeColNames.includes('billingType')) {
+                console.log('[Migration] Adding billingType column to billing_plans...');
+                await db.exec("ALTER TABLE billing_plans ADD COLUMN billingType TEXT DEFAULT 'prepaid'");
+                console.log('[Migration] ✓ billingType column added to billing_plans');
+            }
+        } catch (err) {
+            console.error('[Migration] billing_plans billingType migration error:', err.message);
+        }
+
+        // Add billingType column to dhcp_billing_plans (prepaid/postpaid)
+        try {
+            const dhcpPlanTypeCols = await db.all("PRAGMA table_info(dhcp_billing_plans)");
+            const dhcpPlanTypeColNames = dhcpPlanTypeCols.map(c => c.name);
+            if (!dhcpPlanTypeColNames.includes('billingType')) {
+                console.log('[Migration] Adding billingType column to dhcp_billing_plans...');
+                await db.exec("ALTER TABLE dhcp_billing_plans ADD COLUMN billingType TEXT DEFAULT 'prepaid'");
+                console.log('[Migration] ✓ billingType column added to dhcp_billing_plans');
+            }
+        } catch (err) {
+            console.error('[Migration] dhcp_billing_plans billingType migration error:', err.message);
+        }
         
         // Add fee detail columns to xendit_sessions
         try {
@@ -3569,27 +3595,33 @@ async function startServer() {
                 } catch (_) {}
             }
 
-            const { routerId, type = 'all' } = req.query;
+            const { routerId, type = 'all', billingType } = req.query;
             
             let plans = [];
             
             // Get PPPoE plans
             if (type === 'all' || type === 'pppoe') {
-                const pppoePlans = routerId
-                    ? await db.all('SELECT * FROM billing_plans WHERE routerId = ? AND store_enabled = 1 ORDER BY price ASC', [routerId])
-                    : await db.all('SELECT * FROM billing_plans WHERE store_enabled = 1 ORDER BY price ASC');
+                let query = 'SELECT * FROM billing_plans WHERE store_enabled = 1';
+                const params = [];
+                if (routerId) { query += ' AND routerId = ?'; params.push(routerId); }
+                if (billingType) { query += ' AND billingType = ?'; params.push(billingType); }
+                query += ' ORDER BY price ASC';
+                const pppoePlans = await db.all(query, params);
                 plans = plans.concat(pppoePlans.map(p => ({ ...p, planType: 'pppoe' })));
             }
             
             // Get DHCP plans
             if (type === 'all' || type === 'dhcp') {
-                const dhcpPlans = routerId
-                    ? await db.all('SELECT * FROM dhcp_billing_plans WHERE routerId = ? AND store_enabled = 1 ORDER BY price ASC', [routerId])
-                    : await db.all('SELECT * FROM dhcp_billing_plans WHERE store_enabled = 1 ORDER BY price ASC');
+                let query = 'SELECT * FROM dhcp_billing_plans WHERE store_enabled = 1';
+                const params = [];
+                if (routerId) { query += ' AND routerId = ?'; params.push(routerId); }
+                if (billingType) { query += ' AND billingType = ?'; params.push(billingType); }
+                query += ' ORDER BY price ASC';
+                const dhcpPlans = await db.all(query, params);
                 plans = plans.concat(dhcpPlans.map(p => ({ ...p, planType: 'dhcp' })));
             }
             
-            console.log(`[Store] Found ${plans.length} plans (type: ${type}, routerId: ${routerId || 'all'})`);
+            console.log(`[Store] Found ${plans.length} plans (type: ${type}, billingType: ${billingType || 'all'}, routerId: ${routerId || 'all'})`);
             res.json(plans);
         } catch (e) {
             console.error('[Store] Error fetching plans:', e.message);
@@ -3610,7 +3642,7 @@ async function startServer() {
             // Lookup by account number
             if (accountNumber) {
                 customer = await db.get(
-                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber,
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, c.planType,
                             r.name as routerName
                      FROM customers c
                      LEFT JOIN routers r ON c.routerId = r.id
@@ -3622,7 +3654,7 @@ async function startServer() {
             // Lookup by PPPoE username
             if (!customer && username) {
                 customer = await db.get(
-                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber,
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, c.planType,
                             r.name as routerName
                      FROM customers c
                      LEFT JOIN routers r ON c.routerId = r.id
@@ -3637,7 +3669,7 @@ async function startServer() {
                 if (!customer) {
                     customer = await db.get(
                         `SELECT dc.id, dc.username, dc.fullName, dc.accountNumber, dc.routerId,
-                                dc.contactNumber, r.name as routerName
+                                dc.contactNumber, dc.planType, r.name as routerName
                          FROM dhcp_clients dc
                          LEFT JOIN routers r ON dc.routerId = r.id
                          WHERE dc.address = ? OR dc.ip = ?`,
@@ -3651,6 +3683,7 @@ async function startServer() {
                             accountNumber: customer.accountNumber || '',
                             routerId: customer.routerId,
                             contactNumber: customer.contactNumber || '',
+                            planType: customer.planType || 'prepaid',
                             routerName: customer.routerName
                         };
                     }
@@ -3658,6 +3691,7 @@ async function startServer() {
             }
 
             if (customer) {
+                const billingType = (customer.planType || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
                 res.json({
                     found: true,
                     fullName: customer.fullName,
@@ -3665,7 +3699,8 @@ async function startServer() {
                     routerId: customer.routerId,
                     accountNumber: customer.accountNumber || '',
                     routerName: customer.routerName || '',
-                    contactNumber: customer.contactNumber || ''
+                    contactNumber: customer.contactNumber || '',
+                    billingType
                 });
             } else {
                 res.json({ found: false });
@@ -12259,18 +12294,24 @@ WantedBy=multi-user.target`;
                 } catch (_) {}
             }
 
-            const { routerId, type = 'all' } = req.query;
+            const { routerId, type = 'all', billingType } = req.query;
             let plans = [];
             if (type === 'all' || type === 'pppoe') {
-                const pppoePlans = routerId
-                    ? await db.all('SELECT * FROM billing_plans WHERE routerId = ? AND store_enabled = 1 ORDER BY price ASC', [routerId])
-                    : await db.all('SELECT * FROM billing_plans WHERE store_enabled = 1 ORDER BY price ASC');
+                let query = 'SELECT * FROM billing_plans WHERE store_enabled = 1';
+                const params = [];
+                if (routerId) { query += ' AND routerId = ?'; params.push(routerId); }
+                if (billingType) { query += ' AND billingType = ?'; params.push(billingType); }
+                query += ' ORDER BY price ASC';
+                const pppoePlans = await db.all(query, params);
                 plans = plans.concat(pppoePlans.map(p => ({ ...p, planType: 'pppoe' })));
             }
             if (type === 'all' || type === 'dhcp') {
-                const dhcpPlans = routerId
-                    ? await db.all('SELECT * FROM dhcp_billing_plans WHERE routerId = ? AND store_enabled = 1 ORDER BY price ASC', [routerId])
-                    : await db.all('SELECT * FROM dhcp_billing_plans WHERE store_enabled = 1 ORDER BY price ASC');
+                let query = 'SELECT * FROM dhcp_billing_plans WHERE store_enabled = 1';
+                const params = [];
+                if (routerId) { query += ' AND routerId = ?'; params.push(routerId); }
+                if (billingType) { query += ' AND billingType = ?'; params.push(billingType); }
+                query += ' ORDER BY price ASC';
+                const dhcpPlans = await db.all(query, params);
                 plans = plans.concat(dhcpPlans.map(p => ({ ...p, planType: 'dhcp' })));
             }
             res.json(plans);
@@ -12290,24 +12331,25 @@ WantedBy=multi-user.target`;
             let customer = null;
             if (accountNumber) {
                 customer = await db.get(
-                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, r.name as routerName
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, c.planType, r.name as routerName
                      FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.accountNumber = ?`, [accountNumber]
                 );
             }
             if (!customer && username) {
                 customer = await db.get(
-                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, r.name as routerName
+                    `SELECT c.id, c.username, c.fullName, c.accountNumber, c.routerId, c.contactNumber, c.planType, r.name as routerName
                      FROM customers c LEFT JOIN routers r ON c.routerId = r.id WHERE c.username = ?`, [username]
                 );
             }
             if (!customer && ip) {
                 customer = await db.get(
-                    `SELECT dc.id, dc.username, dc.fullName, dc.accountNumber, dc.routerId, dc.contactNumber, r.name as routerName
+                    `SELECT dc.id, dc.username, dc.fullName, dc.accountNumber, dc.routerId, dc.contactNumber, dc.planType, r.name as routerName
                      FROM dhcp_clients dc LEFT JOIN routers r ON dc.routerId = r.id WHERE dc.address = ? OR dc.ip = ?`, [ip, ip]
                 );
             }
             if (customer) {
-                res.json({ found: true, fullName: customer.fullName, username: customer.username, routerId: customer.routerId, accountNumber: customer.accountNumber || '', routerName: customer.routerName || '', contactNumber: customer.contactNumber || '' });
+                const billingType = (customer.planType || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
+                res.json({ found: true, fullName: customer.fullName, username: customer.username, routerId: customer.routerId, accountNumber: customer.accountNumber || '', routerName: customer.routerName || '', contactNumber: customer.contactNumber || '', billingType });
             } else {
                 res.json({ found: false });
             }

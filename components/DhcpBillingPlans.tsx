@@ -15,7 +15,7 @@ const DhcpPlanForm: React.FC<{
     const [plan, setPlan] = useState<Partial<DhcpBillingPlanWithId>>({});
     
     useEffect(() => {
-        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency, store_enabled: 1 };
+        const defaults = { name: '', price: 0, cycle_days: 30, speedLimit: '', currency, store_enabled: 1, billingType: 'prepaid' };
         setPlan(initialData ? { ...initialData } : defaults);
     }, [initialData, currency]);
 
@@ -33,7 +33,7 @@ const DhcpPlanForm: React.FC<{
         <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700">
             <h3 className="text-xl font-bold mb-4">{initialData ? `Edit DHCP Plan` : 'Add New DHCP Plan'}</h3>
             <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label className="block text-sm font-medium">Plan Name</label>
                         <input type="text" name="name" value={plan.name || ''} onChange={handleChange} required className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
@@ -41,6 +41,13 @@ const DhcpPlanForm: React.FC<{
                     <div>
                         <label className="block text-sm font-medium">Price ({currency})</label>
                         <input type="number" name="price" value={plan.price || ''} onChange={handleChange} required min="0" step="0.01" className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium">Billing Type</label>
+                        <select name="billingType" value={plan.billingType || 'prepaid'} onChange={(e) => setPlan(prev => ({ ...prev, billingType: e.target.value as 'prepaid' | 'postpaid' }))} required className="mt-1 block w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                            <option value="prepaid">Prepaid</option>
+                            <option value="postpaid">Postpaid</option>
+                        </select>
                     </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -124,7 +131,16 @@ export const DhcpBillingPlans: React.FC<{ routerId: string }> = ({ routerId }) =
                                 <div className="flex items-center gap-4">
                                     <SignalIcon className="h-8 w-8 text-[--color-primary-500]" />
                                     <div>
-                                        <p className="font-semibold">{plan.name}</p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-semibold">{plan.name}</p>
+                                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                                plan.billingType === 'postpaid' 
+                                                    ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' 
+                                                    : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                            }`}>
+                                                {plan.billingType === 'postpaid' ? 'Postpaid' : 'Prepaid'}
+                                            </span>
+                                        </div>
                                         <p className="text-sm text-slate-500">
                                             <span className="font-bold">{formatCurrency(plan.price)}</span> for {plan.cycle_days} days
                                             {plan.speedLimit && ` | Speed: ${plan.speedLimit}Mbps`}
