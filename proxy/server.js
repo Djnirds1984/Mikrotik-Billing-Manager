@@ -4215,6 +4215,7 @@ async function startServer() {
             const username = customer.username || customer.name || '';
             const accountNumber = customer.accountNumber || customer.account_number || '';
             const fullName = customer.fullName || customer.full_name || customer.name || username;
+            const planType = (customer.planType || customer.plan_type || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
 
             return res.json({
                 found: true,
@@ -4226,6 +4227,7 @@ async function startServer() {
                     routerId: customer.routerId || customer.router_id || '',
                     username,
                     clientType,
+                    planType,
                     routerName: customer.routerName || ''
                 }
             });
@@ -4284,6 +4286,7 @@ async function startServer() {
             const username = customer.username || customer.name || '';
             const accountNumber = customer.accountNumber || customer.account_number || '';
             const fullName = customer.fullName || customer.full_name || customer.name || username;
+            const planType = (customer.planType || customer.plan_type || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
 
             res.json({
                 found: true,
@@ -4295,6 +4298,7 @@ async function startServer() {
                     routerId: customer.routerId || customer.router_id || '',
                     username,
                     clientType: customer.clientType || 'pppoe',
+                    planType,
                     routerName: customer.routerName || ''
                 }
             });
@@ -12051,13 +12055,14 @@ WantedBy=multi-user.target`;
             const username = customer.username || customer.name || '';
             const accountNumber = customer.accountNumber || customer.account_number || '';
             const fullName = customer.fullName || customer.full_name || customer.name || username;
+            const planType = (customer.planType || customer.plan_type || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
 
             res.json({
                 found: true,
                 customer: {
                     fullName, accountNumber, planName, dueDate,
                     routerId: customer.routerId || customer.router_id || '',
-                    username, clientType,
+                    username, clientType, planType,
                     routerName: customer.routerName || ''
                 }
             });
@@ -12111,13 +12116,14 @@ WantedBy=multi-user.target`;
             const username = customer.username || customer.name || '';
             const accountNumber = customer.accountNumber || customer.account_number || '';
             const fullName = customer.fullName || customer.full_name || customer.name || username;
+            const planType = (customer.planType || customer.plan_type || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
 
             res.json({
                 found: true,
                 customer: {
                     fullName, accountNumber, planName, dueDate,
                     routerId: customer.routerId || customer.router_id || '',
-                    username, clientType: customer.clientType || 'pppoe',
+                    username, clientType: customer.clientType || 'pppoe', planType,
                     routerName: customer.routerName || ''
                 }
             });

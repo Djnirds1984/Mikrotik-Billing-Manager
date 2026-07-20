@@ -139,7 +139,17 @@ interface CustomerInfo {
     routerId: string;
     username: string;
     clientType: 'pppoe' | 'dhcp';
+    planType?: 'prepaid' | 'postpaid';
     routerName?: string;
+}
+
+interface BillingPlan {
+    id: string;
+    name: string;
+    price: number;
+    currency?: string;
+    cycle?: string;
+    description?: string;
 }
 
 const MIKROTIK_SCRIPT = `# ============================================
@@ -213,6 +223,8 @@ export const ExpiredPortal: React.FC = () => {
     const [manualLoading, setManualLoading] = useState(false);
     const [manualError, setManualError] = useState('');
     const [detectedIp, setDetectedIp] = useState('');
+    const [billingPlans, setBillingPlans] = useState<BillingPlan[]>([]);
+    const [plansLoading, setPlansLoading] = useState(false);
 
     useEffect(() => {
         // Load store settings for custom expired message
@@ -275,6 +287,20 @@ export const ExpiredPortal: React.FC = () => {
 
         lookupCustomer();
     }, []);
+
+    // Fetch billing plans when a postpaid customer is found
+    useEffect(() => {
+        if (customer?.planType === 'postpaid' && customer.routerId) {
+            setPlansLoading(true);
+            fetch(`/api/public/store/plans?routerId=${encodeURIComponent(customer.routerId)}`)
+                .then(r => r.ok ? r.json() : [])
+                .then((plans: BillingPlan[]) => {
+                    setBillingPlans(Array.isArray(plans) ? plans : []);
+                    setPlansLoading(false);
+                })
+                .catch(() => setPlansLoading(false));
+        }
+    }, [customer?.planType, customer?.routerId]);
 
     const handleManualLookup = async () => {
         if (!manualQuery.trim() || manualLoading) return;
@@ -440,29 +466,63 @@ export const ExpiredPortal: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Renew CTA */}
-                        <div className="space-y-3">
-                            <button
-                                onClick={handleGoToStore}
-                                disabled={isNavigating}
-                                className="w-full px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-400 disabled:to-slate-500 text-white rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-[1.02] disabled:transform-none disabled:cursor-not-allowed flex items-center justify-center gap-3"
-                            >
-                                {isNavigating ? (
-                                    <>
-                                        <span className="animate-spin">⏳</span>
-                                        <span>Connecting to Store...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="text-2xl">🛒</span>
-                                        <span>Renew Now - Visit Store</span>
-                                    </>
-                                )}
-                            </button>
-                            <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-                                Browse available plans and pay to restore your internet connection instantly.
-                            </p>
-                        </div>
+                        {/* Renew CTA - Different for prepaid vs postpaid */}
+                        {customer.planType === 'postpaid' ? (
+                            /* Postpaid: Show billing plans, no store button */
+                            <div className="space-y-3">
+                                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-1">Postpaid Account</p>
+                                    <p className="text-xs text-amber-700 dark:text-amber-300">Your subscription is on a postpaid billing cycle. Please contact the administrator to renew your subscription.</p>
+                                </div>
+                                {plansLoading ? (
+                                    <div className="flex justify-center py-4"><Loader /></div>
+                                ) : billingPlans.length > 0 ? (
+                                    <div>
+                                        <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Available Plans:</p>
+                                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                                            {billingPlans.map((plan) => (
+                                                <div key={plan.id} className="flex justify-between items-center bg-slate-100 dark:bg-slate-700/50 rounded-lg px-4 py-3">
+                                                    <div>
+                                                        <p className="font-semibold text-slate-900 dark:text-white text-sm">{plan.name}</p>
+                                                        {plan.cycle && <p className="text-xs text-slate-500 dark:text-slate-400">{plan.cycle}</p>}
+                                                    </div>
+                                                    <p className="font-bold text-[--color-primary-600] dark:text-[--color-primary-400]">
+                                                        {plan.currency === 'USD' ? '$' : '₱'}{Number(plan.price).toFixed(2)}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
+                                <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+                                    Contact the administrator to process your renewal payment.
+                                </p>
+                            </div>
+                        ) : (
+                            /* Prepaid: Show store button */
+                            <div className="space-y-3">
+                                <button
+                                    onClick={handleGoToStore}
+                                    disabled={isNavigating}
+                                    className="w-full px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-400 disabled:to-slate-500 text-white rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-[1.02] disabled:transform-none disabled:cursor-not-allowed flex items-center justify-center gap-3"
+                                >
+                                    {isNavigating ? (
+                                        <>
+                                            <span className="animate-spin">⏳</span>
+                                            <span>Connecting to Store...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="text-2xl">🛒</span>
+                                            <span>Renew Now - Visit Store</span>
+                                        </>
+                                    )}
+                                </button>
+                                <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+                                    Browse available plans and pay to restore your internet connection instantly.
+                                </p>
+                            </div>
+                        )}
 
                         {/* Contact Info */}
                         <div className="mt-6 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-lg p-4 text-sm">
