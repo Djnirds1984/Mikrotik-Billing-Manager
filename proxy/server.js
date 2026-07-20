@@ -11836,6 +11836,10 @@ WantedBy=multi-user.target`;
     const CAPTIVE_PORT = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
     const captiveApp = express();
     
+    // Body parser middleware for captive portal API endpoints
+    captiveApp.use(express.json());
+    captiveApp.use(express.urlencoded({ extended: true }));
+
     // Add redirect middleware for unauthorized clients
     captiveApp.use((req, res, next) => {
         const host = (req.headers.host || '').split(':')[0];
