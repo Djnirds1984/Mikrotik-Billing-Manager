@@ -3213,7 +3213,8 @@ async function startServer() {
             const dueDateStr = newDueDate.toISOString().split('T')[0];
             
             // Determine the plan's billingType (prepaid/postpaid) from the purchased plan
-            const planBillingType = (plan.billingType || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
+            const matchedPlan = billingPlan || dhcpPlan;
+            const planBillingType = (matchedPlan?.billingType || 'prepaid').toLowerCase() === 'postpaid' ? 'postpaid' : 'prepaid';
             
             // Preserve customer's existing planType - only update if customer has no planType set
             const existingPlanType = customer?.planType || '';
