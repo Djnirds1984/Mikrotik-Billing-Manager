@@ -4320,14 +4320,20 @@ async function startServer() {
             let customer = null;
             if (username && routerId) {
                 customer = await db.get(
-                    'SELECT * FROM customers WHERE (username = ? OR name = ?) AND routerId = ?',
-                    [username, username, routerId]
+                    'SELECT * FROM customers WHERE username = ? AND routerId = ?',
+                    [username, routerId]
                 );
             }
             if (!customer && username) {
                 customer = await db.get(
-                    'SELECT * FROM customers WHERE username = ? OR name = ?',
-                    [username, username]
+                    'SELECT * FROM customers WHERE username = ?',
+                    [username]
+                );
+            }
+            if (!customer && accountNumber) {
+                customer = await db.get(
+                    'SELECT * FROM customers WHERE accountNumber = ?',
+                    [accountNumber]
                 );
             }
 
@@ -4345,10 +4351,10 @@ async function startServer() {
             const token = `exp_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
             const sessionData = {
                 id: customer?.id || `temp_${Date.now()}`,
-                username: customer?.username || customer?.name || username || 'expired_client',
+                username: customer?.username || username || 'expired_client',
                 routerId: customer?.routerId || customer?.router_id || routerId || '',
                 accountNumber: customer?.accountNumber || customer?.account_number || accountNumber || '',
-                fullName: customer?.fullName || customer?.full_name || customer?.name || 'Valued Customer',
+                fullName: customer?.fullName || customer?.full_name || 'Valued Customer',
                 pppoeUsername: username || customer?.username || '',
                 expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
                 createdAt: Date.now()
@@ -12144,10 +12150,13 @@ WantedBy=multi-user.target`;
 
             let customer = null;
             if (username && routerId) {
-                customer = await db.get('SELECT * FROM customers WHERE (username = ? OR name = ?) AND routerId = ?', [username, username, routerId]);
+                customer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [username, routerId]);
             }
             if (!customer && username) {
-                customer = await db.get('SELECT * FROM customers WHERE username = ? OR name = ?', [username, username]);
+                customer = await db.get('SELECT * FROM customers WHERE username = ?', [username]);
+            }
+            if (!customer && accountNumber) {
+                customer = await db.get('SELECT * FROM customers WHERE accountNumber = ?', [accountNumber]);
             }
             if (!customer && ip) {
                 customer = await db.get('SELECT * FROM dhcp_clients WHERE address = ? OR ip = ?', [ip, ip]);
@@ -12159,10 +12168,10 @@ WantedBy=multi-user.target`;
             const token = `exp_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
             const sessionData = {
                 id: customer?.id || `temp_${Date.now()}`,
-                username: customer?.username || customer?.name || username || 'expired_client',
+                username: customer?.username || username || 'expired_client',
                 routerId: customer?.routerId || customer?.router_id || routerId || '',
                 accountNumber: customer?.accountNumber || customer?.account_number || accountNumber || '',
-                fullName: customer?.fullName || customer?.full_name || customer?.name || 'Valued Customer',
+                fullName: customer?.fullName || customer?.full_name || 'Valued Customer',
                 pppoeUsername: username || customer?.username || '',
                 expiresAt: Date.now() + 10 * 60 * 1000,
                 createdAt: Date.now()
