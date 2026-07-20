@@ -393,22 +393,22 @@ export const ExpiredPortal: React.FC = () => {
                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                                 Enter your Account Number or Username
                             </label>
-                            <div className="flex gap-2">
+                            <div className="space-y-3">
                                 <input
                                     type="text"
                                     value={manualQuery}
                                     onChange={(e) => setManualQuery(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && handleManualLookup()}
                                     placeholder="e.g., ACC-078441 or username"
-                                    className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="w-full px-4 py-3 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     disabled={manualLoading}
                                 />
                                 <button
                                     onClick={handleManualLookup}
                                     disabled={manualLoading || !manualQuery.trim()}
-                                    className="px-6 py-3 bg-[--color-primary-600] hover:bg-[--color-primary-500] disabled:bg-slate-400 text-white rounded-lg font-semibold transition-colors"
+                                    className="w-full px-6 py-3 bg-[--color-primary-600] hover:bg-[--color-primary-500] disabled:bg-slate-400 text-white rounded-lg font-semibold transition-colors"
                                 >
-                                    {manualLoading ? '...' : 'Find'}
+                                    {manualLoading ? 'Searching...' : 'Find Account'}
                                 </button>
                             </div>
                             {manualError && (
