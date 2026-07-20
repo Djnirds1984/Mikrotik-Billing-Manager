@@ -346,8 +346,13 @@ export const ExpiredPortal: React.FC = () => {
                 setIsNavigating(false);
                 return;
             }
-            // Redirect to store with the session token
-            window.location.href = `/store?session=${encodeURIComponent(data.token)}`;
+            // Redirect to store using the URL from the server (points to main app, not captive portal)
+            if (data.storeUrl) {
+                window.location.href = data.storeUrl;
+            } else {
+                // Fallback: redirect to /store on current host
+                window.location.href = `/store?session=${encodeURIComponent(data.token)}`;
+            }
         } catch (err) {
             alert('Failed to connect to store. Please try again.');
             setIsNavigating(false);

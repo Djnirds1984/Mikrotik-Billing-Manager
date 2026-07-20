@@ -4363,7 +4363,12 @@ async function startServer() {
             expiredSessionTokens.set(token, sessionData);
             console.log(`[Expired Portal] Auto-login token created for ${username || ip || mac}`);
 
-            res.json({ token, expiresIn: 600 }); // 10 minutes
+            // Build store URL
+            const reqHost = (req.headers.host || '').split(':')[0];
+            const reqProto = req.headers['x-forwarded-proto'] || 'http';
+            const storeUrl = `${reqProto}://${reqHost}/store?session=${encodeURIComponent(token)}`;
+
+            res.json({ token, expiresIn: 600, storeUrl }); // 10 minutes
         } catch (e) {
             console.error('[Expired Portal] Auto-login error:', e.message);
             res.status(500).json({ message: e.message });
@@ -12177,7 +12182,13 @@ WantedBy=multi-user.target`;
                 createdAt: Date.now()
             };
             expiredSessionTokens.set(token, sessionData);
-            res.json({ token, expiresIn: 600 });
+            
+            // Build store URL - use request hostname but point to main app (port 80/443 or same host)
+            const reqHost = (req.headers.host || '').split(':')[0];
+            const reqProto = req.headers['x-forwarded-proto'] || 'http';
+            const storeUrl = `${reqProto}://${reqHost}/store?session=${encodeURIComponent(token)}`;
+            
+            res.json({ token, expiresIn: 600, storeUrl });
         } catch (e) {
             console.error('[Captive Expired] Auto-login error:', e.message);
             res.status(500).json({ message: e.message });
