@@ -3131,17 +3131,36 @@ async function startServer() {
             
             console.log(`[Manual Payments] Plan lookup - billingPlan found: ${!!billingPlan}, dhcpPlan found: ${!!dhcpPlan}`);
             console.log(`[Manual Payments] Plan name: "${payment.plan_name}", Router ID: "${payment.customer_router_id}"`);
+            console.log(`[Manual Payments] billingPlan.cycle_days: ${billingPlan?.cycle_days}, billingPlan.cycle: ${billingPlan?.cycle}`);
             
             if (billingPlan) {
-                // PPPoE plan - use cycle_days if available, fall back to cycle-based conversion
-                if (billingPlan.cycle_days) {
-                    durationDays = billingPlan.cycle_days;
-                } else {
-                    if (billingPlan.cycle === 'Monthly') durationDays = 30;
+                // PPPoE plan - determine duration with multiple fallbacks
+                // 1. Try parsing plan name for explicit day count (e.g., "7 Days", "7days", "7d")
+                const nameMatch = payment.plan_name.match(/(\d+)\s*d(ays?)?/i);
+                const daysFromName = nameMatch ? parseInt(nameMatch[1]) : null;
+                
+                // 2. Use cycle_days only if it was explicitly set (not the default 30)
+                //    or if it matches the name (plan says 30 and cycle_days is 30)
+                const cycleDaysExplicit = billingPlan.cycle_days && billingPlan.cycle_days !== 30 ? billingPlan.cycle_days : null;
+                
+                if (daysFromName) {
+                    // Plan name has explicit day count - most reliable
+                    durationDays = daysFromName;
+                } else if (cycleDaysExplicit) {
+                    // cycle_days was explicitly set to non-default value
+                    durationDays = cycleDaysExplicit;
+                } else if (billingPlan.cycle_days === 30 && !daysFromName) {
+                    // cycle_days is 30 (default) - check if cycle text gives better info
+                    if (billingPlan.cycle === 'Weekly') durationDays = 7;
+                    else if (billingPlan.cycle === 'Bi-Weekly') durationDays = 14;
+                    else if (billingPlan.cycle === 'Monthly') durationDays = 30;
                     else if (billingPlan.cycle === 'Quarterly') durationDays = 90;
                     else if (billingPlan.cycle === 'Yearly') durationDays = 365;
+                    else durationDays = 30; // Default to 30 if nothing else matches
+                } else {
+                    durationDays = billingPlan.cycle_days || 30;
                 }
-                console.log(`[Manual Payments] PPPoE plan detected: ${durationDays} days`);
+                console.log(`[Manual Payments] PPPoE plan detected: ${durationDays} days (name: "${payment.plan_name}", cycle: "${billingPlan.cycle}", cycle_days: ${billingPlan.cycle_days})`);
             } else if (dhcpPlan) {
                 // DHCP plan - use cycle_days directly
                 durationDays = dhcpPlan.cycle_days || 30;
@@ -12480,7 +12499,7 @@ WantedBy=multi-user.target`;
                             send_email_receipt: false, show_description: false,
                             success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/success`,
                             cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/store/cancel`,
-                            metadata: { pppoeUsername: effectivePppoeUsername, planId, planType, routerId: effectiveRouterId, planName: plan.name, planPrice: plan.price, duration_days: plan.cycle_days || 30, customerAccountNumber: effectiveAccountNumber, customerFullName: customer.fullName }
+                            metadata: { pppoeUsername: effectivePppoeUsername, planId, planType, routerId: effectiveRouterId, planName: plan.name, planPrice: plan.price, duration_days: (() => { const nm = plan.name.match(/(\d+)\s*d(ays?)?/i); if (nm) return parseInt(nm[1]); return (plan.cycle_days && plan.cycle_days !== 30) ? plan.cycle_days : 30; })(), customerAccountNumber: effectiveAccountNumber, customerFullName: customer.fullName }
                         }
                     }
                 };
