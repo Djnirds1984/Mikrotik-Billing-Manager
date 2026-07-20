@@ -4235,6 +4235,75 @@ async function startServer() {
         }
     });
 
+    // GET: Lookup customer by account number or username (manual entry from expired portal)
+    app.get('/api/public/expired/lookup-by-account', async (req, res) => {
+        try {
+            const q = String(req.query.q || '').trim();
+            if (!q) return res.status(400).json({ message: 'Query parameter "q" is required' });
+
+            // Search by account number or username in customers table
+            let customer = await db.get(
+                `SELECT c.*, r.name as routerName FROM customers c 
+                 LEFT JOIN routers r ON c.routerId = r.id 
+                 WHERE c.accountNumber = ? OR c.username = ?`,
+                [q, q]
+            );
+
+            // Fallback: search in client_users table
+            if (!customer) {
+                const clientUser = await db.get(
+                    'SELECT * FROM client_users WHERE pppoe_username = ? OR username = ?',
+                    [q, q]
+                );
+                if (clientUser) {
+                    customer = await db.get(
+                        `SELECT c.*, r.name as routerName FROM customers c 
+                         LEFT JOIN routers r ON c.routerId = r.id 
+                         WHERE c.routerId = ? AND (c.username = ? OR c.accountNumber = ?)`,
+                        [clientUser.router_id, clientUser.pppoe_username || clientUser.username, clientUser.account_number || '']
+                    );
+                }
+            }
+
+            if (!customer) {
+                return res.json({ found: false });
+            }
+
+            // Parse comment for plan info
+            let planName = customer.planName || customer.plan || '';
+            let dueDate = customer.dueDate || customer.expiresAt || '';
+            try {
+                const comment = customer.comment || '';
+                if (comment.startsWith('{')) {
+                    const parsed = JSON.parse(comment);
+                    planName = planName || parsed.plan || parsed.planName || '';
+                    dueDate = dueDate || parsed.dueDate || parsed.expiresAt || '';
+                }
+            } catch (_) {}
+
+            const username = customer.username || customer.name || '';
+            const accountNumber = customer.accountNumber || customer.account_number || '';
+            const fullName = customer.fullName || customer.full_name || customer.name || username;
+
+            res.json({
+                found: true,
+                customer: {
+                    fullName,
+                    accountNumber,
+                    planName,
+                    dueDate,
+                    routerId: customer.routerId || customer.router_id || '',
+                    username,
+                    clientType: customer.clientType || 'pppoe',
+                    routerName: customer.routerName || ''
+                }
+            });
+        } catch (e) {
+            console.error('[Expired Portal] Account lookup error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     // POST: Create auto-login token for store access
     app.post('/api/public/expired/auto-login', async (req, res) => {
         try {
@@ -11994,6 +12063,66 @@ WantedBy=multi-user.target`;
             });
         } catch (e) {
             console.error('[Captive Expired] Lookup error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // GET: Lookup customer by account number or username (manual entry)
+    captiveApp.get('/api/public/expired/lookup-by-account', async (req, res) => {
+        try {
+            const q = String(req.query.q || '').trim();
+            if (!q) return res.status(400).json({ message: 'Query parameter "q" is required' });
+
+            let customer = await db.get(
+                `SELECT c.*, r.name as routerName FROM customers c 
+                 LEFT JOIN routers r ON c.routerId = r.id 
+                 WHERE c.accountNumber = ? OR c.username = ?`,
+                [q, q]
+            );
+
+            if (!customer) {
+                const clientUser = await db.get(
+                    'SELECT * FROM client_users WHERE pppoe_username = ? OR username = ?',
+                    [q, q]
+                );
+                if (clientUser) {
+                    customer = await db.get(
+                        `SELECT c.*, r.name as routerName FROM customers c 
+                         LEFT JOIN routers r ON c.routerId = r.id 
+                         WHERE c.routerId = ? AND (c.username = ? OR c.accountNumber = ?)`,
+                        [clientUser.router_id, clientUser.pppoe_username || clientUser.username, clientUser.account_number || '']
+                    );
+                }
+            }
+
+            if (!customer) return res.json({ found: false });
+
+            let planName = customer.planName || customer.plan || '';
+            let dueDate = customer.dueDate || customer.expiresAt || '';
+            try {
+                const comment = customer.comment || '';
+                if (comment.startsWith('{')) {
+                    const parsed = JSON.parse(comment);
+                    planName = planName || parsed.plan || parsed.planName || '';
+                    dueDate = dueDate || parsed.dueDate || parsed.expiresAt || '';
+                }
+            } catch (_) {}
+
+            const username = customer.username || customer.name || '';
+            const accountNumber = customer.accountNumber || customer.account_number || '';
+            const fullName = customer.fullName || customer.full_name || customer.name || username;
+
+            res.json({
+                found: true,
+                customer: {
+                    fullName, accountNumber, planName, dueDate,
+                    routerId: customer.routerId || customer.router_id || '',
+                    username, clientType: customer.clientType || 'pppoe',
+                    routerName: customer.routerName || ''
+                }
+            });
+        } catch (e) {
+            console.error('[Captive Expired] Account lookup error:', e.message);
             res.status(500).json({ message: e.message });
         }
     });
