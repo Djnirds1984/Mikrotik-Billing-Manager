@@ -2510,8 +2510,21 @@ async function startServer() {
                     console.log(`[Customers PATCH] Generated account number: ${req.body.accountNumber}`);
                 }
             }
-            const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
-            const values = [...Object.values(req.body), id];
+            
+            // Get actual table columns to filter out non-existent fields
+            const tableCols = await db.all("PRAGMA table_info(customers)");
+            const validColNames = tableCols.map(c => c.name);
+            
+            // Only update fields that are actual columns in the table, exclude 'id'
+            const fieldsToUpdate = Object.keys(req.body).filter(k => validColNames.includes(k) && k !== 'id');
+            if (fieldsToUpdate.length === 0) {
+                console.log(`[Customers PATCH] No valid fields to update`);
+                return res.json({ message: 'No fields to update' });
+            }
+            
+            const updates = fieldsToUpdate.map(k => `${k} = ?`).join(',');
+            const values = fieldsToUpdate.map(k => req.body[k]);
+            values.push(id);
             console.log(`[Customers PATCH] Executing: UPDATE customers SET ${updates} WHERE id = ?`, values);
             await db.run(`UPDATE customers SET ${updates} WHERE id = ?`, values);
             console.log(`[Customers PATCH] Successfully updated customer id=${id}`);
@@ -2537,6 +2550,26 @@ async function startServer() {
             await deleteCustomerFromSupabase(id);
             await db.run(`DELETE FROM customers WHERE id = ?`, id);
             res.json({ message: 'Deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete customer by username and routerId (used when deleting PPPoE user)
+    dbRouter.delete('/customers/by-username', async (req, res) => {
+        try {
+            const { username, routerId } = req.query;
+            if (!username || !routerId) {
+                return res.status(400).json({ message: 'username and routerId are required' });
+            }
+            // Get customer first for Supabase cleanup
+            try {
+                const customer = await db.get('SELECT id FROM customers WHERE username = ? AND routerId = ?', [username, routerId]);
+                if (customer) await deleteCustomerFromSupabase(customer.id);
+            } catch (e) { /* ignore supabase errors */ }
+            const result = await db.run(
+                'DELETE FROM customers WHERE username = ? AND routerId = ?',
+                [username, routerId]
+            );
+            res.json({ message: 'Deleted', changes: result.changes });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 

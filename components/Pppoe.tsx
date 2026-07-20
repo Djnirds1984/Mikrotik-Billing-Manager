@@ -1006,23 +1006,31 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             });
 
             // Update local customer DB - always save even if only username exists
-            if (existingCustomer) {
-                console.log(`[PPPoE Save] Updating existing customer: ${existingCustomer.id} with accountNumber: ${enrichedCustomerData.accountNumber}`);
-                await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
-            } else {
-                // Always create customer record with at least username and account number
-                const alreadyExists = customers.find(c => c.username === secretData.name);
-                if (!alreadyExists) {
-                    console.log(`[PPPoE Save] Creating new customer with accountNumber: ${enrichedCustomerData.accountNumber}`);
-                    await addCustomer({ 
-                        routerId: selectedRouter.id, 
-                        username: secretData.name, 
-                        ...enrichedCustomerData 
-                    });
+            try {
+                if (existingCustomer) {
+                    console.log(`[PPPoE Save] Updating existing customer: ${existingCustomer.id} with accountNumber: ${enrichedCustomerData.accountNumber}`);
+                    await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
+                    console.log(`[PPPoE Save] ✓ Database updated successfully for ${existingCustomer.id}`);
                 } else {
-                    console.log(`[PPPoE Save] Customer already exists, updating with accountNumber: ${enrichedCustomerData.accountNumber}`);
-                    await updateCustomer({ ...alreadyExists, ...enrichedCustomerData });
+                    // Always create customer record with at least username and account number
+                    const alreadyExists = customers.find(c => c.username === secretData.name);
+                    if (!alreadyExists) {
+                        console.log(`[PPPoE Save] Creating new customer with accountNumber: ${enrichedCustomerData.accountNumber}`);
+                        await addCustomer({ 
+                            routerId: selectedRouter.id, 
+                            username: secretData.name, 
+                            ...enrichedCustomerData 
+                        });
+                        console.log(`[PPPoE Save] ✓ New customer created in database`);
+                    } else {
+                        console.log(`[PPPoE Save] Customer already exists, updating with accountNumber: ${enrichedCustomerData.accountNumber}`);
+                        await updateCustomer({ ...alreadyExists, ...enrichedCustomerData });
+                        console.log(`[PPPoE Save] ✓ Database updated successfully for existing customer`);
+                    }
                 }
+            } catch (dbErr) {
+                console.error(`[PPPoE Save] ✗ Database update failed:`, dbErr);
+                // Don't block the save process - MikroTik was already updated
             }
 
             // Generate PDF application form
@@ -1222,10 +1230,23 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         }
     };
     
-    const handleDeleteUser = async (secretId: string) => {
-        if (!window.confirm("Are you sure?")) return;
+    const handleDeleteUser = async (secretId: string, username?: string) => {
+        if (!window.confirm("Are you sure? This will delete the user from both MikroTik and the database.")) return;
         try {
+            // Delete from MikroTik
             await deletePppSecret(selectedRouter, secretId);
+            // Also delete from local database
+            try {
+                const uname = username || (selectedSecret as any)?.name || '';
+                if (uname) {
+                    await fetch(`/api/db/customers/by-username?username=${encodeURIComponent(uname)}&routerId=${encodeURIComponent(selectedRouter.id)}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                    });
+                }
+            } catch (dbErr) {
+                console.warn('Failed to delete customer from database:', dbErr);
+            }
             await fetchData();
         } catch (err) { alert(`Error deleting user: ${(err as Error).message}`); }
     };
@@ -1624,7 +1645,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                         </button>
                                         {hasPermission('pppoe_users:delete') && (
                                             <button
-                                                onClick={() => handleDeleteUser(user.id)}
+                                                onClick={() => handleDeleteUser(user.id, user.name)}
                                                 className="px-3 py-2 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700 transition-colors"
                                             >
                                                 Delete
@@ -1850,7 +1871,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                         </button>
                                         {hasPermission('pppoe_users:delete') && (
                                             <button
-                                                onClick={() => handleDeleteUser(user.id)}
+                                                onClick={() => handleDeleteUser(user.id, user.name)}
                                                 className="px-3 py-1 text-sm bg-red-600 text-white rounded-md font-semibold hover:bg-red-700 transition-colors"
                                                 title="Delete User"
                                             >
