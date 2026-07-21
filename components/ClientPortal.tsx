@@ -22,7 +22,11 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
   const [paymentReceipt, setPaymentReceipt] = useState<{ user: string; amount: string; invoice: string; date: string; base?: string; fee?: string; method?: string } | null>(null);
   const [paymongoConfig, setPaymongoConfig] = useState<{ enabled: boolean; passFeesToCustomer: boolean }>({ enabled: false, passFeesToCustomer: false });
+  const [xenditConfig, setXenditConfig] = useState<{ enabled: boolean; passFeesToCustomer: boolean; paymentMethods: string[] }>({ enabled: false, passFeesToCustomer: false, paymentMethods: [] });
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'gcash' | 'paymaya' | 'grab_pay' | 'qrph' | 'card'>('gcash');
+  const [billingPlans, setBillingPlans] = useState<any[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [selectedGateway, setSelectedGateway] = useState<'paymongo' | 'xendit'>('paymongo');
   useEffect(() => {
     try { localStorage.setItem('suppressReload', '1'); } catch {}
     return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
@@ -94,6 +98,34 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     })();
   }, []);
 
+  // Fetch public Xendit config
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/public/xendit-config');
+        if (res.ok) {
+          const data = await res.json();
+          setXenditConfig({
+            enabled: !!data.enabled,
+            passFeesToCustomer: !!data.passFeesToCustomer,
+            paymentMethods: data.paymentMethods || [],
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to load Xendit config', e);
+      }
+    })();
+  }, []);
+
+  // Auto-select default gateway: prefer PayMongo, fallback to Xendit
+  useEffect(() => {
+    if (paymongoConfig.enabled) {
+      setSelectedGateway('paymongo');
+    } else if (xenditConfig.enabled) {
+      setSelectedGateway('xendit');
+    }
+  }, [paymongoConfig.enabled, xenditConfig.enabled]);
+
   // We don't need to fetch routers for login anymore as username is unique
   
   const handleLogin = async () => {
@@ -153,6 +185,21 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
         const invRes = await fetch(`/api/public/client/invoices?routerId=${encodeURIComponent(user.routerId)}&username=${encodeURIComponent(user.pppoeUsername)}`);
         const invData = await invRes.json();
         setInvoices(Array.isArray(invData) ? invData : []);
+
+        // Fetch available billing plans for this router
+        const plansRes = await fetch(`/api/public/store/plans?routerId=${encodeURIComponent(user.routerId)}&type=pppoe`);
+        if (plansRes.ok) {
+          const plansData = await plansRes.json();
+          setBillingPlans(Array.isArray(plansData) ? plansData : []);
+          // Auto-select the user's current plan if it matches
+          const currentPlanName = data?.planName || data?.profile || '';
+          const matchingPlan = plansData.find((p: any) => p.name === currentPlanName);
+          if (matchingPlan) {
+            setSelectedPlanId(matchingPlan.id);
+          } else if (plansData.length > 0 && !selectedPlanId) {
+            setSelectedPlanId(plansData[0].id);
+          }
+        }
     } catch (e) {
         console.error("Failed to load status", e);
     }
@@ -222,34 +269,66 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   };
 
   const handlePayNow = async () => {
-    const currentPlanName = status?.planName || status?.profile || 'Unknown';
-    const currentPlanPrice = status?.planPrice ?? payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
+    const selectedPlan = billingPlans.find(p => p.id === selectedPlanId);
+    const currentPlanName = selectedPlan?.name || status?.planName || status?.profile || 'Unknown';
+    const currentPlanPrice = selectedPlan?.price ?? status?.planPrice ?? payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
     if (!clientInfo?.pppoeUsername || !currentPlanPrice) {
       setError('Unable to initiate payment. Plan price not found.');
+      return;
+    }
+    if (!paymongoConfig.enabled && !xenditConfig.enabled) {
+      setError('No payment gateway is configured. Please contact support.');
       return;
     }
     setIsPaying(true);
     setError(null);
     try {
-      const res = await fetch('/api/payments/create-checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: Number(currentPlanPrice),
-          description: `${currentPlanName} Subscription Payment`,
-          pppoeUsername: clientInfo.pppoeUsername,
-          planName: currentPlanName,
-          paymentMethod: selectedPaymentMethod,
-          successUrl: `${window.location.origin}/client_portal?payment=success`,
-          cancelUrl: `${window.location.origin}/client_portal?payment=cancelled`
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to create checkout session');
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
+      // Use Xendit if selected and enabled, otherwise fallback to PayMongo
+      const useXendit = selectedGateway === 'xendit' && xenditConfig.enabled;
+
+      if (useXendit) {
+        const res = await fetch('/api/payments/create-xendit-checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pppoe_username: clientInfo.pppoeUsername,
+            plan_name: currentPlanName,
+            amount: Number(currentPlanPrice),
+            duration_days: selectedPlan?.cycle_days || 30,
+            router_id: clientInfo.routerId || '',
+            planType: 'pppoe',
+            planId: selectedPlan?.id || '',
+            paymentMethod: selectedPaymentMethod,
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || 'Failed to create Xendit checkout');
+        if (data.checkout_url) {
+          window.location.href = data.checkout_url;
+        } else {
+          throw new Error('No checkout URL returned from Xendit');
+        }
       } else {
-        throw new Error('No checkout URL returned');
+        const res = await fetch('/api/payments/create-checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: Number(currentPlanPrice),
+            description: `${currentPlanName} Subscription Payment`,
+            pppoeUsername: clientInfo.pppoeUsername,
+            planName: currentPlanName,
+            paymentMethod: selectedPaymentMethod,
+            successUrl: `${window.location.origin}/client_portal?payment=success`,
+            cancelUrl: `${window.location.origin}/client_portal?payment=cancelled`
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed to create PayMongo checkout session');
+        if (data.checkout_url) {
+          window.location.href = data.checkout_url;
+        } else {
+          throw new Error('No checkout URL returned');
+        }
       }
     } catch (e) {
       console.error('Payment initiation failed:', e);
@@ -313,8 +392,10 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   );
 
   if (view === 'dashboard') {
-    const planName = status?.planName || status?.profile || 'Unknown';
-    const planPrice = status?.planPrice ?? payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
+    const selectedPlan = billingPlans.find(p => p.id === selectedPlanId);
+    const planName = selectedPlan?.name || status?.planName || status?.profile || 'Unknown';
+    const planPrice = selectedPlan?.price ?? status?.planPrice ?? payments[0]?.planPrice ?? payments[0]?.finalAmount ?? null;
+    const activeGatewayConfig = selectedGateway === 'xendit' && xenditConfig.enabled ? xenditConfig : paymongoConfig;
 
     // Determine subscription status by profile + due date, NOT by whether
     // the PPPoE session is currently connected. A user who is temporarily
@@ -349,21 +430,97 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 <div className="p-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">PPPoE Account:</span> {clientInfo?.pppoeUsername}</div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Account Number:</span> {clientInfo?.accountNumber || '—'}</div>
-                <div><span className="font-medium text-slate-800 dark:text-slate-200">Current Plan:</span> {planName}{planPrice != null ? ` (₱${Number(planPrice).toFixed(2)}/mo)` : ''}</div>
+                <div><span className="font-medium text-slate-800 dark:text-slate-200">Current Plan:</span> {planName}{planPrice != null ? ` (₱${Number(planPrice).toFixed(2)}${selectedPlan?.cycle === 'Quarterly' ? '/qtr' : selectedPlan?.cycle === 'Yearly' ? '/yr' : '/mo'})` : ''}</div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Overall Status:</span> <span className={`px-2 py-1 rounded text-xs font-bold ${overallStatus === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>{overallStatus}</span></div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Connection:</span> <span className={`px-2 py-1 rounded text-xs font-bold ${isConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{isConnected ? 'Online' : 'Offline'}</span></div>
                 <div><span className="font-medium text-slate-800 dark:text-slate-200">Subscription Expires:</span> {expires || 'Unknown'}</div>
+                
+                {/* Available Billing Plans */}
+                {billingPlans.length > 0 && (
+                  <div className="pt-3">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Select Plan to Pay</label>
+                    <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
+                      {billingPlans.map(plan => (
+                        <button
+                          key={plan.id}
+                          onClick={() => setSelectedPlanId(plan.id)}
+                          className={`flex items-center justify-between px-3 py-2 rounded-lg border text-left text-sm transition-all ${
+                            selectedPlanId === plan.id
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-500'
+                              : 'border-slate-200 dark:border-slate-600 hover:border-blue-300 dark:hover:border-blue-500'
+                          }`}
+                        >
+                          <div>
+                            <div className="font-medium text-slate-800 dark:text-slate-200">{plan.name}</div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                              {plan.cycle || 'Monthly'} • {plan.billingType || 'prepaid'}
+                              {plan.pppoeProfile ? ` • Profile: ${plan.pppoeProfile}` : ''}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0 ml-3">
+                            <div className="font-bold text-slate-800 dark:text-slate-200">₱{Number(plan.price || 0).toFixed(2)}</div>
+                            {selectedPlanId === plan.id && (
+                              <svg className="w-4 h-4 text-blue-500 ml-auto mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment Gateway Selector */}
+                {(paymongoConfig.enabled || xenditConfig.enabled) && (
+                  <div className="pt-3">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Payment Gateway</label>
+                    <div className="flex gap-2">
+                      {paymongoConfig.enabled && (
+                        <button
+                          onClick={() => setSelectedGateway('paymongo')}
+                          className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                            selectedGateway === 'paymongo'
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500'
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-blue-300'
+                          }`}
+                        >
+                          PayMongo
+                        </button>
+                      )}
+                      {xenditConfig.enabled && (
+                        <button
+                          onClick={() => setSelectedGateway('xendit')}
+                          className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                            selectedGateway === 'xendit'
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500'
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-blue-300'
+                          }`}
+                        >
+                          Xendit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="pt-4">
                     <button
                       onClick={handlePayNow}
-                      disabled={isPaying}
+                      disabled={isPaying || !selectedPlanId}
                       className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded font-medium transition-colors"
                     >
-                      {isPaying ? 'Redirecting to payment...' : 'Pay Now / Renew Subscription'}
+                      {isPaying ? 'Redirecting to payment...' : `Pay Now${selectedPlan ? ` — ₱${Number(selectedPlan.price).toFixed(2)}` : ''}`}
                     </button>
-                    {paymongoConfig.passFeesToCustomer && planPrice && (() => {
+                    {activeGatewayConfig.passFeesToCustomer && planPrice && (() => {
                       const base = Number(planPrice);
+                      const isXendit = selectedGateway === 'xendit' && xenditConfig.enabled;
                       const computeTotal = (m: string) => {
+                        if (isXendit) {
+                          if (m === 'card') return (base + 15) / (1 - 0.035);
+                          if (m === 'qrph') return base / (1 - 0.020);
+                          if (['gcash', 'maya'].includes(m)) return base / (1 - 0.025);
+                          return base / (1 - 0.029);
+                        }
+                        // PayMongo
                         if (m === 'card') return (base + 15) / (1 - 0.035);
                         if (m === 'qrph') return base / (1 - 0.020);
                         return base / (1 - 0.029);
@@ -382,9 +539,9 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                               onChange={e => setSelectedPaymentMethod(e.target.value as any)}
                               className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white"
                             >
-                              <option value="gcash">GCash (2.9%)</option>
-                              <option value="paymaya">Maya (2.9%)</option>
-                              <option value="grab_pay">GrabPay (2.9%)</option>
+                              <option value="gcash">GCash ({isXendit ? '2.5%' : '2.9%'})</option>
+                              <option value="paymaya">Maya ({isXendit ? '2.5%' : '2.9%'})</option>
+                              {selectedGateway === 'paymongo' && <option value="grab_pay">GrabPay (2.9%)</option>}
                               <option value="qrph">QRPh (2.0%)</option>
                               <option value="card">Credit/Debit Card (3.5% + ₱15)</option>
                             </select>

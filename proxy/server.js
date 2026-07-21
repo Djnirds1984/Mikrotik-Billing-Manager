@@ -5890,6 +5890,22 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 : (xenditSettings.paymentMethods || []).map(m => xenditChannelMap[m] || m).filter(Boolean);
 
             // Create Xendit invoice via API
+            // Build dynamic success URL back to client portal with receipt details
+            const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '') || 'http://localhost';
+            const xenditInvoiceNo = 'XND-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+            const spXendit = new URLSearchParams({
+                payment: 'success',
+                user: pppoe_username,
+                amount: String(totalAmount),
+                base: String(baseAmount),
+                fee: String(convenienceFee),
+                method: method || '',
+                invoice: xenditInvoiceNo,
+                gateway: 'xendit',
+            });
+            const dynamicSuccessUrl = `${origin}/client_portal?${spXendit.toString()}`;
+            const dynamicCancelUrl = `${origin}/client_portal?payment=cancelled&user=${encodeURIComponent(pppoe_username)}`;
+
             const response = await fetch('https://api.xendit.co/v2/invoices', {
                 method: 'POST',
                 headers: {
@@ -5902,8 +5918,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     currency: 'PHP',
                     description: `Payment for ${plan_name} - ${pppoe_username}`,
                     payment_methods: allowedMethods,
-                    success_redirect_url: xenditSettings.webhookUrl ? xenditSettings.webhookUrl.replace('/api/xendit-webhook', '/payment-success') : undefined,
-                    failure_redirect_url: xenditSettings.webhookUrl ? xenditSettings.webhookUrl.replace('/api/xendit-webhook', '/payment-failed') : undefined,
+                    success_redirect_url: dynamicSuccessUrl,
+                    failure_redirect_url: dynamicCancelUrl,
                     metadata: {
                         pppoe_username,
                         plan_name,
