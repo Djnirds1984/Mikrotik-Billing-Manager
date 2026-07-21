@@ -809,13 +809,20 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     const pt = String(parsedComment.planType || '').toLowerCase().trim();
                     subscription.planType = pt === 'postpaid' ? 'postpaid' : 'prepaid';
                 } catch (e) { /* ignore */ } }
+            // Resolve the panel billing plan for this user
+            const billingPlan = plans.find(p => 
+                (subscription.planId && p.id === subscription.planId) || 
+                p.name === subscription.plan
+            ) || null;
+
             return {
                 ...secret,
                 customer,
-                subscription
+                subscription,
+                billingPlan
             };
         });
-    }, [secrets, customers, selectedRouter.id]);
+    }, [secrets, customers, selectedRouter.id, plans]);
     
     // Sorting Logic
     const sortedUsers = useMemo(() => {
@@ -832,7 +839,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     (user.customer?.accountNumber || '').toLowerCase().includes(lowerTerm) ||
                     (user.profile || '').toLowerCase().includes(lowerTerm) ||
                     (user.subscription?.plan || '').toLowerCase().includes(lowerTerm) ||
-                    (user.subscription?.dueDate || '').toLowerCase().includes(lowerTerm)
+                    (user.subscription?.dueDate || '').toLowerCase().includes(lowerTerm) ||
+                    (user.billingPlan?.name || '').toLowerCase().includes(lowerTerm)
                 );
 
                 // Sort by relevance: username exact match > username starts with > name match > other field match
@@ -872,6 +880,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     case 'planType':
                         aValue = (a.subscription.planType || '').toLowerCase();
                         bValue = (b.subscription.planType || '').toLowerCase();
+                        break;
+                    case 'billingPlan':
+                        aValue = (a.billingPlan?.name || '').toLowerCase();
+                        bValue = (b.billingPlan?.name || '').toLowerCase();
                         break;
                     case 'subscriptionDue':
                          const getTimestamp = (u: any) => {
@@ -1594,6 +1606,17 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                             </div>
                                         </div>
                                         <div className="col-span-2">
+                                            <div className="text-slate-400 uppercase text-[10px] font-bold">Billing Plan</div>
+                                            <div className="text-slate-700 dark:text-slate-200">
+                                                {user.billingPlan ? (
+                                                    <span>
+                                                        <span className="font-semibold">{user.billingPlan.name}</span>
+                                                        <span className="text-slate-500 ml-1">({formatCurrency(user.billingPlan.price)}/{user.billingPlan.cycle === 'Monthly' ? 'mo' : user.billingPlan.cycle === 'Quarterly' ? 'qtr' : 'yr'})</span>
+                                                    </span>
+                                                ) : '—'}
+                                            </div>
+                                        </div>
+                                        <div className="col-span-2">
                                             <div className="text-slate-400 uppercase text-[10px] font-bold">Subscription Due</div>
                                             <div className="text-slate-700 dark:text-slate-200">
                                                 <HighlightText text={user.subscription.dueDate || '—'} highlight={searchTerm} />
@@ -1659,7 +1682,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 </div>
                 {/* Desktop table view */}
                 <div className="hidden md:block overflow-x-auto">
-                 <table className="w-full text-sm md:min-w-[900px]">
+                 <table className="w-full text-sm md:min-w-[1100px]">
                     <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                         <tr>
                             <th 
@@ -1708,6 +1731,17 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             </th>
                             <th 
                                 className="px-6 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
+                                onClick={() => requestSort('billingPlan')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    Billing Plan
+                                    {sortConfig?.key === 'billingPlan' && (
+                                        <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>
+                                    )}
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
                                 onClick={() => requestSort('subscriptionDue')}
                             >
                                 <div className="flex items-center justify-center gap-1">
@@ -1728,7 +1762,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     <tbody>
                         {sortedUsers.length === 0 ? (
                             <tr>
-                                <td colSpan={7} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                <td colSpan={8} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
                                     {searchTerm ? (
                                         <div className="flex flex-col items-center gap-2">
                                             <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1780,6 +1814,20 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                             <span className="px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
                                                 <HighlightText text="Prepaid" highlight={searchTerm} />
                                             </span>
+                                        )}
+                                    </td>
+                                    <td className="text-center">
+                                        {user.billingPlan ? (
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="px-2 py-0.5 text-xs font-semibold rounded bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300">
+                                                    <HighlightText text={user.billingPlan.name || ''} highlight={searchTerm} />
+                                                </span>
+                                                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                                    {formatCurrency(user.billingPlan.price)}/{user.billingPlan.cycle === 'Monthly' ? 'mo' : user.billingPlan.cycle === 'Quarterly' ? 'qtr' : 'yr'}
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
                                         )}
                                     </td>
                                     <td className="text-center">
