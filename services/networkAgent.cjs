@@ -210,23 +210,37 @@ noauth
     // Kill any existing pppd processes
     try {
       await execPromise('sudo pkill pppd || true');
+      await new Promise(resolve => setTimeout(resolve, 2000));
     } catch (e) {
       // No pppd running
     }
     
-    // Start PPPoE connection
-    await execPromise(`sudo pppd call ${pppoeInterfaceName}`);
+    // Start PPPoE connection in background
+    await execPromise(`sudo pppd call ${pppoeInterfaceName} &`);
     
     await this.log(`PPPoE connection started: ${pppoeInterfaceName}`);
     
-    // Wait a moment and verify connection
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for connection to establish (PPPoE can take 10-15 seconds)
+    await new Promise(resolve => setTimeout(resolve, 15000));
     
+    // Verify connection with better diagnostics
     try {
-      const { stdout } = await execPromise('ip addr show ppp0 2>/dev/null || ip addr show ppp1 2>/dev/null || echo "no-ppp"');
-      if (stdout.includes('no-ppp')) {
-        throw new Error('PPPoE connection failed - no PPP interface found');
+      // Check if pppd is still running
+      const { stdout: pppdStatus } = await execPromise('pgrep pppd || echo "not-running"');
+      if (pppdStatus.includes('not-running')) {
+        await this.log('PPPoE verification: pppd process not found');
+        throw new Error('PPPoE connection failed - pppd process terminated');
       }
+      
+      // Check for PPP interface (try multiple possible names)
+      const { stdout } = await execPromise('ip addr show 2>/dev/null | grep -E "ppp[0-9]+" || echo "no-ppp"');
+      if (stdout.includes('no-ppp')) {
+        // Get more diagnostic info
+        const { stdout: logOutput } = await execPromise('sudo cat /var/log/syslog 2>/dev/null | grep pppd | tail -20 || echo "no-logs"');
+        await this.log(`PPPoE verification failed. Recent pppd logs: ${logOutput}`);
+        throw new Error('PPPoE connection failed - no PPP interface found after 15s');
+      }
+      
       await this.log('PPPoE connection verified successfully');
     } catch (e) {
       throw new Error('PPPoE connection verification failed: ' + e.message);
