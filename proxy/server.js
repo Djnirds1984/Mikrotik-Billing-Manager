@@ -3630,7 +3630,7 @@ async function startServer() {
             let p = {};
             try { p = JSON.parse(s?.paymongoSettings || '{}'); } catch (_) {}
             res.json({
-                enabled: !!p.enabled,
+                enabled: !!(p.enabled || p.secretKey),
                 passFeesToCustomer: !!p.passFeesToCustomer,
             });
         } catch (e) {
@@ -3645,7 +3645,7 @@ async function startServer() {
             let x = {};
             try { x = JSON.parse(s?.xenditSettings || '{}'); } catch (_) {}
             res.json({
-                enabled: !!x.enabled,
+                enabled: !!(x.enabled || x.secretKey),
                 passFeesToCustomer: !!x.passFeesToCustomer,
                 paymentMethods: x.paymentMethods || []
             });

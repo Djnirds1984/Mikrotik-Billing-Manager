@@ -276,10 +276,6 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
       setError('Unable to initiate payment. Plan price not found.');
       return;
     }
-    if (!paymongoConfig.enabled && !xenditConfig.enabled) {
-      setError('No payment gateway is configured. Please contact support.');
-      return;
-    }
     setIsPaying(true);
     setError(null);
     try {
@@ -505,10 +501,10 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 <div className="pt-4">
                     <button
                       onClick={handlePayNow}
-                      disabled={isPaying || !selectedPlanId}
+                      disabled={isPaying}
                       className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded font-medium transition-colors"
                     >
-                      {isPaying ? 'Redirecting to payment...' : `Pay Now${selectedPlan ? ` — ₱${Number(selectedPlan.price).toFixed(2)}` : ''}`}
+                      {isPaying ? 'Redirecting to payment...' : `Pay Now${selectedPlan ? ` — ₱${Number(selectedPlan.price).toFixed(2)}` : planPrice != null ? ` — ₱${Number(planPrice).toFixed(2)}` : ''}`}
                     </button>
                     {activeGatewayConfig.passFeesToCustomer && planPrice && (() => {
                       const base = Number(planPrice);
