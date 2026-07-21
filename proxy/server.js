@@ -4525,11 +4525,21 @@ async function startServer() {
         res.json({ ip: clientIp });
     });
 
-    // GET: Public store settings (for expired portal)
+    // GET: Public store settings (for expired portal and client portal)
     app.get('/api/public/store-settings', async (req, res) => {
         try {
-            const s = await db.get('SELECT storeSettings, currency FROM settings WHERE id = 1');
+            const s = await db.get('SELECT storeSettings, companySettings, currency FROM settings WHERE id = 1');
             const systemCurrency = s?.currency || 'PHP';
+            
+            // Get GCash info from companySettings as fallback
+            let companyGcashNumber = '';
+            let companyGcashAccountName = '';
+            try {
+                const cs = JSON.parse(s?.companySettings || '{}');
+                companyGcashNumber = cs.gcashNumber || '';
+                companyGcashAccountName = cs.gcashAccountName || '';
+            } catch (_) {}
+            
             if (s && s.storeSettings) {
                 try {
                     const settings = JSON.parse(s.storeSettings);
@@ -4538,14 +4548,14 @@ async function startServer() {
                         storeBannerText: settings.storeBannerText || '',
                         storeEnabled: settings.storeEnabled !== false,
                         paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },
-                        gcashNumber: settings.gcashNumber || '',
-                        gcashAccountName: settings.gcashAccountName || '',
+                        gcashNumber: settings.gcashNumber || companyGcashNumber,
+                        gcashAccountName: settings.gcashAccountName || companyGcashAccountName,
                         currency: systemCurrency,
                         storeTheme: settings.storeTheme || 'modern'
                     });
-                } catch (_) { res.json({ currency: systemCurrency, storeTheme: 'modern' }); }
+                } catch (_) { res.json({ currency: systemCurrency, storeTheme: 'modern', gcashNumber: companyGcashNumber, gcashAccountName: companyGcashAccountName }); }
             } else {
-                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true }, currency: systemCurrency, storeTheme: 'modern' });
+                res.json({ storeEnabled: true, paymentMethods: { paymongo: true, manualGcash: true }, currency: systemCurrency, storeTheme: 'modern', gcashNumber: companyGcashNumber, gcashAccountName: companyGcashAccountName });
             }
         } catch (e) {
             res.status(500).json({ message: e.message });
