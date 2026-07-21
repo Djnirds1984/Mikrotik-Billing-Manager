@@ -184,16 +184,22 @@ iface ${wanInterface} inet static
     
     const osType = await this.detectOS();
     
+    // Escape special characters in password for shell safety
+    const escapedPassword = password.replace(/'/g, "'\\''");
+    
     // Create PPPoE peer configuration
     const pppConfig = `plugin rp-pppoe.so
 ${wanInterface}
-user "${username}"
-password "${password}"
+name "${username}"
+password "${escapedPassword}"
+auth
+remotenumber ""
 defaultroute
 usepeerdns
 persist
 maxfail 0
 holdoff 5
+noauth
 `;
     
     await execPromise(`echo '${pppConfig}' | sudo tee /etc/ppp/peers/${pppoeInterfaceName}`);
