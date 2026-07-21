@@ -26,7 +26,10 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'gcash' | 'paymaya' | 'grab_pay' | 'qrph' | 'card'>('gcash');
   const [billingPlans, setBillingPlans] = useState<any[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
-  const [selectedGateway, setSelectedGateway] = useState<'paymongo' | 'xendit'>('paymongo');
+  const [selectedGateway, setSelectedGateway] = useState<'paymongo' | 'xendit' | 'manual'>('paymongo');
+  const [storeSettings, setStoreSettings] = useState<{ gcashNumber: string; gcashAccountName: string; paymentMethods?: { manualGcash?: boolean } } | null>(null);
+  const [gcashRef, setGcashRef] = useState('');
+  const [manualSuccess, setManualSuccess] = useState<string | null>(null);
   useEffect(() => {
     try { localStorage.setItem('suppressReload', '1'); } catch {}
     return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
@@ -117,14 +120,35 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     })();
   }, []);
 
-  // Auto-select default gateway: prefer PayMongo, fallback to Xendit
+  // Auto-select default gateway: prefer PayMongo, fallback to Xendit, then Manual GCash
   useEffect(() => {
     if (paymongoConfig.enabled) {
       setSelectedGateway('paymongo');
     } else if (xenditConfig.enabled) {
       setSelectedGateway('xendit');
+    } else if (storeSettings?.gcashNumber) {
+      setSelectedGateway('manual');
     }
-  }, [paymongoConfig.enabled, xenditConfig.enabled]);
+  }, [paymongoConfig.enabled, xenditConfig.enabled, storeSettings?.gcashNumber]);
+
+  // Fetch store settings for GCash info
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/public/store-settings');
+        if (res.ok) {
+          const data = await res.json();
+          setStoreSettings({
+            gcashNumber: data.gcashNumber || '',
+            gcashAccountName: data.gcashAccountName || '',
+            paymentMethods: data.paymentMethods,
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to load store settings', e);
+      }
+    })();
+  }, []);
 
   // We don't need to fetch routers for login anymore as username is unique
   
@@ -278,7 +302,36 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     }
     setIsPaying(true);
     setError(null);
+    setManualSuccess(null);
     try {
+      // Manual GCash payment
+      if (selectedGateway === 'manual') {
+        if (!gcashRef.trim()) {
+          setError('Please enter your GCash reference number.');
+          setIsPaying(false);
+          return;
+        }
+        const res = await fetch('/api/public/store/purchase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: selectedPlan?.id || '',
+            planType: 'pppoe',
+            paymentMethod: 'manual',
+            pppoeUsername: clientInfo.pppoeUsername,
+            accountNumber: clientInfo.accountNumber || undefined,
+            routerId: clientInfo.routerId || '',
+            gcashReference: gcashRef.trim(),
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed to submit manual payment');
+        setManualSuccess(`Payment submitted! Reference: ${gcashRef.trim()}. Please wait for admin approval.`);
+        setGcashRef('');
+        setIsPaying(false);
+        return;
+      }
+
       // Use Xendit if selected and enabled, otherwise fallback to PayMongo
       const useXendit = selectedGateway === 'xendit' && xenditConfig.enabled;
 
@@ -466,10 +519,10 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 )}
 
                 {/* Payment Gateway Selector */}
-                {(paymongoConfig.enabled || xenditConfig.enabled) && (
+                {(paymongoConfig.enabled || xenditConfig.enabled || storeSettings?.gcashNumber) && (
                   <div className="pt-3">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Payment Gateway</label>
-                    <div className="flex gap-2">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Payment Method</label>
+                    <div className="flex flex-wrap gap-2">
                       {paymongoConfig.enabled && (
                         <button
                           onClick={() => setSelectedGateway('paymongo')}
@@ -479,7 +532,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                               : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-blue-300'
                           }`}
                         >
-                          PayMongo
+                          💳 Online Payment
                         </button>
                       )}
                       {xenditConfig.enabled && (
@@ -491,22 +544,63 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                               : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-blue-300'
                           }`}
                         >
-                          Xendit
+                          💳 Online Payment
+                        </button>
+                      )}
+                      {storeSettings?.gcashNumber && (
+                        <button
+                          onClick={() => setSelectedGateway('manual')}
+                          className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                            selectedGateway === 'manual'
+                              ? 'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 ring-1 ring-green-500'
+                              : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-green-300'
+                          }`}
+                        >
+                          📱 Manual GCash
                         </button>
                       )}
                     </div>
                   </div>
                 )}
 
+                {/* Manual GCash Details */}
+                {selectedGateway === 'manual' && storeSettings?.gcashNumber && (
+                  <div className="pt-3 space-y-3">
+                    <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg">
+                      <p className="text-sm font-semibold text-green-800 dark:text-green-200">Send payment to:</p>
+                      <p className="text-lg font-bold text-green-900 dark:text-green-100">{storeSettings.gcashNumber}</p>
+                      {storeSettings.gcashAccountName && (
+                        <p className="text-sm text-green-700 dark:text-green-300">Account: {storeSettings.gcashAccountName}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">GCash Reference Number</label>
+                      <input
+                        type="text"
+                        value={gcashRef}
+                        onChange={e => setGcashRef(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                        placeholder="Enter your GCash reference number"
+                      />
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">You'll find this in your GCash transaction receipt</p>
+                    </div>
+                    {manualSuccess && (
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-lg text-sm text-emerald-700 dark:text-emerald-300">
+                        ✅ {manualSuccess}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="pt-4">
                     <button
                       onClick={handlePayNow}
-                      disabled={isPaying}
+                      disabled={isPaying || (selectedGateway === 'manual' && !gcashRef.trim())}
                       className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded font-medium transition-colors"
                     >
-                      {isPaying ? 'Redirecting to payment...' : `Pay Now${selectedPlan ? ` — ₱${Number(selectedPlan.price).toFixed(2)}` : planPrice != null ? ` — ₱${Number(planPrice).toFixed(2)}` : ''}`}
+                      {isPaying ? (selectedGateway === 'manual' ? 'Submitting...' : 'Redirecting to payment...') : selectedGateway === 'manual' ? 'Submit Payment Proof' : `Pay Now${selectedPlan ? ` — ₱${Number(selectedPlan.price).toFixed(2)}` : planPrice != null ? ` — ₱${Number(planPrice).toFixed(2)}` : ''}`}
                     </button>
-                    {activeGatewayConfig.passFeesToCustomer && planPrice && (() => {
+                    {selectedGateway !== 'manual' && activeGatewayConfig.passFeesToCustomer && planPrice && (() => {
                       const base = Number(planPrice);
                       const isXendit = selectedGateway === 'xendit' && xenditConfig.enabled;
                       const computeTotal = (m: string) => {
