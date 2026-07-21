@@ -2791,7 +2791,7 @@ async function startServer() {
             
             // Trigger network agent to apply
             try {
-                const NetworkAgent = require('../services/networkAgent');
+                const { NetworkAgent } = require('../services/networkAgent.cjs');
                 const agent = new NetworkAgent();
                 await agent.applyConfiguration({
                     connectionType,
@@ -2825,7 +2825,7 @@ async function startServer() {
                 return res.status(404).json({ message: 'No WAN configuration found' });
             }
             
-            const NetworkAgent = require('../services/networkAgent');
+            const { NetworkAgent } = require('../services/networkAgent.cjs');
             const agent = new NetworkAgent();
             await agent.applyConfiguration({
                 connectionType: settings.connection_type,
@@ -2850,7 +2850,7 @@ async function startServer() {
 
     dbRouter.get('/wan-settings/status', async (req, res) => {
         try {
-            const NetworkAgent = require('../services/networkAgent');
+            const { NetworkAgent } = require('../services/networkAgent.cjs');
             const agent = new NetworkAgent();
             const status = await agent.getCurrentNetworkStatus();
             res.json(status);
