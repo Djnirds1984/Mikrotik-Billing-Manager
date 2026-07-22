@@ -321,3 +321,9 @@ export const NetworkEquipmentIcon: React.FC<{ className?: string }> = ({ classNa
     <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-13.5-9a3 3 0 013-3h7.5a3 3 0 013 3v9m-13.5 0h13.5m-13.5 0a3 3 0 01-3-3v-9a3 3 0 013-3m13.5 0a3 3 0 013 3v9a3 3 0 01-3 3m0 0h-7.5" />
   </svg>
 );
+
+export const DownloadIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+  </svg>
+);
