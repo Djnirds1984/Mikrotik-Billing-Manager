@@ -38,7 +38,8 @@ export type View =
   | 'store_settings'
   | 'soa'
   | 'network_equipment'
-  | 'database';
+  | 'database'
+  | 'job_orders';
 
 export interface Notification {
   id: string;

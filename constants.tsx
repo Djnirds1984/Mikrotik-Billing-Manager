@@ -327,3 +327,9 @@ export const DownloadIcon: React.FC<{ className?: string }> = ({ className }) =>
     <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
   </svg>
 );
+
+export const WrenchIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.05-.167.087-.338.108-.512M4.596 7.027c.167-.05.338-.087.512-.108m3.95-.372a6.003 6.003 0 014.596-1.093 6.003 6.003 0 013.542 2.237m0 0a6.003 6.003 0 011.093 4.596m-1.093-4.596l4.653-4.653m-4.653 4.653L21 5.25m-7.5 7.5l-5.63 6.837a2.548 2.548 0 01-3.586-3.586l5.653-4.655" />
+  </svg>
+);

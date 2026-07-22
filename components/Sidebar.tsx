@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon, CloudIcon, ChatBubbleLeftRightIcon, NetworkEquipmentIcon, CircleStackIcon } from '../constants.tsx';
+import { MikroTikLogoIcon, BellIcon, EthernetIcon, EditIcon, RouterIcon, VlanIcon, UpdateIcon, SignalIcon, UsersIcon, WifiIcon, CogIcon, CurrencyDollarIcon, ShareIcon, ArchiveBoxIcon, BuildingOffice2Icon, ShieldCheckIcon, CodeBracketIcon, KeyIcon, LockClosedIcon, ServerIcon, CalculatorIcon, CloudIcon, ChatBubbleLeftRightIcon, NetworkEquipmentIcon, CircleStackIcon, WrenchIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { View, CompanySettings, LicenseStatus } from '../types.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -119,6 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'panel_roles', label: t('sidebar.panel_roles'), icon: <KeyIcon className="w-6 h-6" /> },
     { id: 'client_portal_users', label: t('sidebar.client_portal_users'), icon: <ShieldCheckIcon className="w-6 h-6" /> },
     { id: 'repair_tickets', label: t('sidebar.repair_tickets') || 'Repair Tickets', icon: <CogIcon className="w-6 h-6" /> },
+    { id: 'job_orders', label: 'Job Orders', icon: <WrenchIcon className="w-6 h-6" /> },
     { id: 'manual_payments', label: 'Manual Payments', icon: <CurrencyDollarIcon className="w-6 h-6" /> },
     { id: 'store_settings', label: 'Store Settings', icon: <ShoppingCartIcon className="w-6 h-6" /> },
     { id: 'updater', label: t('sidebar.updater'), icon: <UpdateIcon className="w-6 h-6" /> },
@@ -148,7 +149,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
 
   const licensedViews: View[] = [
       'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'facebook-clients', 'billing', 'sales',
-      'inventory', 'accounting', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'repair_tickets', 'network_equipment'
+      'inventory', 'accounting', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'repair_tickets', 'network_equipment', 'job_orders'
   ];
 
   return (

@@ -288,7 +288,17 @@ async function initDb() {
             { id: 'perm_sidebar_updater', name: 'view:sidebar:updater', description: 'View Updater' },
             { id: 'perm_sidebar_logs', name: 'view:sidebar:logs', description: 'View System Logs' },
             { id: 'perm_sidebar_license', name: 'view:sidebar:license', description: 'View License Page' },
-            { id: 'perm_sidebar_super_admin', name: 'view:sidebar:super_admin', description: 'View Super Admin' }
+            { id: 'perm_sidebar_super_admin', name: 'view:sidebar:super_admin', description: 'View Super Admin' },
+            { id: 'perm_sidebar_job_orders', name: 'view:sidebar:job_orders', description: 'View Job Orders' },
+            { id: 'perm_sidebar_accounting', name: 'view:sidebar:accounting', description: 'View Accounting & Expenses' },
+            { id: 'perm_sidebar_repair_tickets', name: 'view:sidebar:repair_tickets', description: 'View Repair Tickets' },
+            { id: 'perm_sidebar_ntc_compliance', name: 'view:sidebar:ntc-compliance', description: 'View NTC Compliance' },
+            { id: 'perm_sidebar_network_equipment', name: 'view:sidebar:network_equipment', description: 'View Network Equipment' },
+            { id: 'perm_sidebar_database', name: 'view:sidebar:database', description: 'View Database' },
+            { id: 'perm_sidebar_manual_payments', name: 'view:sidebar:manual_payments', description: 'View Manual Payments' },
+            { id: 'perm_sidebar_store_settings', name: 'view:sidebar:store_settings', description: 'View Store Settings' },
+            { id: 'perm_sidebar_soa', name: 'view:sidebar:soa', description: 'View Statement of Account' },
+            { id: 'perm_sidebar_facebook_clients', name: 'view:sidebar:facebook-clients', description: 'View Facebook Clients' }
         ];
         for (const p of sidebarPerms) {
             await db.run("INSERT OR IGNORE INTO permissions (id, name, description) VALUES (?, ?, ?)", p.id, p.name, p.description);
@@ -519,6 +529,31 @@ async function initDb() {
                 created_by TEXT DEFAULT 'client',
                 assigned_to TEXT,
                 resolved_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS job_orders (
+                id TEXT PRIMARY KEY,
+                job_order_number TEXT UNIQUE NOT NULL,
+                client_name TEXT NOT NULL,
+                client_contact TEXT,
+                client_address TEXT,
+                router_node_id TEXT,
+                service_type TEXT NOT NULL DEFAULT 'Maintenance',
+                status TEXT NOT NULL DEFAULT 'Pending',
+                description TEXT,
+                assigned_technician TEXT,
+                items TEXT DEFAULT '[]',
+                subtotal REAL DEFAULT 0,
+                discount REAL DEFAULT 0,
+                tax_amount REAL DEFAULT 0,
+                grand_total REAL DEFAULT 0,
+                payment_status TEXT DEFAULT 'Unpaid',
+                amount_paid REAL DEFAULT 0,
+                balance REAL DEFAULT 0,
+                estimated_at TEXT,
+                completed_at TEXT,
+                invoiced_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT
             );
@@ -9453,6 +9488,143 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         try {
             await db.run('DELETE FROM repair_tickets WHERE id = ?', [req.params.id]);
             res.json({ message: 'Ticket deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // ========================================
+    // Job Orders API
+    // ========================================
+
+    // Helper: generate next JO number
+    async function generateJobOrderNumber() {
+        const year = new Date().getFullYear();
+        const prefix = `JO-${year}-`;
+        const row = await db.get(
+            "SELECT job_order_number FROM job_orders WHERE job_order_number LIKE ? ORDER BY job_order_number DESC LIMIT 1",
+            [`${prefix}%`]
+        );
+        let nextSeq = 1;
+        if (row) {
+            const parts = row.job_order_number.split('-');
+            nextSeq = parseInt(parts[2], 10) + 1;
+        }
+        return `${prefix}${String(nextSeq).padStart(4, '0')}`;
+    }
+
+    // LIST
+    app.get('/api/job-orders', protect, async (req, res) => {
+        try {
+            const { status, router_node_id, search } = req.query;
+            let query = 'SELECT * FROM job_orders WHERE 1=1';
+            const params = [];
+            if (status) { query += ' AND status = ?'; params.push(status); }
+            if (router_node_id) { query += ' AND router_node_id = ?'; params.push(router_node_id); }
+            if (search) {
+                query += ' AND (job_order_number LIKE ? OR client_name LIKE ?)';
+                params.push(`%${search}%`, `%${search}%`);
+            }
+            query += ' ORDER BY created_at DESC';
+            const rows = await db.all(query, params);
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // GET ONE
+    app.get('/api/job-orders/:id', protect, async (req, res) => {
+        try {
+            const row = await db.get('SELECT * FROM job_orders WHERE id = ?', [req.params.id]);
+            if (!row) return res.status(404).json({ message: 'Job order not found' });
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // CREATE
+    app.post('/api/job-orders', protect, async (req, res) => {
+        try {
+            const {
+                client_name, client_contact, client_address, router_node_id,
+                service_type, description, assigned_technician, items,
+                subtotal, discount, tax_amount, grand_total
+            } = req.body;
+            if (!client_name) return res.status(400).json({ message: 'Client name is required' });
+
+            const id = `jo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const job_order_number = await generateJobOrderNumber();
+            const now = new Date().toISOString();
+            const itemsJson = JSON.stringify(items || []);
+            const sub = subtotal || 0;
+            const disc = discount || 0;
+            const tax = tax_amount || 0;
+            const gt = grand_total || 0;
+
+            await db.run(
+                `INSERT INTO job_orders (id, job_order_number, client_name, client_contact, client_address, router_node_id, service_type, description, assigned_technician, items, subtotal, discount, tax_amount, grand_total, balance, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                [id, job_order_number, client_name, client_contact || '', client_address || '', router_node_id || '', service_type || 'Maintenance', description || '', assigned_technician || '', itemsJson, sub, disc, tax, gt, gt, now, now]
+            );
+            const created = await db.get('SELECT * FROM job_orders WHERE id = ?', [id]);
+            res.json(created);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // UPDATE
+    app.put('/api/job-orders/:id', protect, async (req, res) => {
+        try {
+            const existing = await db.get('SELECT * FROM job_orders WHERE id = ?', [req.params.id]);
+            if (!existing) return res.status(404).json({ message: 'Job order not found' });
+
+            const now = new Date().toISOString();
+            const {
+                client_name, client_contact, client_address, router_node_id,
+                service_type, status, description, assigned_technician, items,
+                subtotal, discount, tax_amount, grand_total, payment_status, amount_paid
+            } = req.body;
+
+            const newStatus = status || existing.status;
+            const estimated_at = newStatus === 'Estimated' && !existing.estimated_at ? now : existing.estimated_at;
+            const completed_at = newStatus === 'Job Done' && !existing.completed_at ? now : existing.completed_at;
+            const invoiced_at = newStatus === 'Invoiced' && !existing.invoiced_at ? now : existing.invoiced_at;
+
+            const newGrandTotal = grand_total !== undefined ? grand_total : existing.grand_total;
+            const newAmountPaid = amount_paid !== undefined ? amount_paid : existing.amount_paid;
+            const newPaymentStatus = payment_status || existing.payment_status;
+
+            await db.run(
+                `UPDATE job_orders SET client_name=?, client_contact=?, client_address=?, router_node_id=?, service_type=?, status=?, description=?, assigned_technician=?, items=?, subtotal=?, discount=?, tax_amount=?, grand_total=?, payment_status=?, amount_paid=?, balance=?, estimated_at=?, completed_at=?, invoiced_at=?, updated_at=? WHERE id=?`,
+                [
+                    client_name ?? existing.client_name,
+                    client_contact !== undefined ? client_contact : existing.client_contact,
+                    client_address !== undefined ? client_address : existing.client_address,
+                    router_node_id !== undefined ? router_node_id : existing.router_node_id,
+                    service_type ?? existing.service_type,
+                    newStatus,
+                    description !== undefined ? description : existing.description,
+                    assigned_technician !== undefined ? assigned_technician : existing.assigned_technician,
+                    items ? JSON.stringify(items) : existing.items,
+                    subtotal !== undefined ? subtotal : existing.subtotal,
+                    discount !== undefined ? discount : existing.discount,
+                    tax_amount !== undefined ? tax_amount : existing.tax_amount,
+                    newGrandTotal,
+                    newPaymentStatus,
+                    newAmountPaid,
+                    newGrandTotal - newAmountPaid,
+                    estimated_at,
+                    completed_at,
+                    invoiced_at,
+                    now,
+                    req.params.id
+                ]
+            );
+            const updated = await db.get('SELECT * FROM job_orders WHERE id = ?', [req.params.id]);
+            res.json(updated);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // DELETE
+    app.delete('/api/job-orders/:id', protect, async (req, res) => {
+        try {
+            await db.run('DELETE FROM job_orders WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Job order deleted' });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 

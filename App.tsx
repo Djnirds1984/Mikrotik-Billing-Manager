@@ -66,6 +66,7 @@ const StoreSettingsPage = React.lazy(() => import('./components/StoreSettings.ts
 const NtcCompliance = React.lazy(() => import('./components/NtcCompliance.tsx').then(m => ({ default: m.NtcCompliance })));
 const NetworkEquipmentManager = React.lazy(() => import('./components/NetworkEquipmentManager.tsx').then(m => ({ default: m.NetworkEquipmentManager })));
 const DatabaseSettings = React.lazy(() => import('./components/DatabaseSettings.tsx').then(m => ({ default: m.DatabaseSettings })));
+const JobOrders = React.lazy(() => import('./components/JobOrders.tsx').then(m => ({ default: m.JobOrders })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -231,7 +232,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
 
     const licensedViews: View[] = [
         'scripting', 'terminal', 'network', 'pppoe', 'billing', 'sales',
-        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'client_portal_users', 'repair_tickets'
+        'inventory', 'payroll', 'hotspot', 'mikrotik_files', 'remote', 'logs', 'dhcp-portal', 'client_portal_users', 'repair_tickets', 'job_orders'
     ];
 
     if (!licenseStatus?.licensed && licensedViews.includes(currentView)) {
@@ -336,6 +337,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <NetworkEquipmentManager />;
                   case 'database':
                     return <DatabaseSettings />;
+                  case 'job_orders':
+                    return <JobOrders />;
                   case 'ai_assistant':
                     return <Help currentView={currentView} selectedRouter={selectedRouter} />;
                   case 'license':
