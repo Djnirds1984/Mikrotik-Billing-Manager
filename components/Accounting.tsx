@@ -12,13 +12,12 @@ import { PisoWifiIncomeManager } from './PisoWifiIncomeManager.tsx';
 
 type AccountingTab = 'overview' | 'expenses' | 'pisowifi' | 'sales' | 'all-routers-summary';
 
-// CSV Export Utility
-const escapeCsvValue = (value: string | number): string => {
-    const str = String(value);
-    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return `"${str.replace(/"/g, '""')}"`;
+// CSV Export Utility — uniform 7-column structure with UTF-8 BOM for Excel
+const padRow = (row: (string | number)[]): string => {
+    while (row.length < 7) {
+        row.push('');
     }
-    return str;
+    return row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',');
 };
 
 const formatCsvNumber = (value: number): string => {
@@ -26,6 +25,7 @@ const formatCsvNumber = (value: number): string => {
 };
 
 const generateAccountingCsv = (
+    companyName: string,
     routerName: string,
     periodType: string,
     summary: { totalIncome: number; totalPisowifiIncome: number; totalExpenses: number; netProfit: number },
@@ -39,40 +39,39 @@ const generateAccountingCsv = (
         netCashFlow: number;
     }>
 ): string => {
-    const lines: string[] = [];
-    const now = new Date().toISOString().split('T')[0];
+    const rows: string[][] = [];
 
-    // Section 1: Header / Metadata
-    lines.push('Mikrotik Billing Management System - Accounting Report');
-    lines.push(`Router,${escapeCsvValue(routerName)}`);
-    lines.push(`Period Type,${escapeCsvValue(periodType)}`);
-    lines.push(`Date Generated,${now}`);
-    lines.push('');
+    // Section 1: Header / Metadata (7-column padded)
+    rows.push([companyName + ' - Accounting Report']);
+    rows.push(['Router', routerName]);
+    rows.push(['Period Type', periodType]);
+    rows.push(['Date Generated', new Date().toLocaleDateString()]);
+    rows.push([]); // Blank line
 
     // Section 2: Financial Overview Summary
-    lines.push('Financial Overview Summary');
-    lines.push(`Total Sales Income,${formatCsvNumber(summary.totalIncome)}`);
-    lines.push(`PisoWiFi Income,${formatCsvNumber(summary.totalPisowifiIncome)}`);
-    lines.push(`Total Expenses,${formatCsvNumber(summary.totalExpenses)}`);
-    lines.push(`Net Profit,${formatCsvNumber(summary.netProfit)}`);
-    lines.push('');
+    rows.push(['FINANCIAL OVERVIEW SUMMARY']);
+    rows.push(['Total Sales Income', formatCsvNumber(summary.totalIncome)]);
+    rows.push(['PisoWiFi Income', formatCsvNumber(summary.totalPisowifiIncome)]);
+    rows.push(['Total Expenses', formatCsvNumber(summary.totalExpenses)]);
+    rows.push(['Net Profit', formatCsvNumber(summary.netProfit)]);
+    rows.push([]); // Blank line
 
     // Section 3: Cash Flow Trend
-    lines.push('Cash Flow Trend (Last 6 Periods)');
-    lines.push('Period,PPPoE Sales,DHCP Sales,PisoWiFi Sales,Total Income,Expenses,Net Cash Flow');
+    rows.push(['CASH FLOW TREND (LAST 6 PERIODS)']);
+    rows.push(['Period', 'PPPoE Sales', 'DHCP Sales', 'PisoWiFi Sales', 'Total Income', 'Expenses', 'Net Cash Flow']);
 
     let totalPppoe = 0, totalDhcp = 0, totalPwi = 0, totalIncome = 0, totalExpenses = 0, totalNet = 0;
 
     cashFlowAnalysis.forEach(period => {
-        lines.push([
-            escapeCsvValue(period.label),
+        rows.push([
+            period.label,
             formatCsvNumber(period.pppoeSales),
             formatCsvNumber(period.dhcpSales),
             formatCsvNumber(period.pwiIncome),
             formatCsvNumber(period.totalIncome),
             formatCsvNumber(period.expenses),
             formatCsvNumber(period.netCashFlow)
-        ].join(','));
+        ]);
         totalPppoe += period.pppoeSales;
         totalDhcp += period.dhcpSales;
         totalPwi += period.pwiIncome;
@@ -82,7 +81,7 @@ const generateAccountingCsv = (
     });
 
     // Total Row
-    lines.push([
+    rows.push([
         'TOTAL',
         formatCsvNumber(totalPppoe),
         formatCsvNumber(totalDhcp),
@@ -90,9 +89,10 @@ const generateAccountingCsv = (
         formatCsvNumber(totalIncome),
         formatCsvNumber(totalExpenses),
         formatCsvNumber(totalNet)
-    ].join(','));
+    ]);
 
-    return lines.join('\n');
+    // Prepend UTF-8 BOM and join with \r\n for Excel compatibility
+    return '\uFEFF' + rows.map(padRow).join('\r\n');
 };
 
 const downloadCsv = (content: string, filename: string) => {
@@ -304,6 +304,7 @@ export const Accounting: React.FC<AccountingProps> = ({ selectedRouter }) => {
                     onTimeFilterChange={setTimeFilter}
                     isLoading={isLoadingAllSales}
                     routerName={selectedRouter?.name || 'All Routers'}
+                    companyName={settings.companyName || 'Company'}
                 />
             )}
             {activeTab === 'expenses' && (
@@ -383,7 +384,8 @@ const FinancialOverview: React.FC<{
     onTimeFilterChange: (filter: 'daily' | 'weekly' | 'monthly') => void;
     isLoading: boolean;
     routerName: string;
-}> = ({ summary, formatCurrency, cashFlowAnalysis, timeFilter, onTimeFilterChange, isLoading, routerName }) => {
+    companyName: string;
+}> = ({ summary, formatCurrency, cashFlowAnalysis, timeFilter, onTimeFilterChange, isLoading, routerName, companyName }) => {
     if (isLoading) {
         return <div className="text-center p-12 text-slate-500">Loading cash flow data...</div>;
     }
@@ -414,6 +416,7 @@ const FinancialOverview: React.FC<{
                             const safeRouterName = routerName.replace(/[^a-zA-Z0-9]/g, '_');
                             const filename = `Accounting_Report_${safeRouterName}_${periodLabel}_${dateStr}.csv`;
                             const csvContent = generateAccountingCsv(
+                                companyName,
                                 routerName,
                                 periodLabel,
                                 summary,
