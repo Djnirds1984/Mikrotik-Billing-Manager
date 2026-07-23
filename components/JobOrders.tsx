@@ -158,12 +158,15 @@ const PrintDocument: React.FC<{
     const companyAddress = companySettings?.address || '';
     const companyContact = companySettings?.contactNumber || '';
     const companyEmail = companySettings?.email || '';
+    const companyLogo = companySettings?.logoBase64 || '';
 
     let body = '';
 
     // Header for all docs
+    const logoHtml = companyLogo ? `<img src="${companyLogo}" alt="Logo" style="max-height:60px;margin-bottom:8px;" />` : '';
     const headerHtml = `
       <div class="header">
+        ${logoHtml}
         <h1>${companyName}</h1>
         <p>${companyAddress}${companyContact ? ' | ' + companyContact : ''}${companyEmail ? ' | ' + companyEmail : ''}</p>
         <p style="font-size:8pt; color:#94a3b8;">Powered by AJC Softwares</p>
@@ -290,10 +293,12 @@ const PrintDocument: React.FC<{
 // ─── Print Preview (on-screen) ───────────────────────────────────────────────
 const PrintPreview: React.FC<{ docType: DocType; job: JobOrder; items: LineItem[]; companySettings: any }> = ({ docType, job, items, companySettings }) => {
   const companyName = companySettings?.companyName || 'CITYCONNECT';
+  const companyLogo = companySettings?.logoBase64 || '';
   return (
     <div className="max-w-xl mx-auto text-sm text-slate-800 dark:text-slate-200">
       {/* Header */}
       <div className="text-center border-b-2 border-blue-600 pb-4 mb-4">
+        {companyLogo && <img src={companyLogo} alt="Company Logo" className="h-14 mx-auto mb-2 object-contain" />}
         <h1 className="text-xl font-bold text-blue-800 dark:text-blue-400">{companyName}</h1>
         <p className="text-xs text-slate-500">{companySettings?.address || ''} {companySettings?.contactNumber ? '| ' + companySettings.contactNumber : ''}</p>
         <p className="text-xs text-slate-400">Powered by AJC Softwares</p>
