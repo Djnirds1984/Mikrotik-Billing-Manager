@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import type { RouterConfigWithId } from '../types.ts';
 
 export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
@@ -719,6 +719,54 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 </div>
                 </div>
             </div>
+            </div>
+
+            {/* Statement of Account Section */}
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-sm">
+                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                    <div className="font-semibold text-slate-800 dark:text-white">Statement of Account</div>
+                    <button
+                        onClick={() => {
+                            const companyName = panelSettings?.companyName || '';
+                            const totalInvoiced = invoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0);
+                            const totalPaidInv = invoices.filter((inv: any) => inv.status === 'PAID').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0);
+                            const totalPaySales = payments.reduce((sum: number, p: any) => sum + (p.finalAmount || p.planPrice || 0), 0);
+                            const totalPaid = totalPaidInv + totalPaySales;
+                            const outstanding = Math.max(0, totalInvoiced - totalPaid);
+                            const printW = window.open('', '_blank');
+                            if (!printW) return;
+                            const html = `<html><head><title>SOA - ${clientInfo?.pppoeUsername || clientInfo?.username}</title><style>body{font-family:Arial,sans-serif;padding:40px;color:#333}h1{font-size:24px;margin-bottom:4px}.subtitle{color:#666;font-size:12px;margin-bottom:24px}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}.info-label{color:#666;font-size:12px;margin-bottom:2px}.info-value{font-size:16px;font-weight:bold}.summary-box{border:1px solid #333;padding:16px;margin-bottom:24px}.summary-row{display:flex;justify-content:space-between;padding:4px 0}.summary-row.total{border-top:1px solid #ccc;margin-top:8px;padding-top:8px}table{width:100%;border-collapse:collapse;margin-bottom:24px;font-size:13px}th{text-align:left;padding:8px;border-bottom:2px solid #333;font-weight:bold}td{padding:8px;border-bottom:1px solid #ddd}.text-right{text-align:right}.text-center{text-align:center}.footer{margin-top:48px;border-top:2px solid #333;padding-top:16px;text-align:center;font-size:12px;color:#666}.amount{font-weight:600}.status-paid{color:green;font-weight:bold}.status-pending{color:orange;font-weight:bold}</style></head><body>${companyName ? `<h2 style="margin:0 0 4px 0;font-size:20px;color:#333;">${companyName}</h2>` : ''}<h1>STATEMENT OF ACCOUNT</h1><p class="subtitle">Generated: ${new Date().toLocaleString()}</p><div class="info-grid"><div><p class="info-label">Customer:</p><p class="info-value">${clientInfo?.pppoeUsername || clientInfo?.username || ''}</p></div><div>${clientInfo?.accountNumber ? `<p class="info-label">Account Number:</p><p class="info-value">${clientInfo.accountNumber}</p>` : ''}</div></div><div class="summary-box"><h2 style="margin:0 0 12px 0;font-size:18px;">Account Summary</h2><div class="summary-row"><span>Total Invoiced:</span><span class="amount">\u20B1${totalInvoiced.toFixed(2)}</span></div><div class="summary-row"><span>Total Paid:</span><span class="amount" style="color:green;">\u20B1${totalPaid.toFixed(2)}</span></div><div class="summary-row total"><span><strong>Outstanding Balance:</strong></span><span class="amount" style="color:red;font-size:18px;">\u20B1${outstanding.toFixed(2)}</span></div></div><h2 style="font-size:18px;">Invoices</h2>${invoices.length > 0 ? `<table><thead><tr><th>Date</th><th>Invoice #</th><th>Plan</th><th>Due Date</th><th class="text-right">Amount</th><th class="text-center">Status</th></tr></thead><tbody>${invoices.map((inv: any) => `<tr><td>${inv.issueDate ? new Date(inv.issueDate).toLocaleDateString() : '\u2014'}</td><td style="font-family:monospace;">${inv.id.slice(-8).toUpperCase()}</td><td>${inv.planName || '\u2014'}</td><td>${inv.dueDateTime ? new Date(inv.dueDateTime).toLocaleDateString() : '\u2014'}</td><td class="text-right amount">\u20B1${(inv.amount || 0).toFixed(2)}</td><td class="text-center ${inv.status === 'PAID' ? 'status-paid' : 'status-pending'}">${inv.status || 'PENDING'}</td></tr>`).join('')}</tbody></table>` : '<p style="color:#999;font-style:italic;">No invoices found</p>'}<h2 style="font-size:18px;">Payment History</h2>${payments.length > 0 ? `<table><thead><tr><th>Date</th><th>Plan</th><th class="text-right">Amount</th><th class="text-right">Final Amount</th><th class="text-right">Discount</th></tr></thead><tbody>${payments.map((p: any) => `<tr><td>${p.date ? new Date(p.date).toLocaleDateString() : '\u2014'}</td><td>${p.planName || '\u2014'}</td><td class="text-right">\u20B1${(p.planPrice || 0).toFixed(2)}</td><td class="text-right amount" style="color:green;">\u20B1${(p.finalAmount || p.planPrice || 0).toFixed(2)}</td><td class="text-right" style="color:red;">${p.discountAmount > 0 ? '- \u20B1' + p.discountAmount.toFixed(2) : '\u2014'}</td></tr>`).join('')}</tbody></table>` : '<p style="color:#999;font-style:italic;">No payment history found</p>'}<div class="footer"><p><strong>Thank you for your business!</strong></p><p>This is a computer-generated Statement of Account.</p></div></body></html>`;
+                            printW.document.write(html);
+                            printW.document.close();
+                            printW.focus();
+                            setTimeout(() => { printW.print(); }, 300);
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" /></svg>
+                        Print SOA
+                    </button>
+                </div>
+                <div className="p-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                        <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
+                            <p className="text-xs text-slate-500 dark:text-slate-400 uppercase">Total Invoiced</p>
+                            <p className="text-lg font-bold text-slate-800 dark:text-white mt-1">\u20B1{invoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0).toFixed(2)}</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
+                            <p className="text-xs text-slate-500 dark:text-slate-400 uppercase">Total Paid</p>
+                            <p className="text-lg font-bold text-emerald-600 mt-1">\u20B1{(invoices.filter((inv: any) => inv.status === 'PAID').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) + payments.reduce((sum: number, p: any) => sum + (p.finalAmount || p.planPrice || 0), 0)).toFixed(2)}</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
+                            <p className="text-xs text-slate-500 dark:text-slate-400 uppercase">Outstanding</p>
+                            <p className="text-lg font-bold text-red-600 mt-1">\u20B1{Math.max(0, invoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) - invoices.filter((inv: any) => inv.status === 'PAID').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) - payments.reduce((sum: number, p: any) => sum + (p.finalAmount || p.planPrice || 0), 0)).toFixed(2)}</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
+                            <p className="text-xs text-slate-500 dark:text-slate-400 uppercase">Pending</p>
+                            <p className="text-lg font-bold text-amber-600 mt-1">{invoices.filter((inv: any) => inv.status === 'PENDING').length}</p>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             {/* Report an Issue / Repair Tickets Section */}
