@@ -751,15 +751,15 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                         <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
                             <p className="text-xs text-slate-500 dark:text-slate-400 uppercase">Total Invoiced</p>
-                            <p className="text-lg font-bold text-slate-800 dark:text-white mt-1">\u20B1{invoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0).toFixed(2)}</p>
+                            <p className="text-lg font-bold text-slate-800 dark:text-white mt-1">₱{invoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0).toFixed(2)}</p>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
                             <p className="text-xs text-slate-500 dark:text-slate-400 uppercase">Total Paid</p>
-                            <p className="text-lg font-bold text-emerald-600 mt-1">\u20B1{(invoices.filter((inv: any) => inv.status === 'PAID').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) + payments.reduce((sum: number, p: any) => sum + (p.finalAmount || p.planPrice || 0), 0)).toFixed(2)}</p>
+                            <p className="text-lg font-bold text-emerald-600 mt-1">₱{(invoices.filter((inv: any) => inv.status === 'PAID').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) + payments.reduce((sum: number, p: any) => sum + (p.finalAmount || p.planPrice || 0), 0)).toFixed(2)}</p>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
                             <p className="text-xs text-slate-500 dark:text-slate-400 uppercase">Outstanding</p>
-                            <p className="text-lg font-bold text-red-600 mt-1">\u20B1{Math.max(0, invoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) - invoices.filter((inv: any) => inv.status === 'PAID').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) - payments.reduce((sum: number, p: any) => sum + (p.finalAmount || p.planPrice || 0), 0)).toFixed(2)}</p>
+                            <p className="text-lg font-bold text-red-600 mt-1">₱{Math.max(0, invoices.reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) - invoices.filter((inv: any) => inv.status === 'PAID').reduce((sum: number, inv: any) => sum + (inv.amount || 0), 0) - payments.reduce((sum: number, p: any) => sum + (p.finalAmount || p.planPrice || 0), 0)).toFixed(2)}</p>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
                             <p className="text-xs text-slate-500 dark:text-slate-400 uppercase">Pending</p>
