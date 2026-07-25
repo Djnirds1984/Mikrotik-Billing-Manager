@@ -67,6 +67,7 @@ const NtcCompliance = React.lazy(() => import('./components/NtcCompliance.tsx').
 const NetworkEquipmentManager = React.lazy(() => import('./components/NetworkEquipmentManager.tsx').then(m => ({ default: m.NetworkEquipmentManager })));
 const DatabaseSettings = React.lazy(() => import('./components/DatabaseSettings.tsx').then(m => ({ default: m.DatabaseSettings })));
 const JobOrders = React.lazy(() => import('./components/JobOrders.tsx').then(m => ({ default: m.JobOrders })));
+const Customers = React.lazy(() => import('./components/Customers.tsx').then(m => ({ default: m.Customers })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -339,6 +340,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <DatabaseSettings />;
                   case 'job_orders':
                     return <JobOrders />;
+                  case 'customers':
+                    return <Customers selectedRouter={selectedRouter} />;
                   case 'ai_assistant':
                     return <Help currentView={currentView} selectedRouter={selectedRouter} />;
                   case 'license':

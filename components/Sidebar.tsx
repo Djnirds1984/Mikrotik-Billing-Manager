@@ -102,6 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'network_equipment', label: 'Network Equipment', icon: <NetworkEquipmentIcon className="w-6 h-6" /> },
     { id: 'dhcp-portal', label: t('sidebar.dhcp-portal'), icon: <ServerIcon className="w-6 h-6" /> },
     { id: 'pppoe', label: t('sidebar.pppoe'), icon: <UsersIcon className="w-6 h-6" /> },
+    { id: 'customers', label: 'Customers', icon: <UsersIcon className="w-6 h-6" /> },
     { id: 'facebook-clients', label: 'Facebook Clients', icon: <ChatBubbleLeftRightIcon className="w-6 h-6" /> },
     { id: 'billing', label: t('sidebar.billing_plans'), icon: <SignalIcon className="w-6 h-6" /> },
     { id: 'sales', label: t('sidebar.sales_report'), icon: <CurrencyDollarIcon className="w-6 h-6" /> },

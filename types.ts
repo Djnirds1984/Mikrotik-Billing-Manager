@@ -39,7 +39,8 @@ export type View =
   | 'soa'
   | 'network_equipment'
   | 'database'
-  | 'job_orders';
+  | 'job_orders'
+  | 'customers';
 
 export interface Notification {
   id: string;
