@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useCustomers } from '../hooks/useCustomers.ts';
+import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { Customer } from '../types.ts';
 import type { RouterConfigWithId } from '../types.ts';
@@ -47,9 +48,10 @@ interface SOAModalProps {
     onClose: () => void;
     customer: Customer | null;
     routerId: string;
+    companyName: string;
 }
 
-const SOAModal: React.FC<SOAModalProps> = ({ isOpen, onClose, customer, routerId }) => {
+const SOAModal: React.FC<SOAModalProps> = ({ isOpen, onClose, customer, routerId, companyName }) => {
     const { formatCurrency } = useLocalization();
     const [invoices, setInvoices] = useState<any[]>([]);
     const [payments, setPayments] = useState<any[]>([]);
@@ -121,6 +123,7 @@ const SOAModal: React.FC<SOAModalProps> = ({ isOpen, onClose, customer, routerId
                 </style>
             </head>
             <body>
+                ${companyName ? `<h2 style="margin:0 0 4px 0;font-size:20px;color:#333;">${companyName}</h2>` : ''}
                 <h1>STATEMENT OF ACCOUNT</h1>
                 <p class="subtitle">Generated: ${new Date().toLocaleString()}</p>
                 <div class="info-grid">
@@ -486,6 +489,7 @@ interface CustomersProps {
 export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
     const routerId = selectedRouter?.id || null;
     const { customers, addCustomer, updateCustomer, deleteCustomer, isLoading, error } = useCustomers(routerId);
+    const { settings: companySettings } = useCompanySettings();
 
     const [isModalOpen, setModalOpen] = useState(false);
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -685,6 +689,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
                 onClose={() => setSoaCustomer(null)}
                 customer={soaCustomer}
                 routerId={routerId || ''}
+                companyName={companySettings.companyName || ''}
             />
         </div>
     );
