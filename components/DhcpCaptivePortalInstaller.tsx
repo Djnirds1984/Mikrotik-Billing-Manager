@@ -113,11 +113,16 @@ export const DhcpCaptivePortalInstaller: React.FC<{ selectedRouter: RouterConfig
                 </div>
                 <div className="p-6 space-y-6">
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Portal Server IP Address</label>
-                        <div className="mt-1 p-3 bg-slate-100 dark:bg-slate-700 rounded-md font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600">
-                            {panelIp || 'Detecting...'}
-                        </div>
-                        <p className="mt-1 text-xs text-slate-500">The IP address of the server hosting this panel (e.g., your Orange Pi). This is auto-detected.</p>
+                        <label htmlFor="panelIp" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Portal Server IP Address</label>
+                        <input
+                            type="text"
+                            id="panelIp"
+                            value={panelIp}
+                            onChange={(e) => setPanelIp(e.target.value)}
+                            placeholder="e.g. 192.168.1.100"
+                            className="mt-1 block w-full p-3 bg-slate-100 dark:bg-slate-700 rounded-md font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-[--color-primary-500] focus:outline-none"
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Pre-filled from browser hostname. Change this if your panel runs on a different IP address.</p>
                     </div>
                      <div>
                         <label htmlFor="lanInterface" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Primary LAN Interface</label>
