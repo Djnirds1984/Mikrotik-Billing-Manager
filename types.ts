@@ -36,7 +36,6 @@ export type View =
   | 'manual_payments'
   | 'ntc-compliance'
   | 'store_settings'
-  | 'soa'
   | 'network_equipment'
   | 'database'
   | 'job_orders'
