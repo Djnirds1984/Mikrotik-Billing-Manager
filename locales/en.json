@@ -29,7 +29,8 @@
         "license": "License",
         "super_admin": "Super Admin",
         "notifications": "Notifications",
-        "application_form": "Application Form"
+        "application_form": "Application Form",
+        "collectibles": "Collectibles"
     },
     "titles": {
         "dashboard": "Dashboard",

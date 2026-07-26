@@ -39,7 +39,8 @@ export type View =
   | 'network_equipment'
   | 'database'
   | 'job_orders'
-  | 'customers';
+  | 'customers'
+  | 'collectibles';
 
 export interface Notification {
   id: string;

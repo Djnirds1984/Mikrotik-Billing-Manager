@@ -24,7 +24,8 @@
         "panel_roles": "Funções do Painel",
         "mikrotik_files": "Arquivos Mikrotik",
         "license": "Licença",
-        "super_admin": "Super Admin"
+        "super_admin": "Super Admin",
+        "collectibles": "Cobranças"
     },
     "titles": {
         "dashboard": "Painel",

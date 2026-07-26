@@ -25,7 +25,8 @@
         "mikrotik_files": "Mga File ng Mikrotik",
         "license": "Lisensya",
         "super_admin": "Super Admin",
-        "application_form": "Application Form"
+        "application_form": "Application Form",
+        "collectibles": "Collectibles"
     },
     "titles": {
         "dashboard": "Dashboard",

@@ -54,6 +54,8 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [isSyncing, setIsSyncing] = useState<string | null>(null);
     const [isBulkSyncing, setIsBulkSyncing] = useState<boolean>(false);
     const [isCustomInvoiceOpen, setIsCustomInvoiceOpen] = useState<boolean>(false);
+    const [collectors, setCollectors] = useState<any[]>([]);
+    const [collectorFilter, setCollectorFilter] = useState<string>('');
     const [bulkSyncResult, setBulkSyncResult] = useState<{
         synced: number;
         skipped: number;
@@ -61,9 +63,16 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
         errorDetails: Array<{ saleId: string; error: string }>;
     } | null>(null);
 
+    const loadCollectors = async () => {
+        try {
+            const res = await fetch('/api/collector-dashboard/collectors', { headers: getAuthHeader() });
+            if (res.ok) { const data = await res.json(); setCollectors(Array.isArray(data) ? data : []); }
+        } catch { setCollectors([]); }
+    };
+
     const filteredSales = useMemo(() => {
         return salesData.filter(sale => {
-            if (!startDate && !endDate) return true;
+            if (!startDate && !endDate && !collectorFilter) return true;
             const saleDate = new Date(sale.date);
             const start = startDate ? new Date(startDate) : null;
             const end = endDate ? new Date(endDate) : null;
@@ -72,9 +81,10 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
 
             if (start && saleDate < start) return false;
             if (end && saleDate > end) return false;
+            if (collectorFilter && (sale.processedBy || 'admin') !== collectorFilter) return false;
             return true;
         });
-    }, [salesData, startDate, endDate]);
+    }, [salesData, startDate, endDate, collectorFilter]);
 
     const summary = useMemo(() => {
         return filteredSales.reduce((acc, sale) => {
@@ -336,7 +346,7 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
         window.addEventListener('afterprint', handleAfterPrint);
         return () => window.removeEventListener('afterprint', handleAfterPrint);
     }, []);
-    useEffect(() => { loadInvoices(); loadRouters(); }, []);
+    useEffect(() => { loadInvoices(); loadRouters(); loadCollectors(); }, []);
     useEffect(() => {
         if (addRouterId) loadClientsForRouter(addRouterId, addSource);
     }, [addRouterId, addSource]);
@@ -649,6 +659,15 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                              <div>
                                 <label htmlFor="endDate" className="block text-xs font-medium text-slate-500 dark:text-slate-400">End Date</label>
                                 <input type="date" name="endDate" id="endDate" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-900 dark:text-white" />
+                            </div>
+                            <div>
+                                <label htmlFor="collectorFilter" className="block text-xs font-medium text-slate-500 dark:text-slate-400">Processed By</label>
+                                <select id="collectorFilter" value={collectorFilter} onChange={e => setCollectorFilter(e.target.value)} className="mt-1 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md text-sm text-slate-900 dark:text-white">
+                                    <option value="">All</option>
+                                    {collectors.map((c: any) => (
+                                        <option key={c.id} value={c.username}>{c.username}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
 

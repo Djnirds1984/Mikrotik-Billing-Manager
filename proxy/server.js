@@ -248,6 +248,7 @@ async function initDb() {
         if (rolesCount.count === 0) {
             await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_admin', 'Administrator', 'Full access to all features');
             await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_employee', 'Employee', 'Can view and process payments but cannot delete or edit users');
+            await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_collector', 'Collector', 'Can access customer pages and process payments');
             
             await db.run("INSERT INTO permissions (id, name, description) VALUES (?, ?, ?)", 'perm_all', '*:*', 'All Permissions');
             await db.run("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_admin', 'perm_all');
@@ -299,10 +300,46 @@ async function initDb() {
             { id: 'perm_sidebar_manual_payments', name: 'view:sidebar:manual_payments', description: 'View Manual Payments' },
             { id: 'perm_sidebar_store_settings', name: 'view:sidebar:store_settings', description: 'View Store Settings' },
             { id: 'perm_sidebar_soa', name: 'view:sidebar:soa', description: 'View Statement of Account' },
-            { id: 'perm_sidebar_facebook_clients', name: 'view:sidebar:facebook-clients', description: 'View Facebook Clients' }
+            { id: 'perm_sidebar_facebook_clients', name: 'view:sidebar:facebook-clients', description: 'View Facebook Clients' },
+            { id: 'perm_sidebar_collectibles', name: 'view:sidebar:collectibles', description: 'View Collectibles' },
+            { id: 'perm_sidebar_customers', name: 'view:sidebar:customers', description: 'View Customers' }
         ];
         for (const p of sidebarPerms) {
             await db.run("INSERT OR IGNORE INTO permissions (id, name, description) VALUES (?, ?, ?)", p.id, p.name, p.description);
+        }
+
+        // Grant specific sidebar permissions to Collector role
+        const collectorPerms = [
+            'perm_sidebar_collectibles',
+            'perm_sidebar_dashboard',
+            'perm_sidebar_pppoe',
+            'perm_sidebar_dhcp_portal',
+            'perm_sidebar_customers',
+            'perm_sidebar_sales'
+        ];
+        for (const permId of collectorPerms) {
+            await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_collector', permId);
+        }
+
+        // Grant collectibles permission to Employee role
+        await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_employee', 'perm_sidebar_collectibles');
+
+        // Ensure Collector role exists for existing deployments
+        const collectorExists = await db.get("SELECT id FROM roles WHERE id = 'role_collector'");
+        if (!collectorExists) {
+            await db.run("INSERT OR IGNORE INTO roles (id, name, description) VALUES (?, ?, ?)", 
+                'role_collector', 'Collector', 'Can access customer pages and process payments');
+            const collectorNewPerms = [
+                'perm_sidebar_collectibles',
+                'perm_sidebar_dashboard',
+                'perm_sidebar_pppoe',
+                'perm_sidebar_dhcp_portal',
+                'perm_sidebar_customers',
+                'perm_sidebar_sales'
+            ];
+            for (const permId of collectorNewPerms) {
+                await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_collector', permId);
+            }
         }
 
         // Business Data Tables
@@ -625,8 +662,29 @@ async function initDb() {
                 status TEXT DEFAULT 'pending',
                 error_message TEXT
             );
+            CREATE TABLE IF NOT EXISTS collector_assignments (
+                id TEXT PRIMARY KEY,
+                router_id TEXT,
+                customer_id TEXT,
+                customer_name TEXT NOT NULL,
+                customer_username TEXT,
+                customer_account_number TEXT,
+                address TEXT,
+                plan_name TEXT,
+                assigned_collector_id TEXT NOT NULL,
+                assigned_collector_name TEXT NOT NULL,
+                assigned_by TEXT,
+                status TEXT DEFAULT 'Active',
+                assigned_at TEXT NOT NULL,
+                notes TEXT,
+                updated_at TEXT
+            );
         `);
-        
+
+        // Indexes for collector_assignments
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_collector_assignments_collector ON collector_assignments(assigned_collector_id)`);
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_collector_assignments_router ON collector_assignments(router_id)`);
+
         // Insert default WAN settings if not exists
         await db.run("INSERT OR IGNORE INTO wan_settings (id, connection_type, wan_interface) VALUES (1, 'dhcp', 'eth0')");
         
@@ -1572,8 +1630,8 @@ async function startServer() {
                             const saleAmount = (existing.amount || 0) > 0 ? existing.amount : (isCustom ? ((existing.laborCost || 0) + (existing.partsCost || 0)) : 0);
                             const salePlanName = isCustom ? (existing.category || existing.description || 'Custom Service') : (existing.planName || '');
                             await db.run(
-                                `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, routerName, currency, clientAddress, clientContact, clientEmail, invoiceId, coveredMonth)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, routerName, currency, clientAddress, clientContact, clientEmail, invoiceId, coveredMonth, processedBy)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                                 [
                                     saleId,
                                     existing.routerId,
@@ -1587,7 +1645,8 @@ async function startServer() {
                                     existing.currency || 'PHP',
                                     null, null, null,
                                     existing.id,
-                                    null
+                                    null,
+                                    req.user?.username || 'admin'
                                 ]
                             );
                             
@@ -6717,8 +6776,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     : (sessionAttributes?.amount ? sessionAttributes.amount / 100 : 0);
                 const saleId = `sale_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
                 await db.run(
-                    `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, invoiceId) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-                    [saleId, routerId, saleDate, username, planName || 'Unknown', amountPaid, amountPaid, invoiceNo || null]
+                    `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, invoiceId, processedBy) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                    [saleId, routerId, saleDate, username, planName || 'Unknown', amountPaid, amountPaid, invoiceNo || null, 'paymongo']
                 );
                 console.log('[PayMongo Webhook] ✓ Sale recorded, amount:', amountPaid);
             } catch (saleErr) {
@@ -9893,6 +9952,343 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             await db.run('DELETE FROM job_orders WHERE id = ?', [req.params.id]);
             res.json({ message: 'Job order deleted' });
         } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // ========== Collector Assignments API ==========
+
+    // GET /api/collector-assignments - List with filters
+    app.get('/api/collector-assignments', protect, async (req, res) => {
+        try {
+            const { router_id, assigned_collector_id, status, search, address } = req.query;
+            let query = 'SELECT * FROM collector_assignments WHERE 1=1';
+            const params = [];
+            
+            if (router_id) {
+                query += ' AND router_id = ?';
+                params.push(router_id);
+            }
+            if (assigned_collector_id) {
+                query += ' AND assigned_collector_id = ?';
+                params.push(assigned_collector_id);
+            }
+            if (status) {
+                query += ' AND status = ?';
+                params.push(status);
+            }
+            if (address) {
+                query += ' AND address = ?';
+                params.push(address);
+            }
+            if (search) {
+                query += ' AND (customer_name LIKE ? OR address LIKE ? OR customer_username LIKE ? OR customer_account_number LIKE ?)';
+                const searchParam = `%${search}%`;
+                params.push(searchParam, searchParam, searchParam, searchParam);
+            }
+            
+            query += ' ORDER BY assigned_at DESC';
+            const assignments = await db.all(query, params);
+            res.json(assignments);
+        } catch (error) {
+            console.error('Error fetching collector assignments:', error);
+            res.status(500).json({ error: 'Failed to fetch collector assignments' });
+        }
+    });
+
+    // GET /api/collector-assignments/addresses - Distinct addresses (MUST be before /:id)
+    app.get('/api/collector-assignments/addresses', protect, async (req, res) => {
+        try {
+            const { router_id } = req.query;
+            let query = "SELECT DISTINCT address FROM customers WHERE address IS NOT NULL AND address != ''";
+            const params = [];
+            if (router_id) {
+                query += ' AND routerId = ?';
+                params.push(router_id);
+            }
+            query += ' ORDER BY address ASC';
+            const rows = await db.all(query, params);
+            res.json(rows.map(r => r.address));
+        } catch (error) {
+            console.error('Error fetching addresses:', error);
+            res.status(500).json({ error: 'Failed to fetch addresses' });
+        }
+    });
+
+    // POST /api/collector-assignments - Create
+    app.post('/api/collector-assignments', protect, async (req, res) => {
+        try {
+            const { router_id, customer_id, customer_name, customer_username, customer_account_number, address, plan_name, assigned_collector_id, assigned_collector_name, notes } = req.body;
+            const id = crypto.randomUUID();
+            const now = new Date().toISOString();
+            
+            await db.run(
+                `INSERT INTO collector_assignments (id, router_id, customer_id, customer_name, customer_username, customer_account_number, address, plan_name, assigned_collector_id, assigned_collector_name, assigned_by, status, assigned_at, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+                [id, router_id, customer_id, customer_name, customer_username, customer_account_number, address, plan_name, assigned_collector_id, assigned_collector_name, req.user.username, now, notes]
+            );
+            
+            const newAssignment = await db.get('SELECT * FROM collector_assignments WHERE id = ?', id);
+            res.status(201).json(newAssignment);
+        } catch (error) {
+            console.error('Error creating collector assignment:', error);
+            res.status(500).json({ error: 'Failed to create collector assignment' });
+        }
+    });
+
+    // POST /api/collector-assignments/batch - Batch assign collector (MUST be before /:id)
+    app.post('/api/collector-assignments/batch', protect, async (req, res) => {
+        try {
+            const { collector_id, collector_name, customer_ids, address_filter, router_id } = req.body;
+            const now = new Date().toISOString();
+            let assigned = 0;
+            
+            if (customer_ids && customer_ids.length > 0) {
+                for (const customerId of customer_ids) {
+                    const customer = await db.get('SELECT * FROM customers WHERE id = ?', customerId);
+                    if (customer) {
+                        // Fix 8: Skip if active assignment already exists
+                        const existingAssignment = await db.get(
+                            'SELECT id FROM collector_assignments WHERE customer_id = ? AND status = ?',
+                            [customer.id, 'Active']
+                        );
+                        if (existingAssignment) continue;
+                        const id = crypto.randomUUID();
+                        await db.run(
+                            `INSERT INTO collector_assignments (id, router_id, customer_id, customer_name, customer_username, customer_account_number, address, plan_name, assigned_collector_id, assigned_collector_name, assigned_by, status, assigned_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+                            [id, customer.routerId || router_id, customer.id, customer.fullName, customer.username, customer.accountNumber, customer.address, '', collector_id, collector_name, req.user.username, now]
+                        );
+                        assigned++;
+                    }
+                }
+            } else if (address_filter) {
+                let query = 'SELECT * FROM customers WHERE address LIKE ?';
+                const params = [`%${address_filter}%`];
+                if (router_id) {
+                    query += ' AND routerId = ?';
+                    params.push(router_id);
+                }
+                const customers = await db.all(query, params);
+                for (const customer of customers) {
+                    // Fix 8: Skip if active assignment already exists
+                    const existingAssignment = await db.get(
+                        'SELECT id FROM collector_assignments WHERE customer_id = ? AND status = ?',
+                        [customer.id, 'Active']
+                    );
+                    if (existingAssignment) continue;
+                    const id = crypto.randomUUID();
+                    await db.run(
+                        `INSERT INTO collector_assignments (id, router_id, customer_id, customer_name, customer_username, customer_account_number, address, plan_name, assigned_collector_id, assigned_collector_name, assigned_by, status, assigned_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+                        [id, customer.routerId || router_id, customer.id, customer.fullName, customer.username, customer.accountNumber, customer.address, '', collector_id, collector_name, req.user.username, now]
+                    );
+                    assigned++;
+                }
+            }
+            
+            res.json({ success: true, assigned });
+        } catch (error) {
+            console.error('Error batch assigning collectors:', error);
+            res.status(500).json({ error: 'Failed to batch assign collectors' });
+        }
+    });
+
+    // GET /api/collector-assignments/:id
+    app.get('/api/collector-assignments/:id', protect, async (req, res) => {
+        try {
+            const assignment = await db.get('SELECT * FROM collector_assignments WHERE id = ?', req.params.id);
+            if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+            res.json(assignment);
+        } catch (error) {
+            console.error('Error fetching collector assignment:', error);
+            res.status(500).json({ error: 'Failed to fetch collector assignment' });
+        }
+    });
+
+    // PUT /api/collector-assignments/:id - Update
+    app.put('/api/collector-assignments/:id', protect, async (req, res) => {
+        try {
+            const existing = await db.get('SELECT * FROM collector_assignments WHERE id = ?', req.params.id);
+            if (!existing) return res.status(404).json({ error: 'Assignment not found' });
+            
+            // Fix 3: Whitelist approach to prevent mass assignment
+            const allowed = ['customer_name', 'customer_username', 'customer_account_number', 'address', 'plan_name', 'assigned_collector_id', 'assigned_collector_name', 'status', 'notes'];
+            const updated = { ...existing };
+            for (const key of allowed) {
+                if (req.body[key] !== undefined) updated[key] = req.body[key];
+            }
+            updated.updated_at = new Date().toISOString();
+            await db.run(
+                `UPDATE collector_assignments SET router_id=?, customer_id=?, customer_name=?, customer_username=?, customer_account_number=?, address=?, plan_name=?, assigned_collector_id=?, assigned_collector_name=?, status=?, notes=?, updated_at=?
+                 WHERE id=?`,
+                [updated.router_id, updated.customer_id, updated.customer_name, updated.customer_username, updated.customer_account_number, updated.address, updated.plan_name, updated.assigned_collector_id, updated.assigned_collector_name, updated.status, updated.notes, updated.updated_at, req.params.id]
+            );
+            
+            const result = await db.get('SELECT * FROM collector_assignments WHERE id = ?', req.params.id);
+            res.json(result);
+        } catch (error) {
+            console.error('Error updating collector assignment:', error);
+            res.status(500).json({ error: 'Failed to update collector assignment' });
+        }
+    });
+
+    // DELETE /api/collector-assignments/:id
+    app.delete('/api/collector-assignments/:id', protect, async (req, res) => {
+        try {
+            await db.run('DELETE FROM collector_assignments WHERE id = ?', req.params.id);
+            res.json({ success: true });
+        } catch (error) {
+            console.error('Error deleting collector assignment:', error);
+            res.status(500).json({ error: 'Failed to delete collector assignment' });
+        }
+    });
+
+    // ========== Collector Dashboard API ==========
+
+    // GET /api/collector-dashboard/summary
+    app.get('/api/collector-dashboard/summary', protect, async (req, res) => {
+        try {
+            const { router_id } = req.query;
+            
+            const collectors = await db.all(
+                "SELECT u.id, u.username, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE r.id = 'role_collector'"
+            );
+            
+            let totalCollected = 0;
+            let todayCollected = 0;
+            let weekCollected = 0;
+            let monthCollected = 0;
+            let totalTransactions = 0;
+            const collectorStats = [];
+            
+            const today = new Date().toISOString().split('T')[0];
+            const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            
+            for (const collector of collectors) {
+                let query = "SELECT COUNT(*) as count, COALESCE(SUM(finalAmount), 0) as total FROM sales_records WHERE processedBy = ?";
+                const queryParams = [collector.username];
+                if (router_id) { query += ' AND routerId = ?'; queryParams.push(router_id); }
+                const stats = await db.get(query, queryParams);
+                
+                let todayQuery = "SELECT COUNT(*) as count, COALESCE(SUM(finalAmount), 0) as total FROM sales_records WHERE processedBy = ? AND DATE(date) = ?";
+                const todayParams = [collector.username, today];
+                if (router_id) { todayQuery += ' AND routerId = ?'; todayParams.push(router_id); }
+                const todayStats = await db.get(todayQuery, todayParams);
+                
+                let weekQuery = "SELECT COUNT(*) as count, COALESCE(SUM(finalAmount), 0) as total FROM sales_records WHERE processedBy = ? AND DATE(date) >= ?";
+                const weekParams = [collector.username, weekAgo];
+                if (router_id) { weekQuery += ' AND routerId = ?'; weekParams.push(router_id); }
+                const weekStats = await db.get(weekQuery, weekParams);
+                
+                let monthQuery = "SELECT COUNT(*) as count, COALESCE(SUM(finalAmount), 0) as total FROM sales_records WHERE processedBy = ? AND DATE(date) >= ?";
+                const monthParams = [collector.username, monthAgo];
+                if (router_id) { monthQuery += ' AND routerId = ?'; monthParams.push(router_id); }
+                const monthStats = await db.get(monthQuery, monthParams);
+                
+                const lastCollection = await db.get("SELECT date FROM sales_records WHERE processedBy = ? ORDER BY date DESC LIMIT 1", collector.username);
+                
+                totalCollected += stats.total;
+                todayCollected += todayStats.total;
+                weekCollected += weekStats.total;
+                monthCollected += monthStats.total;
+                totalTransactions += stats.count;
+                
+                collectorStats.push({
+                    id: collector.id,
+                    username: collector.username,
+                    totalCollected: stats.total,
+                    totalTransactions: stats.count,
+                    todayCollected: todayStats.total,
+                    todayTransactions: todayStats.count,
+                    weekCollected: weekStats.total,
+                    weekTransactions: weekStats.count,
+                    monthCollected: monthStats.total,
+                    monthTransactions: monthStats.count,
+                    lastCollectionDate: lastCollection ? lastCollection.date : null
+                });
+            }
+            
+            res.json({
+                summary: {
+                    totalCollected,
+                    todayCollected,
+                    weekCollected,
+                    monthCollected,
+                    totalTransactions,
+                    totalCollectors: collectors.length
+                },
+                collectorStats
+            });
+        } catch (error) {
+            console.error('Error fetching collector dashboard summary:', error);
+            res.status(500).json({ error: 'Failed to fetch collector dashboard summary' });
+        }
+    });
+
+    // GET /api/collector-dashboard/collections
+    app.get('/api/collector-dashboard/collections', protect, async (req, res) => {
+        try {
+            const { collector_name, date_from, date_to, router_id, page = 1, limit = 50 } = req.query;
+            let query = "SELECT * FROM sales_records WHERE processedBy IS NOT NULL AND processedBy != ''";
+            const params = [];
+            
+            if (collector_name) {
+                query += ' AND processedBy = ?';
+                params.push(collector_name);
+            } else {
+                const collectors = await db.all(
+                    "SELECT username FROM users u JOIN roles r ON u.role_id = r.id WHERE r.id = 'role_collector'"
+                );
+                const usernames = collectors.map(c => c.username);
+                if (usernames.length > 0) {
+                    query += ` AND processedBy IN (${usernames.map(() => '?').join(',')})`;
+                    params.push(...usernames);
+                }
+            }
+            
+            if (date_from) {
+                query += ' AND DATE(date) >= ?';
+                params.push(date_from);
+            }
+            if (date_to) {
+                query += ' AND DATE(date) <= ?';
+                params.push(date_to);
+            }
+            if (router_id) {
+                query += ' AND routerId = ?';
+                params.push(router_id);
+            }
+            
+            // Run count query first (same WHERE conditions, no ORDER BY/LIMIT/OFFSET)
+            const countQuery = query;
+            const countResult = await db.get(`SELECT COUNT(*) as total FROM (${countQuery})`, [...params]);
+            
+            query += ' ORDER BY date DESC';
+            const limitNum = Math.max(1, Math.min(200, parseInt(limit) || 50));
+            const pageNum = Math.max(1, parseInt(page) || 1);
+            const offset = (pageNum - 1) * limitNum;
+            query += ` LIMIT ? OFFSET ?`;
+            params.push(limitNum, offset);
+            
+            const collections = await db.all(query, params);
+            res.json({ collections, total: countResult.total });
+        } catch (error) {
+            console.error('Error fetching collector collections:', error);
+            res.status(500).json({ error: 'Failed to fetch collector collections' });
+        }
+    });
+
+    // GET /api/collector-dashboard/collectors
+    app.get('/api/collector-dashboard/collectors', protect, async (req, res) => {
+        try {
+            const collectors = await db.all(
+                "SELECT u.id, u.username, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE r.id = 'role_collector' ORDER BY u.username"
+            );
+            res.json(collectors);
+        } catch (error) {
+            console.error('Error fetching collectors:', error);
+            res.status(500).json({ error: 'Failed to fetch collectors' });
+        }
     });
 
     // --- Repair Tickets (Public - Client Portal) ---
