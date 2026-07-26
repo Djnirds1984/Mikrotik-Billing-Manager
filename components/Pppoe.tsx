@@ -468,10 +468,15 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
                             <div className="text-sm text-blue-800 dark:text-blue-300">
                                 <label htmlFor="createPortalAccount" className="cursor-pointer select-none">
                                     {portalAccountExists
-                                        ? 'Client portal account exists. Check to update portal credentials (username & password).'
-                                        : 'Create client portal account using this PPPoE username and password.'
+                                        ? 'Client portal account exists. Check to update the portal password.'
+                                        : 'Create client portal account for this client.'
                                     }
                                 </label>
+                                {customer.accountNumber && (
+                                    <p className="text-xs mt-1">
+                                        Client logs in with Account Number: <span className="font-mono font-semibold">{customer.accountNumber}</span> and the password {secret.password ? 'entered above' : 'on file'}.
+                                    </p>
+                                )}
                                 {createPortalAccount && !portalAccountExists && initialData && !secret.password && (
                                     <p className="text-xs text-amber-700 dark:text-amber-400 mt-1 font-medium">
                                         ⚠ You must enter the password above to create the portal account.
@@ -1108,7 +1113,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             routerId: selectedRouter.id,
                             pppoeUsername: secretData.name,
                             password: secretData.password || undefined, // Only send if provided
-                            accountNumber: enrichedCustomerData.accountNumber
+                            accountNumber: enrichedCustomerData.accountNumber,
+                            linkedEmail: enrichedCustomerData.email || undefined // For OTP on new devices
                         })
                     });
                     const portalData = await portalRes.json();

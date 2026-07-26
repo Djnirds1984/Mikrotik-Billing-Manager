@@ -9298,7 +9298,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
     // Auto-create or update client portal account from PPPoE user management (Protected)
     clientPortalRouter.post('/auto-create', protect, async (req, res) => {
-        const { routerId, pppoeUsername, password, accountNumber } = req.body;
+        const { routerId, pppoeUsername, password, accountNumber, linkedEmail } = req.body;
         if (!pppoeUsername) return res.status(400).json({ message: 'PPPoE username is required' });
         if (!routerId) return res.status(400).json({ message: 'Router ID is required' });
         try {
@@ -9325,6 +9325,13 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         [accountNumber, existing.id]
                     );
                 }
+                // Update linked email if provided (for OTP on new devices)
+                if (linkedEmail && linkedEmail !== existing.linked_email) {
+                    await db.run(
+                        'UPDATE client_users SET linked_email = ? WHERE id = ?',
+                        [linkedEmail, existing.id]
+                    );
+                }
                 res.json({ message: 'Portal account updated', id: existing.id, created: false });
             } else {
                 // Create new account using PPPoE username as portal username
@@ -9334,8 +9341,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 const id = `u_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 const acc = accountNumber || await generateAccountNumber();
                 await db.run(
-                    'INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, account_number, created_at) VALUES (?,?,?,?,?,?,?,?)',
-                    [id, pppoeUsername, hash, salt, routerId, pppoeUsername, acc, new Date().toISOString()]
+                    'INSERT INTO client_users (id, username, password_hash, salt, router_id, pppoe_username, account_number, linked_email, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+                    [id, pppoeUsername, hash, salt, routerId, pppoeUsername, acc, linkedEmail || null, new Date().toISOString()]
                 );
                 res.json({ message: 'Portal account created', id, created: true, accountNumber: acc });
             }
