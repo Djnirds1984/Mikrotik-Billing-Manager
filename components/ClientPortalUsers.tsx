@@ -22,7 +22,6 @@ export const ClientPortalUsers: React.FC = () => {
     const { routers } = useRouters();
 
     // Form State
-    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [routerId, setRouterId] = useState('');
     const [pppoeUsername, setPppoeUsername] = useState('');
@@ -102,8 +101,8 @@ export const ClientPortalUsers: React.FC = () => {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!username || !password || !routerId || !pppoeUsername) {
-            alert('Portal Username, Password, Router, and PPPoE Username are required');
+        if (!password || !routerId || !pppoeUsername) {
+            alert('Password, Router, and PPPoE Username are required');
             return;
         }
         if (!accountNumber) {
@@ -118,12 +117,11 @@ export const ClientPortalUsers: React.FC = () => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${localStorage.getItem('authToken')}`
                 },
-                body: JSON.stringify({ username, password, routerId, pppoeUsername, accountNumber })
+                body: JSON.stringify({ username: pppoeUsername, password, routerId, pppoeUsername, accountNumber })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.message);
             
-            setUsername('');
             setPassword('');
             setPppoeUsername('');
             setAccountNumber('');
@@ -198,23 +196,15 @@ export const ClientPortalUsers: React.FC = () => {
                 <h3 className="text-lg font-semibold mb-4 text-slate-800 dark:text-white">Manually Create Credentials</h3>
                 <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Portal Username</label>
-                        <input 
-                            value={username} 
-                            onChange={e => setUsername(e.target.value)} 
-                            className="mt-1 w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600" 
-                            placeholder="Login username"
-                        />
-                    </div>
-                    <div>
                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Portal Password</label>
                         <input 
                             type="password"
                             value={password} 
                             onChange={e => setPassword(e.target.value)} 
                             className="mt-1 w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600" 
-                            placeholder="Login password"
+                            placeholder="Login password (given to client)"
                         />
+                        <p className="text-xs text-slate-500 mt-1">Client uses this password together with their Account Number to log in.</p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Router</label>
@@ -282,7 +272,7 @@ export const ClientPortalUsers: React.FC = () => {
                 <table className="w-full text-left text-sm text-slate-600 dark:text-slate-300">
                     <thead className="bg-slate-100 dark:bg-slate-900 uppercase font-semibold">
                         <tr>
-                            <th className="px-6 py-3">Portal Username</th>
+                            <th className="px-6 py-3">Username (Internal)</th>
                             <th className="px-6 py-3">Type</th>
                             <th className="px-6 py-3">Linked Router</th>
                             <th className="px-6 py-3">PPPoE Account</th>
