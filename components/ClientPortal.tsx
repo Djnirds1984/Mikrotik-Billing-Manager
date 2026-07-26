@@ -1,10 +1,37 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import type { RouterConfigWithId } from '../types.ts';
 
+declare global {
+  interface Window {
+    grecaptcha?: {
+      render: (container: HTMLElement, params: any) => number;
+      reset: (widgetId?: number) => void;
+    };
+  }
+}
+
+// Device fingerprint utility
+async function getDeviceFingerprint(): Promise<string> {
+  try {
+    const stored = localStorage.getItem('clientDeviceId');
+    if (stored) return stored;
+    const raw = `${navigator.userAgent}|${screen.width}x${screen.height}|${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(raw);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem('clientDeviceId', hash);
+    return hash;
+  } catch {
+    return 'unknown-device';
+  }
+}
+
 export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null }> = ({ selectedRouter }) => {
-  const [username, setUsername] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
   const [password, setPassword] = useState('');
-  const [view, setView] = useState<'login' | 'dashboard'>('login');
+  const [view, setView] = useState<'login' | 'otp' | 'dashboard'>('login');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<any | null>(null);
@@ -30,6 +57,28 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
   const [storeSettings, setStoreSettings] = useState<{ gcashNumber: string; gcashAccountName: string; paymentMethods?: { manualGcash?: boolean } } | null>(null);
   const [gcashRef, setGcashRef] = useState('');
   const [manualSuccess, setManualSuccess] = useState<string | null>(null);
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpTimer, setOtpTimer] = useState(0);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const captchaRef = useRef<HTMLDivElement>(null);
+  const captchaWidgetId = useRef<number | null>(null);
+
+  // Render reCAPTCHA widget when required
+  useEffect(() => {
+    if (captchaRequired && captchaRef.current && window.grecaptcha) {
+      const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
+      if (siteKey && captchaWidgetId.current === null) {
+        captchaWidgetId.current = window.grecaptcha.render(captchaRef.current, {
+          sitekey: siteKey,
+          callback: (token: string) => setCaptchaToken(token),
+          'expired-callback': () => setCaptchaToken(null),
+        });
+      }
+    }
+  }, [captchaRequired]);
   useEffect(() => {
     try { localStorage.setItem('suppressReload', '1'); } catch {}
     return () => { try { localStorage.removeItem('suppressReload'); } catch {} };
@@ -150,38 +199,100 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     })();
   }, []);
 
-  // We don't need to fetch routers for login anymore as username is unique
-  
+  // OTP countdown timer effect
+  useEffect(() => {
+    if (otpTimer <= 0) return;
+    const interval = setInterval(() => {
+      setOtpTimer(prev => {
+        if (prev <= 1) { clearInterval(interval); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [otpTimer]);
+
   const handleLogin = async () => {
-    if (!username || !password) { setFeedback('Please fill username and password'); return; }
+    if (!accountNumber || !password) { setFeedback('Please enter your account number and password'); return; }
+    if (!/^ACC-\d{6}$/.test(accountNumber)) { setError('Invalid format. Use ACC-000000'); return; }
     setError(null); setFeedback(null); setStatus(null);
+    setIsLoggingIn(true);
     try {
+      const deviceFingerprint = await getDeviceFingerprint();
       const res = await fetch('/api/public/client-portal/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ accountNumber, password, captchaToken: captchaToken || undefined, deviceFingerprint })
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.message || 'Login failed'); return; }
-      
+      if (!res.ok) {
+        setError(data.message || 'Login failed');
+        if (data.captchaRequired) setCaptchaRequired(true);
+        return;
+      }
+
+      // If OTP is required, switch to OTP view
+      if (data.requiresOtp) {
+        setView('otp');
+        setOtpTimer(300); // 5 minutes
+        setFeedback('A verification code was sent to your email.');
+        return;
+      }
+
+      // Direct login success
+      setCaptchaRequired(false);
+      setCaptchaToken(null);
       setClientInfo(data);
       try { sessionStorage.setItem('clientPortalSession', JSON.stringify(data)); } catch {}
       setFeedback('Login successful');
-      
-      // Fetch Status using the returned routerId and pppoeUsername
-      // We need router name for the existing API? The existing API /api/public/ppp/status takes routerId AND routerName?
-      // Let's check the existing API in ClientPortal.tsx (previous read)
-      // "fetch(`/api/public/ppp/status?routerId=${...}&routerName=${...}&username=${...}`)"
-      // If I don't have routerName, I might need to fetch it or just send ID if backend supports it.
-      // The backend for ppp/status likely uses routerId to find the router. routerName might be redundant or used for logging.
-      // I'll try sending just routerId or fetch router info.
-      
-      // Actually, let's fetch routers to get the name if needed, or hope backend handles it.
-      // But wait, I can just fetch the status.
-      
       fetchStatus(data);
       fetchClientTickets(data.pppoeUsername || data.username);
       setView('dashboard');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpCode || otpCode.length !== 6) { setError('Please enter the 6-digit code'); return; }
+    setError(null);
+    setIsVerifyingOtp(true);
+    try {
+      const deviceFingerprint = await getDeviceFingerprint();
+      const res = await fetch('/api/public/client-portal/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountNumber, otpCode, deviceFingerprint })
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.message || 'Verification failed'); return; }
+
+      setClientInfo(data);
+      try { sessionStorage.setItem('clientPortalSession', JSON.stringify(data)); } catch {}
+      setFeedback('Verification successful');
+      fetchStatus(data);
+      fetchClientTickets(data.pppoeUsername || data.username);
+      setView('dashboard');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setError(null);
+    try {
+      const res = await fetch('/api/public/client-portal/resend-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountNumber })
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.message || 'Failed to resend'); return; }
+      setOtpTimer(300);
+      setFeedback('New code sent to your email.');
     } catch (e) {
       setError((e as Error).message);
     }
@@ -470,7 +581,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                 Welcome, {clientInfo?.username}!
                 <span className="ml-3 text-sm font-normal text-slate-600 dark:text-slate-300">Account Number: {clientInfo?.accountNumber || '—'}</span>
             </h1>
-            <button onClick={() => { try { sessionStorage.removeItem('clientPortalSession'); } catch {}; setView('login'); setClientInfo(null); setUsername(''); setPassword(''); }} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
+            <button onClick={() => { try { sessionStorage.removeItem('clientPortalSession'); } catch {}; setView('login'); setClientInfo(null); setAccountNumber(''); setPassword(''); setCaptchaRequired(false); setCaptchaToken(null); }} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">Logout</button>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -959,25 +1070,92 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
     );
   }
 
+  // OTP Verification View
+  if (view === 'otp') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 p-4">
+        <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-lg shadow-lg p-8 space-y-6">
+          <div className="text-center">
+            <div className="mx-auto w-14 h-14 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Verify Your Identity</h2>
+            <p className="text-slate-500 dark:text-slate-400 mt-2 text-sm">A verification code was sent to your email address.</p>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Enter 6-digit code</label>
+              <input
+                value={otpCode}
+                onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="w-full px-4 py-3 text-center text-2xl tracking-[0.5em] font-mono border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="000000"
+                maxLength={6}
+                onKeyDown={e => e.key === 'Enter' && handleVerifyOtp()}
+                autoFocus
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-500 dark:text-slate-400">
+                {otpTimer > 0 ? `Code expires in ${Math.floor(otpTimer / 60)}:${String(otpTimer % 60).padStart(2, '0')}` : 'Code expired'}
+              </span>
+              <button
+                onClick={handleResendOtp}
+                disabled={otpTimer > 240}
+                className="text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-40 disabled:no-underline font-medium"
+              >
+                Resend Code
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={handleVerifyOtp}
+            disabled={isVerifyingOtp || otpCode.length !== 6}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-md transition-colors shadow-md"
+          >
+            {isVerifyingOtp ? 'Verifying...' : 'Verify & Login'}
+          </button>
+
+          <button
+            onClick={() => { setView('login'); setOtpCode(''); setError(null); setFeedback(null); }}
+            className="w-full py-2 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+          >
+            Back to Login
+          </button>
+
+          {feedback && <div className="text-sm text-center text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 p-2 rounded">{feedback}</div>}
+          {error && <div className="text-sm text-center text-red-600 bg-red-50 dark:bg-red-900/20 p-2 rounded">{error}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  // Login View
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 p-4">
         {paymentReceiptOverlay}
         <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-lg shadow-lg p-8 space-y-6">
             <div className="text-center">
                 <h2 className="text-3xl font-bold text-slate-800 dark:text-white">Client Portal</h2>
-                <p className="text-slate-500 mt-2">Login to view your account status</p>
+                <p className="text-slate-500 mt-2">Login with your account number</p>
             </div>
             
             <div className="space-y-4">
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Username</label>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Account Number</label>
                     <input 
-                        value={username} 
-                        onChange={e => setUsername(e.target.value)} 
-                        className="mt-1 w-full px-4 py-2 border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none" 
-                        placeholder="Enter your username"
+                        value={accountNumber} 
+                        onChange={e => setAccountNumber(e.target.value.toUpperCase())} 
+                        className="mt-1 w-full px-4 py-2 border rounded-md dark:bg-slate-700 dark:border-slate-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono" 
+                        placeholder="ACC-000000"
                         onKeyDown={e => e.key === 'Enter' && handleLogin()}
                     />
+                    <p className="text-xs text-slate-400 mt-1">Format: ACC- followed by 6 digits</p>
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
@@ -990,13 +1168,26 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                         onKeyDown={e => e.key === 'Enter' && handleLogin()}
                     />
                 </div>
+
+                {/* reCAPTCHA widget - shown when server requires it */}
+                {captchaRequired && (
+                  <div className="flex flex-col items-center py-2 gap-2">
+                    <div ref={captchaRef}></div>
+                    {!import.meta.env.VITE_RECAPTCHA_SITE_KEY && (
+                      <div className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-2 rounded border border-amber-200 dark:border-amber-800">
+                        CAPTCHA required but not configured. Contact admin.
+                      </div>
+                    )}
+                  </div>
+                )}
             </div>
 
             <button 
-                onClick={handleLogin} 
-                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md transition-colors shadow-md"
+                onClick={handleLogin}
+                disabled={isLoggingIn}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-md transition-colors shadow-md"
             >
-                Login
+                {isLoggingIn ? 'Logging in...' : 'Login'}
             </button>
 
             {feedback && <div className="text-sm text-center text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 p-2 rounded">{feedback}</div>}

@@ -8,6 +8,9 @@ interface ClientUser {
     router_id: string;
     pppoe_username: string;
     account_number?: string;
+    linked_email?: string;
+    failed_attempts?: number;
+    locked_until?: string;
     created_at: string;
 }
 
@@ -148,6 +151,23 @@ export const ClientPortalUsers: React.FC = () => {
         }
     };
 
+    const handleUnlock = async (id: string) => {
+        try {
+            const res = await fetch('/api/client-portal/unlock', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                },
+                body: JSON.stringify({ userId: id })
+            });
+            if (!res.ok) throw new Error('Failed to unlock');
+            fetchData();
+        } catch (e) {
+            alert((e as Error).message);
+        }
+    };
+
     if (isLoading && users.length === 0) return <Loader />;
 
     return (
@@ -169,8 +189,8 @@ export const ClientPortalUsers: React.FC = () => {
 
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                 <p className="text-sm text-blue-800 dark:text-blue-300">
-                    <strong>Note:</strong> Client portal accounts are automatically created when you add or edit a PPPoE user from the PPPoE User Management page. 
-                    The portal username and password match the PPPoE credentials. You can also manually create accounts here if needed.
+                    <strong>Note:</strong> Clients log in using their <strong>Account Number</strong> (ACC-XXXXXX) and the password set here. 
+                    Accounts are automatically created when you add or edit a PPPoE user. Security features: account lockout after 5 failed attempts, CAPTCHA after 3 failures, and email OTP on new devices.
                 </p>
             </div>
             
@@ -267,6 +287,8 @@ export const ClientPortalUsers: React.FC = () => {
                             <th className="px-6 py-3">Linked Router</th>
                             <th className="px-6 py-3">PPPoE Account</th>
                             <th className="px-6 py-3">Account Number</th>
+                            <th className="px-6 py-3">Email</th>
+                            <th className="px-6 py-3">Status</th>
                             <th className="px-6 py-3">Created At</th>
                             <th className="px-6 py-3">Actions</th>
                         </tr>
@@ -275,6 +297,7 @@ export const ClientPortalUsers: React.FC = () => {
                         {filteredUsers.map(u => {
                             const rName = routers.find(r => r.id === u.router_id)?.name || u.router_id || '-';
                             const isAutoCreated = u.username === u.pppoe_username;
+                            const isLocked = u.locked_until && new Date(u.locked_until) > new Date();
                             return (
                                 <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                     <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{u.username}</td>
@@ -291,22 +314,49 @@ export const ClientPortalUsers: React.FC = () => {
                                     </td>
                                     <td className="px-6 py-4">{rName}</td>
                                     <td className="px-6 py-4">{u.pppoe_username || '-'}</td>
-                                    <td className="px-6 py-4">{u.account_number || '-'}</td>
+                                    <td className="px-6 py-4 font-mono text-xs">{u.account_number || '-'}</td>
+                                    <td className="px-6 py-4 text-xs">{u.linked_email || <span className="text-slate-400">Not set</span>}</td>
+                                    <td className="px-6 py-4">
+                                        {isLocked ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd"/></svg>
+                                                Locked
+                                            </span>
+                                        ) : (u.failed_attempts || 0) > 0 ? (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                                                {u.failed_attempts} failed
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                                Active
+                                            </span>
+                                        )}
+                                    </td>
                                     <td className="px-6 py-4">{new Date(u.created_at).toLocaleDateString()}</td>
                                     <td className="px-6 py-4">
-                                        <button 
-                                            onClick={() => handleDelete(u.id)} 
-                                            className="text-red-600 hover:text-red-800 font-medium"
-                                        >
-                                            Delete
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            {isLocked && (
+                                                <button 
+                                                    onClick={() => handleUnlock(u.id)} 
+                                                    className="text-amber-600 hover:text-amber-800 font-medium text-xs px-2 py-1 border border-amber-300 dark:border-amber-700 rounded hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                                                >
+                                                    Unlock
+                                                </button>
+                                            )}
+                                            <button 
+                                                onClick={() => handleDelete(u.id)} 
+                                                className="text-red-600 hover:text-red-800 font-medium text-xs"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             );
                         })}
                         {filteredUsers.length === 0 && (
                             <tr>
-                                <td colSpan={7} className="px-6 py-8 text-center text-slate-500">
+                                <td colSpan={9} className="px-6 py-8 text-center text-slate-500">
                                     {users.length === 0 ? 'No client portal accounts yet.' : 'No matching accounts found.'}
                                 </td>
                             </tr>

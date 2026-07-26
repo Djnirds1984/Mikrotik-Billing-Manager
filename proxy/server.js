@@ -17,6 +17,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const archiver = require('archiver');
 const tar = require('tar');
+const nodemailer = require('nodemailer');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -735,6 +736,24 @@ async function initDb() {
             const clientUserColNames = clientUserCols.map(c => c.name);
             if (!clientUserColNames.includes('account_number')) {
                 await db.exec("ALTER TABLE client_users ADD COLUMN account_number TEXT");
+            }
+            // Security columns for account-number login system
+            const securityCols = [
+                { name: 'failed_attempts', sql: "ALTER TABLE client_users ADD COLUMN failed_attempts INTEGER DEFAULT 0" },
+                { name: 'locked_until', sql: "ALTER TABLE client_users ADD COLUMN locked_until TEXT DEFAULT NULL" },
+                { name: 'linked_email', sql: "ALTER TABLE client_users ADD COLUMN linked_email TEXT DEFAULT NULL" },
+                { name: 'otp_secret', sql: "ALTER TABLE client_users ADD COLUMN otp_secret TEXT DEFAULT NULL" },
+                { name: 'otp_expires', sql: "ALTER TABLE client_users ADD COLUMN otp_expires TEXT DEFAULT NULL" },
+                { name: 'otp_attempts', sql: "ALTER TABLE client_users ADD COLUMN otp_attempts INTEGER DEFAULT 0" },
+                { name: 'known_devices', sql: "ALTER TABLE client_users ADD COLUMN known_devices TEXT DEFAULT '[]'" },
+                { name: 'session_token', sql: "ALTER TABLE client_users ADD COLUMN session_token TEXT DEFAULT NULL" },
+                { name: 'session_expires', sql: "ALTER TABLE client_users ADD COLUMN session_expires TEXT DEFAULT NULL" }
+            ];
+            for (const col of securityCols) {
+                if (!clientUserColNames.includes(col.name)) {
+                    await db.exec(col.sql);
+                    console.log(`[Migration] ✓ ${col.name} column added to client_users`);
+                }
             }
         } catch (_) {}
         try {
@@ -9218,7 +9237,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // Admin: List Client Users (Protected)
     clientPortalRouter.get('/users', protect, async (req, res) => {
         try {
-            const users = await db.all('SELECT id, username, router_id, pppoe_username, account_number, created_at FROM client_users ORDER BY created_at DESC');
+            const users = await db.all('SELECT id, username, router_id, pppoe_username, account_number, linked_email, failed_attempts, locked_until, created_at FROM client_users ORDER BY created_at DESC');
             res.json(users);
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
@@ -9331,43 +9350,284 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
     app.use('/api/client-portal', clientPortalRouter);
 
-    // Public Client Login
-    app.post('/api/public/client-portal/login', async (req, res) => {
-        const { username, password } = req.body;
-        if (!username || !password) return res.status(400).json({ message: 'Credentials required' });
+    // --- Client Portal Security Helpers ---
+    const CAPTCHA_THRESHOLD = parseInt(process.env.CAPTCHA_THRESHOLD) || 3;
+    const MAX_LOGIN_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS) || 5;
+    const LOCKOUT_MINUTES = parseInt(process.env.LOCKOUT_MINUTES) || 15;
+    const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES) || 5;
+
+    async function verifyRecaptcha(token) {
+        const secret = process.env.RECAPTCHA_SECRET_KEY;
+        if (!secret) return true; // Skip if not configured
         try {
-            const user = await db.get('SELECT * FROM client_users WHERE username = ?', [username]);
+            const resp = await axios.post('https://www.google.com/recaptcha/api/siteverify', null, {
+                params: { secret, response: token }
+            });
+            return resp.data && resp.data.success === true;
+        } catch (e) {
+            console.error('[reCAPTCHA] Verification error:', e.message);
+            return false;
+        }
+    }
+
+    function getOtpTransporter() {
+        const host = process.env.SMTP_HOST;
+        const port = parseInt(process.env.SMTP_PORT) || 587;
+        const user = process.env.SMTP_USER;
+        const pass = process.env.SMTP_PASS;
+        if (!host || !user || !pass) return null;
+        return nodemailer.createTransport({
+            host,
+            port,
+            secure: port === 465,
+            auth: { user, pass }
+        });
+    }
+
+    async function sendOtpEmail(toEmail, otpCode, accountNumber) {
+        const transporter = getOtpTransporter();
+        if (!transporter) {
+            console.warn('[OTP] SMTP not configured, skipping email OTP');
+            return false;
+        }
+        try {
+            await transporter.sendMail({
+                from: `"Billing Portal" <${process.env.SMTP_USER}>`,
+                to: toEmail,
+                subject: `Your Verification Code - Account ${accountNumber}`,
+                html: `
+                    <div style="font-family:Arial,sans-serif;max-width:400px;margin:auto;padding:20px;border:1px solid #e2e8f0;border-radius:8px;">
+                        <h2 style="color:#1e40af;margin-bottom:8px;">Verification Code</h2>
+                        <p style="color:#475569;">Use the code below to verify your login:</p>
+                        <div style="background:#f1f5f9;padding:16px;border-radius:6px;text-align:center;margin:16px 0;">
+                            <span style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#1e293b;">${otpCode}</span>
+                        </div>
+                        <p style="color:#64748b;font-size:13px;">This code expires in ${OTP_EXPIRY_MINUTES} minutes. Do not share it with anyone.</p>
+                        <p style="color:#94a3b8;font-size:12px;margin-top:16px;">Account: ${accountNumber}</p>
+                    </div>
+                `
+            });
+            return true;
+        } catch (e) {
+            console.error('[OTP] Failed to send email:', e.message);
+            return false;
+        }
+    }
+
+    function generateSessionToken() {
+        return crypto.randomUUID();
+    }
+
+    // Public Client Login (Account Number + Password with security layers)
+    app.post('/api/public/client-portal/login', async (req, res) => {
+        const { accountNumber, password, captchaToken, deviceFingerprint } = req.body;
+        if (!accountNumber || !password) return res.status(400).json({ message: 'Account number and password are required' });
+
+        // Validate account number format
+        if (!/^ACC-\d{6}$/.test(accountNumber)) {
+            return res.status(400).json({ message: 'Invalid account number format. Expected: ACC-000000' });
+        }
+
+        try {
+            const user = await db.get('SELECT * FROM client_users WHERE account_number = ?', [accountNumber]);
             if (!user) return res.status(401).json({ message: 'Invalid credentials' });
-            
+
+            // Check account lockout
+            if (user.locked_until && new Date(user.locked_until) > new Date()) {
+                const remainingMin = Math.ceil((new Date(user.locked_until) - new Date()) / 60000);
+                return res.status(423).json({ message: `Account is locked. Try again in ${remainingMin} minute(s).`, lockedUntil: user.locked_until });
+            }
+
+            // If lockout has expired, reset it
+            if (user.locked_until && new Date(user.locked_until) <= new Date()) {
+                await db.run('UPDATE client_users SET failed_attempts = 0, locked_until = NULL WHERE id = ?', [user.id]);
+                user.failed_attempts = 0;
+            }
+
+            // CAPTCHA required after threshold failures
+            const failedAttempts = user.failed_attempts || 0;
+            if (failedAttempts >= CAPTCHA_THRESHOLD) {
+                if (!captchaToken) {
+                    return res.status(403).json({ message: 'CAPTCHA verification required', captchaRequired: true });
+                }
+                const captchaValid = await verifyRecaptcha(captchaToken);
+                if (!captchaValid) {
+                    return res.status(403).json({ message: 'CAPTCHA verification failed. Please try again.', captchaRequired: true });
+                }
+            }
+
+            // Verify password
             const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
-            if (hash !== user.password_hash) return res.status(401).json({ message: 'Invalid credentials' });
-            
+            if (hash !== user.password_hash) {
+                const newAttempts = failedAttempts + 1;
+                if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+                    const lockUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60000).toISOString();
+                    await db.run('UPDATE client_users SET failed_attempts = ?, locked_until = ? WHERE id = ?', [newAttempts, lockUntil, user.id]);
+                    return res.status(423).json({ message: `Too many failed attempts. Account locked for ${LOCKOUT_MINUTES} minutes.`, lockedUntil: lockUntil });
+                }
+                await db.run('UPDATE client_users SET failed_attempts = ? WHERE id = ?', [newAttempts, user.id]);
+                const needsCaptcha = newAttempts >= CAPTCHA_THRESHOLD;
+                return res.status(401).json({ message: 'Invalid credentials', captchaRequired: needsCaptcha, attemptsLeft: MAX_LOGIN_ATTEMPTS - newAttempts });
+            }
+
+            // Password correct - reset failure counters
+            await db.run('UPDATE client_users SET failed_attempts = 0, locked_until = NULL WHERE id = ?', [user.id]);
+
+            // Ensure account number is set
             let acc = user.account_number;
             if (!acc || String(acc).trim() === '') {
                 const cust = await db.get('SELECT accountNumber FROM customers WHERE routerId = ? AND username = ?', [user.router_id, user.pppoe_username || user.username]);
                 acc = cust?.accountNumber || '';
-                if (!acc) {
-                    acc = await generateAccountNumber();
-                }
+                if (!acc) acc = await generateAccountNumber();
                 await db.run('UPDATE client_users SET account_number = ? WHERE id = ?', [acc, user.id]);
                 if (cust && (!cust.accountNumber || String(cust.accountNumber).trim() === '')) {
                     await db.run('UPDATE customers SET accountNumber = ? WHERE routerId = ? AND username = ?', [acc, user.router_id, user.pppoe_username || user.username]);
-                    
-                    // Sync to Supabase
                     const updatedCustomer = await db.get('SELECT * FROM customers WHERE routerId = ? AND username = ?', [user.router_id, user.pppoe_username || user.username]);
                     await syncCustomerToSupabase(updatedCustomer);
                 }
             }
+
+            // Device fingerprint check for OTP
+            const knownDevices = JSON.parse(user.known_devices || '[]');
+            const isNewDevice = deviceFingerprint && !knownDevices.includes(deviceFingerprint);
+
+            if (isNewDevice && user.linked_email) {
+                // Generate OTP and send via email
+                const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+                const otpHash = crypto.createHash('sha256').update(otpCode).digest('hex');
+                const otpExpires = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60000).toISOString();
+                await db.run('UPDATE client_users SET otp_secret = ?, otp_expires = ?, otp_attempts = 0 WHERE id = ?', [otpHash, otpExpires, user.id]);
+
+                const sent = await sendOtpEmail(user.linked_email, otpCode, acc);
+                if (sent) {
+                    return res.json({ requiresOtp: true, accountNumber: acc, message: 'Verification code sent to your email' });
+                }
+                // If email failed, allow login directly
+                console.warn('[Login] OTP email failed, allowing direct login for', acc);
+            }
+
+            // Issue session directly (known device or no email)
+            const sessionToken = generateSessionToken();
+            const sessionExpires = new Date(Date.now() + 24 * 60 * 60000).toISOString(); // 24h
+            await db.run('UPDATE client_users SET session_token = ?, session_expires = ? WHERE id = ?', [sessionToken, sessionExpires, user.id]);
+
+            // If device fingerprint provided and not already known, add it
+            if (deviceFingerprint && !knownDevices.includes(deviceFingerprint)) {
+                knownDevices.push(deviceFingerprint);
+                await db.run('UPDATE client_users SET known_devices = ? WHERE id = ?', [JSON.stringify(knownDevices), user.id]);
+            }
+
             res.json({
                 id: user.id,
                 username: user.username,
                 routerId: user.router_id,
                 pppoeUsername: user.pppoe_username,
-                accountNumber: acc
+                accountNumber: acc,
+                sessionToken,
+                sessionExpires
             });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
+    // OTP Verification Endpoint
+    app.post('/api/public/client-portal/verify-otp', async (req, res) => {
+        const { accountNumber, otpCode, deviceFingerprint } = req.body;
+        if (!accountNumber || !otpCode) return res.status(400).json({ message: 'Account number and OTP code are required' });
+
+        try {
+            const user = await db.get('SELECT * FROM client_users WHERE account_number = ?', [accountNumber]);
+            if (!user) return res.status(401).json({ message: 'Invalid account' });
+
+            // Check OTP expiry
+            if (!user.otp_expires || new Date(user.otp_expires) < new Date()) {
+                await db.run('UPDATE client_users SET otp_secret = NULL, otp_expires = NULL, otp_attempts = 0 WHERE id = ?', [user.id]);
+                return res.status(410).json({ message: 'OTP has expired. Please login again.' });
+            }
+
+            // Check max OTP attempts
+            if ((user.otp_attempts || 0) >= 3) {
+                await db.run('UPDATE client_users SET otp_secret = NULL, otp_expires = NULL, otp_attempts = 0 WHERE id = ?', [user.id]);
+                return res.status(429).json({ message: 'Too many OTP attempts. Please login again.' });
+            }
+
+            // Verify OTP
+            const otpHash = crypto.createHash('sha256').update(otpCode).digest('hex');
+            if (otpHash !== user.otp_secret) {
+                await db.run('UPDATE client_users SET otp_attempts = otp_attempts + 1 WHERE id = ?', [user.id]);
+                return res.status(401).json({ message: 'Invalid verification code', attemptsLeft: 3 - (user.otp_attempts || 0) - 1 });
+            }
+
+            // OTP correct - clear OTP data and register device
+            const knownDevices = JSON.parse(user.known_devices || '[]');
+            if (deviceFingerprint && !knownDevices.includes(deviceFingerprint)) {
+                knownDevices.push(deviceFingerprint);
+            }
+            const sessionToken = generateSessionToken();
+            const sessionExpires = new Date(Date.now() + 24 * 60 * 60000).toISOString();
+            await db.run(
+                'UPDATE client_users SET otp_secret = NULL, otp_expires = NULL, otp_attempts = 0, known_devices = ?, session_token = ?, session_expires = ? WHERE id = ?',
+                [JSON.stringify(knownDevices), sessionToken, sessionExpires, user.id]
+            );
+
+            res.json({
+                id: user.id,
+                username: user.username,
+                routerId: user.router_id,
+                pppoeUsername: user.pppoe_username,
+                accountNumber: user.account_number,
+                sessionToken,
+                sessionExpires
+            });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Resend OTP
+    app.post('/api/public/client-portal/resend-otp', async (req, res) => {
+        const { accountNumber } = req.body;
+        if (!accountNumber) return res.status(400).json({ message: 'Account number is required' });
+        try {
+            const user = await db.get('SELECT * FROM client_users WHERE account_number = ?', [accountNumber]);
+            if (!user || !user.linked_email) return res.status(400).json({ message: 'Cannot resend OTP' });
+
+            const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+            const otpHash = crypto.createHash('sha256').update(otpCode).digest('hex');
+            const otpExpires = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60000).toISOString();
+            await db.run('UPDATE client_users SET otp_secret = ?, otp_expires = ?, otp_attempts = 0 WHERE id = ?', [otpHash, otpExpires, user.id]);
+
+            const sent = await sendOtpEmail(user.linked_email, otpCode, accountNumber);
+            if (!sent) return res.status(500).json({ message: 'Failed to send OTP email' });
+            res.json({ message: 'New verification code sent to your email' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Link Email to Account (authenticated via session token)
+    app.post('/api/public/client-portal/link-email', async (req, res) => {
+        const { accountNumber, email, sessionToken } = req.body;
+        if (!accountNumber || !email || !sessionToken) return res.status(400).json({ message: 'Account number, email, and session token are required' });
+        try {
+            const user = await db.get('SELECT * FROM client_users WHERE account_number = ? AND session_token = ?', [accountNumber, sessionToken]);
+            if (!user) return res.status(401).json({ message: 'Invalid session' });
+            if (user.session_expires && new Date(user.session_expires) < new Date()) {
+                return res.status(401).json({ message: 'Session expired' });
+            }
+            // Basic email validation
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                return res.status(400).json({ message: 'Invalid email format' });
+            }
+            await db.run('UPDATE client_users SET linked_email = ? WHERE id = ?', [email, user.id]);
+            res.json({ message: 'Email linked successfully', email });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Admin: Unlock a client account (Protected)
+    app.post('/api/client-portal/unlock', protect, async (req, res) => {
+        const { userId } = req.body;
+        if (!userId) return res.status(400).json({ message: 'userId is required' });
+        try {
+            await db.run('UPDATE client_users SET failed_attempts = 0, locked_until = NULL WHERE id = ?', [userId]);
+            res.json({ message: 'Account unlocked successfully' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
 
     // --- Repair Tickets (Admin - Protected) ---
     app.get('/api/repair-tickets', protect, async (req, res) => {
