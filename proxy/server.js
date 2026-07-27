@@ -859,6 +859,32 @@ async function initDb() {
             }
         } catch (_) {}
 
+        // Backfill missing columns on equipment_withdrawals (older DBs may have a partial schema;
+        // CREATE TABLE IF NOT EXISTS is a no-op on existing tables so missing columns must be added here)
+        try {
+            const ewCols = await db.all("PRAGMA table_info(equipment_withdrawals)");
+            const ewColNames = ewCols.map(c => c.name);
+            const ewExpected = [
+                { name: 'inventoryItemId', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN inventoryItemId TEXT" },
+                { name: 'itemName', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN itemName TEXT" },
+                { name: 'quantity', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN quantity INTEGER DEFAULT 1" },
+                { name: 'serialNumber', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN serialNumber TEXT" },
+                { name: 'customerId', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN customerId TEXT" },
+                { name: 'customerName', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN customerName TEXT" },
+                { name: 'customerUsername', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN customerUsername TEXT" },
+                { name: 'notes', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN notes TEXT" },
+                { name: 'withdrawnBy', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN withdrawnBy TEXT" },
+                { name: 'withdrawnDate', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN withdrawnDate TEXT" },
+                { name: 'routerId', sql: "ALTER TABLE equipment_withdrawals ADD COLUMN routerId TEXT" }
+            ];
+            for (const col of ewExpected) {
+                if (!ewColNames.includes(col.name)) {
+                    await db.exec(col.sql);
+                    console.log(`[Migration] ✓ ${col.name} column added to equipment_withdrawals`);
+                }
+            }
+        } catch (_) {}
+
         // Add oltNapPortId to customers table for fiber network mapping
         try {
             const custCols2 = await db.all("PRAGMA table_info(customers)");
