@@ -541,13 +541,18 @@ const ExpensesManager: React.FC<{
     const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
 
     const handleSave = async (expenseData: any) => {
-        if (editingExpense) {
-            await onUpdate({ ...editingExpense, ...expenseData });
-        } else {
-            await onAdd(expenseData);
+        try {
+            if (editingExpense) {
+                await onUpdate({ ...editingExpense, ...expenseData });
+            } else {
+                await onAdd(expenseData);
+            }
+            setIsFormOpen(false);
+            setEditingExpense(null);
+        } catch (err) {
+            console.error('Failed to save expense:', err);
+            alert(`Failed to save expense: ${(err as Error).message}`);
         }
-        setIsFormOpen(false);
-        setEditingExpense(null);
     };
 
     const handleEdit = (expense: ExpenseRecord) => {
@@ -641,7 +646,7 @@ const ExpensesManager: React.FC<{
 const ExpenseFormModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
-    onSave: (data: any) => void;
+    onSave: (data: any) => void | Promise<void>;
     initialData: ExpenseRecord | null;
 }> = ({ isOpen, onClose, onSave, initialData }) => {
     const [expense, setExpense] = useState({
@@ -673,9 +678,9 @@ const ExpenseFormModal: React.FC<{
 
     if (!isOpen) return null;
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        onSave(expense);
+        await onSave(expense);
     };
 
     return (

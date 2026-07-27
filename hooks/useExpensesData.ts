@@ -36,6 +36,7 @@ export const useExpensesData = (routerId: string | null = null, autoLoad: boolea
             const newExpense: ExpenseRecord = {
                 ...newExpenseData,
                 id: `exp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                ...(routerId ? { routerId } : {}),
             };
             await dbApi.post('/expenses', newExpense);
             await fetchExpenses();
@@ -47,7 +48,11 @@ export const useExpensesData = (routerId: string | null = null, autoLoad: boolea
 
     const updateExpense = async (updatedExpense: ExpenseRecord) => {
         try {
-            await dbApi.patch(`/expenses/${updatedExpense.id}`, updatedExpense);
+            const expenseToSave: ExpenseRecord = {
+                ...updatedExpense,
+                ...(!updatedExpense.routerId && routerId ? { routerId } : {}),
+            };
+            await dbApi.patch(`/expenses/${expenseToSave.id}`, expenseToSave);
             await fetchExpenses();
         } catch (err) {
             console.error("Failed to update expense:", err);

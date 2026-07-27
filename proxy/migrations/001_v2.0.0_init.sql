@@ -71,6 +71,21 @@ CREATE TABLE IF NOT EXISTS inventory (
     dateAdded TEXT
 );
 
+CREATE TABLE IF NOT EXISTS equipment_withdrawals (
+    id TEXT PRIMARY KEY,
+    inventoryItemId TEXT NOT NULL,
+    itemName TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    serialNumber TEXT,
+    customerId TEXT,
+    customerName TEXT,
+    customerUsername TEXT,
+    notes TEXT,
+    withdrawnBy TEXT,
+    withdrawnDate TEXT NOT NULL,
+    routerId TEXT
+);
+
 CREATE TABLE IF NOT EXISTS expenses (
     id TEXT PRIMARY KEY,
     date TEXT NOT NULL,

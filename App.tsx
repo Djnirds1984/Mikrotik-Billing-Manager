@@ -139,7 +139,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
     currentView === 'sales' || currentView === 'dhcp-portal' || currentView === 'pppoe'
   );
   const { items, addItem, updateItem, deleteItem, reload: reloadInventory } = useInventoryData(currentView === 'inventory');
-  const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData(currentView === 'inventory' || currentView === 'accounting' || currentView === 'payroll');
+  const { expenses, addExpense, updateExpense, deleteExpense } = useExpensesData(null, currentView === 'inventory' || currentView === 'accounting' || currentView === 'payroll');
   const { records: pisowifiIncome, addRecord: addPisowifiIncome, updateRecord: updatePisowifiIncome, deleteRecord: deletePisowifiIncome } = usePisowifiIncomeData(currentView === 'inventory' || currentView === 'accounting');
   const { resellers: pisowifiResellers, addReseller: addPisowifiReseller, updateReseller: updatePisowifiReseller, deleteReseller: deletePisowifiReseller } = usePisowifiResellersData(currentView === 'inventory');
   const payrollData = usePayrollData(currentView === 'payroll');
