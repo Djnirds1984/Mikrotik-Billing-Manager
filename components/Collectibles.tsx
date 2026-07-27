@@ -33,6 +33,25 @@ interface Customer {
   [key: string]: any;
 }
 
+interface ExpiringClient {
+  id: string;
+  username: string;
+  routerId: string;
+  fullName: string;
+  address: string;
+  contactNumber: string;
+  accountNumber: string;
+  planName: string;
+  dueDate: string;
+  routerName: string;
+  clientType: 'pppoe' | 'dhcp';
+  expirationStatus: 'Expired' | 'Expiring';
+  assignmentId?: string;
+  assigned_collector_id?: string;
+  assigned_collector_name?: string;
+  assignmentStatus?: string;
+}
+
 interface DashboardSummary {
   totalCollected: number;
   todayCollected: number;
@@ -100,6 +119,19 @@ export const Collectibles = ({ selectedRouter }: { selectedRouter: string }) => 
   const [showForm, setShowForm] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState<CollectorAssignment | null>(null);
   const [showBatch, setShowBatch] = useState(false);
+  const [assignmentsSubTab, setAssignmentsSubTab] = useState<'expiring' | 'all'>('expiring');
+
+  // ── Expiring clients state ──
+  const [expiringClients, setExpiringClients] = useState<ExpiringClient[]>([]);
+  const [expLoading, setExpLoading] = useState(true);
+  const [expSearch, setExpSearch] = useState('');
+  const [expFilterStatus, setExpFilterStatus] = useState('');
+  const [expFilterCollector, setExpFilterCollector] = useState('');
+  const [expFilterAddress, setExpFilterAddress] = useState('');
+  const [selectedClientIds, setSelectedClientIds] = useState<Set<string>>(new Set());
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<ExpiringClient | null>(null);
+  const [showBatchAssignModal, setShowBatchAssignModal] = useState(false);
 
   // ── Dashboard state ──
   const [summary, setSummary] = useState<DashboardSummary>({
@@ -122,6 +154,18 @@ export const Collectibles = ({ selectedRouter }: { selectedRouter: string }) => 
       if (res.ok) { const data = await res.json(); setCollectors(Array.isArray(data) ? data : []); }
     } catch (e) { console.error(e); }
   }, []);
+
+  // ── Fetch expiring clients ──
+  const fetchExpiringClients = useCallback(async () => {
+    setExpLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedRouter) params.append('router_id', selectedRouter);
+      const res = await fetch(`/api/collectibles/expiring-clients?${params}`, { headers: authHeaders() });
+      if (res.ok) { const data = await res.json(); setExpiringClients(Array.isArray(data) ? data : []); }
+    } catch (err) { console.error(err); }
+    setExpLoading(false);
+  }, [selectedRouter]);
 
   // ── Fetch assignments ──
   const fetchAssignments = useCallback(async () => {
@@ -150,6 +194,7 @@ export const Collectibles = ({ selectedRouter }: { selectedRouter: string }) => 
   }, [selectedRouter]);
 
   useEffect(() => { fetchCollectors(); }, [fetchCollectors]);
+  useEffect(() => { fetchExpiringClients(); }, [fetchExpiringClients]);
   useEffect(() => { fetchAssignments(); }, [fetchAssignments]);
   useEffect(() => { fetchAddresses(); }, [fetchAddresses]);
 
@@ -191,6 +236,29 @@ export const Collectibles = ({ selectedRouter }: { selectedRouter: string }) => 
     if (activeTab === 'dashboard') { fetchDashboard(); fetchCollections(); }
   }, [activeTab, fetchDashboard, fetchCollections]);
 
+  // ── Expiring clients filtered list ──
+  const filteredExpiringClients = useMemo(() => {
+    let list = expiringClients;
+    if (expSearch) {
+      const q = expSearch.toLowerCase();
+      list = list.filter(c => c.fullName?.toLowerCase().includes(q) || c.address?.toLowerCase().includes(q) || c.accountNumber?.toLowerCase().includes(q) || c.username?.toLowerCase().includes(q));
+    }
+    if (expFilterStatus === 'Expired') list = list.filter(c => c.expirationStatus === 'Expired');
+    else if (expFilterStatus === 'Expiring') list = list.filter(c => c.expirationStatus === 'Expiring');
+    else if (expFilterStatus === 'Assigned') list = list.filter(c => !!c.assignmentId);
+    else if (expFilterStatus === 'Unassigned') list = list.filter(c => !c.assignmentId);
+    if (expFilterCollector) list = list.filter(c => c.assigned_collector_id === expFilterCollector);
+    if (expFilterAddress) list = list.filter(c => c.address === expFilterAddress);
+    return list;
+  }, [expiringClients, expSearch, expFilterStatus, expFilterCollector, expFilterAddress]);
+
+  const expStats = useMemo(() => ({
+    total: expiringClients.length,
+    expired: expiringClients.filter(c => c.expirationStatus === 'Expired').length,
+    expiring: expiringClients.filter(c => c.expirationStatus === 'Expiring').length,
+    assigned: expiringClients.filter(c => !!c.assignmentId).length,
+  }), [expiringClients]);
+
   // ── Assignment stats ──
   const stats = useMemo(() => ({
     total: assignments.length,
@@ -199,13 +267,42 @@ export const Collectibles = ({ selectedRouter }: { selectedRouter: string }) => 
     revoked: assignments.filter(a => a.status === 'Revoked').length,
   }), [assignments]);
 
+  // ── Checkbox helpers ──
+  const toggleClient = (id: string) => {
+    setSelectedClientIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleAllFiltered = () => {
+    if (selectedClientIds.size === filteredExpiringClients.length && filteredExpiringClients.length > 0) {
+      setSelectedClientIds(new Set());
+    } else {
+      setSelectedClientIds(new Set(filteredExpiringClients.map(c => `${c.clientType}-${c.id}`)));
+    }
+  };
+  const allFilteredSelected = filteredExpiringClients.length > 0 && selectedClientIds.size === filteredExpiringClients.length;
+
   // ── CRUD handlers ──
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this assignment?')) return;
     try {
       await fetch(`/api/collector-assignments/${id}`, { method: 'DELETE', headers: authHeaders() });
       fetchAssignments();
+      fetchExpiringClients();
     } catch (e) { console.error(e); }
+  };
+
+  // ── Single assign from expiring list ──
+  const handleSingleAssign = (client: ExpiringClient) => {
+    setAssignTarget(client);
+    setShowAssignModal(true);
+  };
+
+  // ── Batch assign from selected ──
+  const handleBatchAssignSelected = () => {
+    setShowBatchAssignModal(true);
   };
 
   // ── Render ──
@@ -228,27 +325,70 @@ export const Collectibles = ({ selectedRouter }: { selectedRouter: string }) => 
       </div>
 
       {activeTab === 'assignments' ? (
-        <AssignmentsTab
-          assignments={assignments}
-          loading={loading}
-          search={search}
-          setSearch={setSearch}
-          filterCollector={filterCollector}
-          setFilterCollector={setFilterCollector}
-          filterAddress={filterAddress}
-          setFilterAddress={setFilterAddress}
-          filterStatus={filterStatus}
-          setFilterStatus={setFilterStatus}
-          collectors={collectors}
-          addresses={addresses}
-          stats={stats}
-          selectedRouter={selectedRouter}
-          onNew={() => { setEditingAssignment(null); setShowForm(true); }}
-          onEdit={(a) => { setEditingAssignment(a); setShowForm(true); }}
-          onDelete={handleDelete}
-          onBatch={() => setShowBatch(true)}
-          fetchAssignments={fetchAssignments}
-        />
+        <div className="space-y-4">
+          {/* Sub-tabs */}
+          <div className="flex gap-1">
+            <button
+              onClick={() => setAssignmentsSubTab('expiring')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition ${assignmentsSubTab === 'expiring' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
+            >
+              Expiring Clients
+            </button>
+            <button
+              onClick={() => setAssignmentsSubTab('all')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition ${assignmentsSubTab === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
+            >
+              All Assignments
+            </button>
+          </div>
+
+          {assignmentsSubTab === 'expiring' ? (
+            <ExpiringClientsView
+              clients={filteredExpiringClients}
+              loading={expLoading}
+              stats={expStats}
+              search={expSearch}
+              setSearch={setExpSearch}
+              filterStatus={expFilterStatus}
+              setFilterStatus={setExpFilterStatus}
+              filterCollector={expFilterCollector}
+              setFilterCollector={setExpFilterCollector}
+              filterAddress={expFilterAddress}
+              setFilterAddress={setFilterAddress}
+              collectors={collectors}
+              addresses={addresses}
+              selectedClientIds={selectedClientIds}
+              toggleClient={toggleClient}
+              toggleAllFiltered={toggleAllFiltered}
+              allFilteredSelected={allFilteredSelected}
+              onAssign={handleSingleAssign}
+              onBatchAssign={handleBatchAssignSelected}
+              onRefresh={fetchExpiringClients}
+            />
+          ) : (
+            <AssignmentsTab
+              assignments={assignments}
+              loading={loading}
+              search={search}
+              setSearch={setSearch}
+              filterCollector={filterCollector}
+              setFilterCollector={setFilterCollector}
+              filterAddress={filterAddress}
+              setFilterAddress={setFilterAddress}
+              filterStatus={filterStatus}
+              setFilterStatus={setFilterStatus}
+              collectors={collectors}
+              addresses={addresses}
+              stats={stats}
+              selectedRouter={selectedRouter}
+              onNew={() => { setEditingAssignment(null); setShowForm(true); }}
+              onEdit={(a) => { setEditingAssignment(a); setShowForm(true); }}
+              onDelete={handleDelete}
+              onBatch={() => setShowBatch(true)}
+              fetchAssignments={fetchAssignments}
+            />
+          )}
+        </div>
       ) : (
         <DashboardTab
           summary={summary}
@@ -275,19 +415,177 @@ export const Collectibles = ({ selectedRouter }: { selectedRouter: string }) => 
           collectors={collectors}
           selectedRouter={selectedRouter}
           onClose={() => { setShowForm(false); setEditingAssignment(null); }}
-          onSaved={() => { setShowForm(false); setEditingAssignment(null); fetchAssignments(); }}
+          onSaved={() => { setShowForm(false); setEditingAssignment(null); fetchAssignments(); fetchExpiringClients(); }}
         />
       )}
 
-      {/* Batch Assignment Modal */}
+      {/* Batch Assignment Modal (address-based) */}
       {showBatch && (
         <BatchAssignModal
           collectors={collectors}
           addressFilter={filterAddress}
           selectedRouter={selectedRouter}
           onClose={() => setShowBatch(false)}
-          onSaved={() => { setShowBatch(false); fetchAssignments(); }}
+          onSaved={() => { setShowBatch(false); fetchAssignments(); fetchExpiringClients(); }}
         />
+      )}
+
+      {/* Single Assign from Expiring Client */}
+      {showAssignModal && assignTarget && (
+        <ExpiringClientAssignModal
+          client={assignTarget}
+          collectors={collectors}
+          selectedRouter={selectedRouter}
+          onClose={() => { setShowAssignModal(false); setAssignTarget(null); }}
+          onSaved={() => { setShowAssignModal(false); setAssignTarget(null); fetchExpiringClients(); fetchAssignments(); }}
+        />
+      )}
+
+      {/* Batch Assign from selected expiring clients */}
+      {showBatchAssignModal && (
+        <BatchExpiringAssignModal
+          selectedClients={filteredExpiringClients.filter(c => selectedClientIds.has(`${c.clientType}-${c.id}`))}
+          collectors={collectors}
+          selectedRouter={selectedRouter}
+          onClose={() => setShowBatchAssignModal(false)}
+          onSaved={() => { setShowBatchAssignModal(false); setSelectedClientIds(new Set()); fetchExpiringClients(); fetchAssignments(); }}
+        />
+      )}
+    </div>
+  );
+};
+
+// ─── Expiring Clients View ───────────────────────────────────────────────────
+const ExpiringClientsView: React.FC<{
+  clients: ExpiringClient[];
+  loading: boolean;
+  stats: { total: number; expired: number; expiring: number; assigned: number };
+  search: string; setSearch: (v: string) => void;
+  filterStatus: string; setFilterStatus: (v: string) => void;
+  filterCollector: string; setFilterCollector: (v: string) => void;
+  filterAddress: string; setFilterAddress: (v: string) => void;
+  collectors: Collector[];
+  addresses: string[];
+  selectedClientIds: Set<string>;
+  toggleClient: (id: string) => void;
+  toggleAllFiltered: () => void;
+  allFilteredSelected: boolean;
+  onAssign: (client: ExpiringClient) => void;
+  onBatchAssign: () => void;
+  onRefresh: () => void;
+}> = ({ clients, loading, stats, search, setSearch, filterStatus, setFilterStatus, filterCollector, setFilterCollector, filterAddress, setFilterAddress, collectors, addresses, selectedClientIds, toggleClient, toggleAllFiltered, allFilteredSelected, onAssign, onBatchAssign, onRefresh }) => {
+  const inputCls = 'px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500';
+  return (
+    <div className="space-y-4">
+      {/* Stats cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Total Expiring', value: stats.total, color: 'text-slate-800 dark:text-slate-200' },
+          { label: 'Expired', value: stats.expired, color: 'text-red-600 dark:text-red-400' },
+          { label: 'Expiring Soon', value: stats.expiring, color: 'text-amber-600 dark:text-amber-400' },
+          { label: 'Assigned', value: stats.assigned, color: 'text-green-600 dark:text-green-400' },
+        ].map(s => (
+          <div key={s.label} className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+            <p className="text-xs text-slate-500 dark:text-slate-400">{s.label}</p>
+            <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          type="text"
+          placeholder="Search name, address, account..."
+          className={`${inputCls} w-64`}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <select className={inputCls} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="">All Statuses</option>
+          <option value="Expired">Expired</option>
+          <option value="Expiring">Expiring</option>
+          <option value="Assigned">Assigned</option>
+          <option value="Unassigned">Unassigned</option>
+        </select>
+        <select className={inputCls} value={filterCollector} onChange={e => setFilterCollector(e.target.value)}>
+          <option value="">All Collectors</option>
+          {collectors.map(c => <option key={c.id} value={c.id}>{c.username}</option>)}
+        </select>
+        <select className={inputCls} value={filterAddress} onChange={e => setFilterAddress(e.target.value)}>
+          <option value="">All Addresses</option>
+          {addresses.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <div className="flex-1" />
+        {selectedClientIds.size > 0 && (
+          <button onClick={onBatchAssign} className="flex items-center gap-1 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium">
+            Assign Selected ({selectedClientIds.size})
+          </button>
+        )}
+        <button onClick={onRefresh} className="flex items-center gap-1 px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 text-sm font-medium">
+          ↻ Refresh
+        </button>
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <div className="text-center py-12 text-slate-500">Loading expiring clients...</div>
+      ) : clients.length === 0 ? (
+        <div className="text-center py-12 text-slate-500 dark:text-slate-400">No expiring or expired clients found for this month.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+              <tr>
+                <th className="px-3 py-3 text-center">
+                  <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} className="rounded" />
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Client Name</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Type</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Account #</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Address</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Plan</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Due Date</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Collector</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+              {clients.map(c => {
+                const key = `${c.clientType}-${c.id}`;
+                return (
+                  <tr key={key} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition ${selectedClientIds.has(key) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                    <td className="px-3 py-3 text-center">
+                      <input type="checkbox" checked={selectedClientIds.has(key)} onChange={() => toggleClient(key)} className="rounded" />
+                    </td>
+                    <td className="px-4 py-3 text-slate-800 dark:text-slate-200 font-medium">{c.fullName || c.username || '—'}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.clientType === 'pppoe' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400' : 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400'}`}>
+                        {c.clientType === 'pppoe' ? 'PPPoE' : 'DHCP'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-xs font-mono">{c.accountNumber || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-xs">{c.address || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-xs">{c.planName || '—'}</td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-xs font-mono">{formatDate(c.dueDate)}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.expirationStatus === 'Expired' ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'}`}>
+                        {c.expirationStatus}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300 text-xs">{c.assigned_collector_name || '—'}</td>
+                    <td className="px-4 py-3 text-center">
+                      <button onClick={() => onAssign(c)} className="px-3 py-1 text-xs bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 rounded hover:bg-blue-200 font-medium">
+                        {c.assignmentId ? 'Reassign' : 'Assign'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -565,7 +863,6 @@ const AssignmentFormModal: React.FC<{
   const [custLoading, setCustLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Fetch customers for selector
   const fetchCustomers = useCallback(async (q?: string) => {
     setCustLoading(true);
     try {
@@ -635,16 +932,10 @@ const AssignmentFormModal: React.FC<{
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl">&times;</button>
         </div>
         <div className="flex-1 overflow-auto p-5 space-y-4">
-          {/* Customer selector (create mode only) */}
           {!assignment && (
             <div>
               <label className={labelCls}>Select Customer</label>
-              <input
-                className={inputCls}
-                placeholder="Search customers..."
-                value={custSearch}
-                onChange={e => { setCustSearch(e.target.value); fetchCustomers(e.target.value); }}
-              />
+              <input className={inputCls} placeholder="Search customers..." value={custSearch} onChange={e => { setCustSearch(e.target.value); fetchCustomers(e.target.value); }} />
               {custLoading && <p className="text-xs text-slate-400 mt-1">Searching...</p>}
               {custSearch && customers.length > 0 && (
                 <div className="mt-1 max-h-40 overflow-auto border border-slate-200 dark:border-slate-600 rounded-lg">
@@ -658,61 +949,184 @@ const AssignmentFormModal: React.FC<{
               )}
             </div>
           )}
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className={labelCls}>Customer Name *</label>
-              <input className={inputCls} value={form.customer_name} onChange={e => setForm({ ...form, customer_name: e.target.value })} />
-            </div>
-            <div>
-              <label className={labelCls}>Username</label>
-              <input className={inputCls} value={form.customer_username} onChange={e => setForm({ ...form, customer_username: e.target.value })} />
-            </div>
-            <div>
-              <label className={labelCls}>Account Number</label>
-              <input className={inputCls} value={form.customer_account_number} onChange={e => setForm({ ...form, customer_account_number: e.target.value })} />
-            </div>
-            <div>
-              <label className={labelCls}>Address</label>
-              <input className={inputCls} value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
-            </div>
-            <div>
-              <label className={labelCls}>Plan</label>
-              <input className={inputCls} value={form.plan_name} onChange={e => setForm({ ...form, plan_name: e.target.value })} />
-            </div>
-            <div>
-              <label className={labelCls}>Assigned Collector *</label>
+            <div><label className={labelCls}>Customer Name *</label><input className={inputCls} value={form.customer_name} onChange={e => setForm({ ...form, customer_name: e.target.value })} /></div>
+            <div><label className={labelCls}>Username</label><input className={inputCls} value={form.customer_username} onChange={e => setForm({ ...form, customer_username: e.target.value })} /></div>
+            <div><label className={labelCls}>Account Number</label><input className={inputCls} value={form.customer_account_number} onChange={e => setForm({ ...form, customer_account_number: e.target.value })} /></div>
+            <div><label className={labelCls}>Address</label><input className={inputCls} value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
+            <div><label className={labelCls}>Plan</label><input className={inputCls} value={form.plan_name} onChange={e => setForm({ ...form, plan_name: e.target.value })} /></div>
+            <div><label className={labelCls}>Assigned Collector *</label>
               <select className={inputCls} value={form.assigned_collector_id} onChange={e => setForm({ ...form, assigned_collector_id: e.target.value })}>
                 <option value="">Select Collector</option>
                 {collectors.map(c => <option key={c.id} value={c.id}>{c.username}</option>)}
               </select>
             </div>
-            {assignment && (
-              <div>
-                <label className={labelCls}>Status</label>
-                <select className={inputCls} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-                  {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-            )}
+            {assignment && (<div><label className={labelCls}>Status</label>
+              <select className={inputCls} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+                {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>)}
           </div>
-          <div>
-            <label className={labelCls}>Notes</label>
-            <textarea rows={3} className={inputCls} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
-          </div>
+          <div><label className={labelCls}>Notes</label><textarea rows={3} className={inputCls} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
         </div>
         <div className="flex justify-end gap-2 p-4 border-t border-slate-200 dark:border-slate-700">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200">Cancel</button>
-          <button onClick={handleSubmit} disabled={saving} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-            {saving ? 'Saving...' : assignment ? 'Update Assignment' : 'Create Assignment'}
-          </button>
+          <button onClick={handleSubmit} disabled={saving} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving...' : assignment ? 'Update Assignment' : 'Create Assignment'}</button>
         </div>
       </div>
     </div>
   );
 };
 
-// ─── Batch Assign Modal ──────────────────────────────────────────────────────
+// ─── Expiring Client Assign Modal (single) ───────────────────────────────────
+const ExpiringClientAssignModal: React.FC<{
+  client: ExpiringClient;
+  collectors: Collector[];
+  selectedRouter: string;
+  onClose: () => void;
+  onSaved: () => void;
+}> = ({ client, collectors, selectedRouter, onClose, onSaved }) => {
+  const [collectorId, setCollectorId] = useState(client.assigned_collector_id || '');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!collectorId) { alert('Please select a collector'); return; }
+    const collector = collectors.find(c => c.id === collectorId);
+    setSaving(true);
+    try {
+      const body = {
+        router_id: client.routerId || selectedRouter,
+        customer_id: client.id,
+        customer_name: client.fullName || '',
+        customer_username: client.username || '',
+        customer_account_number: client.accountNumber || '',
+        address: client.address || '',
+        plan_name: client.planName || '',
+        assigned_collector_id: collectorId,
+        assigned_collector_name: collector?.username || '',
+        notes,
+      };
+      const res = await fetch('/api/collector-assignments', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      if (!res.ok) throw new Error('Failed to assign collector');
+      onSaved();
+    } catch (e: any) { alert(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const inputCls = 'w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500';
+  const labelCls = 'block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+          <h3 className="text-lg font-semibold text-slate-800 dark:text-white">{client.assignmentId ? 'Reassign' : 'Assign'} Collector</h3>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 space-y-1 text-sm">
+            <p className="font-medium text-slate-800 dark:text-slate-200">{client.fullName || client.username}</p>
+            <p className="text-xs text-slate-500">{client.accountNumber || '—'} &middot; {client.address || '—'}</p>
+            <p className="text-xs text-slate-500">Due: {formatDate(client.dueDate)} &middot; <span className={client.expirationStatus === 'Expired' ? 'text-red-600 dark:text-red-400 font-medium' : 'text-amber-600 dark:text-amber-400 font-medium'}>{client.expirationStatus}</span></p>
+          </div>
+          <div>
+            <label className={labelCls}>Select Collector *</label>
+            <select className={inputCls} value={collectorId} onChange={e => setCollectorId(e.target.value)}>
+              <option value="">Select Collector</option>
+              {collectors.map(c => <option key={c.id} value={c.id}>{c.username}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Notes</label>
+            <textarea rows={2} className={inputCls} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 p-4 border-t border-slate-200 dark:border-slate-700">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200">Cancel</button>
+          <button onClick={handleSubmit} disabled={saving} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Assigning...' : 'Assign Collector'}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Batch Expiring Assign Modal ─────────────────────────────────────────────
+const BatchExpiringAssignModal: React.FC<{
+  selectedClients: ExpiringClient[];
+  collectors: Collector[];
+  selectedRouter: string;
+  onClose: () => void;
+  onSaved: () => void;
+}> = ({ selectedClients, collectors, selectedRouter, onClose, onSaved }) => {
+  const [collectorId, setCollectorId] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!collectorId) { alert('Please select a collector'); return; }
+    if (selectedClients.length === 0) { alert('No clients selected'); return; }
+    const collector = collectors.find(c => c.id === collectorId);
+    setSaving(true);
+    try {
+      // Create assignments one by one
+      let success = 0;
+      for (const client of selectedClients) {
+        const body = {
+          router_id: client.routerId || selectedRouter,
+          customer_id: client.id,
+          customer_name: client.fullName || '',
+          customer_username: client.username || '',
+          customer_account_number: client.accountNumber || '',
+          address: client.address || '',
+          plan_name: client.planName || '',
+          assigned_collector_id: collectorId,
+          assigned_collector_name: collector?.username || '',
+          notes: '',
+        };
+        const res = await fetch('/api/collector-assignments', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+        if (res.ok) success++;
+      }
+      alert(`Assigned ${success} of ${selectedClients.length} clients.`);
+      onSaved();
+    } catch (e: any) { alert(e.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+          <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Batch Assign ({selectedClients.length} clients)</h3>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl">&times;</button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="max-h-32 overflow-auto text-xs text-slate-600 dark:text-slate-400 space-y-1">
+            {selectedClients.map(c => (
+              <p key={`${c.clientType}-${c.id}`}>{c.fullName || c.username} — {formatDate(c.dueDate)}</p>
+            ))}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Select Collector *</label>
+            <select
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500"
+              value={collectorId}
+              onChange={e => setCollectorId(e.target.value)}
+            >
+              <option value="">Select Collector</option>
+              {collectors.map(c => <option key={c.id} value={c.id}>{c.username}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 p-4 border-t border-slate-200 dark:border-slate-700">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200">Cancel</button>
+          <button onClick={handleSubmit} disabled={saving} className="px-5 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 font-medium">{saving ? 'Assigning...' : `Assign ${selectedClients.length} Clients`}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Batch Assign Modal (address-based, original) ────────────────────────────
 const BatchAssignModal: React.FC<{
   collectors: Collector[];
   addressFilter: string;
@@ -771,9 +1185,7 @@ const BatchAssignModal: React.FC<{
         </div>
         <div className="flex justify-end gap-2 p-4 border-t border-slate-200 dark:border-slate-700">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200">Cancel</button>
-          <button onClick={handleSubmit} disabled={saving} className="px-5 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 font-medium">
-            {saving ? 'Assigning...' : 'Batch Assign'}
-          </button>
+          <button onClick={handleSubmit} disabled={saving} className="px-5 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 font-medium">{saving ? 'Assigning...' : 'Batch Assign'}</button>
         </div>
       </div>
     </div>

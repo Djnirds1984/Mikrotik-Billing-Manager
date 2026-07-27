@@ -9954,6 +9954,80 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
+    // ========== Collectibles — Expiring Clients API ==========
+
+    // GET /api/collectibles/expiring-clients - Returns PPPoE + DHCP clients with dueDate in the current month or earlier
+    app.get('/api/collectibles/expiring-clients', protect, async (req, res) => {
+        try {
+            const { router_id } = req.query;
+            const today = new Date().toISOString().split('T')[0];
+            const now = new Date();
+            const firstOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split('T')[0];
+
+            let routerFilter = '';
+            const params = [];
+            if (router_id) {
+                routerFilter = ' AND c.routerId = ?';
+                params.push(router_id);
+            }
+
+            // PPPoE clients with dueDate before end of current month
+            const pppoeClients = await db.all(`
+                SELECT c.id, c.username, c.routerId, c.fullName, c.address, c.contactNumber,
+                       c.accountNumber, c.planName, c.planType, c.dueDate,
+                       r.name as routerName,
+                       'pppoe' as clientType,
+                       CASE WHEN c.dueDate < ? THEN 'Expired' ELSE 'Expiring' END as expirationStatus,
+                       ca.id as assignmentId, ca.assigned_collector_id, ca.assigned_collector_name, ca.status as assignmentStatus
+                FROM customers c
+                LEFT JOIN routers r ON c.routerId = r.id
+                LEFT JOIN collector_assignments ca ON ca.customer_id = c.id AND ca.status = 'Active'
+                WHERE c.dueDate IS NOT NULL
+                  AND c.dueDate != ''
+                  AND c.dueDate < ?
+                ${routerFilter}
+                ORDER BY c.dueDate ASC
+            `, [today, firstOfNextMonth, ...params]);
+
+            // DHCP clients with dueDate before end of current month
+            let dhcpRouterFilter = '';
+            const dhcpParams = [];
+            if (router_id) {
+                dhcpRouterFilter = ' AND dc.routerId = ?';
+                dhcpParams.push(router_id);
+            }
+            const dhcpClients = await db.all(`
+                SELECT dc.id, dc.macAddress as username, dc.routerId,
+                       COALESCE(dc.fullName, dc.customerInfo) as fullName,
+                       dc.address, dc.contactNumber, dc.accountNumber, dc.planName,
+                       dc.dueDate,
+                       r.name as routerName,
+                       'dhcp' as clientType,
+                       CASE WHEN dc.dueDate < ? THEN 'Expired' ELSE 'Expiring' END as expirationStatus,
+                       ca.id as assignmentId, ca.assigned_collector_id, ca.assigned_collector_name, ca.status as assignmentStatus
+                FROM dhcp_clients dc
+                LEFT JOIN routers r ON dc.routerId = r.id
+                LEFT JOIN collector_assignments ca ON ca.customer_id = dc.id AND ca.status = 'Active'
+                WHERE dc.dueDate IS NOT NULL
+                  AND dc.dueDate != ''
+                  AND dc.dueDate < ?
+                ${dhcpRouterFilter}
+                ORDER BY dc.dueDate ASC
+            `, [today, firstOfNextMonth, ...dhcpParams]);
+
+            // Merge and sort
+            const allClients = [...pppoeClients, ...dhcpClients].sort((a, b) => {
+                if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+                return 0;
+            });
+
+            res.json(allClients);
+        } catch (error) {
+            console.error('Error fetching expiring clients:', error);
+            res.status(500).json({ error: 'Failed to fetch expiring clients' });
+        }
+    });
+
     // ========== Collector Assignments API ==========
 
     // GET /api/collector-assignments - List with filters
