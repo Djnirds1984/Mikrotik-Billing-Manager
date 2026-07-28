@@ -10096,7 +10096,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 query += ' AND router_id = ?';
                 params.push(router_id);
             }
-            if (assigned_collector_id) {
+            // Collector role users can only ever see their own assignments
+            const isCollectorRole = (req.user?.role?.name || '').toLowerCase() === 'collector';
+            if (isCollectorRole) {
+                query += ' AND assigned_collector_id = ?';
+                params.push(req.user.id);
+            } else if (assigned_collector_id) {
                 query += ' AND assigned_collector_id = ?';
                 params.push(assigned_collector_id);
             }
