@@ -5384,7 +5384,10 @@ async function startServer() {
         let row = null;
         if (planId) row = await db.get('SELECT price, currency, name FROM billing_plans WHERE id = ? AND routerId = ?', [planId, routerId]);
         if (!row && planName) row = await db.get('SELECT price, currency, name FROM billing_plans WHERE name = ? AND routerId = ?', [planName, routerId]);
-        return row ? { amount: row.price, currency: row.currency || 'PHP', planName: row.name } : { amount: 0, currency: 'PHP', planName: planName || '' };
+        // Use the configured system currency so invoices match panel settings (plan rows may hold a stale default like 'USD')
+        const settingsRow = await db.get('SELECT currency FROM settings WHERE id = 1');
+        const currency = convertCurrencyToCode(settingsRow?.currency || (row ? row.currency : null));
+        return row ? { amount: row.price, currency, planName: row.name } : { amount: 0, currency, planName: planName || '' };
     };
     const ensureInvoice = async ({ routerId, username, accountNumber, source, planName, planId, dueDate }) => {
         if (!dueDate) return;

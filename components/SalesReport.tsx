@@ -44,7 +44,7 @@ const formatPaymentMethod = (method?: string): string => {
 
 export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale, clearSales, companySettings, selectedRouter }) => {
     const { hasPermission } = useAuth();
-    const { formatCurrency } = useLocalization();
+    const { formatCurrency, currency: systemCurrency } = useLocalization();
     const canDelete = hasPermission('action:delete');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -162,15 +162,15 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                     } catch {}
                 }
                 // Lookup plan price
-                let amount = 0; let currency = 'PHP';
+                let amount = 0; let currency = systemCurrency || 'PHP';
                 if (planId) {
                     const p = await dbApi.get<any[]>(`/billing-plans?routerId=${addRouterId}`);
                     const found = Array.isArray(p) ? p.find(pl => pl.id === planId) : null;
-                    if (found) { amount = found.price || 0; currency = found.currency || 'PHP'; planName = found.name || planName; }
+                    if (found) { amount = found.price || 0; planName = found.name || planName; }
                 } else if (planName) {
                     const p = await dbApi.get<any[]>(`/billing-plans?routerId=${addRouterId}`);
                     const found = Array.isArray(p) ? p.find(pl => String(pl.name).toLowerCase() === String(planName).toLowerCase()) : null;
-                    if (found) { amount = found.price || 0; currency = found.currency || 'PHP'; planName = found.name || planName; }
+                    if (found) { amount = found.price || 0; planName = found.name || planName; }
                 }
                 payload.planName = planName;
                 payload.planId = planId || null;
@@ -183,7 +183,7 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
                 payload.username = String(label || '').toLowerCase();
                 payload.planName = '';
                 payload.amount = 0;
-                payload.currency = 'PHP';
+                payload.currency = systemCurrency || 'PHP';
                 payload.dueDateTime = null;
             }
             await dbApi.post('/client-invoices', payload);
@@ -418,7 +418,71 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                 )}
             </div>
             
-            <div className={!receiptToPrint ? 'printable-area' : 'hidden'}>
+            <div className={invoiceToPrint ? 'printable-area' : 'hidden'}>
+                {invoiceToPrint && panelSettings && (
+                    <div className="p-8 font-sans text-black bg-white">
+                        <header className="flex justify-between items-start pb-4 border-b-2 border-black">
+                            <div className="w-2/3">
+                                <div className="text-3xl font-bold">{panelSettings.companyName || 'Your Company'}</div>
+                                {panelSettings.address && <div className="text-sm">{panelSettings.address}</div>}
+                                {panelSettings.contactNumber && <div className="text-sm">{panelSettings.contactNumber}</div>}
+                                {panelSettings.email && <div className="text-sm">{panelSettings.email}</div>}
+                            </div>
+                            {panelSettings.logoBase64 && (
+                                <div className="w-1/3 flex justify-end">
+                                    <img src={panelSettings.logoBase64} alt="" className="h-16 w-auto object-contain" />
+                                </div>
+                            )}
+                        </header>
+                        <section className="my-6">
+                            <div className="flex justify-between">
+                                <div>
+                                    <div className="font-bold">BILLED TO:</div>
+                                    <div>{invoiceToPrint.username}</div>
+                                    {invoiceToPrint.accountNumber && <div className="text-sm">Account: {invoiceToPrint.accountNumber}</div>}
+                                </div>
+                                <div className="text-right">
+                                    <div className="font-bold">INVOICE</div>
+                                    <div>Issued: {invoiceToPrint.issueDate ? new Date(invoiceToPrint.issueDate).toLocaleDateString() : '—'}</div>
+                                    <div>Due: {invoiceToPrint.dueDateTime ? new Date(invoiceToPrint.dueDateTime).toLocaleDateString() : '—'}</div>
+                                    <div>Status: {String(invoiceToPrint.status || 'PENDING').toUpperCase()}</div>
+                                </div>
+                            </div>
+                        </section>
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-gray-200">
+                                <tr>
+                                    <th className="p-2 border border-black">DESCRIPTION</th>
+                                    <th className="p-2 border border-black text-right">AMOUNT</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td className="p-2 border border-black">
+                                        <div className="font-semibold">{invoiceToPrint.planName || 'Subscription'}</div>
+                                        <div className="text-xs text-gray-600">Internet Plan Subscription</div>
+                                    </td>
+                                    <td className="p-2 border border-black text-right">{formatCurrency(invoiceToPrint.amount || 0)}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <section className="my-6 flex justify-end">
+                            <div className="w-1/2">
+                                <div className="flex justify-between font-bold text-xl mt-2 pt-2 border-t-2 border-black">
+                                    <span>TOTAL:</span>
+                                    <span>{formatCurrency(invoiceToPrint.amount || 0)}</span>
+                                </div>
+                            </div>
+                        </section>
+                        <footer className="mt-8 pt-4 border-t-2 border-dashed border-black text-center">
+                            <div className="font-bold">Thank you!</div>
+                            <div className="text-xs mt-2">This is an invoice document.</div>
+                        </footer>
+                    </div>
+                )}
+            </div>
+            
+            <div className={!receiptToPrint && !invoiceToPrint ? 'printable-area' : 'hidden'}>
                 <div className="max-w-7xl mx-auto space-y-6">
                     <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 no-print">
                          <div>
@@ -795,76 +859,13 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                             <div className="p-3 border-r">Amount</div>
                                             <div className="p-3">{formatCurrency(invoiceToView.amount || 0)}</div>
                                             <div className="p-3 border-r">Currency</div>
-                                            <div className="p-3">{invoiceToView.currency || 'PHP'}</div>
+                                            <div className="p-3">{systemCurrency || invoiceToView.currency || 'PHP'}</div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     )}
-                    <div className={invoiceToPrint ? 'printable-area' : 'hidden'}>
-                        {invoiceToPrint && panelSettings && (
-                            <div className="p-8 font-sans text-black bg-white">
-                                <header className="flex justify-between items-start pb-4 border-b-2 border-black">
-                                    <div className="w-2/3">
-                                        <div className="text-3xl font-bold">{panelSettings.companyName || 'Your Company'}</div>
-                                        {panelSettings.address && <div className="text-sm">{panelSettings.address}</div>}
-                                        {panelSettings.contactNumber && <div className="text-sm">{panelSettings.contactNumber}</div>}
-                                        {panelSettings.email && <div className="text-sm">{panelSettings.email}</div>}
-                                    </div>
-                                    {panelSettings.logoBase64 && (
-                                        <div className="w-1/3 flex justify-end">
-                                            <img src={panelSettings.logoBase64} alt="" className="h-16 w-auto object-contain" />
-                                        </div>
-                                    )}
-                                </header>
-                                <section className="my-6">
-                                    <div className="flex justify-between">
-                                        <div>
-                                            <div className="font-bold">BILLED TO:</div>
-                                            <div>{invoiceToPrint.username}</div>
-                                            {invoiceToPrint.accountNumber && <div className="text-sm">Account: {invoiceToPrint.accountNumber}</div>}
-                                        </div>
-                                        <div className="text-right">
-                                            <div className="font-bold">INVOICE</div>
-                                            <div>Issued: {invoiceToPrint.issueDate ? new Date(invoiceToPrint.issueDate).toLocaleDateString() : '—'}</div>
-                                            <div>Due: {invoiceToPrint.dueDateTime ? new Date(invoiceToPrint.dueDateTime).toLocaleDateString() : '—'}</div>
-                                            <div>Status: {String(invoiceToPrint.status || 'PENDING').toUpperCase()}</div>
-                                        </div>
-                                    </div>
-                                </section>
-                                <table className="w-full text-left border-collapse">
-                                    <thead className="bg-gray-200">
-                                        <tr>
-                                            <th className="p-2 border border-black">DESCRIPTION</th>
-                                            <th className="p-2 border border-black text-right">AMOUNT</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td className="p-2 border border-black">
-                                                <div className="font-semibold">{invoiceToPrint.planName || 'Subscription'}</div>
-                                                <div className="text-xs text-gray-600">Internet Plan Subscription</div>
-                                            </td>
-                                            <td className="p-2 border border-black text-right">{formatCurrency(invoiceToPrint.amount || 0)}</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                                <section className="my-6 flex justify-end">
-                                    <div className="w-1/2">
-                                        <div className="flex justify-between font-bold text-xl mt-2 pt-2 border-t-2 border-black">
-                                            <span>TOTAL:</span>
-                                            <span>{formatCurrency(invoiceToPrint.amount || 0)}</span>
-                                        </div>
-                                    </div>
-                                </section>
-                                <footer className="mt-8 pt-4 border-t-2 border-dashed border-black text-center">
-                                    <div className="font-bold">Thank you!</div>
-                                    <div className="text-xs mt-2">This is an invoice document.</div>
-                                </footer>
-                            </div>
-                        )}
-                    </div>
                 </div>
                 
                 {/* Mikrotik Sales Logs Section */}
