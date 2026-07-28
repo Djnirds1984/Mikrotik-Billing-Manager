@@ -1407,6 +1407,29 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             planType: planType || 'prepaid'
         };
 
+        // Grace grants must NOT overwrite the client's original due date in the comment;
+        // the grace deadline lives only in the deactivate scheduler. Carry over the existing
+        // comment's due date (and any extra keys), falling back to expiresAt only when the
+        // existing comment has no parseable due date.
+        const resolveCommentJson = (existingCommentStr) => {
+            if (!(graceDays && !manualExpiresAt)) return JSON.stringify(commentData);
+            let existing = {};
+            try { existing = JSON.parse(existingCommentStr || '{}'); } catch (_) { existing = {}; }
+            const merged = { ...existing };
+            if (customerInfo) merged.customerInfo = customerInfo;
+            if (contactNumber) merged.contactNumber = contactNumber;
+            if (email) merged.email = email;
+            if (plan && plan.name) merged.planName = plan.name;
+            if (planType) merged.planType = planType;
+            if (!merged.planType) merged.planType = 'prepaid';
+            const existingDue = new Date(merged.dueDateTime || merged.dueDate || '');
+            if (isNaN(existingDue.getTime())) {
+                merged.dueDate = commentData.dueDate;
+                merged.dueDateTime = commentData.dueDateTime;
+            }
+            return JSON.stringify(merged);
+        };
+
         // Common Scheduler Script (RouterOS format)
         const schedName = `deactivate-dhcp-${address.replace(/\./g, '-')}`;
         const onEvent = `/ip firewall address-list remove [find where address='${address}' and list='authorized-dhcp-users']; /ip firewall connection remove [find where src-address~'^${address}']; :local leaseId [/ip dhcp-server lease find where address='${address}']; if ([:len $leaseId] > 0) do={ /ip firewall address-list add address='${address}' list='pending-dhcp-users' timeout=1d comment='${macAddress}'; }`;
@@ -1423,9 +1446,9 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             // 1. Ensure Authorized entry exists; attach expiry metadata
             const addressLists = await writeLegacySafe(client, ['/ip/firewall/address-list/print', '?address=' + address, '?list=authorized-dhcp-users']);
             if (Array.isArray(addressLists) && addressLists.length > 0) {
-                await client.write('/ip/firewall/address-list/set', { '.id': addressLists[0]['.id'], comment: JSON.stringify(commentData) });
+                await client.write('/ip/firewall/address-list/set', { '.id': addressLists[0]['.id'], comment: resolveCommentJson(addressLists[0]['comment']) });
             } else {
-                await client.write('/ip/firewall/address-list/add', { address, list: 'authorized-dhcp-users', timeout: '0s', comment: JSON.stringify(commentData) });
+                await client.write('/ip/firewall/address-list/add', { address, list: 'authorized-dhcp-users', timeout: '0s', comment: resolveCommentJson(null) });
             }
             const pendingLists = await writeLegacySafe(client, ['/ip/firewall/address-list/print', '?address=' + address, '?list=pending-dhcp-users']);
             if (Array.isArray(pendingLists) && pendingLists.length > 0) {
@@ -1472,9 +1495,9 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
             try {
                 const alRes = await instance.get(`/ip/firewall/address-list?address=${address}&list=authorized-dhcp-users`);
                 if (alRes.data && alRes.data.length > 0) {
-                    await instance.patch(`/ip/firewall/address-list/${alRes.data[0]['.id']}`, { comment: JSON.stringify(commentData) });
+                    await instance.patch(`/ip/firewall/address-list/${alRes.data[0]['.id']}`, { comment: resolveCommentJson(alRes.data[0]['comment']) });
                 } else {
-                    await instance.put(`/ip/firewall/address-list`, { address, list: 'authorized-dhcp-users', timeout: '0s', comment: JSON.stringify(commentData) });
+                    await instance.put(`/ip/firewall/address-list`, { address, list: 'authorized-dhcp-users', timeout: '0s', comment: resolveCommentJson(null) });
                 }
             } catch (e) { console.warn("Address list update warning", e.message); }
             try {
@@ -1588,8 +1611,14 @@ const onEvent = `/log info message="PPPoE auto-kick: ${String(secretData.name)}"
                     if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
                     let base = {}; try { base = JSON.parse(meta[0]?.comment || '{}'); } catch (_) {}
                     const merged = { ...base, ...subscriptionData, planType: (subscriptionData.planType || '').toLowerCase() || preservedPlanType };
+                    delete merged.graceDays; delete merged.graceTime; delete merged.nonPaymentProfile;
                     if (subscriptionData?.dueDate) { const s = String(subscriptionData.dueDate); const datePart = s.split('T')[0]; merged.dueDate = datePart; merged.dueDateTime = s; }
-                    if (d && !subscriptionData?.dueDate) { const y = d.getFullYear(); const m = String(d.getMonth()+1).padStart(2,'0'); const dd = String(d.getDate()).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mm = String(d.getMinutes()).padStart(2,'0'); const datePart = `${y}-${m}-${dd}`; merged.dueDate = datePart; merged.dueDateTime = `${datePart}T${hh}:${mm}`; }
+                    if (d && !isGrace && !subscriptionData?.dueDate && subscriptionData?.dueDateTime) { const y = d.getFullYear(); const m = String(d.getMonth()+1).padStart(2,'0'); const dd = String(d.getDate()).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mm = String(d.getMinutes()).padStart(2,'0'); const datePart = `${y}-${m}-${dd}`; merged.dueDate = datePart; merged.dueDateTime = `${datePart}T${hh}:${mm}`; }
+                    if (!subscriptionData?.dueDate && !subscriptionData?.dueDateTime) {
+                        // No explicit due provided (e.g. grace grant): keep the original comment due date untouched
+                        if (base.dueDate != null) merged.dueDate = base.dueDate; else delete merged.dueDate;
+                        if (base.dueDateTime != null) merged.dueDateTime = base.dueDateTime; else delete merged.dueDateTime;
+                    }
                     payload['comment'] = JSON.stringify(merged);
                     console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
                 }
@@ -1685,8 +1714,14 @@ const onEvent = `/log info message="PPPoE auto-kick: ${String(secretData.name)}"
                 if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
                 let base = {}; try { base = JSON.parse((Array.isArray(s.data) && s.data[0]?.comment) || '{}'); } catch (_) {}
                 const merged = { ...base, ...subscriptionData, planType: (subscriptionData.planType || '').toLowerCase() || preservedPlanType };
+                delete merged.graceDays; delete merged.graceTime; delete merged.nonPaymentProfile;
                 if (subscriptionData?.dueDate) { const sVal = String(subscriptionData.dueDate); const datePart = sVal.split('T')[0]; merged.dueDate = datePart; merged.dueDateTime = sVal; }
-                if (d && !subscriptionData?.dueDate) { const y = d.getFullYear(); const m = String(d.getMonth()+1).padStart(2,'0'); const dd = String(d.getDate()).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mm = String(d.getMinutes()).padStart(2,'0'); const datePart = `${y}-${m}-${dd}`; merged.dueDate = datePart; merged.dueDateTime = `${datePart}T${hh}:${mm}`; }
+                if (d && !isGrace && !subscriptionData?.dueDate && subscriptionData?.dueDateTime) { const y = d.getFullYear(); const m = String(d.getMonth()+1).padStart(2,'0'); const dd = String(d.getDate()).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mm = String(d.getMinutes()).padStart(2,'0'); const datePart = `${y}-${m}-${dd}`; merged.dueDate = datePart; merged.dueDateTime = `${datePart}T${hh}:${mm}`; }
+                if (!subscriptionData?.dueDate && !subscriptionData?.dueDateTime) {
+                    // No explicit due provided (e.g. grace grant): keep the original comment due date untouched
+                    if (base.dueDate != null) merged.dueDate = base.dueDate; else delete merged.dueDate;
+                    if (base.dueDateTime != null) merged.dueDateTime = base.dueDateTime; else delete merged.dueDateTime;
+                }
                 payload['comment'] = JSON.stringify(merged);
                 console.log('[ppp/user/save] preserve planType:', preservedPlanType || subscriptionData.planType || 'unknown');
             }
@@ -1719,7 +1754,7 @@ if (shouldKick) {
             } catch (e) { console.warn('[ppp/user/save] REST active remove failed:', e.message); }
 
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
-            const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secretData.name)]);
+            if (!isGrace) { const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secretData.name)]); }
             res.json(savedRes.data);
         }
     } catch (e) {
@@ -1822,8 +1857,19 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
             // If we have an original fixed day, preserve it and advance by 1 month
             if (originalFixedDay) {
                 fixedDay = originalFixedDay;
-                // Start from payment date and advance by 1 calendar month
-                const baseDate = start;
+                // Base on the client's ORIGINAL due date (not the payment date) so paying
+                // during a grace period never shifts the cycle an extra month forward
+                let baseDate = clientExistingDueDate || null;
+                if (!baseDate) {
+                    try {
+                        if (secret && secret.comment) {
+                            const c = JSON.parse(secret.comment);
+                            const prevDue = new Date(c.dueDateTime || c.dueDate || '');
+                            if (!isNaN(prevDue.getTime())) baseDate = prevDue;
+                        }
+                    } catch (e) {}
+                }
+                if (!baseDate) baseDate = start;
                 let targetYear = baseDate.getFullYear();
                 let targetMonth = baseDate.getMonth() + 1; // Next month
                 
@@ -1945,6 +1991,13 @@ const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:d
                     if (Array.isArray(s) && s.length > 0 && s[0]['.id']) await client.write('/system/scheduler/remove', { '.id': s[0]['.id'] });
                     await client.write('/system/scheduler/add', { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
                 } catch (e) { console.warn('[ppp/payment/process] scheduler update failed:', e.message); }
+
+                // Payment clears any pending grace: remove the grace-expire scheduler so it
+                // can't downgrade the freshly paid client at the old grace deadline
+                try {
+                    const gs = await writeLegacySafe(client, ['/system/scheduler/print', `?name=ppp-grace-expire-${String(secret.name)}`]);
+                    if (Array.isArray(gs) && gs.length > 0 && gs[0]['.id']) await client.write('/system/scheduler/remove', { '.id': gs[0]['.id'] });
+                } catch (e) { console.warn('[ppp/payment/process] grace scheduler cleanup failed:', e.message); }
                 
                 try {
                     const active = await writeLegacySafe(client, ['/ppp/active/print', `?name=${String(secret.name)}`]);
@@ -1972,6 +2025,12 @@ const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:d
             const sch = await instance.get(`/system/scheduler?name=${encodeURIComponent(schedName)}`);
             if (Array.isArray(sch.data) && sch.data.length > 0) await instance.delete(`/system/scheduler/${sch.data[0]['.id']}`);
             await instance.put(`/system/scheduler`, { name: schedName, 'start-date': rosDate, 'start-time': rosTime, interval: '0s', 'on-event': onEvent });
+            // Payment clears any pending grace: remove the grace-expire scheduler so it
+            // can't downgrade the freshly paid client at the old grace deadline
+            try {
+                const gsch = await instance.get(`/system/scheduler?name=${encodeURIComponent(`ppp-grace-expire-${String(secret.name)}`)}`);
+                if (Array.isArray(gsch.data) && gsch.data.length > 0) await instance.delete(`/system/scheduler/${gsch.data[0]['.id']}`);
+            } catch (e) { console.warn('[ppp/payment/process] REST grace scheduler cleanup failed:', e.message); }
             try { 
                 const activeRes = await instance.get(`/ppp/active?name=${name}`);
                 if (Array.isArray(activeRes.data) && activeRes.data.length > 0) {
@@ -1979,6 +2038,9 @@ const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:d
                 }
             } catch (e) { console.warn('[ppp/payment/process] REST active remove failed:', e.message); }
             const savedRes = await instance.get(`/ppp/secret?name=${name}`);
+            try {
+                const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
+            } catch (e) { console.warn('[ppp/payment/process] REST ppp_grace cleanup failed:', e.message); }
             res.json(savedRes.data);
         }
     } catch (e) {

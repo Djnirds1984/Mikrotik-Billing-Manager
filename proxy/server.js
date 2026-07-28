@@ -3658,6 +3658,34 @@ async function startServer() {
                             console.error('[Manual Payments] Scheduler creation error:', schedErr.message);
                             console.error('[Manual Payments] Scheduler error stack:', schedErr.stack);
                         }
+                        
+                        // Payment clears any pending grace period: remove the grace DB record and
+                        // the ppp-grace-expire scheduler so they can't downgrade the paid client (best effort)
+                        try {
+                            await db.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [payment.customer_router_id, secret.name]);
+                            console.log('[Manual Payments] ✓ Cleared ppp_grace record for', secret.name);
+                        } catch (graceDbErr) {
+                            console.error('[Manual Payments] Grace record cleanup error:', graceDbErr.message);
+                        }
+                        try {
+                            const graceSchedName = `ppp-grace-expire-${secret.name}`;
+                            const graceRes = await axios.get(`${apiBase}/rest/system/scheduler`, {
+                                headers: { Authorization: authHeader },
+                                timeout: 10000
+                            });
+                            const graceScheds = Array.isArray(graceRes.data) ? graceRes.data : [];
+                            for (const sched of graceScheds) {
+                                if (sched.name === graceSchedName && sched['.id']) {
+                                    await axios.post(`${apiBase}/rest/system/scheduler/remove`, { '.id': sched['.id'] }, {
+                                        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                        timeout: 10000
+                                    });
+                                    console.log('[Manual Payments] ✓ Removed grace scheduler:', sched['.id']);
+                                }
+                            }
+                        } catch (graceErr) {
+                            console.error('[Manual Payments] Grace scheduler cleanup error:', graceErr.message);
+                        }
                     } else {
                         console.error(`[Manual Payments] PPP secret NOT found for username: ${payment.customer_username}`);
                         console.error(`[Manual Payments] Available secrets:`, secrets.map(s => s.name).join(', '));
@@ -6817,6 +6845,34 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                           console.log('[PayMongo Webhook] ✓ Scheduler created: Non-Payment on', newDueStr);
                         } catch (schedErr) {
                           console.error('[PayMongo Webhook] Scheduler creation error:', schedErr.message);
+                        }
+
+                        // 4e. Payment clears any pending grace period: remove the grace DB record and
+                        // the ppp-grace-expire scheduler so they can't downgrade the paid client (best effort)
+                        try {
+                          await db.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [routerId, username]);
+                          console.log('[PayMongo Webhook] ✓ Cleared ppp_grace record for', username);
+                        } catch (graceDbErr) {
+                          console.error('[PayMongo Webhook] Grace record cleanup error:', graceDbErr.message);
+                        }
+                        try {
+                          const graceSchedName = `ppp-grace-expire-${username}`;
+                          const graceRes = await axios.get(`${apiBase}/rest/system/scheduler`, {
+                            headers: { Authorization: authHeader },
+                            timeout: 10000
+                          });
+                          const graceScheds = Array.isArray(graceRes.data) ? graceRes.data : [];
+                          for (const sched of graceScheds) {
+                            if (sched.name === graceSchedName && sched['.id']) {
+                              await axios.post(`${apiBase}/rest/system/scheduler/remove`, { '.id': sched['.id'] }, {
+                                headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                timeout: 10000
+                              });
+                              console.log('[PayMongo Webhook] ✓ Removed grace scheduler:', sched['.id']);
+                            }
+                          }
+                        } catch (graceErr) {
+                          console.error('[PayMongo Webhook] Grace scheduler cleanup error:', graceErr.message);
                         }
                     }
                 }
