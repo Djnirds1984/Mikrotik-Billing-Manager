@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { getPanelSettings } from '../services/databaseService.ts';
 import type { PanelSettings } from '../types.ts';
 import { useAuth } from './AuthContext.tsx';
@@ -112,7 +112,9 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return strResult;
     };
 
-    const formatCurrency = (amount: number): string => {
+    // Cache the Intl.NumberFormat instance — constructing it is expensive, and
+    // formatCurrency is called per table row / per modal render across the app.
+    const currencyFormatter = useMemo(() => {
         const { currency, language } = settings;
         let locale;
 
@@ -139,8 +141,12 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return new Intl.NumberFormat(locale, {
             style: 'currency',
             currency: currency,
-        }).format(amount);
-    };
+        });
+    }, [settings.currency, settings.language]);
+
+    const formatCurrency = useCallback((amount: number): string => {
+        return currencyFormatter.format(amount);
+    }, [currencyFormatter]);
 
     const value = {
         language: settings.language,

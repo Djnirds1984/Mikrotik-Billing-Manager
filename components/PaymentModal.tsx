@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { PppSecret, BillingPlanWithId, SaleRecord, CompanySettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 
@@ -49,8 +49,18 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const [pendingInvoices, setPendingInvoices] = useState<PendingInvoiceEntry[]>([]);
     const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
 
+    // Keep latest plans in a ref so the open/reset effect below doesn't need
+    // `plans` in its deps (a recreated array identity must not re-trigger the
+    // fetches or reset the user's in-progress selections).
+    const plansRef = useRef(plans);
+    plansRef.current = plans;
+    const secretRef = useRef(secret);
+    secretRef.current = secret;
+
     useEffect(() => {
         if (isOpen) {
+            const secret = secretRef.current;
+            const plans = plansRef.current;
             setDiscountDays('0');
             setPaymentDate(new Date().toISOString().split('T')[0]);
             setIsSubmitting(false);
@@ -143,7 +153,19 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                     });
             }
         }
-    }, [isOpen, plans, secret, preselectedMonth, routerId]);
+        // NOTE: deps are identity keys only. Depending on the `plans`/`secret`
+        // object identities re-ran all three fetches and reset the form whenever
+        // the parent re-rendered with recreated props.
+    }, [isOpen, secret?.name, preselectedMonth, routerId]);
+
+    // If plans finish loading after the modal is already open, apply the default
+    // plan without resetting anything else (previously handled by the effect above
+    // re-running on `plans` identity change).
+    useEffect(() => {
+        if (isOpen && plans.length > 0) {
+            setSelectedPlanId(prev => prev || plans[0].id);
+        }
+    }, [isOpen, plans]);
 
     if (!isOpen || !secret) return null;
 

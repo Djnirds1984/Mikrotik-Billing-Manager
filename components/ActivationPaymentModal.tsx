@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { DhcpClient, DhcpBillingPlanWithId, DhcpClientDbRecord, DhcpClientActionParams } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 
@@ -48,8 +48,19 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
     const [pendingInvoices, setPendingInvoices] = useState<PendingInvoiceEntry[]>([]);
     const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
 
+    // Latest dbClient/plans via refs: the parent recreates `dbClient` on every
+    // 8s poll (dbClients.find(...)), so having them in the effect deps reset the
+    // whole form (incl. payment type) and re-fetched invoices while the modal
+    // was open. The init effect below must only run on open / client change.
+    const dbClientRef = useRef(dbClient);
+    dbClientRef.current = dbClient;
+    const plansRef = useRef(plans);
+    plansRef.current = plans;
+
     useEffect(() => {
         if (isOpen && client) {
+            const dbClient = dbClientRef.current;
+            const plans = plansRef.current;
             setCustomerInfo(dbClient?.customerInfo || client.customerInfo || client.hostName || '');
             setContactNumber(dbClient?.contactNumber || client.contactNumber || '');
             setEmail(dbClient?.email || client.email || '');
@@ -103,7 +114,17 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
                     });
             }
         }
-    }, [isOpen, client, dbClient, plans, routerId]);
+        // NOTE: identity keys only — `dbClient`/`plans` are read via refs above,
+        // so parent poll cycles can no longer wipe the operator's inputs.
+    }, [isOpen, client, routerId]);
+
+    // If plans finish loading after the modal is already open, apply the default
+    // plan without resetting anything else.
+    useEffect(() => {
+        if (isOpen && plans.length > 0) {
+            setSelectedPlanId(prev => prev || plans[0].id);
+        }
+    }, [isOpen, plans]);
 
     const selectedPlan = useMemo(() => plans.find(p => p.id === selectedPlanId), [plans, selectedPlanId]);
     
