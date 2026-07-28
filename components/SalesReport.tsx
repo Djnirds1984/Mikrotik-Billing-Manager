@@ -30,6 +30,18 @@ const StatCard: React.FC<{ title: string, value: string | number, icon: React.Re
     </div>
 );
 
+// Display legacy/system payment_method values nicely; manual dropdown values (CASH, GCASH, BANK CHEQUE) are shown as-is
+const formatPaymentMethod = (method?: string): string => {
+    if (!method) return 'Manual';
+    const legacyLabels: Record<string, string> = {
+        'manual': 'Manual',
+        'manual_gcash': 'Manual GCash',
+        'paymongo': 'PayMongo',
+        'invoice': 'Invoice',
+    };
+    return legacyLabels[method.toLowerCase()] || method;
+};
+
 export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale, clearSales, companySettings, selectedRouter }) => {
     const { hasPermission } = useAuth();
     const { formatCurrency } = useLocalization();
@@ -683,6 +695,7 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                         <th className="px-4 py-3 text-right">Discount</th>
                                         <th className="px-4 py-3 text-right">Final Amount</th>
                                         <th className="px-4 py-3">Processed By</th>
+                                        <th className="px-4 py-3">Payment Method</th>
                                         <th className="px-4 py-3 text-center no-print">Actions</th>
                                     </tr>
                                 </thead>
@@ -697,6 +710,7 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                             <td className="px-4 py-3 text-right font-mono text-yellow-600 dark:text-yellow-400">{formatCurrency(sale.discountAmount)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-green-600 dark:text-green-400 font-bold">{formatCurrency(sale.finalAmount)}</td>
                                             <td className="px-4 py-3 text-sm font-medium">{sale.processedBy || 'admin'}</td>
+                                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{formatPaymentMethod(sale.payment_method)}</td>
                                             <td className="px-4 py-3 text-center no-print">
                                                 <button onClick={() => handlePrintReceipt(sale, 'normal')} className="p-2 text-slate-500 dark:text-slate-400 hover:text-sky-500 dark:hover:text-sky-400 rounded-md" title="Print Acknowledgement Receipt (Normal)">
                                                     <PrinterIcon className="h-5 w-5" />
@@ -725,7 +739,7 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                         </tr>
                                     )) : (
                                         <tr>
-                                            <td colSpan={9} className="text-center py-8 text-slate-500">
+                                            <td colSpan={10} className="text-center py-8 text-slate-500">
                                                 No sales records found for the selected period.
                                             </td>
                                         </tr>

@@ -261,7 +261,8 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 routerId: selectedRouter.id,
                 routerName: selectedRouter.name,
                 date: new Date().toISOString(),
-                processedBy: processedByLabel
+                processedBy: processedByLabel,
+                payment_method: params.paymentMethod || 'CASH'
             });
             
             await upsertDbClient({

@@ -6802,8 +6802,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     : (sessionAttributes?.amount ? sessionAttributes.amount / 100 : 0);
                 const saleId = `sale_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
                 await db.run(
-                    `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, invoiceId, processedBy) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-                    [saleId, routerId, saleDate, username, planName || 'Unknown', amountPaid, amountPaid, invoiceNo || null, 'paymongo']
+                    `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, invoiceId, payment_method, processedBy) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+                    [saleId, routerId, saleDate, username, planName || 'Unknown', amountPaid, amountPaid, invoiceNo || null, 'paymongo', 'paymongo']
                 );
                 console.log('[PayMongo Webhook] ✓ Sale recorded, amount:', amountPaid);
             } catch (saleErr) {

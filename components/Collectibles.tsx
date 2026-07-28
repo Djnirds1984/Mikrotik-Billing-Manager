@@ -76,7 +76,7 @@ interface CollectionRecord {
   processedBy: string;
   clientName: string;
   finalAmount: number;
-  paymentMethod: string;
+  payment_method?: string;
   planName: string;
 }
 
@@ -93,6 +93,17 @@ const formatCurrency = (amount: number) =>
 
 const formatDate = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+
+const formatPaymentMethod = (method?: string): string => {
+    if (!method) return 'Manual';
+    const legacyLabels: Record<string, string> = {
+        'manual': 'Manual',
+        'manual_gcash': 'Manual GCash',
+        'paymongo': 'PayMongo',
+        'invoice': 'Invoice',
+    };
+    return legacyLabels[method.toLowerCase()] || method;
+};
 
 const getStatusBadge = (status: string) => {
   const map: Record<string, string> = {
@@ -807,7 +818,7 @@ const DashboardTab: React.FC<{
                       <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{c.processedBy}</td>
                       <td className="px-4 py-3 text-slate-800 dark:text-slate-200">{c.clientName || '—'}</td>
                       <td className="px-4 py-3 text-right font-mono text-green-600 dark:text-green-400 font-medium">{formatCurrency(c.finalAmount)}</td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{c.paymentMethod || '—'}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{formatPaymentMethod(c.payment_method)}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{c.planName || '—'}</td>
                     </tr>
                   ))}

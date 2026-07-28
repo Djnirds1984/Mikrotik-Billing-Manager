@@ -959,6 +959,7 @@ export interface DhcpClientActionParams {
     speedLimit?: string;
     accountNumber?: string;
     gpsCoordinates?: string;
+    paymentMethod?: string;
 }
 
 export interface NetworkStatus {

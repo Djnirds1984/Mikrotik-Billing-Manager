@@ -31,6 +31,7 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
     const [downtimeDays, setDowntimeDays] = useState<number>(0);
     const [manualExpiresAt, setManualExpiresAt] = useState('');
     const [gpsCoordinates, setGpsCoordinates] = useState('');
+    const [paymentType, setPaymentType] = useState<string>('CASH');
 
     useEffect(() => {
         if (isOpen && client) {
@@ -39,6 +40,7 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             setEmail(dbClient?.email || client.email || '');
             setDowntimeDays(0);
             setManualExpiresAt('');
+            setPaymentType('CASH');
             try {
                 if (client.comment) {
                     const parsed = JSON.parse(client.comment);
@@ -90,7 +92,8 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             downtimeDays,
             expiresAt: manualExpiresAt || undefined,
             speedLimit: selectedPlan.speedLimit,
-            gpsCoordinates
+            gpsCoordinates,
+            paymentMethod: paymentType
         });
     };
 
@@ -163,6 +166,19 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
                                         {p.name} - {formatCurrency(p.price)} / {p.cycle_days} days
                                     </option>
                                 ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Payment Method</label>
+                            <select 
+                                value={paymentType} 
+                                onChange={e => setPaymentType(e.target.value)}
+                                className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-slate-900 dark:text-white"
+                            >
+                                <option value="CASH">CASH</option>
+                                <option value="GCASH">GCASH</option>
+                                <option value="BANK CHEQUE">BANK CHEQUE</option>
                             </select>
                         </div>
 

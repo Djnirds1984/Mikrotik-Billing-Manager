@@ -34,6 +34,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const [isPostpaid, setIsPostpaid] = useState(false);
     const [clientBalance, setClientBalance] = useState<number>(0); // negative = credit available
     const [customAmount, setCustomAmount] = useState<string>('');
+    const [paymentType, setPaymentType] = useState<string>('CASH');
 
     useEffect(() => {
         if (isOpen) {
@@ -44,6 +45,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             setUnpaidMonths([]);
             setClientBalance(0);
             setCustomAmount('');
+            setPaymentType('CASH');
 
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
@@ -167,6 +169,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             clientEmail: secret.customer?.email,
             planType: isPostpaid ? 'postpaid' as const : 'prepaid' as const,
             coveredMonth,
+            payment_method: paymentType,
         };
         
         const paymentData = {
@@ -308,6 +311,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                                 {plan.name} ({formatCurrency(plan.price)})
                                             </option>
                                         ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label htmlFor="paymentType" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Payment Method</label>
+                                    <select id="paymentType" value={paymentType} onChange={(e) => setPaymentType(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
+                                        <option value="CASH">CASH</option>
+                                        <option value="GCASH">GCASH</option>
+                                        <option value="BANK CHEQUE">BANK CHEQUE</option>
                                     </select>
                                 </div>
                                 <div>
