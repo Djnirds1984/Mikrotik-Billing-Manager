@@ -347,6 +347,7 @@ export interface SaleRecord {
     processedBy?: string; // Username of employee/admin who processed the payment
     installationFee?: number; // One-time installation charge
     payment_method?: string;
+    invoiceId?: string; // Links this sale to an auto-generated client invoice
 }
 
 export interface InventoryItem {
@@ -960,6 +961,7 @@ export interface DhcpClientActionParams {
     accountNumber?: string;
     gpsCoordinates?: string;
     paymentMethod?: string;
+    invoiceId?: string; // Pending client invoice settled by this payment
 }
 
 export interface NetworkStatus {

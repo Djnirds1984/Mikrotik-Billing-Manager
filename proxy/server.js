@@ -1779,6 +1779,29 @@ async function startServer() {
         }
     });
 
+    // Flexible pending-invoice lookup by username/accountNumber/macAddress (used by admin Pay modals).
+    // Lives behind the authenticated dbRouter — never expose identifier-based lookup publicly.
+    dbRouter.get('/client-invoices-lookup', async (req, res) => {
+        try {
+            const { routerId, username, accountNumber, macAddress, status } = req.query;
+            if (!routerId) return res.status(400).json({ message: 'routerId is required' });
+            const identifiers = [username, accountNumber, macAddress].filter(v => v && String(v).trim() !== '').map(v => String(v));
+            if (identifiers.length === 0) return res.status(400).json({ message: 'username, accountNumber or macAddress is required' });
+            const placeholders = identifiers.map(() => '?').join(', ');
+            let sql = `SELECT id, planName, amount, currency, dueDateTime, issueDate, status, accountNumber, source, invoiceType, description FROM client_invoices WHERE routerId = ? AND (username IN (${placeholders}) OR accountNumber IN (${placeholders}))`;
+            const params = [routerId, ...identifiers, ...identifiers];
+            if (status) {
+                sql += ' AND status = ?';
+                params.push(String(status).toUpperCase());
+            }
+            sql += ' ORDER BY issueDate DESC';
+            const rows = await db.all(sql, params);
+            res.json(rows);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     createCrud('/billing-plans', 'billing_plans');
     createCrud('/inventory', 'inventory');
     createCrud('/equipment-withdrawals', 'equipment_withdrawals');
@@ -4892,7 +4915,10 @@ async function startServer() {
         try {
             const { routerId, username } = req.query;
             if (!routerId || !username) return res.status(400).json({ message: 'routerId and username are required' });
-            const rows = await db.all('SELECT id, planName, amount, currency, dueDateTime, issueDate, status FROM client_invoices WHERE routerId = ? AND username = ? ORDER BY issueDate DESC', [routerId, username]);
+            const rows = await db.all(
+                'SELECT id, planName, amount, currency, dueDateTime, issueDate, status, accountNumber, source, invoiceType, description FROM client_invoices WHERE routerId = ? AND username = ? ORDER BY issueDate DESC',
+                [routerId, username]
+            );
             res.json(rows);
         } catch (e) { res.status(500).json({ message: e.message }); }
     });

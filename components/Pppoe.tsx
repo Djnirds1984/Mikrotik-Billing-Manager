@@ -1275,6 +1275,16 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
             const saleResult = await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString(), processedBy: processedByLabel });
 
+            // Auto-mark the linked pending invoice as PAID (non-blocking).
+            // The sale above carries invoiceId, so the backend PATCH skips creating a duplicate sales record.
+            if (sale.invoiceId) {
+                try {
+                    await dbApi.patch(`/client-invoices/${encodeURIComponent(sale.invoiceId)}`, { status: 'PAID' });
+                } catch (invErr) {
+                    console.warn('[PPPoE Payment] Failed to mark invoice as PAID:', invErr);
+                }
+            }
+
             // Update billing ledger for postpaid users
             const coveredMonth = payment.coveredMonth; // YYYY-MM format
             if (coveredMonth) {

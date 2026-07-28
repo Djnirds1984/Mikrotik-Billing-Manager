@@ -11,6 +11,18 @@ interface ActivationPaymentModalProps {
     plans: DhcpBillingPlanWithId[];
     isSubmitting: boolean;
     dbClient?: DhcpClientDbRecord | null;
+    routerId?: string;
+}
+
+interface PendingInvoiceEntry {
+    id: string;
+    planName?: string;
+    amount?: number;
+    currency?: string;
+    dueDateTime?: string;
+    issueDate?: string;
+    invoiceType?: string;
+    description?: string;
 }
 
 export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
@@ -20,7 +32,8 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
     client,
     plans,
     isSubmitting,
-    dbClient
+    dbClient,
+    routerId
 }) => {
     const { formatCurrency } = useLocalization();
     
@@ -32,6 +45,8 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
     const [manualExpiresAt, setManualExpiresAt] = useState('');
     const [gpsCoordinates, setGpsCoordinates] = useState('');
     const [paymentType, setPaymentType] = useState<string>('CASH');
+    const [pendingInvoices, setPendingInvoices] = useState<PendingInvoiceEntry[]>([]);
+    const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
 
     useEffect(() => {
         if (isOpen && client) {
@@ -41,6 +56,8 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             setDowntimeDays(0);
             setManualExpiresAt('');
             setPaymentType('CASH');
+            setPendingInvoices([]);
+            setSelectedInvoiceId('');
             try {
                 if (client.comment) {
                     const parsed = JSON.parse(client.comment);
@@ -61,8 +78,32 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
             }
+
+            // Fetch pending auto-invoices for this client (DHCP invoices may key on MAC or account number)
+            if (routerId && client.macAddress) {
+                const accountNumber = (dbClient as any)?.accountNumber || '';
+                const invParams = new URLSearchParams({ routerId, macAddress: client.macAddress, status: 'PENDING' });
+                if (accountNumber) invParams.set('accountNumber', accountNumber);
+                fetch(`/api/db/client-invoices-lookup?${invParams.toString()}`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                })
+                    .then(async (res) => {
+                        if (!res.ok) return [];
+                        try { return await res.json(); } catch { return []; }
+                    })
+                    .then((data: PendingInvoiceEntry[]) => {
+                        const list = Array.isArray(data) ? data : [];
+                        setPendingInvoices(list);
+                        // Default: most recent pending invoice is selected for settlement
+                        setSelectedInvoiceId(list.length > 0 ? list[0].id : '');
+                    })
+                    .catch(() => {
+                        setPendingInvoices([]);
+                        setSelectedInvoiceId('');
+                    });
+            }
         }
-    }, [isOpen, client, dbClient, plans]);
+    }, [isOpen, client, dbClient, plans, routerId]);
 
     const selectedPlan = useMemo(() => plans.find(p => p.id === selectedPlanId), [plans, selectedPlanId]);
     
@@ -93,7 +134,8 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
             expiresAt: manualExpiresAt || undefined,
             speedLimit: selectedPlan.speedLimit,
             gpsCoordinates,
-            paymentMethod: paymentType
+            paymentMethod: paymentType,
+            invoiceId: selectedInvoiceId || undefined
         });
     };
 
@@ -181,6 +223,27 @@ export const ActivationPaymentModal: React.FC<ActivationPaymentModalProps> = ({
                                 <option value="BANK CHEQUE">BANK CHEQUE</option>
                             </select>
                         </div>
+
+                        {pendingInvoices.length > 0 && (
+                            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                                <span className="block text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">Pending Invoice</span>
+                                <p className="text-xs text-amber-700 dark:text-amber-400 mb-2">
+                                    This client has {pendingInvoices.length} pending invoice{pendingInvoices.length > 1 ? 's' : ''}. The selected invoice will be marked as PAID by this payment.
+                                </p>
+                                <select
+                                    value={selectedInvoiceId}
+                                    onChange={e => setSelectedInvoiceId(e.target.value)}
+                                    className="w-full p-2 bg-white dark:bg-slate-700 border border-amber-300 dark:border-amber-700 rounded-md text-sm text-slate-900 dark:text-white"
+                                >
+                                    <option value="">Do not settle an invoice</option>
+                                    {pendingInvoices.map(inv => (
+                                        <option key={inv.id} value={inv.id}>
+                                            {inv.planName || inv.description || 'Invoice'} — {formatCurrency(inv.amount || 0)}{inv.dueDateTime ? ` (due ${new Date(inv.dueDateTime).toLocaleDateString()})` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
 
                         <div>
                              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Downtime Discount (Days)</label>

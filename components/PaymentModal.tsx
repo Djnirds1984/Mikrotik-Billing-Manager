@@ -8,6 +8,17 @@ interface UnpaidMonthEntry {
     planPrice?: number;
 }
 
+interface PendingInvoiceEntry {
+    id: string;
+    planName?: string;
+    amount?: number;
+    currency?: string;
+    dueDateTime?: string;
+    issueDate?: string;
+    invoiceType?: string;
+    description?: string;
+}
+
 interface PaymentModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -35,6 +46,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const [clientBalance, setClientBalance] = useState<number>(0); // negative = credit available
     const [customAmount, setCustomAmount] = useState<string>('');
     const [paymentType, setPaymentType] = useState<string>('CASH');
+    const [pendingInvoices, setPendingInvoices] = useState<PendingInvoiceEntry[]>([]);
+    const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
 
     useEffect(() => {
         if (isOpen) {
@@ -46,6 +59,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             setClientBalance(0);
             setCustomAmount('');
             setPaymentType('CASH');
+            setPendingInvoices([]);
+            setSelectedInvoiceId('');
 
             if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
@@ -98,6 +113,34 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                         setClientBalance(data.balance || 0);
                     })
                     .catch(() => setClientBalance(0));
+            }
+
+            // Fetch pending auto-invoices for this client
+            if (routerId && secret?.name) {
+                let accountNumber = '';
+                try {
+                    const c = JSON.parse(String(secret.comment || '{}'));
+                    accountNumber = c.accountNumber || c.customer?.accountNumber || '';
+                } catch {}
+                const invParams = new URLSearchParams({ routerId, username: secret.name, status: 'PENDING' });
+                if (accountNumber) invParams.set('accountNumber', accountNumber);
+                fetch(`/api/db/client-invoices-lookup?${invParams.toString()}`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                })
+                    .then(async (res) => {
+                        if (!res.ok) return [];
+                        try { return await res.json(); } catch { return []; }
+                    })
+                    .then((data: PendingInvoiceEntry[]) => {
+                        const list = Array.isArray(data) ? data : [];
+                        setPendingInvoices(list);
+                        // Default: most recent pending invoice is selected for settlement
+                        setSelectedInvoiceId(list.length > 0 ? list[0].id : '');
+                    })
+                    .catch(() => {
+                        setPendingInvoices([]);
+                        setSelectedInvoiceId('');
+                    });
             }
         }
     }, [isOpen, plans, secret, preselectedMonth, routerId]);
@@ -170,6 +213,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             planType: isPostpaid ? 'postpaid' as const : 'prepaid' as const,
             coveredMonth,
             payment_method: paymentType,
+            invoiceId: selectedInvoiceId || undefined,
         };
         
         const paymentData = {
@@ -233,6 +277,33 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                     <p className="text-xs text-green-700 dark:text-green-400">
                                         Current credit: <span className="font-bold">{formatCurrency(creditAvailable)}</span> — will be automatically applied to this payment.
                                     </p>
+                                </div>
+                            )}
+
+                            {/* Pending Auto Invoice */}
+                            {pendingInvoices.length > 0 && (
+                                <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <svg className="w-4 h-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">Pending Invoice</span>
+                                    </div>
+                                    <p className="text-xs text-amber-700 dark:text-amber-400 mb-2">
+                                        This client has {pendingInvoices.length} pending invoice{pendingInvoices.length > 1 ? 's' : ''}. The selected invoice will be marked as PAID by this payment.
+                                    </p>
+                                    <select
+                                        value={selectedInvoiceId}
+                                        onChange={(e) => setSelectedInvoiceId(e.target.value)}
+                                        className="block w-full bg-white dark:bg-slate-700 border border-amber-300 dark:border-amber-700 rounded-md py-1.5 px-2 text-sm text-slate-900 dark:text-white"
+                                    >
+                                        <option value="">Do not settle an invoice</option>
+                                        {pendingInvoices.map(inv => (
+                                            <option key={inv.id} value={inv.id}>
+                                                {inv.planName || inv.description || 'Invoice'} — {formatCurrency(inv.amount || 0)}{inv.dueDateTime ? ` (due ${new Date(inv.dueDateTime).toLocaleDateString()})` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </div>
                             )}
 

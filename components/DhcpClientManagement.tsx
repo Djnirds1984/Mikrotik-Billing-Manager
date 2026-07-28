@@ -262,8 +262,19 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 routerName: selectedRouter.name,
                 date: new Date().toISOString(),
                 processedBy: processedByLabel,
-                payment_method: params.paymentMethod || 'CASH'
+                payment_method: params.paymentMethod || 'CASH',
+                ...(params.invoiceId ? { invoiceId: params.invoiceId } : {})
             });
+
+            // Auto-mark the linked pending invoice as PAID (non-blocking).
+            // The sale above carries invoiceId, so the backend PATCH skips creating a duplicate sales record.
+            if (params.invoiceId) {
+                try {
+                    await dbApi.patch(`/client-invoices/${params.invoiceId}`, { status: 'PAID' });
+                } catch (invErr) {
+                    console.warn('[DHCP Payment] Failed to mark invoice as PAID:', invErr);
+                }
+            }
             
             await upsertDbClient({
                 routerId: selectedRouter.id,
@@ -370,6 +381,7 @@ export const DhcpClientManagement: React.FC<DhcpClientManagementProps> = ({ sele
                 plans={plans}
                 isSubmitting={isSubmitting}
                 dbClient={dbClients.find(c => c.macAddress === selectedClient?.macAddress)}
+                routerId={selectedRouter.id}
             />
             <EditClientModal
                 isOpen={isEditModalOpen}
