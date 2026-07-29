@@ -12278,9 +12278,10 @@ WantedBy=multi-user.target`;
             return res.status(400).json({ error: 'Bot Token and Chat ID are required.' });
         }
         try {
+            const timestamp = new Date().toLocaleString();
             await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 chat_id: chatId,
-                text: "🔔 Test message from Mikrotik Manager Panel."
+                text: `🔔 Test message from Mikrotik Manager Panel.\n🕐 ${timestamp}`
             }, { timeout: 10000 });
             res.json({ success: true, message: 'Message sent successfully!' });
         } catch (err) {
