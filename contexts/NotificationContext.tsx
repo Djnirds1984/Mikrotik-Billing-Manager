@@ -6,6 +6,7 @@ import { dbApi, getPanelSettings } from '../services/databaseService.ts';
 import { useAuth } from './AuthContext.tsx';
 import { useRouters } from '../hooks/useRouters.ts';
 import { 
+    generatePppoeNotifications,
     generateDhcpPortalNotifications, 
     generateNetworkNotifications, 
     generateBilledNotifications,
@@ -42,6 +43,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
         const runGenerators = async () => {
             const currentNotifs = notificationsRef.current;
+            await generatePppoeNotifications(routers, currentNotifs, panelSettings?.notificationSettings, panelSettings);
             await generateSystemLogNotifications(routers, currentNotifs, panelSettings?.notificationSettings, panelSettings);
             await generateNetworkNotifications(routers, currentNotifs, panelSettings?.notificationSettings, panelSettings);
             await generateDhcpPortalNotifications(routers, currentNotifs, panelSettings?.notificationSettings, panelSettings);

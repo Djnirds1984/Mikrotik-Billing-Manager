@@ -12291,6 +12291,30 @@ WantedBy=multi-user.target`;
         }
     });
 
+    // Telegram Send (reads settings from DB, sends notification to admin)
+    app.post('/api/telegram/send', protect, async (req, res) => {
+        const { message } = req.body;
+        if (!message) {
+            return res.status(400).json({ error: 'Message is required.' });
+        }
+        try {
+            const settings = await db.get('SELECT telegramSettings FROM settings WHERE id = 1');
+            const telegramSettings = JSON.parse(settings?.telegramSettings || '{}');
+            if (!telegramSettings?.enabled || !telegramSettings.botToken || !telegramSettings.chatId) {
+                return res.json({ success: false, skipped: true, reason: 'Telegram not configured or disabled' });
+            }
+            await axios.post(`https://api.telegram.org/bot${telegramSettings.botToken}/sendMessage`, {
+                chat_id: telegramSettings.chatId,
+                text: message
+            }, { timeout: 10000 });
+            res.json({ success: true });
+        } catch (err) {
+            const errorMsg = err.response?.data?.description || err.message || 'Unknown error';
+            console.error('[Telegram Send] Failed:', errorMsg);
+            res.status(400).json({ error: errorMsg });
+        }
+    });
+
     // --- Super Admin & Full Panel Backups ---
     const superRouter = express.Router();
     superRouter.use(protect, requireSuperadmin);

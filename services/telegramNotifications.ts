@@ -1,4 +1,4 @@
-import { dbApi } from './databaseService.ts';
+import { dbApi, getAuthHeader } from './databaseService.ts';
 import type {
   RouterConfigWithId,
   Notification,
@@ -39,7 +39,7 @@ const hasRecentMessage = (existing: Notification[], candidateMsg: string, within
   return existing.some(n => n.message === candidateMsg && (now - new Date(n.timestamp).getTime()) <= thresholdMs);
 };
 
-// Telegram notification functions (Frontend version - logs only)
+// Telegram notification - delegates actual sending to backend for security
 export const sendTelegramNotification = async (
   message: string,
   settings?: PanelSettings['telegramSettings']
@@ -49,9 +49,19 @@ export const sendTelegramNotification = async (
     return;
   }
 
-  // Frontend version - just log the intention to send
-  // Actual Telegram sending will be handled by backend
-  console.log(`Telegram notification would be sent: ${message}`);
+  try {
+    const res = await fetch('/api/telegram/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ message })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      console.warn('Telegram notification failed:', data.error || res.statusText);
+    }
+  } catch (err) {
+    console.warn('Telegram notification request failed:', (err as Error).message);
+  }
 };
 
 // Enhanced notification generators with Telegram support
