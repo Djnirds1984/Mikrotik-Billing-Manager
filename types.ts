@@ -44,7 +44,7 @@ export type View =
 
 export interface Notification {
   id: string;
-  type: 'pppoe-expired' | 'client-chat' | 'info';
+  type: 'pppoe-expired' | 'pppoe-profile-change' | 'pppoe-non-payment' | 'client-chat' | 'info';
   message: string;
   is_read: 0 | 1;
   timestamp: string; // ISO string
@@ -498,6 +498,7 @@ export interface TelegramSettings {
     enableClientDisconnected: boolean;
     enableInterfaceDisconnected: boolean;
     enableUserPaid: boolean;
+    enableProfileChange: boolean;
 }
 
 export interface PayMongoSettings {

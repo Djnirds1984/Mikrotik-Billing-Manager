@@ -306,3 +306,76 @@ export const generateSystemLogNotifications = async (
   }
 };
 
+// In-memory cache for PPPoE profile tracking: `${routerId}:${username}` → profile
+const profileCache = new Map<string, string>();
+let profileCacheSeeded = false;
+
+// Generate PPPoE profile change notifications (transfers between profiles)
+export const generatePppoeProfileChangeNotifications = async (
+  routers: RouterConfigWithId[],
+  existingNotifications: Notification[],
+  settings?: PanelSettings['notificationSettings'],
+  panelSettings?: PanelSettings
+): Promise<void> => {
+  const currentKeys = new Set<string>();
+
+  for (const router of routers) {
+    let secrets: PppSecret[] = [];
+    try {
+      secrets = await getPppSecrets(router);
+    } catch (e) {
+      console.warn(`PPPoE fetch failed for router ${router.name}:`, e);
+      continue;
+    }
+
+    for (const s of secrets) {
+      const key = `${router.id}:${s.name}`;
+      currentKeys.add(key);
+      const currentProfile = s.profile || '';
+      const prevProfile = profileCache.get(key);
+
+      if (prevProfile !== undefined && prevProfile !== currentProfile) {
+        // Profile changed!
+        const isNonPayment = currentProfile.toLowerCase() === 'non-payment';
+        const msg = isNonPayment
+          ? `PPPoE user '${s.name}' moved to Non-Payment on ${router.name}.`
+          : `PPPoE user '${s.name}' profile changed: '${prevProfile}' → '${currentProfile}' on ${router.name}.`;
+        const debounceMin = settings?.debounceMinutes ?? 15;
+        if (hasDuplicateMessage(existingNotifications, msg) || hasRecentMessage(existingNotifications, msg, debounceMin)) {
+          profileCache.set(key, currentProfile);
+          continue;
+        }
+
+        const notif: Notification = {
+          id: makeId(),
+          type: isNonPayment ? 'pppoe-non-payment' : 'pppoe-profile-change',
+          message: msg,
+          is_read: 0,
+          timestamp: new Date().toISOString(),
+          link_to: 'pppoe',
+          context_json: JSON.stringify({ routerId: router.id, username: s.name, fromProfile: prevProfile, toProfile: currentProfile })
+        };
+        try {
+          await dbApi.post('/notifications', notif);
+          const ts = panelSettings?.telegramSettings;
+          if (ts?.enabled && ts.enableProfileChange) {
+            await sendTelegramNotification(msg, ts);
+          }
+        } catch (err) {
+          console.error('Failed to create PPPoE profile change notification:', err);
+        }
+      }
+
+      profileCache.set(key, currentProfile);
+    }
+  }
+
+  // Clean up cache entries for users that no longer exist
+  if (profileCacheSeeded) {
+    for (const key of profileCache.keys()) {
+      if (!currentKeys.has(key)) profileCache.delete(key);
+    }
+  }
+  profileCacheSeeded = true;
+};
+

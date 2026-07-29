@@ -324,6 +324,7 @@ const TelegramTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispat
                     <Toggle label="Client Disconnected" checked={telegram.enableClientDisconnected || false} onChange={c => update('enableClientDisconnected', c)} info="Notify when a user is disabled/disconnected due to expiry." />
                     <Toggle label="Interface Disconnected" checked={telegram.enableInterfaceDisconnected || false} onChange={c => update('enableInterfaceDisconnected', c)} info="Notify when a monitored WAN interface goes down." />
                     <Toggle label="User Paid" checked={telegram.enableUserPaid || false} onChange={c => update('enableUserPaid', c)} info="Notify when a payment is processed through the panel." />
+                    <Toggle label="Profile Change / Non-Payment" checked={telegram.enableProfileChange || false} onChange={c => update('enableProfileChange', c)} info="Notify when a PPPoE user's profile is changed or moved to Non-Payment." />
                 </div>
             </div>
         </SettingsSection>
