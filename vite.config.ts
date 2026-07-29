@@ -59,6 +59,11 @@ export default defineConfig(({ mode, command }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/api/telegram': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+        },
         '/api/client-balance': {
           target: 'http://localhost:3001',
           changeOrigin: true,

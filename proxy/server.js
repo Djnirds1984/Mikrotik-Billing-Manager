@@ -12274,14 +12274,19 @@ WantedBy=multi-user.target`;
     // Telegram Test
     app.post('/api/telegram/test', protect, async (req, res) => {
         const { botToken, chatId } = req.body;
+        if (!botToken || !chatId) {
+            return res.status(400).json({ error: 'Bot Token and Chat ID are required.' });
+        }
         try {
             await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 chat_id: chatId,
                 text: "🔔 Test message from Mikrotik Manager Panel."
-            });
+            }, { timeout: 10000 });
             res.json({ success: true, message: 'Message sent successfully!' });
         } catch (err) {
-            res.status(400).json({ error: err.response?.data?.description || err.message });
+            const errorMsg = err.response?.data?.description || err.message || 'Unknown error';
+            console.error('[Telegram Test] Failed:', errorMsg);
+            res.status(400).json({ error: errorMsg });
         }
     });
 
