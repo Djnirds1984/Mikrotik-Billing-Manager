@@ -18,6 +18,7 @@ const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const archiver = require('archiver');
 const tar = require('tar');
 const nodemailer = require('nodemailer');
+const cors = require('cors');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -1165,6 +1166,25 @@ async function startServer() {
         }
     }));
     app.use(express.text({ limit: '10mb' }));
+
+    // --- CORS FOR PUBLIC ENDPOINTS ONLY ---
+    // Android WebView (Capacitor APK) sends origin: null; each operator also has
+    // their own tunnel domain (*.trycloudflare.com, *.cloudflare.app, custom), so
+    // all origins are allowed — but ONLY on public + payment routes. Admin routes
+    // (/api/admin, /api/auth, /api/db) intentionally have NO CORS.
+    const corsOptions = {
+        origin: function (origin, callback) {
+            // Allow requests with no origin (mobile apps, curl, etc.)
+            if (!origin) return callback(null, true);
+            // Allow all origins for public endpoints (each operator has unique domain)
+            callback(null, true);
+        },
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Client'],
+        credentials: true
+    };
+    app.use('/api/public', cors(corsOptions));
+    app.use('/api/payments', cors(corsOptions));
 
     // --- HOTSPOT CONTROLLER MODULE (Isolated) ---
     const hotspotDb = require('./hotspot/db');

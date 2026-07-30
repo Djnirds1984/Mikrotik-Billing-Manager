@@ -1,0 +1,128 @@
+/* Minimal custom styles for the mobile setup page (Tailwind handles the rest) */
+
+:root {
+  --status-ok: #22c55e;
+  --status-error: #ef4444;
+  --status-testing: #3b82f6;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background-color: #0f172a;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  /* Keep content clear of the Android status bar / navigation bar */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* --- Form state transitions --- */
+.view {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.view.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.view.is-hidden {
+  display: none;
+}
+
+.fade {
+  transition: opacity 180ms ease, max-height 220ms ease;
+}
+
+/* --- Loading spinner --- */
+.spinner {
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #ffffff;
+  border-radius: 9999px;
+  animation: spin 700ms linear infinite;
+}
+
+.spinner-lg {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-width: 3px;
+  border-top-color: var(--status-testing);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Status indicator --- */
+.status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid transparent;
+}
+
+.status-testing {
+  color: #93c5fd;
+  background-color: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.status-ok {
+  color: #86efac;
+  background-color: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.status-error {
+  color: #fca5a5;
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+/* --- Inputs / buttons --- */
+input[type='text'],
+input[type='url'] {
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button:not(:disabled):active {
+  transform: scale(0.985);
+}
+
+button {
+  transition: background-color 160ms ease, transform 90ms ease, opacity 160ms ease;
+}
+
+/* Pulsing dot used while the app auto-reconnects on launch */
+.pulse-dot {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}

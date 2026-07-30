@@ -52,3 +52,9 @@ proxy/uploads/
 
 # Backup snapshots created by the updater
 proxy/backups/
+
+# Capacitor Android build
+android/app/build/
+android/.gradle/
+android/local.properties
+*.keystore
