@@ -4866,6 +4866,16 @@ async function startServer() {
 
     app.use('/uploads', express.static(UPLOADS_DIR));
     
+        // Serve downloadable files (e.g. customer Android APK)
+        app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
+            setHeaders: (res, filePath) => {
+                if (filePath.endsWith('.apk')) {
+                    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+                    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+                }
+            }
+        }));
+    
     app.get('/api/public/routers', async (req, res) => {
         try {
             const rows = await db.all('SELECT id, name FROM routers ORDER BY name ASC');
