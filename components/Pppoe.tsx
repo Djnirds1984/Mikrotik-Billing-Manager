@@ -1627,7 +1627,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                                 {user.billingPlan ? (
                                                     <span>
                                                         <span className="font-semibold">{user.billingPlan.name}</span>
-                                                        <span className="text-slate-500 ml-1">({formatCurrency(user.billingPlan.price)}/{user.billingPlan.cycle === 'Monthly' ? 'mo' : user.billingPlan.cycle === 'Quarterly' ? 'qtr' : 'yr'})</span>
+                                                        <span className="text-slate-500 ml-1">({formatCurrency(user.billingPlan.price)}/{user.billingPlan.cycle_days ? (user.billingPlan.cycle_days === 30 ? 'mo' : user.billingPlan.cycle_days === 90 ? 'qtr' : user.billingPlan.cycle_days === 365 ? 'yr' : `${user.billingPlan.cycle_days}d`) : (user.billingPlan.cycle === 'Monthly' ? 'mo' : user.billingPlan.cycle === 'Quarterly' ? 'qtr' : 'yr')})</span>
                                                     </span>
                                                 ) : '—'}
                                             </div>
@@ -1839,7 +1839,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                                     <HighlightText text={user.billingPlan.name || ''} highlight={searchTerm} />
                                                 </span>
                                                 <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                                                    {formatCurrency(user.billingPlan.price)}/{user.billingPlan.cycle === 'Monthly' ? 'mo' : user.billingPlan.cycle === 'Quarterly' ? 'qtr' : 'yr'}
+                                                    {formatCurrency(user.billingPlan.price)}/{user.billingPlan.cycle_days ? (user.billingPlan.cycle_days === 30 ? 'mo' : user.billingPlan.cycle_days === 90 ? 'qtr' : user.billingPlan.cycle_days === 365 ? 'yr' : `${user.billingPlan.cycle_days}d`) : (user.billingPlan.cycle === 'Monthly' ? 'mo' : user.billingPlan.cycle === 'Quarterly' ? 'qtr' : 'yr')}
                                                 </span>
                                             </div>
                                         ) : (

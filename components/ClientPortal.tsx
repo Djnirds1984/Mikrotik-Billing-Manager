@@ -693,7 +693,7 @@ export const ClientPortal: React.FC<{ selectedRouter: RouterConfigWithId | null 
                           <div>
                             <div className="font-medium text-slate-800 dark:text-slate-200">{plan.name}</div>
                             <div className="text-xs text-slate-500 dark:text-slate-400">
-                              {plan.cycle || 'Monthly'} • {plan.billingType || 'prepaid'}
+                              {plan.cycle_days ? (plan.cycle_days === 30 ? 'Monthly' : plan.cycle_days === 90 ? 'Quarterly' : plan.cycle_days === 365 ? 'Yearly' : `${plan.cycle_days} days`) : (plan.cycle || 'Monthly')} • {plan.billingType || 'prepaid'}
                               {plan.pppoeProfile ? ` • Profile: ${plan.pppoeProfile}` : ''}
                             </div>
                           </div>
