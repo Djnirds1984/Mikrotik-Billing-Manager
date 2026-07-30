@@ -9,7 +9,7 @@
  * the plugins are read from the global object rather than imported/bundled.
  */
 
-const { Preferences, App: CapApp, SplashScreen, StatusBar } = window.Capacitor?.Plugins || {};
+const { Preferences, App: CapApp, SplashScreen, StatusBar, CapacitorHttp } = window.Capacitor?.Plugins || {};
 
 const DOMAIN_KEY = 'tunnel_domain';
 const VALIDATE_PATH = '/api/public/store-settings';
@@ -160,10 +160,34 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
  * Probes the panel's public settings endpoint.
  * Returns { ok, reason } so callers can show a specific message.
+ *
+ * In the native shell the request goes through CapacitorHttp (Android's HTTP
+ * stack), which bypasses WebView CORS entirely — the panel does not need CORS
+ * headers for the APK to validate a domain. Browser previews fall back to a
+ * no-cors fetch that only proves reachability.
  */
 async function validateDomain(domain) {
   if (!isOnline()) return { ok: false, reason: 'offline' };
 
+  if (CapacitorHttp) {
+    try {
+      const response = await CapacitorHttp.get({
+        url: `${domain}${VALIDATE_PATH}`,
+        headers: { 'X-Client': 'mobile-apk' },
+        connectTimeout: REQUEST_TIMEOUT,
+        readTimeout: REQUEST_TIMEOUT
+      });
+
+      if (response.status >= 200 && response.status < 400) return { ok: true };
+      return { ok: false, reason: response.status === 404 ? 'not-panel' : 'server', status: response.status };
+    } catch (error) {
+      const message = String(error?.message || error || '').toLowerCase();
+      return { ok: false, reason: message.includes('timeout') || message.includes('timed out') ? 'timeout' : 'unreachable' };
+    }
+  }
+
+  // Browser preview fallback: no custom headers (they force a CORS preflight)
+  // and mode 'no-cors' so a CORS-less panel still counts as reachable.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
@@ -171,10 +195,11 @@ async function validateDomain(domain) {
     const response = await fetch(`${domain}${VALIDATE_PATH}`, {
       signal: controller.signal,
       cache: 'no-store',
-      headers: { 'X-Client': 'mobile-apk' }
+      mode: 'no-cors'
     });
 
-    if (response.ok) return { ok: true };
+    // Opaque responses report status 0; the server answered, so treat it as ok.
+    if (response.status === 0 || response.ok) return { ok: true };
     return { ok: false, reason: response.status === 404 ? 'not-panel' : 'server', status: response.status };
   } catch (error) {
     return { ok: false, reason: error?.name === 'AbortError' ? 'timeout' : 'unreachable' };

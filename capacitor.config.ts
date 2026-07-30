@@ -5,6 +5,10 @@ const config: CapacitorConfig = {
   appName: 'ISP Billing',
   webDir: 'mobile-app',
   plugins: {
+    CapacitorHttp: {
+      // Native HTTP so the setup page can validate domains without CORS
+      enabled: true
+    },
     SplashScreen: {
       launchAutoHide: false,
       backgroundColor: '#1e293b',
