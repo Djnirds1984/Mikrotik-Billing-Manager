@@ -74,6 +74,11 @@ export default defineConfig(({ mode, command }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/api/sms': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+        },
         '/api': {
           target: 'http://localhost:3002',
           changeOrigin: true,

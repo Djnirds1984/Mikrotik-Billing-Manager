@@ -68,6 +68,7 @@ const DatabaseSettings = React.lazy(() => import('./components/DatabaseSettings.
 const JobOrders = React.lazy(() => import('./components/JobOrders.tsx').then(m => ({ default: m.JobOrders })));
 const Customers = React.lazy(() => import('./components/Customers.tsx').then(m => ({ default: m.Customers })));
 const Collectibles = React.lazy(() => import('./components/Collectibles.tsx').then(m => ({ default: m.Collectibles })));
+const SmsManager = React.lazy(() => import('./components/SmsManager.tsx').then(m => ({ default: m.SmsManager })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -342,6 +343,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <Customers selectedRouter={selectedRouter} />;
                   case 'collectibles':
                     return <Collectibles selectedRouter={selectedRouter} />;
+                  case 'sms_admin':
+                    return <SmsManager selectedRouter={selectedRouter} />;
                   case 'ai_assistant':
                     return <Help currentView={currentView} selectedRouter={selectedRouter} />;
                   case 'license':

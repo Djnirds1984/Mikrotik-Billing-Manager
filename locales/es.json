@@ -60,7 +60,8 @@
         "accounting": "Contabilidad",
         "ntc-compliance": "Cumplimiento NTC",
         "manual_payments": "Pagos Manuales",
-        "store_settings": "Configuración de Tienda"
+        "store_settings": "Configuración de Tienda",
+        "sms_admin": "Gestión de SMS"
     },
     "topbar": {
         "add_router_title": "Vaya a la página de Routers para agregar un nuevo router",

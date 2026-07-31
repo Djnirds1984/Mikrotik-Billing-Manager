@@ -56,7 +56,8 @@
         "accounting": "Contabilidade",
         "ntc-compliance": "Conformidade NTC",
         "manual_payments": "Pagamentos Manuais",
-        "store_settings": "Configurações da Loja"
+        "store_settings": "Configurações da Loja",
+        "sms_admin": "Gestão de SMS"
     },
     "topbar": {
         "add_router_title": "Vá para a página de Roteadores para adicionar um novo roteador",

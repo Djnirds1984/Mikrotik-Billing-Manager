@@ -40,7 +40,8 @@ export type View =
   | 'database'
   | 'job_orders'
   | 'customers'
-  | 'collectibles';
+  | 'collectibles'
+  | 'sms_admin';
 
 export interface Notification {
   id: string;

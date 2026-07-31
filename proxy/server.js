@@ -303,7 +303,8 @@ async function initDb() {
             { id: 'perm_sidebar_soa', name: 'view:sidebar:soa', description: 'View Statement of Account' },
             { id: 'perm_sidebar_facebook_clients', name: 'view:sidebar:facebook-clients', description: 'View Facebook Clients' },
             { id: 'perm_sidebar_collectibles', name: 'view:sidebar:collectibles', description: 'View Collectibles' },
-            { id: 'perm_sidebar_customers', name: 'view:sidebar:customers', description: 'View Customers' }
+            { id: 'perm_sidebar_customers', name: 'view:sidebar:customers', description: 'View Customers' },
+            { id: 'perm_sidebar_sms_admin', name: 'view:sidebar:sms_admin', description: 'SMS Management' }
         ];
         for (const p of sidebarPerms) {
             await db.run("INSERT OR IGNORE INTO permissions (id, name, description) VALUES (?, ?, ?)", p.id, p.name, p.description);
@@ -3253,6 +3254,201 @@ async function startServer() {
     });
 
     app.use('/api/db', dbRouter);
+
+    // --- SMS Management API (Protected) ---
+    // Templates and delivery logs for the Admin APK native SMS sender.
+    // DB columns are snake_case (see migrations/003_v2.2.0_sms_management.sql);
+    // the JSON contract is camelCase and is consumed verbatim by the frontend.
+    const smsRouter = express.Router();
+    smsRouter.use(protect);
+
+    const SMS_TEMPLATE_TYPES = ['due_reminder', 'payment_confirm', 'disconnection', 'custom'];
+    const SMS_LOG_STATUSES = ['QUEUED', 'SENT', 'FAILED'];
+
+    const mapSmsTemplate = (row) => ({
+        id: row.id,
+        name: row.name,
+        type: row.type,
+        body: row.body,
+        routerId: row.router_id || null,
+        createdAt: row.created_at || null
+    });
+
+    const mapSmsLog = (row) => ({
+        id: row.id,
+        templateId: row.template_id || null,
+        clientId: row.client_id || null,
+        clientPhone: row.client_phone || null,
+        messageText: row.message_text || null,
+        status: row.status || 'QUEUED',
+        errorMessage: row.error_message || null,
+        routerId: row.router_id || null,
+        sentAt: row.sent_at || null,
+        createdAt: row.created_at || null
+    });
+
+    // A missing table means the v2.2.0 migration has not been applied yet —
+    // degrade to empty results instead of breaking the admin UI.
+    const isMissingSmsTable = (e) => /no such table/i.test((e && e.message) || '');
+
+    // GET /api/sms/templates?routerId= — router-scoped templates plus global defaults
+    smsRouter.get('/templates', async (req, res) => {
+        try {
+            const { routerId } = req.query;
+            let query = 'SELECT * FROM sms_templates';
+            const params = [];
+            if (routerId) {
+                query += " WHERE router_id = ? OR router_id IS NULL OR router_id = ''";
+                params.push(routerId);
+            }
+            query += ' ORDER BY created_at ASC';
+            const rows = await db.all(query, params);
+            res.json(rows.map(mapSmsTemplate));
+        } catch (e) {
+            if (isMissingSmsTable(e)) return res.json([]);
+            console.error('[SMS Templates GET] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // POST /api/sms/templates — create a template (id generated when absent)
+    smsRouter.post('/templates', async (req, res) => {
+        try {
+            const { id, name, type, body, routerId } = req.body || {};
+            if (!name || !String(name).trim()) return res.status(400).json({ message: 'name is required' });
+            if (!body || !String(body).trim()) return res.status(400).json({ message: 'body is required' });
+
+            const templateId = id && String(id).trim() ? String(id).trim() : `tpl_${crypto.randomUUID()}`;
+            const templateType = SMS_TEMPLATE_TYPES.includes(type) ? type : 'custom';
+            const createdAt = new Date().toISOString();
+
+            await db.run(
+                'INSERT INTO sms_templates (id, name, type, body, router_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [templateId, String(name).trim(), templateType, String(body), routerId || null, createdAt]
+            );
+
+            const row = await db.get('SELECT * FROM sms_templates WHERE id = ?', [templateId]);
+            res.json(mapSmsTemplate(row));
+        } catch (e) {
+            console.error('[SMS Templates POST] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // PUT /api/sms/templates/:id — update name/type/body
+    smsRouter.put('/templates/:id', async (req, res) => {
+        try {
+            const { id } = req.params;
+            const existing = await db.get('SELECT * FROM sms_templates WHERE id = ?', [id]);
+            if (!existing) return res.status(404).json({ message: 'Template not found' });
+
+            const { name, type, body } = req.body || {};
+            const updates = [];
+            const params = [];
+            if (name !== undefined) { updates.push('name = ?'); params.push(String(name).trim()); }
+            if (type !== undefined) { updates.push('type = ?'); params.push(SMS_TEMPLATE_TYPES.includes(type) ? type : existing.type); }
+            if (body !== undefined) { updates.push('body = ?'); params.push(String(body)); }
+
+            if (updates.length > 0) {
+                params.push(id);
+                await db.run(`UPDATE sms_templates SET ${updates.join(', ')} WHERE id = ?`, params);
+            }
+
+            const row = await db.get('SELECT * FROM sms_templates WHERE id = ?', [id]);
+            res.json(mapSmsTemplate(row));
+        } catch (e) {
+            console.error('[SMS Templates PUT] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // DELETE /api/sms/templates/:id
+    smsRouter.delete('/templates/:id', async (req, res) => {
+        try {
+            await db.run('DELETE FROM sms_templates WHERE id = ?', [req.params.id]);
+            res.json({ success: true });
+        } catch (e) {
+            console.error('[SMS Templates DELETE] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // GET /api/sms/logs?routerId=&limit=&offset=&status= — newest first
+    smsRouter.get('/logs', async (req, res) => {
+        try {
+            const { routerId, status } = req.query;
+            const parsedLimit = parseInt(req.query.limit, 10);
+            const parsedOffset = parseInt(req.query.offset, 10);
+            const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50;
+            const offset = Number.isFinite(parsedOffset) && parsedOffset > 0 ? parsedOffset : 0;
+
+            const conditions = [];
+            const params = [];
+            if (routerId) { conditions.push('router_id = ?'); params.push(routerId); }
+            if (status) { conditions.push('status = ?'); params.push(String(status).toUpperCase()); }
+            const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+
+            const totalRow = await db.get(`SELECT COUNT(*) as count FROM sms_logs${where}`, params);
+            const rows = await db.all(
+                `SELECT * FROM sms_logs${where} ORDER BY datetime(created_at) DESC, rowid DESC LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            res.json({ logs: rows.map(mapSmsLog), total: totalRow ? totalRow.count : 0 });
+        } catch (e) {
+            if (isMissingSmsTable(e)) return res.json({ logs: [], total: 0 });
+            console.error('[SMS Logs GET] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // POST /api/sms/logs — accepts a single log object or an array (batch insert)
+    smsRouter.post('/logs', async (req, res) => {
+        try {
+            const payload = req.body;
+            const entries = Array.isArray(payload) ? payload : [payload];
+            if (entries.length === 0 || !entries[0] || typeof entries[0] !== 'object') {
+                return res.status(400).json({ message: 'A log object or an array of log objects is required' });
+            }
+
+            let inserted = 0;
+            await db.run('BEGIN TRANSACTION');
+            for (const entry of entries) {
+                if (!entry || typeof entry !== 'object') continue;
+                const id = entry.id && String(entry.id).trim() ? String(entry.id).trim() : `sms_${crypto.randomUUID()}`;
+                const rawStatus = entry.status ? String(entry.status).toUpperCase() : 'QUEUED';
+                const status = SMS_LOG_STATUSES.includes(rawStatus) ? rawStatus : 'QUEUED';
+
+                await db.run(
+                    `INSERT OR REPLACE INTO sms_logs
+                     (id, template_id, client_id, client_phone, message_text, status, error_message, router_id, sent_at, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        id,
+                        entry.templateId || null,
+                        entry.clientId || null,
+                        entry.clientPhone || null,
+                        entry.messageText || null,
+                        status,
+                        entry.errorMessage || null,
+                        entry.routerId || null,
+                        entry.sentAt || null,
+                        new Date().toISOString()
+                    ]
+                );
+                inserted++;
+            }
+            await db.run('COMMIT');
+
+            res.json({ success: true, inserted });
+        } catch (e) {
+            try { await db.run('ROLLBACK'); } catch (rollbackErr) { /* no active transaction */ }
+            console.error('[SMS Logs POST] Error:', e.message);
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    app.use('/api/sms', smsRouter);
 
     // Manual Payment Requests API (Public - Admin Panel Access)
     app.get('/api/public/manual-payments', async (req, res) => {

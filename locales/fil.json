@@ -58,7 +58,8 @@
         "accounting": "Accounting",
         "ntc-compliance": "NTC Compliance",
         "manual_payments": "Mga Manual na Pagbabayad",
-        "store_settings": "Mga Setting ng Store"
+        "store_settings": "Mga Setting ng Store",
+        "sms_admin": "SMS Management"
     },
     "topbar": {
         "add_router_title": "Pumunta sa pahina ng Mga Router para magdagdag ng bagong router",
