@@ -6,11 +6,19 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { CustomInvoiceCategory, ClientInvoice } from '../types.ts';
 import { Html5Qrcode } from 'html5-qrcode';
 
+interface LockedCustomer {
+    routerId: string;
+    username: string;
+    displayName: string;
+    accountNumber?: string;
+}
+
 interface CustomInvoiceModalProps {
     isOpen: boolean;
     onClose: () => void;
     routers: any[];
     onInvoiceCreated: () => void;
+    lockedCustomer?: LockedCustomer | null;
 }
 
 const CATEGORIES: CustomInvoiceCategory[] = [
@@ -22,7 +30,7 @@ const CATEGORIES: CustomInvoiceCategory[] = [
     'Other',
 ];
 
-export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, onClose, routers, onInvoiceCreated }) => {
+export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, onClose, routers, onInvoiceCreated, lockedCustomer }) => {
     const { formatCurrency, currency } = useLocalization();
 
     // Client selection state
@@ -213,6 +221,27 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
         }
     }, [isOpen]);
 
+    // When lockedCustomer is provided, auto-set router and fetch+select the client
+    useEffect(() => {
+        if (!isOpen || !lockedCustomer) return;
+        setRouterId(lockedCustomer.routerId);
+        setSource('pppoe');
+    }, [isOpen, lockedCustomer]);
+
+    // After clients load for lockedCustomer, auto-select the matching client
+    useEffect(() => {
+        if (!isOpen || !lockedCustomer || clients.length === 0 || routerId !== lockedCustomer.routerId) return;
+        if (selectedClientId) return; // already selected
+        const match = clients.find(c =>
+            c.pppoe_username === lockedCustomer.username ||
+            c.username === lockedCustomer.username ||
+            c.account_number === lockedCustomer.accountNumber
+        );
+        if (match) {
+            setSelectedClientId(match.id);
+        }
+    }, [isOpen, lockedCustomer, clients, routerId, selectedClientId]);
+
     const handleSubmit = async () => {
         if (!routerId || !selectedClientId) {
             alert('Please select a router and client.');
@@ -300,6 +329,18 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
                     <div className="space-y-3">
                         <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Client Selection</h4>
 
+                        {lockedCustomer ? (
+                            <div className="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-600">
+                                <div className="text-sm font-medium text-slate-900 dark:text-white">{lockedCustomer.displayName}</div>
+                                {lockedCustomer.accountNumber && (
+                                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Account #{lockedCustomer.accountNumber}</div>
+                                )}
+                                {lockedCustomer.username && (
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">Username: {lockedCustomer.username}</div>
+                                )}
+                            </div>
+                        ) : (
+                        <>
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">Source</label>
@@ -367,6 +408,8 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
                                     Point camera at QR code or barcode. Format: <code className="text-xs">accountNumber</code> or <code className="text-xs">routerId:accountNumber</code>
                                 </p>
                             </div>
+                        )}
+                        </>
                         )}
                     </div>
 

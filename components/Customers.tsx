@@ -4,6 +4,8 @@ import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { Customer } from '../types.ts';
 import type { RouterConfigWithId } from '../types.ts';
+import { CustomInvoiceModal } from './CustomInvoiceModal.tsx';
+import { dbApi } from '../services/databaseService.ts';
 
 // Icons
 const PlusIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -39,6 +41,12 @@ const PrinterIcon: React.FC<{ className?: string }> = ({ className }) => (
 const XMarkIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+);
+
+const ReceiptInvoiceIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 14.25l3-3m0 0l3 3m-3-3v8.25M3.75 9.75V21h16.5V9.75M3.75 3h16.5M3.75 3L2.25 9.75M20.25 3l1.5 6.75M3.75 9.75h16.5" />
     </svg>
 );
 
@@ -496,6 +504,9 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [soaCustomer, setSoaCustomer] = useState<Customer | null>(null);
+    const [isCustomInvoiceOpen, setIsCustomInvoiceOpen] = useState(false);
+    const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null);
+    const [routers, setRouters] = useState<any[]>([]);
 
     const filteredCustomers = useMemo(() => {
         if (!searchTerm.trim()) return customers;
@@ -544,6 +555,24 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    // Fetch routers list for the CustomInvoiceModal
+    React.useEffect(() => {
+        const fetchRouters = async () => {
+            try {
+                const rows = await dbApi.get('/routers');
+                setRouters(Array.isArray(rows) ? rows : []);
+            } catch {
+                setRouters([]);
+            }
+        };
+        fetchRouters();
+    }, []);
+
+    const handleOpenCustomInvoice = (customer: Customer) => {
+        setInvoiceCustomer(customer);
+        setIsCustomInvoiceOpen(true);
     };
 
     if (!selectedRouter) {
@@ -642,8 +671,15 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
                                     </td>
                                     <td className="px-4 py-3 text-right whitespace-nowrap">
                                         <button
+                                            onClick={() => handleOpenCustomInvoice(customer)}
+                                            className="inline-flex items-center p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-md transition"
+                                            title="Custom Invoice"
+                                        >
+                                            <ReceiptInvoiceIcon className="w-4 h-4" />
+                                        </button>
+                                        <button
                                             onClick={() => setSoaCustomer(customer)}
-                                            className="inline-flex items-center p-1.5 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-md transition"
+                                            className="inline-flex items-center p-1.5 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-md transition ml-1"
                                             title="Statement of Account"
                                         >
                                             <DocumentIcon className="w-4 h-4" />
@@ -690,6 +726,20 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
                 customer={soaCustomer}
                 routerId={routerId || ''}
                 companyName={companySettings.companyName || ''}
+            />
+
+            {/* Custom Invoice Modal */}
+            <CustomInvoiceModal
+                isOpen={isCustomInvoiceOpen}
+                onClose={() => { setIsCustomInvoiceOpen(false); setInvoiceCustomer(null); }}
+                routers={routers}
+                onInvoiceCreated={() => {}}
+                lockedCustomer={invoiceCustomer ? {
+                    routerId: routerId || '',
+                    username: invoiceCustomer.username || '',
+                    displayName: invoiceCustomer.fullName || invoiceCustomer.username || 'Unknown',
+                    accountNumber: invoiceCustomer.accountNumber,
+                } : null}
             />
         </div>
     );
