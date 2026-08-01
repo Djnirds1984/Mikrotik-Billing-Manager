@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { XMarkIcon, SearchIcon } from '../constants.tsx';
+import { XMarkIcon } from '../constants.tsx';
+import { SearchableSelect } from './SearchableSelect.tsx';
 import { dbApi, getAuthHeader } from '../services/databaseService.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { CustomInvoiceCategory, ClientInvoice } from '../types.ts';
@@ -326,25 +327,36 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
 
                         <div>
                             <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">Client</label>
-                            <div className="flex gap-2">
-                                <select
-                                    value={selectedClientId}
-                                    onChange={e => setSelectedClientId(e.target.value)}
-                                    disabled={loadingClients}
-                                    className="flex-1 p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-slate-900 dark:text-white border-0"
-                                >
-                                    <option value="">{loadingClients ? 'Loading...' : 'Select Client'}</option>
-                                    {clients.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                                </select>
-                                <button
-                                    type="button"
-                                    onClick={() => isScannerOpen ? stopScanner() : startScanner()}
-                                    className={`px-3 py-2 rounded-md text-sm font-semibold text-white ${isScannerOpen ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                                    title={isScannerOpen ? 'Stop Scanner' : 'Scan QR/Barcode'}
-                                >
-                                    {isScannerOpen ? 'Stop' : 'Scan QR'}
-                                </button>
-                            </div>
+                            <SearchableSelect
+                                options={clients}
+                                value={selectedClientId}
+                                onChange={setSelectedClientId}
+                                searchFields={['label', 'username', 'pppoe_username', 'account_number', 'macAddress', 'customerInfo', 'hostName']}
+                                renderOption={(c) => (
+                                    <div className="px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
+                                        {c.label}
+                                        {c.account_number ? (
+                                            <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">#{c.account_number}</span>
+                                        ) : null}
+                                    </div>
+                                )}
+                                placeholder={loadingClients ? 'Loading...' : 'Select Client'}
+                                searchPlaceholder="Search by name, username, account #..."
+                                ariaLabel="Search clients"
+                                loading={loadingClients}
+                                disabled={loadingClients}
+                                pageSize={50}
+                                triggerAddon={
+                                    <button
+                                        type="button"
+                                        onClick={() => isScannerOpen ? stopScanner() : startScanner()}
+                                        className={`px-3 py-2 rounded-md text-sm font-semibold text-white ${isScannerOpen ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                        title={isScannerOpen ? 'Stop Scanner' : 'Scan QR/Barcode'}
+                                    >
+                                        {isScannerOpen ? 'Stop' : 'Scan QR'}
+                                    </button>
+                                }
+                            />
                         </div>
 
                         {/* QR Scanner */}

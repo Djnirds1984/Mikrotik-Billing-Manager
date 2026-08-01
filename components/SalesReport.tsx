@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { SaleRecord, CompanySettings } from '../types.ts';
 import { CurrencyDollarIcon, TrashIcon, PrinterIcon, ArrowPathIcon } from '../constants.tsx';
+import { SearchableSelect } from './SearchableSelect.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
 import { PrintableThermalReceipt } from './PrintableThermalReceipt.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -586,10 +587,26 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium">Client</label>
-                                        <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
-                                            <option value="">Select Client</option>
-                                            {clients.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                                        </select>
+                                        <div className="mt-1">
+                                            <SearchableSelect
+                                                options={clients}
+                                                value={selectedClientId}
+                                                onChange={setSelectedClientId}
+                                                searchFields={['label', 'username', 'pppoe_username', 'account_number', 'macAddress', 'customerInfo', 'hostName']}
+                                                renderOption={(c) => (
+                                                    <div className="px-3 py-2 text-sm text-slate-900 dark:text-slate-100">
+                                                        {c.label}
+                                                        {c.account_number ? (
+                                                            <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">#{c.account_number}</span>
+                                                        ) : null}
+                                                    </div>
+                                                )}
+                                                placeholder="Select Client"
+                                                searchPlaceholder="Search by name, username, account #..."
+                                                ariaLabel="Search clients"
+                                                pageSize={50}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="px-4 py-3 border-t dark:border-slate-700 flex justify-end gap-2">
