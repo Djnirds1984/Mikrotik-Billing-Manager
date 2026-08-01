@@ -60,6 +60,10 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
     // Submit state
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Locked-customer mismatch detection
+    const [lockedMismatch, setLockedMismatch] = useState(false);
+    const mismatchFiredRef = useRef(false);
+
     const total = laborCost + partsCost;
 
     // Fetch clients when router or source changes
@@ -218,6 +222,8 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
                 scannerRef.current = null;
             }
             setIsScannerOpen(false);
+            setLockedMismatch(false);
+            mismatchFiredRef.current = false;
         }
     }, [isOpen]);
 
@@ -231,7 +237,7 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
     // After clients load for lockedCustomer, auto-select the matching client
     useEffect(() => {
         if (!isOpen || !lockedCustomer || clients.length === 0 || routerId !== lockedCustomer.routerId) return;
-        if (selectedClientId) return; // already selected
+        if (selectedClientId || mismatchFiredRef.current) return;
         const match = clients.find(c =>
             c.pppoe_username === lockedCustomer.username ||
             c.username === lockedCustomer.username ||
@@ -239,8 +245,43 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
         );
         if (match) {
             setSelectedClientId(match.id);
+        } else {
+            mismatchFiredRef.current = true;
+            setLockedMismatch(true);
         }
     }, [isOpen, lockedCustomer, clients, routerId, selectedClientId]);
+
+    // Detect locked-customer mismatch edge cases (fires at most once per session):
+    // 1) Router doesn't exist in available list (clients will never load)
+    // 2) Clients finished loading into an empty list for this router
+    useEffect(() => {
+        if (!isOpen || !lockedCustomer || mismatchFiredRef.current) return;
+        if (selectedClientId) return;
+
+        const routerExists = routers.some(r => r.id === lockedCustomer.routerId);
+        if (!routerExists && routers.length > 0) {
+            mismatchFiredRef.current = true;
+            setLockedMismatch(true);
+            return;
+        }
+
+        if (!loadingClients && routerId === lockedCustomer.routerId && clients.length === 0 && routerId !== '') {
+            mismatchFiredRef.current = true;
+            setLockedMismatch(true);
+        }
+    }, [isOpen, lockedCustomer, selectedClientId, routers, routerId, clients, loadingClients]);
+
+    // Console-warn when operator manually picks a different client than the locked identity
+    useEffect(() => {
+        if (!lockedCustomer || !lockedMismatch || !selectedClientId) return;
+        const picked = clients.find(c => c.id === selectedClientId);
+        const pickedUser = picked?.pppoe_username || picked?.username || '';
+        if (pickedUser && pickedUser !== lockedCustomer.username) {
+            console.warn(
+                `[CustomInvoice] Operator selected client "${pickedUser}" which differs from locked customer "${lockedCustomer.username}".`
+            );
+        }
+    }, [lockedCustomer, lockedMismatch, selectedClientId, clients]);
 
     const handleSubmit = async () => {
         if (!routerId || !selectedClientId) {
@@ -329,7 +370,8 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
                     <div className="space-y-3">
                         <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Client Selection</h4>
 
-                        {lockedCustomer ? (
+                        {/* Locked-customer card (always visible when lockedCustomer is provided) */}
+                        {lockedCustomer && (
                             <div className="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-600">
                                 <div className="text-sm font-medium text-slate-900 dark:text-white">{lockedCustomer.displayName}</div>
                                 {lockedCustomer.accountNumber && (
@@ -339,7 +381,19 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
                                     <div className="text-xs text-slate-500 dark:text-slate-400">Username: {lockedCustomer.username}</div>
                                 )}
                             </div>
-                        ) : (
+                        )}
+
+                        {/* Warning banner when auto-select failed */}
+                        {lockedCustomer && lockedMismatch && (
+                            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-300 dark:border-amber-700">
+                                <p className="text-sm text-amber-800 dark:text-amber-200 font-medium">
+                                    This customer doesn't appear in the system. Please choose the correct record manually.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Picker UI — shown when no lockedCustomer, or when lockedMismatch forces manual selection */}
+                        {(!lockedCustomer || lockedMismatch) && (
                         <>
                         <div className="grid grid-cols-2 gap-3">
                             <div>
@@ -350,7 +404,7 @@ export const CustomInvoiceModal: React.FC<CustomInvoiceModalProps> = ({ isOpen, 
                                     className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-slate-900 dark:text-white border-0"
                                 >
                                     <option value="pppoe">PPPoE</option>
-                                    <option value="dhcp">DHCP Portal</option>
+                                    <option value="dhcp">DHCP</option>
                                 </select>
                             </div>
                             <div>
