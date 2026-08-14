@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type { Employee, EmployeeBenefit, TimeRecord, Holiday, PayrollSettings } from '../types.ts';
 import { Loader } from './Loader.tsx';
-import { EditIcon, TrashIcon, UsersIcon, ClockIcon, CalculatorIcon, CheckCircleIcon, CalendarIcon, CogIcon } from '../constants.tsx';
+import { EditIcon, TrashIcon, UsersIcon, ClockIcon, CalculatorIcon, CheckCircleIcon, CalendarIcon, CogIcon, XMarkIcon, KeyIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { printPayrollThermal } from './PayrollThermalPrint.tsx';
 import { EmployeeIDModal } from './EmployeeIDModal.tsx';
@@ -180,7 +180,7 @@ interface PayrollProps {
     timeRecords: TimeRecord[];
     holidays: Holiday[];
     payrollSettings: PayrollSettings;
-    addEmployee: (employeeData: Omit<Employee, 'id'>, benefitData: Omit<EmployeeBenefit, 'id' | 'employeeId'>) => Promise<void>;
+    addEmployee: (employeeData: Omit<Employee, 'id'>, benefitData: Omit<EmployeeBenefit, 'id' | 'employeeId'>) => Promise<{ generatedPassword: string | null }>;
     updateEmployee: (employee: Employee, benefit: EmployeeBenefit) => Promise<void>;
     deleteEmployee: (employeeId: string) => Promise<void>;
     saveTimeRecord: (record: Omit<TimeRecord, 'id'> | TimeRecord) => Promise<void>;
@@ -189,6 +189,7 @@ interface PayrollProps {
     updateHoliday: (holiday: Holiday) => Promise<void>;
     deleteHoliday: (holidayId: string) => Promise<void>;
     savePayrollSettings: (settings: PayrollSettings) => Promise<void>;
+    resetEmployeePassword?: (employeeId: string) => Promise<string | null>;
     isLoading: boolean;
     error: string | null;
     onPayrollPaid?: (periodStart: string, periodEnd: string, totalNet: number, employeeCount: number) => Promise<void>;
@@ -467,7 +468,7 @@ const TimeRecordModal: React.FC<{
 }
 
 export const Payroll: React.FC<PayrollProps> = (props) => {
-    const { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, isLoading, error, onPayrollPaid } = props;
+    const { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, isLoading, error, onPayrollPaid } = props;
     const [activeTab, setActiveTab] = useState<'employees' | 'time_records' | 'generate_payroll' | 'holidays'>('employees');
     const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
     const [editingEmployee, setEditingEmployee] = useState<{ employee: Employee, benefit: EmployeeBenefit } | null>(null);
@@ -485,6 +486,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const [settingsSaved, setSettingsSaved] = useState(true);
     const [selectedEmployeeForId, setSelectedEmployeeForId] = useState<Employee | null>(null);
     const [isIdModalOpen, setIsIdModalOpen] = useState(false);
+    const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
 
     // Payroll generation state
     const today = new Date();
@@ -646,7 +648,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
             if ('id' in employeeData) {
                 await updateEmployee(employeeData, benefitData);
             } else {
-                await addEmployee(employeeData, benefitData);
+                const result = await addEmployee(employeeData, benefitData);
+                if (result?.generatedPassword) {
+                    setGeneratedPassword(result.generatedPassword);
+                }
             }
             setIsEmployeeModalOpen(false);
         } catch (err) {
@@ -654,6 +659,20 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
             alert("Failed to save employee.");
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    const handleResetPassword = async (emp: Employee) => {
+        if (!resetEmployeePassword) return;
+        if (!confirm(`Reset password for ${emp.fullName}?`)) return;
+        try {
+            const newPw = await resetEmployeePassword(emp.id);
+            if (newPw) {
+                setGeneratedPassword(newPw);
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Failed to reset password.');
         }
     };
     
@@ -717,8 +736,24 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                 return (
                     <div>
                         <div className="flex justify-end mb-4">
-                            <button onClick={() => { setEditingEmployee(null); setIsEmployeeModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add Employee</button>
+                            <button onClick={() => { setEditingEmployee(null); setGeneratedPassword(null); setIsEmployeeModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add Employee</button>
                         </div>
+
+                        {/* Generated Password Alert */}
+                        {generatedPassword && (
+                            <div className="mb-4 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Employee credentials generated:</p>
+                                        <p className="text-lg font-mono font-bold text-emerald-800 dark:text-emerald-200 mt-1">Password: {generatedPassword}</p>
+                                        <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">Please share this with the employee. It will not be shown again.</p>
+                                    </div>
+                                    <button onClick={() => setGeneratedPassword(null)} className="p-1 text-emerald-600 hover:text-emerald-800">
+                                        <XMarkIcon className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
                             <table className="w-full text-sm">
                                 <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50"><tr><th className="px-6 py-3">Name</th><th className="px-6 py-3">Role</th><th className="px-6 py-3">Salary</th><th className="px-6 py-3 text-right">Actions</th></tr></thead>
@@ -739,8 +774,13 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                                 <td>{emp.role}</td>
                                                 <td>{formatCurrency(emp.rate)} / {emp.salaryType}</td>
                                                 <td className="px-6 py-4 text-right space-x-2">
-                                                    <button onClick={() => { if(benefit) { setEditingEmployee({ employee: emp, benefit }); setIsEmployeeModalOpen(true); }}} className="p-1"><EditIcon className="w-5 h-5"/></button>
-                                                    <button onClick={() => deleteEmployee(emp.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button>
+                                                    <button onClick={() => { if(benefit) { setEditingEmployee({ employee: emp, benefit }); setIsEmployeeModalOpen(true); }}} className="p-1" title="Edit"><EditIcon className="w-5 h-5"/></button>
+                                                    {resetEmployeePassword && (
+                                                        <button onClick={() => handleResetPassword(emp)} className="p-1 text-amber-500 hover:text-amber-700" title="Reset Password">
+                                                            <KeyIcon className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => deleteEmployee(emp.id)} className="p-1" title="Delete"><TrashIcon className="w-5 h-5"/></button>
                                                 </td>
                                             </tr>
                                         )
@@ -788,7 +828,14 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                                 const hol = holidays.find(h => h.date === rec.date);
                                                 return (
                                                 <tr key={rec.id} className={`border-b dark:border-slate-700 ${hol ? (hol.type === 'regular' ? 'bg-red-50 dark:bg-red-900/10' : 'bg-blue-50 dark:bg-blue-900/10') : ''}`}>
-                                                    <td className="px-3 py-3 font-medium">{rec.date}</td>
+                                                    <td className="px-3 py-3 font-medium">
+                                                        <div className="flex items-center gap-1.5">
+                                                            {rec.date}
+                                                            {rec.source === 'employee' && (
+                                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 uppercase" title="Recorded via Employee Clock-In">Clock-In</span>
+                                                            )}
+                                                        </div>
+                                                    </td>
                                                     <td className="px-3 py-3">{formatTime12h(rec.timeInAM || rec.timeIn) || '--'}</td>
                                                     <td className="px-3 py-3">{formatTime12h(rec.timeOutAM || rec.timeOut) || '--'}</td>
                                                     <td className="px-3 py-3">{formatTime12h(rec.timeInPM) || '--'}</td>
@@ -805,8 +852,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                                             : <span className="text-slate-400">—</span>}
                                                     </td>
                                                     <td className="px-3 py-3 text-right space-x-2">
-                                                        <button onClick={() => { setEditingTimeRecord(rec); setIsTimeRecordModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button>
-                                                        <button onClick={() => deleteTimeRecord(rec.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button>
+                                                        <button onClick={() => { setEditingTimeRecord(rec); setIsTimeRecordModalOpen(true); }} className="p-1" title="Edit"><EditIcon className="w-5 h-5"/></button>
+                                                        {rec.source !== 'employee' && (
+                                                            <button onClick={() => deleteTimeRecord(rec.id)} className="p-1" title="Delete"><TrashIcon className="w-5 h-5"/></button>
+                                                        )}
                                                     </td>
                                                 </tr>
                                                 );

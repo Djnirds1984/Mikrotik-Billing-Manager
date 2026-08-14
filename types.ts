@@ -684,6 +684,8 @@ export interface Employee {
   hireDate: string; // ISO string YYYY-MM-DD
   salaryType: 'daily' | 'monthly';
   rate: number;
+  photoUrl?: string; // Employee photo (base64 or URL)
+  password?: string; // Auto-generated on creation, only returned once
 }
 
 export interface EmployeeBenefit {
@@ -707,6 +709,7 @@ export interface TimeRecord {
     isOvertime?: number; // 0 = regular, 1 = overtime entry (legacy, now auto-calculated)
     otHours?: number; // overtime hours for this entry (auto-calculated)
     holidayType?: 'regular' | 'special' | null; // auto-set when date matches a holiday
+    source?: 'admin' | 'employee'; // Where this record originated from
 }
 
 export interface Holiday {

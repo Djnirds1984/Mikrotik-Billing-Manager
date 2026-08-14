@@ -243,6 +243,22 @@ async function initDb() {
             console.warn('[Migration] Payroll migration skipped:', err.message);
         }
 
+        // Employee Login & DTR source tracking migrations
+        try {
+            const empLoginCols = await db.all("PRAGMA table_info(employees)");
+            const empLoginColNames = empLoginCols.map(c => c.name);
+            if (!empLoginColNames.includes('password')) await db.exec("ALTER TABLE employees ADD COLUMN password TEXT");
+            if (!empLoginColNames.includes('photoUrl')) await db.exec("ALTER TABLE employees ADD COLUMN photoUrl TEXT");
+
+            const trSourceCols = await db.all("PRAGMA table_info(time_records)");
+            const trSourceColNames = trSourceCols.map(c => c.name);
+            if (!trSourceColNames.includes('source')) await db.exec("ALTER TABLE time_records ADD COLUMN source TEXT DEFAULT 'admin'");
+
+            console.log('[Migration] Employee login & DTR source columns ensured');
+        } catch (err) {
+            console.warn('[Migration] Employee login migration skipped:', err.message);
+        }
+
         // Users & Roles
         await db.exec(`
             CREATE TABLE IF NOT EXISTS roles (
@@ -1600,7 +1616,11 @@ async function startServer() {
                     query += ` WHERE routerId = ?`;
                     params.push(routerId);
                 }
-                const rows = await db.all(query, params);
+                let rows = await db.all(query, params);
+                // Strip password hashes from employee records
+                if (table === 'employees') {
+                    rows = rows.map(e => { const { password, ...rest } = e; return rest; });
+                }
                 res.json(rows);
             } catch (e) {
                 res.status(500).json({ message: e.message });
@@ -1612,6 +1632,15 @@ async function startServer() {
                     if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
                         req.body.accountNumber = await generateAccountNumber();
                     }
+                }
+                // Auto-generate password for new employees
+                let _empPlaintext = null;
+                if (table === 'employees') {
+                    const namePart = (req.body.fullName || 'emp').toLowerCase().replace(/[^a-z]/g, '').slice(0, 4);
+                    const idSuffix = (req.body.id || Date.now().toString()).replace(/[^0-9]/g, '').slice(-4);
+                    _empPlaintext = `${namePart || 'emp'}_${idSuffix || '0000'}`;
+                    const hashedPw = await bcrypt.hash(_empPlaintext, 10);
+                    req.body.password = hashedPw;
                 }
                 const keys = Object.keys(req.body);
                 const values = Object.values(req.body);
@@ -1694,6 +1723,9 @@ async function startServer() {
                     }
                 }
                 
+                if (table === 'employees' && _empPlaintext) {
+                    return res.json({ message: 'Created', generatedPassword: _empPlaintext });
+                }
                 res.json({ message: 'Created' });
             } catch (e) {
                 res.status(500).json({ message: e.message });
@@ -1909,6 +1941,36 @@ async function startServer() {
             res.status(500).json({ message: e.message });
         }
     });
+
+    // Reset employee password (admin-initiated)
+    dbRouter.post('/employees/:id/reset-password', async (req, res) => {
+        try {
+            const { id } = req.params;
+            const employee = await db.get('SELECT * FROM employees WHERE id = ?', [id]);
+            if (!employee) return res.status(404).json({ message: 'Employee not found' });
+            const namePart = (employee.fullName || 'emp').toLowerCase().replace(/[^a-z]/g, '').slice(0, 4);
+            const idSuffix = (employee.id || '').replace(/[^0-9]/g, '').slice(-4);
+            const plaintextPassword = `${namePart || 'emp'}_${idSuffix || '0000'}`;
+            const hashedPw = await bcrypt.hash(plaintextPassword, 10);
+            await db.run('UPDATE employees SET password = ? WHERE id = ?', [hashedPw, id]);
+            res.json({ message: 'Password reset successfully', generatedPassword: plaintextPassword });
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    // Update employee photo
+    dbRouter.patch('/employees/:id/photo', async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { photoUrl } = req.body;
+            await db.run('UPDATE employees SET photoUrl = ? WHERE id = ?', [photoUrl, id]);
+            res.json({ message: 'Photo updated' });
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
     createCrud('/dhcp-billing-plans', 'dhcp_billing_plans');
     createCrud('/dhcp_clients', 'dhcp_clients');
     createCrud('/client-invoices', 'client_invoices');
@@ -3328,6 +3390,219 @@ async function startServer() {
     });
 
     app.use('/api/db', dbRouter);
+
+    // --- Employee Login & DTR API ---
+    // Employee auth (public — no admin JWT required)
+    const employeeAuthRouter = express.Router();
+
+    // Employee login
+    employeeAuthRouter.post('/login', async (req, res) => {
+        try {
+            const { id, password } = req.body;
+            if (!id || !password) {
+                return res.status(400).json({ message: 'Employee ID and password are required' });
+            }
+            const employee = await db.get('SELECT * FROM employees WHERE id = ?', [id]);
+            if (!employee) {
+                return res.status(401).json({ message: 'Invalid employee ID or password' });
+            }
+            if (!employee.password) {
+                return res.status(401).json({ message: 'No password set. Contact admin to reset.' });
+            }
+            const valid = await bcrypt.compare(password, employee.password);
+            if (!valid) {
+                return res.status(401).json({ message: 'Invalid employee ID or password' });
+            }
+            const token = jwt.sign(
+                { id: employee.id, fullName: employee.fullName, role: 'employee', type: 'employee' },
+                SECRET_KEY,
+                { expiresIn: '24h' }
+            );
+            res.json({
+                token,
+                employee: {
+                    id: employee.id,
+                    fullName: employee.fullName,
+                    role: employee.role,
+                    hireDate: employee.hireDate,
+                    salaryType: employee.salaryType,
+                    rate: employee.rate,
+                    photoUrl: employee.photoUrl || null
+                }
+            });
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    // Middleware to protect employee routes
+    const protectEmployee = (req, res, next) => {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ message: 'No token provided' });
+        }
+        const token = authHeader.split(' ')[1];
+        jwt.verify(token, SECRET_KEY, (err, decoded) => {
+            if (err || decoded.type !== 'employee') {
+                return res.status(403).json({ message: 'Invalid or expired token' });
+            }
+            req.employee = decoded;
+            next();
+        });
+    };
+
+    // Get logged-in employee profile
+    employeeAuthRouter.get('/me', protectEmployee, async (req, res) => {
+        try {
+            const employee = await db.get('SELECT id, fullName, role, hireDate, salaryType, rate, photoUrl FROM employees WHERE id = ?', [req.employee.id]);
+            if (!employee) return res.status(404).json({ message: 'Employee not found' });
+            res.json(employee);
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    // Change password
+    employeeAuthRouter.post('/change-password', protectEmployee, async (req, res) => {
+        try {
+            const { currentPassword, newPassword } = req.body;
+            if (!currentPassword || !newPassword) {
+                return res.status(400).json({ message: 'Current and new password are required' });
+            }
+            const employee = await db.get('SELECT * FROM employees WHERE id = ?', [req.employee.id]);
+            if (!employee) return res.status(404).json({ message: 'Employee not found' });
+            const valid = await bcrypt.compare(currentPassword, employee.password);
+            if (!valid) return res.status(401).json({ message: 'Current password is incorrect' });
+            const hashed = await bcrypt.hash(newPassword, 10);
+            await db.run('UPDATE employees SET password = ? WHERE id = ?', [hashed, req.employee.id]);
+            res.json({ message: 'Password changed successfully' });
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    app.use('/api/employee-auth', employeeAuthRouter);
+
+    // Employee DTR endpoints (protected — employee JWT required)
+    const employeeDtrRouter = express.Router();
+    employeeDtrRouter.use(protectEmployee);
+
+    // Helper: get server time in HH:MM format
+    const getServerTime = () => {
+        const now = new Date();
+        return now.toLocaleTimeString('en-PH', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    };
+    // Helper: get today's date in YYYY-MM-DD format
+    const getTodayDate = () => {
+        return new Date().toISOString().split('T')[0];
+    };
+
+    // Time-In
+    employeeDtrRouter.post('/time-in', async (req, res) => {
+        try {
+            const empId = req.employee.id;
+            const today = getTodayDate();
+            const serverTime = getServerTime();
+
+            // Check if a record already exists for today
+            const existing = await db.get(
+                'SELECT * FROM time_records WHERE employeeId = ? AND date = ?',
+                [empId, today]
+            );
+
+            if (existing) {
+                // Already timed in and completed
+                if (existing.timeOutPM || existing.timeOut) {
+                    return res.status(400).json({ message: 'You have already completed your DTR for today.', record: existing });
+                }
+                // Already timed in but not yet out — return existing record
+                if (existing.timeInAM || existing.timeIn) {
+                    return res.json({ message: 'Already timed in today.', record: existing });
+                }
+            }
+
+            if (existing) {
+                // Update existing empty record
+                await db.run(
+                    'UPDATE time_records SET timeInAM = ? WHERE id = ?',
+                    [serverTime, existing.id]
+                );
+                const updated = await db.get('SELECT * FROM time_records WHERE id = ?', [existing.id]);
+                return res.json({ message: 'Time-in recorded.', record: updated });
+            }
+
+            // Create new record
+            const recordId = `dtr_${Date.now()}_${empId.slice(-4)}`;
+            await db.run(
+                `INSERT INTO time_records (id, employeeId, date, timeInAM, timeIn, timeOut, source)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [recordId, empId, today, serverTime, serverTime, '', 'employee']
+            );
+            const created = await db.get('SELECT * FROM time_records WHERE id = ?', [recordId]);
+            res.json({ message: 'Time-in recorded successfully.', record: created, serverTime });
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    // Time-Out
+    employeeDtrRouter.post('/time-out', async (req, res) => {
+        try {
+            const empId = req.employee.id;
+            const today = getTodayDate();
+            const serverTime = getServerTime();
+
+            const existing = await db.get(
+                'SELECT * FROM time_records WHERE employeeId = ? AND date = ?',
+                [empId, today]
+            );
+
+            if (!existing) {
+                return res.status(404).json({ message: 'No time-in record found for today. Please time-in first.' });
+            }
+            if (existing.timeOutPM || existing.timeOut) {
+                return res.status(400).json({ message: 'You have already timed out today.', record: existing });
+            }
+
+            await db.run(
+                'UPDATE time_records SET timeOutPM = ?, timeOut = ? WHERE id = ?',
+                [serverTime, serverTime, existing.id]
+            );
+            const updated = await db.get('SELECT * FROM time_records WHERE id = ?', [existing.id]);
+            res.json({ message: 'Time-out recorded.', record: updated, serverTime });
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    // Get all DTR records for the logged-in employee
+    employeeDtrRouter.get('/records', async (req, res) => {
+        try {
+            const records = await db.all(
+                'SELECT * FROM time_records WHERE employeeId = ? ORDER BY date DESC',
+                [req.employee.id]
+            );
+            res.json(records);
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    // Get today's DTR record
+    employeeDtrRouter.get('/today', async (req, res) => {
+        try {
+            const today = getTodayDate();
+            const record = await db.get(
+                'SELECT * FROM time_records WHERE employeeId = ? AND date = ?',
+                [req.employee.id, today]
+            );
+            res.json(record || null);
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    });
+
+    app.use('/api/employee-dtr', employeeDtrRouter);
 
     // --- SMS Management API (Protected) ---
     // Templates and delivery logs for the Admin APK native SMS sender.

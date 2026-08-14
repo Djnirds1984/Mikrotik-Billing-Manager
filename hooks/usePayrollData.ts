@@ -61,7 +61,7 @@ export const usePayrollData = (autoLoad: boolean = true) => {
                 ...employeeData,
                 id: `emp_${Date.now()}`,
             };
-            await dbApi.post('/employees', newEmployee);
+            const result = await dbApi.post<{ message: string; generatedPassword?: string }>('/employees', newEmployee);
             
             const newBenefit: EmployeeBenefit = {
                 ...benefitData,
@@ -70,6 +70,7 @@ export const usePayrollData = (autoLoad: boolean = true) => {
             };
             await dbApi.post('/employee-benefits', newBenefit);
             await fetchData();
+            return { generatedPassword: result?.generatedPassword || null };
         } catch (err) {
             console.error("Failed to add employee:", err);
             throw err;
@@ -164,5 +165,15 @@ export const usePayrollData = (autoLoad: boolean = true) => {
         }
     };
 
-    return { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, isLoading, error, fetchData };
+    const resetEmployeePassword = async (employeeId: string): Promise<string | null> => {
+        try {
+            const result = await dbApi.post<{ message: string; generatedPassword?: string }>(`/employees/${employeeId}/reset-password`, {});
+            return result?.generatedPassword || null;
+        } catch (err) {
+            console.error("Failed to reset employee password:", err);
+            throw err;
+        }
+    };
+
+    return { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, isLoading, error, fetchData };
 };

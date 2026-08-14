@@ -69,6 +69,7 @@ const JobOrders = React.lazy(() => import('./components/JobOrders.tsx').then(m =
 const Customers = React.lazy(() => import('./components/Customers.tsx').then(m => ({ default: m.Customers })));
 const Collectibles = React.lazy(() => import('./components/Collectibles.tsx').then(m => ({ default: m.Collectibles })));
 const SmsManager = React.lazy(() => import('./components/SmsManager.tsx').then(m => ({ default: m.SmsManager })));
+const EmployeeLogin = React.lazy(() => import('./components/EmployeeLogin.tsx').then(m => ({ default: m.EmployeeLogin })));
 
 
 const useMediaQuery = (query: string): boolean => {
@@ -542,6 +543,18 @@ const AppRouter: React.FC = () => {
                 <LocalizationProvider>
                     <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
                         <ExpiredPortal />
+                    </Suspense>
+                </LocalizationProvider>
+            </ThemeProvider>
+        );
+    }
+
+    if (path.startsWith('/employee_login')) {
+        return (
+            <ThemeProvider>
+                <LocalizationProvider>
+                    <Suspense fallback={<div className="flex h-screen w-screen items-center justify-center"><Loader /></div>}>
+                        <EmployeeLogin />
                     </Suspense>
                 </LocalizationProvider>
             </ThemeProvider>
