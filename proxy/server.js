@@ -216,6 +216,33 @@ async function initDb() {
             await db.exec("UPDATE notifications SET link_to='captive_chat' WHERE type IN ('client-chat','admin-reply') AND (link_to IS NULL OR link_to <> 'captive_chat')");
         } catch (_) {}
 
+        // Payroll DTR Form 48 + Overtime + Holiday migrations
+        try {
+            const trCols = await db.all("PRAGMA table_info(time_records)");
+            const trColNames = trCols.map(c => c.name);
+            if (!trColNames.includes('timeInAM')) await db.exec("ALTER TABLE time_records ADD COLUMN timeInAM TEXT");
+            if (!trColNames.includes('timeOutAM')) await db.exec("ALTER TABLE time_records ADD COLUMN timeOutAM TEXT");
+            if (!trColNames.includes('timeInPM')) await db.exec("ALTER TABLE time_records ADD COLUMN timeInPM TEXT");
+            if (!trColNames.includes('timeOutPM')) await db.exec("ALTER TABLE time_records ADD COLUMN timeOutPM TEXT");
+            if (!trColNames.includes('isOvertime')) await db.exec("ALTER TABLE time_records ADD COLUMN isOvertime INTEGER DEFAULT 0");
+            if (!trColNames.includes('otHours')) await db.exec("ALTER TABLE time_records ADD COLUMN otHours REAL DEFAULT 0");
+            if (!trColNames.includes('holidayType')) await db.exec("ALTER TABLE time_records ADD COLUMN holidayType TEXT DEFAULT NULL");
+
+            const empCols = await db.all("PRAGMA table_info(employees)");
+            const empColNames = empCols.map(c => c.name);
+            if (!empColNames.includes('hoursPerDay')) await db.exec("ALTER TABLE employees ADD COLUMN hoursPerDay REAL DEFAULT 8");
+
+            // Seed payroll_settings defaults
+            await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('otPremiumPercent', 50)");
+            await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('regularHolidayMultiplier', 2.0)");
+            await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('specialHolidayMultiplier', 1.5)");
+            await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('defaultHoursPerDay', 8)");
+
+            console.log('[Migration] Payroll DTR/Overtime/Holiday columns + tables ensured');
+        } catch (err) {
+            console.warn('[Migration] Payroll migration skipped:', err.message);
+        }
+
         // Users & Roles
         await db.exec(`
             CREATE TABLE IF NOT EXISTS roles (
@@ -478,7 +505,8 @@ async function initDb() {
                 role TEXT,
                 hireDate TEXT,
                 salaryType TEXT,
-                rate REAL
+                rate REAL,
+                hoursPerDay REAL DEFAULT 8
             );
             CREATE TABLE IF NOT EXISTS employee_benefits (
                 id TEXT PRIMARY KEY,
@@ -494,7 +522,25 @@ async function initDb() {
                 date TEXT,
                 timeIn TEXT,
                 timeOut TEXT,
+                timeInAM TEXT,
+                timeOutAM TEXT,
+                timeInPM TEXT,
+                timeOutPM TEXT,
+                isOvertime INTEGER DEFAULT 0,
+                otHours REAL DEFAULT 0,
+                holidayType TEXT DEFAULT NULL,
                 FOREIGN KEY (employeeId) REFERENCES employees(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS holidays (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT 'regular',
+                createdAt TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS payroll_settings (
+                key TEXT PRIMARY KEY,
+                value REAL NOT NULL
             );
              CREATE TABLE IF NOT EXISTS customers (
                 id TEXT PRIMARY KEY,
@@ -1835,6 +1881,34 @@ async function startServer() {
     createCrud('/routers', 'routers');
     createCrud('/employee-benefits', 'employee_benefits');
     createCrud('/time-records', 'time_records');
+    createCrud('/holidays', 'holidays');
+
+    // Payroll Settings endpoints (key-value store)
+    dbRouter.get('/payroll-settings', async (req, res) => {
+        try {
+            const rows = await db.all('SELECT key, value FROM payroll_settings');
+            const settings = {};
+            rows.forEach(r => { settings[r.key] = r.value; });
+            res.json(settings);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    dbRouter.patch('/payroll-settings', async (req, res) => {
+        try {
+            const updates = req.body; // { key: value, ... }
+            for (const [key, value] of Object.entries(updates)) {
+                await db.run('INSERT OR REPLACE INTO payroll_settings (key, value) VALUES (?, ?)', [key, value]);
+            }
+            const rows = await db.all('SELECT key, value FROM payroll_settings');
+            const settings = {};
+            rows.forEach(r => { settings[r.key] = r.value; });
+            res.json(settings);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
     createCrud('/dhcp-billing-plans', 'dhcp_billing_plans');
     createCrud('/dhcp_clients', 'dhcp_clients');
     createCrud('/client-invoices', 'client_invoices');

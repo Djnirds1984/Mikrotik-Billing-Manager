@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import type { Employee, EmployeeBenefit, TimeRecord } from '../types.ts';
+import type { Employee, EmployeeBenefit, TimeRecord, Holiday, PayrollSettings } from '../types.ts';
 import { Loader } from './Loader.tsx';
-import { EditIcon, TrashIcon, UsersIcon, ClockIcon, CalculatorIcon, CheckCircleIcon } from '../constants.tsx';
+import { EditIcon, TrashIcon, UsersIcon, ClockIcon, CalculatorIcon, CheckCircleIcon, CalendarIcon, CogIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 
 // ─── Philippine government contribution rates (2024) ───────────────────────
@@ -26,6 +26,14 @@ interface PayrollEntry {
     pagibigDeduction: number;
     totalDeductions: number;
     netPay: number;
+    regularHours: number;
+    overtimeHours: number;
+    regularPay: number;
+    overtimePay: number;
+    otHourlyRate: number;
+    holidayPay: number;
+    holidayDays: number;
+    totalPay: number;
 }
 
 const computeHoursWorked = (timeIn: string, timeOut: string): number => {
@@ -36,12 +44,55 @@ const computeHoursWorked = (timeIn: string, timeOut: string): number => {
     return diff > 0 ? diff / 60 : 0;
 };
 
+// Form 48: compute hours from AM/PM split
+const computeHoursFromForm48 = (record: TimeRecord): number => {
+    if (record.timeInAM && record.timeOutAM) {
+        const amHours = computeHoursWorked(record.timeInAM, record.timeOutAM);
+        const pmHours = (record.timeInPM && record.timeOutPM) ? computeHoursWorked(record.timeInPM, record.timeOutPM) : 0;
+        return amHours + pmHours;
+    }
+    // Fallback to legacy
+    return computeHoursWorked(record.timeIn, record.timeOut);
+};
+
+// Compute overtime pay using configurable settings
+const computeOvertimePayForDay = (
+    employee: Employee,
+    totalHours: number,
+    otHoursLogged: number,
+    settings: PayrollSettings,
+    holidayMultiplier: number | null
+) => {
+    const stdHours = employee.hoursPerDay || settings.defaultHoursPerDay;
+    const baseRate = employee.salaryType === 'daily' ? employee.rate : employee.rate / 26;
+    const effectiveBase = holidayMultiplier ? baseRate * holidayMultiplier : baseRate;
+    const hourlyRate = effectiveBase / stdHours;
+    const otRate = hourlyRate * (1 + settings.otPremiumPercent / 100);
+    const regularHours = Math.min(totalHours, stdHours);
+    const autoOtHours = Math.max(0, totalHours - stdHours);
+    const totalOtHours = autoOtHours + (otHoursLogged || 0);
+    return {
+        regularPay: hourlyRate * regularHours,
+        overtimePay: otRate * totalOtHours,
+        otRate,
+        regularHours,
+        totalOtHours,
+    };
+};
+
+// Check if a date matches a holiday
+const findHoliday = (date: string, holidays: Holiday[]): Holiday | null => {
+    return holidays.find(h => h.date === date) || null;
+};
+
 const computePayrollEntry = (
     employee: Employee,
     benefit: EmployeeBenefit,
     records: TimeRecord[],
     periodStart: string,
-    periodEnd: string
+    periodEnd: string,
+    holidays: Holiday[],
+    settings: PayrollSettings
 ): PayrollEntry => {
     const start = new Date(periodStart);
     const end = new Date(periodEnd);
@@ -53,29 +104,43 @@ const computePayrollEntry = (
 
     let daysWorked = 0;
     let hoursWorked = 0;
+    let totalRegularPay = 0;
+    let totalOvertimePay = 0;
+    let totalOtHours = 0;
+    let totalRegularHours = 0;
+    let totalHolidayPay = 0;
+    let holidayDaysCount = 0;
+    let lastOtRate = 0;
 
     filtered.forEach(r => {
-        const h = computeHoursWorked(r.timeIn, r.timeOut);
-        if (h > 0) {
-            hoursWorked += h;
+        const h = computeHoursFromForm48(r);
+        const holiday = findHoliday(r.date, holidays);
+        const holidayMultiplier = holiday
+            ? (holiday.type === 'regular' ? settings.regularHolidayMultiplier : settings.specialHolidayMultiplier)
+            : null;
+
+        if (h > 0 || (!r.timeIn && !r.timeOut && (!r.timeInAM || !r.timeOutAM))) {
+            const effectiveHours = h > 0 ? h : (employee.hoursPerDay || settings.defaultHoursPerDay);
             daysWorked += 1;
-        } else if (!r.timeIn && !r.timeOut) {
-            // Full day entry with no time — count as 1 day
-            daysWorked += 1;
-            hoursWorked += 8;
+            hoursWorked += effectiveHours;
+
+            const otResult = computeOvertimePayForDay(employee, effectiveHours, r.otHours || 0, settings, holidayMultiplier);
+            totalRegularPay += otResult.regularPay;
+            totalOvertimePay += otResult.overtimePay;
+            totalOtHours += otResult.totalOtHours;
+            totalRegularHours += otResult.regularHours;
+            lastOtRate = otResult.otRate;
+
+            // Holiday bonus: extra pay on top of base
+            if (holiday && holidayMultiplier) {
+                const baseRate = employee.salaryType === 'daily' ? employee.rate : employee.rate / 26;
+                totalHolidayPay += baseRate * (holidayMultiplier - 1);
+                holidayDaysCount += 1;
+            }
         }
     });
 
-    let grossPay = 0;
-    if (employee.salaryType === 'daily') {
-        grossPay = employee.rate * daysWorked;
-    } else {
-        // Monthly: prorate by working days in period (assume 26 working days/month)
-        const workingDaysInMonth = 26;
-        const periodDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-        const periodWorkingDays = Math.round((periodDays / 30) * workingDaysInMonth);
-        grossPay = (employee.rate / workingDaysInMonth) * Math.min(daysWorked, periodWorkingDays);
-    }
+    const grossPay = totalRegularPay + totalOvertimePay + totalHolidayPay;
 
     // Monthly equivalent for deduction computation
     const monthlyEquivalent = employee.salaryType === 'monthly' ? employee.rate : employee.rate * 26;
@@ -86,18 +151,35 @@ const computePayrollEntry = (
     const totalDeductions = sssDeduction + philhealthDeduction + pagibigDeduction;
     const netPay = Math.max(0, grossPay - totalDeductions);
 
-    return { employee, benefit, daysWorked, hoursWorked, grossPay, sssDeduction, philhealthDeduction, pagibigDeduction, totalDeductions, netPay };
+    return {
+        employee, benefit, daysWorked, hoursWorked, grossPay,
+        sssDeduction, philhealthDeduction, pagibigDeduction, totalDeductions, netPay,
+        regularHours: totalRegularHours,
+        overtimeHours: totalOtHours,
+        regularPay: totalRegularPay,
+        overtimePay: totalOvertimePay,
+        otHourlyRate: lastOtRate,
+        holidayPay: totalHolidayPay,
+        holidayDays: holidayDaysCount,
+        totalPay: grossPay,
+    };
 };
 
 interface PayrollProps {
     employees: Employee[];
     benefits: EmployeeBenefit[];
     timeRecords: TimeRecord[];
+    holidays: Holiday[];
+    payrollSettings: PayrollSettings;
     addEmployee: (employeeData: Omit<Employee, 'id'>, benefitData: Omit<EmployeeBenefit, 'id' | 'employeeId'>) => Promise<void>;
     updateEmployee: (employee: Employee, benefit: EmployeeBenefit) => Promise<void>;
     deleteEmployee: (employeeId: string) => Promise<void>;
     saveTimeRecord: (record: Omit<TimeRecord, 'id'> | TimeRecord) => Promise<void>;
     deleteTimeRecord: (recordId: string) => Promise<void>;
+    addHoliday: (holidayData: Omit<Holiday, 'id'>) => Promise<void>;
+    updateHoliday: (holiday: Holiday) => Promise<void>;
+    deleteHoliday: (holidayId: string) => Promise<void>;
+    savePayrollSettings: (settings: PayrollSettings) => Promise<void>;
     isLoading: boolean;
     error: string | null;
     onPayrollPaid?: (periodStart: string, periodEnd: string, totalNet: number, employeeCount: number) => Promise<void>;
@@ -110,7 +192,7 @@ const EmployeeFormModal: React.FC<{
     initialData: { employee: Employee, benefit: EmployeeBenefit } | null;
     isSubmitting: boolean;
 }> = ({ isOpen, onClose, onSave, initialData, isSubmitting }) => {
-    const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', rate: 0 });
+    const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', rate: 0, hoursPerDay: 8 });
     const [benefit, setBenefit] = useState<Omit<EmployeeBenefit, 'id' | 'employeeId'>>({ sss: false, philhealth: false, pagibig: false });
 
     useEffect(() => {
@@ -119,7 +201,7 @@ const EmployeeFormModal: React.FC<{
                 setEmployee(initialData.employee);
                 setBenefit(initialData.benefit);
             } else {
-                setEmployee({ fullName: '', role: '', hireDate: new Date().toISOString().split('T')[0], salaryType: 'daily', rate: 0 });
+                setEmployee({ fullName: '', role: '', hireDate: new Date().toISOString().split('T')[0], salaryType: 'daily', rate: 0, hoursPerDay: 8 });
                 setBenefit({ sss: false, philhealth: false, pagibig: false });
             }
         }
@@ -167,7 +249,7 @@ const EmployeeFormModal: React.FC<{
                                     <input name="role" value={employee.role} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                                 </div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                 <div>
                                     <label>Hire Date</label>
                                     <input type="date" name="hireDate" value={employee.hireDate} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
@@ -182,6 +264,10 @@ const EmployeeFormModal: React.FC<{
                                 <div>
                                     <label>Rate</label>
                                     <input type="number" name="rate" value={employee.rate} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                                <div>
+                                    <label>Hours / Day</label>
+                                    <input type="number" name="hoursPerDay" value={employee.hoursPerDay || 8} onChange={handleChange} min={1} max={24} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                                 </div>
                             </div>
                             <div>
@@ -212,50 +298,156 @@ const TimeRecordModal: React.FC<{
     onSave: (record: Omit<TimeRecord, 'id'> | TimeRecord) => void;
     initialData: TimeRecord | null;
     employeeId: string;
+    employeeRate: number;
+    employeeSalaryType: 'daily' | 'monthly';
+    employeeHoursPerDay: number;
+    holidays: Holiday[];
+    payrollSettings: PayrollSettings;
     isSubmitting: boolean;
-}> = ({ isOpen, onClose, onSave, initialData, employeeId, isSubmitting }) => {
-    const [record, setRecord] = useState({ date: '', timeIn: '', timeOut: '' });
+}> = ({ isOpen, onClose, onSave, initialData, employeeId, employeeRate, employeeSalaryType, employeeHoursPerDay, holidays, payrollSettings, isSubmitting }) => {
+    const [record, setRecord] = useState({ date: '', timeIn: '', timeOut: '', timeInAM: '', timeOutAM: '', timeInPM: '', timeOutPM: '', isOvertime: 0, otHours: 0 });
 
     useEffect(() => {
         if(isOpen) {
             if (initialData) {
-                setRecord({ date: initialData.date, timeIn: initialData.timeIn || '', timeOut: initialData.timeOut || '' });
+                setRecord({
+                    date: initialData.date,
+                    timeIn: initialData.timeIn || '', timeOut: initialData.timeOut || '',
+                    timeInAM: initialData.timeInAM || '', timeOutAM: initialData.timeOutAM || '',
+                    timeInPM: initialData.timeInPM || '', timeOutPM: initialData.timeOutPM || '',
+                    isOvertime: initialData.isOvertime || 0,
+                    otHours: initialData.otHours || 0,
+                });
             } else {
-                setRecord({ date: new Date().toISOString().split('T')[0], timeIn: '', timeOut: '' });
+                setRecord({ date: new Date().toISOString().split('T')[0], timeIn: '', timeOut: '', timeInAM: '', timeOutAM: '', timeInPM: '', timeOutPM: '', isOvertime: 0, otHours: 0 });
             }
         }
     }, [isOpen, initialData]);
 
     if (!isOpen) return null;
-    
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setRecord(r => ({ ...r, [e.target.name]: e.target.value }));
+        const { name, value, type } = e.target;
+        setRecord(r => ({ ...r, [name]: type === 'number' ? parseFloat(value) || 0 : (type === 'checkbox' ? (e.target as HTMLInputElement).checked ? 1 : 0 : value) }));
     };
-    
+
+    // Compute total hours from AM/PM
+    const totalHours = useMemo(() => {
+        let h = 0;
+        if (record.timeInAM && record.timeOutAM) {
+            const [inH, inM] = record.timeInAM.split(':').map(Number);
+            const [outH, outM] = record.timeOutAM.split(':').map(Number);
+            const diff = (outH * 60 + outM) - (inH * 60 + inM);
+            if (diff > 0) h += diff / 60;
+        }
+        if (record.timeInPM && record.timeOutPM) {
+            const [inH, inM] = record.timeInPM.split(':').map(Number);
+            const [outH, outM] = record.timeOutPM.split(':').map(Number);
+            const diff = (outH * 60 + outM) - (inH * 60 + inM);
+            if (diff > 0) h += diff / 60;
+        }
+        return h;
+    }, [record.timeInAM, record.timeOutAM, record.timeInPM, record.timeOutPM]);
+
+    // Detect holiday
+    const holiday = holidays.find(h => h.date === record.date) || null;
+    const holidayMultiplier = holiday
+        ? (holiday.type === 'regular' ? payrollSettings.regularHolidayMultiplier : payrollSettings.specialHolidayMultiplier)
+        : null;
+
+    // Compute OT rate display
+    const stdHours = employeeHoursPerDay || payrollSettings.defaultHoursPerDay;
+    const baseRate = employeeSalaryType === 'daily' ? employeeRate : employeeRate / 26;
+    const effectiveBase = holidayMultiplier ? baseRate * holidayMultiplier : baseRate;
+    const hourlyRate = effectiveBase / stdHours;
+    const otRate = hourlyRate * (1 + payrollSettings.otPremiumPercent / 100);
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave(initialData ? { ...record, id: initialData.id, employeeId } : { ...record, employeeId });
+        const data = {
+            ...record,
+            employeeId,
+            holidayType: holiday ? holiday.type : null,
+        };
+        onSave(initialData ? { ...data, id: initialData.id } : data);
     };
 
     return (
          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
                 <form onSubmit={handleSubmit}>
                     <div className="p-6">
-                        <h3 className="text-xl font-bold mb-4">{initialData ? 'Edit Time Record' : 'Add Time Record'}</h3>
+                        <h3 className="text-xl font-bold mb-4">{initialData ? 'Edit DTR Entry' : 'Add DTR Entry (Form 48)'}</h3>
                         <div className="space-y-4">
                             <div>
                                 <label>Date</label>
                                 <input type="date" name="date" value={record.date} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label>Time In</label>
-                                    <input type="time" name="timeIn" value={record.timeIn} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+
+                            {/* Holiday Badge */}
+                            {holiday && (
+                                <div className={`px-3 py-2 rounded-md text-sm font-semibold ${holiday.type === 'regular' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}`}>
+                                    {holiday.type === 'regular' ? '🔴 Regular Holiday' : '🔵 Special Holiday'} — {holiday.name} (x{holidayMultiplier})
                                 </div>
-                                <div>
-                                    <label>Time Out</label>
-                                    <input type="time" name="timeOut" value={record.timeOut} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                            )}
+
+                            {/* AM/PM Split */}
+                            <div className="border border-slate-200 dark:border-slate-600 rounded-lg p-3">
+                                <p className="text-xs font-bold uppercase text-slate-500 mb-2">Morning (AM)</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-sm">Time In</label>
+                                        <input type="time" name="timeInAM" value={record.timeInAM} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm">Time Out</label>
+                                        <input type="time" name="timeOutAM" value={record.timeOutAM} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="border border-slate-200 dark:border-slate-600 rounded-lg p-3">
+                                <p className="text-xs font-bold uppercase text-slate-500 mb-2">Afternoon (PM)</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-sm">Time In</label>
+                                        <input type="time" name="timeInPM" value={record.timeInPM} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm">Time Out</label>
+                                        <input type="time" name="timeOutPM" value={record.timeOutPM} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Total Hours */}
+                            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-700/50 rounded-md px-3 py-2">
+                                <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Total Hours</span>
+                                <span className="font-bold text-lg">{totalHours.toFixed(2)} hrs</span>
+                            </div>
+
+                            {/* Overtime */}
+                            <div className="border border-amber-200 dark:border-amber-700 rounded-lg p-3 bg-amber-50 dark:bg-amber-900/10">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <input type="checkbox" name="isOvertime" checked={record.isOvertime === 1} onChange={handleChange} id="isOvertime" />
+                                    <label htmlFor="isOvertime" className="text-sm font-semibold text-amber-700 dark:text-amber-400">Overtime</label>
+                                </div>
+                                {record.isOvertime === 1 && (
+                                    <div>
+                                        <label className="text-sm">Additional OT Hours</label>
+                                        <input type="number" name="otHours" value={record.otHours} onChange={handleChange} min={0} step={0.5} className="mt-1 w-full p-2 bg-white dark:bg-slate-700 rounded-md border border-amber-200 dark:border-amber-600" />
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* OT Rate Display */}
+                            <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-700 rounded-md px-3 py-2 text-sm">
+                                <div className="flex justify-between">
+                                    <span className="text-slate-600 dark:text-slate-300">Hourly Rate</span>
+                                    <span className="font-semibold">₱{hourlyRate.toFixed(2)}/hr</span>
+                                </div>
+                                <div className="flex justify-between mt-1">
+                                    <span className="text-emerald-700 dark:text-emerald-400">OT Rate (+{payrollSettings.otPremiumPercent}%)</span>
+                                    <span className="font-bold text-emerald-700 dark:text-emerald-400">₱{otRate.toFixed(2)}/hr</span>
                                 </div>
                             </div>
                         </div>
@@ -271,8 +463,8 @@ const TimeRecordModal: React.FC<{
 }
 
 export const Payroll: React.FC<PayrollProps> = (props) => {
-    const { employees, benefits, timeRecords, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, isLoading, error, onPayrollPaid } = props;
-    const [activeTab, setActiveTab] = useState<'employees' | 'time_records' | 'generate_payroll'>('employees');
+    const { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, isLoading, error, onPayrollPaid } = props;
+    const [activeTab, setActiveTab] = useState<'employees' | 'time_records' | 'generate_payroll' | 'holidays'>('employees');
     const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
     const [editingEmployee, setEditingEmployee] = useState<{ employee: Employee, benefit: EmployeeBenefit } | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -282,6 +474,11 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const [editingTimeRecord, setEditingTimeRecord] = useState<TimeRecord | null>(null);
     const [payrollPaid, setPayrollPaid] = useState(false);
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    const [isHolidayModalOpen, setIsHolidayModalOpen] = useState(false);
+    const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
+    const [holidayForm, setHolidayForm] = useState({ name: '', date: '', type: 'regular' as 'regular' | 'special' });
+    const [settingsDraft, setSettingsDraft] = useState<PayrollSettings>(payrollSettings);
+    const [settingsSaved, setSettingsSaved] = useState(true);
 
     // Payroll generation state
     const today = new Date();
@@ -293,15 +490,19 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const [generated, setGenerated] = useState(false);
     const printRef = useRef<HTMLDivElement>(null);
 
+    useEffect(() => {
+        setSettingsDraft(payrollSettings);
+    }, [payrollSettings]);
+
     const payrollEntries = useMemo<PayrollEntry[]>(() => {
         if (!generated) return [];
         const targets = employees.filter(e => selectedEmployeeIds.size === 0 || selectedEmployeeIds.has(e.id));
         return targets.map(emp => {
             const benefit = benefits.find(b => b.employeeId === emp.id) || { id: '', employeeId: emp.id, sss: false, philhealth: false, pagibig: false };
             const empRecords = timeRecords.filter(r => r.employeeId === emp.id);
-            return computePayrollEntry(emp, benefit, empRecords, periodStart, periodEnd);
+            return computePayrollEntry(emp, benefit, empRecords, periodStart, periodEnd, holidays, payrollSettings);
         });
-    }, [generated, employees, benefits, timeRecords, selectedEmployeeIds, periodStart, periodEnd]);
+    }, [generated, employees, benefits, timeRecords, selectedEmployeeIds, periodStart, periodEnd, holidays, payrollSettings]);
 
     const totals = useMemo(() => ({
         gross: payrollEntries.reduce((s, e) => s + e.grossPay, 0),
@@ -359,6 +560,75 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
         win.close();
     };
 
+    const handlePrintDtr = () => {
+        if (!selectedEmployeeForDtr) return;
+        const win = window.open('', '_blank');
+        if (!win) return;
+        const records = employeeTimeRecords.slice().sort((a, b) => a.date.localeCompare(b.date));
+        let totalHours = 0;
+        let totalOtHours = 0;
+        let holidayCount = 0;
+        const rows = records.map((rec, i) => {
+            const hrs = computeHoursFromForm48(rec);
+            totalHours += hrs;
+            if (rec.otHours) totalOtHours += rec.otHours;
+            const hol = holidays.find(h => h.date === rec.date);
+            if (hol) holidayCount++;
+            const holBadge = hol ? (hol.type === 'regular' ? `<span style="color:red;font-weight:bold">RH - ${hol.name}</span>` : `<span style="color:blue;font-weight:bold">SH - ${hol.name}</span>`) : '';
+            const otMark = (rec.isOvertime === 1 || rec.otHours) ? `<span style="color:#d97706;font-weight:bold">OT ${rec.otHours || 0}h</span>` : '';
+            return `<tr><td>${i + 1}</td><td>${rec.date}</td><td>${rec.timeInAM || rec.timeIn || ''}</td><td>${rec.timeOutAM || rec.timeOut || ''}</td><td>${rec.timeInPM || ''}</td><td>${rec.timeOutPM || ''}</td><td style="text-align:center">${hrs.toFixed(2)}</td><td>${otMark}</td><td>${holBadge}</td></tr>`;
+        }).join('');
+
+        const stdHrs = selectedEmployeeForDtr.hoursPerDay || payrollSettings.defaultHoursPerDay;
+        const baseRate = selectedEmployeeForDtr.salaryType === 'daily' ? selectedEmployeeForDtr.rate : selectedEmployeeForDtr.rate / 26;
+        const hourlyRate = baseRate / stdHrs;
+        const otRate = hourlyRate * (1 + payrollSettings.otPremiumPercent / 100);
+
+        win.document.write(`
+            <html><head><title>DTR Form 48 - ${selectedEmployeeForDtr.fullName}</title>
+            <style>
+                body { font-family: Arial, sans-serif; font-size: 11px; color: #000; margin: 20px; }
+                h2 { text-align: center; margin-bottom: 2px; font-size: 16px; }
+                h3 { text-align: center; margin-bottom: 12px; font-size: 12px; color: #555; }
+                .info { margin-bottom: 12px; }
+                .info span { margin-right: 24px; }
+                table { width: 100%; border-collapse: collapse; }
+                th, td { border: 1px solid #999; padding: 4px 8px; text-align: left; }
+                th { background: #e5e7eb; font-weight: bold; font-size: 10px; text-transform: uppercase; }
+                .summary { margin-top: 16px; }
+                .summary td { font-weight: bold; }
+            </style>
+            </head><body>
+            <h2>DAILY TIME RECORD</h2>
+            <h3>(Form 48)</h3>
+            <div class="info">
+                <span><strong>Name:</strong> ${selectedEmployeeForDtr.fullName}</span>
+                <span><strong>Position:</strong> ${selectedEmployeeForDtr.role}</span>
+                <span><strong>Period:</strong> ${records.length > 0 ? records[0].date : ''} to ${records.length > 0 ? records[records.length - 1].date : ''}</span>
+            </div>
+            <table>
+                <thead><tr><th>#</th><th>Date</th><th>AM In</th><th>AM Out</th><th>PM In</th><th>PM Out</th><th>Hours</th><th>OT</th><th>Holiday</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <table class="summary" style="margin-top:16px;width:60%">
+                <tr><td>Total Regular Hours</td><td>${totalHours.toFixed(2)} hrs</td></tr>
+                <tr><td>Total OT Hours</td><td>${totalOtHours.toFixed(2)} hrs</td></tr>
+                <tr><td>Holiday Days Worked</td><td>${holidayCount}</td></tr>
+                <tr><td>Hourly Rate</td><td>₱${hourlyRate.toFixed(2)}/hr</td></tr>
+                <tr><td>OT Rate (+${payrollSettings.otPremiumPercent}%)</td><td>₱${otRate.toFixed(2)}/hr</td></tr>
+            </table>
+            <div style="margin-top:40px;display:flex;justify-content:space-between">
+                <div style="border-top:1px solid #000;width:200px;text-align:center;padding-top:4px">Employee Signature</div>
+                <div style="border-top:1px solid #000;width:200px;text-align:center;padding-top:4px">Supervisor Signature</div>
+            </div>
+            </body></html>
+        `);
+        win.document.close();
+        win.focus();
+        win.print();
+        win.close();
+    };
+
     const toggleEmployee = (id: string) => {
         setSelectedEmployeeIds(prev => {
             const next = new Set(prev);
@@ -402,6 +672,39 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
         } catch (err) {
             console.error(err);
             alert("Failed to save time record.");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleSaveHoliday = async () => {
+        if (!holidayForm.name || !holidayForm.date) return;
+        setIsSubmitting(true);
+        try {
+            if (editingHoliday) {
+                await updateHoliday({ ...editingHoliday, ...holidayForm });
+            } else {
+                await addHoliday(holidayForm);
+            }
+            setIsHolidayModalOpen(false);
+            setEditingHoliday(null);
+            setHolidayForm({ name: '', date: '', type: 'regular' });
+        } catch (err) {
+            console.error(err);
+            alert('Failed to save holiday.');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleSaveSettings = async () => {
+        setIsSubmitting(true);
+        try {
+            await savePayrollSettings(settingsDraft);
+            setSettingsSaved(true);
+        } catch (err) {
+            console.error(err);
+            alert('Failed to save payroll settings.');
         } finally {
             setIsSubmitting(false);
         }
@@ -458,20 +761,54 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                         </div>
                         {selectedEmployeeForDtr && (
                             <div>
-                                <div className="flex justify-end mb-4"><button onClick={() => { setEditingTimeRecord(null); setIsTimeRecordModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add Time Record</button></div>
-                                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
+                                <div className="flex justify-between items-center mb-4">
+                                    <button onClick={() => handlePrintDtr()} className="text-sm px-3 py-1.5 bg-slate-600 text-white rounded-lg hover:bg-slate-700">Print DTR (Form 48)</button>
+                                    <button onClick={() => { setEditingTimeRecord(null); setIsTimeRecordModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add DTR Entry</button>
+                                </div>
+                                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-x-auto">
                                     <table className="w-full text-sm">
-                                        <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50"><tr><th className="px-6 py-3">Date</th><th className="px-6 py-3">Time In</th><th className="px-6 py-3">Time Out</th><th className="px-6 py-3 text-right">Actions</th></tr></thead>
+                                        <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
+                                            <tr>
+                                                <th className="px-3 py-3">Date</th>
+                                                <th className="px-3 py-3">AM In</th>
+                                                <th className="px-3 py-3">AM Out</th>
+                                                <th className="px-3 py-3">PM In</th>
+                                                <th className="px-3 py-3">PM Out</th>
+                                                <th className="px-3 py-3 text-center">Total</th>
+                                                <th className="px-3 py-3 text-center">OT</th>
+                                                <th className="px-3 py-3 text-center">Holiday</th>
+                                                <th className="px-3 py-3 text-right">Actions</th>
+                                            </tr>
+                                        </thead>
                                         <tbody>
-                                            {employeeTimeRecords.map(rec => (
-                                                <tr key={rec.id} className="border-b dark:border-slate-700">
-                                                    <td className="px-6 py-4">{rec.date}</td><td>{rec.timeIn || '--'}</td><td>{rec.timeOut || '--'}</td>
-                                                    <td className="px-6 py-4 text-right space-x-2">
+                                            {employeeTimeRecords.map(rec => {
+                                                const hrs = computeHoursFromForm48(rec);
+                                                const hol = holidays.find(h => h.date === rec.date);
+                                                return (
+                                                <tr key={rec.id} className={`border-b dark:border-slate-700 ${hol ? (hol.type === 'regular' ? 'bg-red-50 dark:bg-red-900/10' : 'bg-blue-50 dark:bg-blue-900/10') : ''}`}>
+                                                    <td className="px-3 py-3 font-medium">{rec.date}</td>
+                                                    <td className="px-3 py-3">{rec.timeInAM || rec.timeIn || '--'}</td>
+                                                    <td className="px-3 py-3">{rec.timeOutAM || rec.timeOut || '--'}</td>
+                                                    <td className="px-3 py-3">{rec.timeInPM || '--'}</td>
+                                                    <td className="px-3 py-3">{rec.timeOutPM || '--'}</td>
+                                                    <td className="px-3 py-3 text-center">{hrs.toFixed(1)}h</td>
+                                                    <td className="px-3 py-3 text-center">
+                                                        {rec.isOvertime === 1 || (rec.otHours && rec.otHours > 0)
+                                                            ? <span className="text-amber-600 font-semibold">{rec.otHours || 0}h</span>
+                                                            : <span className="text-slate-400">—</span>}
+                                                    </td>
+                                                    <td className="px-3 py-3 text-center">
+                                                        {hol
+                                                            ? <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${hol.type === 'regular' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}`}>{hol.type === 'regular' ? 'RH' : 'SH'}</span>
+                                                            : <span className="text-slate-400">—</span>}
+                                                    </td>
+                                                    <td className="px-3 py-3 text-right space-x-2">
                                                         <button onClick={() => { setEditingTimeRecord(rec); setIsTimeRecordModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button>
                                                         <button onClick={() => deleteTimeRecord(rec.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button>
                                                     </td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -577,49 +914,61 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                             <table className="w-full text-sm">
                                                 <thead className="bg-slate-50 dark:bg-slate-900/60 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                                     <tr>
-                                                        <th className="px-4 py-3 text-left">Employee</th>
-                                                        <th className="px-4 py-3 text-left">Role</th>
-                                                        <th className="px-4 py-3 text-center">Days</th>
-                                                        <th className="px-4 py-3 text-center">Hours</th>
-                                                        <th className="px-4 py-3 text-right">Gross Pay</th>
-                                                        <th className="px-4 py-3 text-right">SSS</th>
-                                                        <th className="px-4 py-3 text-right">PhilHealth</th>
-                                                        <th className="px-4 py-3 text-right">Pag-IBIG</th>
-                                                        <th className="px-4 py-3 text-right">Total Deductions</th>
-                                                        <th className="px-4 py-3 text-right font-bold text-slate-700 dark:text-slate-200">Net Pay</th>
+                                                        <th className="px-3 py-3 text-left">Employee</th>
+                                                        <th className="px-3 py-3 text-left">Role</th>
+                                                        <th className="px-3 py-3 text-center">Days</th>
+                                                        <th className="px-3 py-3 text-center">Hours</th>
+                                                        <th className="px-3 py-3 text-center">OT Hrs</th>
+                                                        <th className="px-3 py-3 text-right">OT Pay</th>
+                                                        <th className="px-3 py-3 text-center">Hol</th>
+                                                        <th className="px-3 py-3 text-right">Hol Pay</th>
+                                                        <th className="px-3 py-3 text-right">Gross</th>
+                                                        <th className="px-3 py-3 text-right">SSS</th>
+                                                        <th className="px-3 py-3 text-right">PhilHealth</th>
+                                                        <th className="px-3 py-3 text-right">Pag-IBIG</th>
+                                                        <th className="px-3 py-3 text-right">Deductions</th>
+                                                        <th className="px-3 py-3 text-right font-bold text-slate-700 dark:text-slate-200">Net Pay</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                                     {payrollEntries.map(entry => (
                                                         <tr key={entry.employee.id} className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                                                            <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-100">{entry.employee.fullName}</td>
-                                                            <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{entry.employee.role}</td>
-                                                            <td className="px-4 py-3 text-center">{entry.daysWorked}</td>
-                                                            <td className="px-4 py-3 text-center">{entry.hoursWorked.toFixed(1)}</td>
-                                                            <td className="px-4 py-3 text-right">{formatCurrency(entry.grossPay)}</td>
-                                                            <td className="px-4 py-3 text-right text-red-500 dark:text-red-400">
+                                                            <td className="px-3 py-3 font-semibold text-slate-800 dark:text-slate-100">{entry.employee.fullName}</td>
+                                                            <td className="px-3 py-3 text-slate-500 dark:text-slate-400">{entry.employee.role}</td>
+                                                            <td className="px-3 py-3 text-center">{entry.daysWorked}</td>
+                                                            <td className="px-3 py-3 text-center">{entry.regularHours.toFixed(1)}</td>
+                                                            <td className="px-3 py-3 text-center text-amber-600 font-medium">{entry.overtimeHours > 0 ? entry.overtimeHours.toFixed(1) : '—'}</td>
+                                                            <td className="px-3 py-3 text-right text-amber-600">{entry.overtimePay > 0 ? formatCurrency(entry.overtimePay) : '—'}</td>
+                                                            <td className="px-3 py-3 text-center">{entry.holidayDays > 0 ? <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">{entry.holidayDays}d</span> : '—'}</td>
+                                                            <td className="px-3 py-3 text-right text-red-500">{entry.holidayPay > 0 ? formatCurrency(entry.holidayPay) : '—'}</td>
+                                                            <td className="px-3 py-3 text-right font-medium">{formatCurrency(entry.grossPay)}</td>
+                                                            <td className="px-3 py-3 text-right text-red-500 dark:text-red-400">
                                                                 {entry.benefit.sss ? formatCurrency(entry.sssDeduction) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                                                             </td>
-                                                            <td className="px-4 py-3 text-right text-red-500 dark:text-red-400">
+                                                            <td className="px-3 py-3 text-right text-red-500 dark:text-red-400">
                                                                 {entry.benefit.philhealth ? formatCurrency(entry.philhealthDeduction) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                                                             </td>
-                                                            <td className="px-4 py-3 text-right text-red-500 dark:text-red-400">
+                                                            <td className="px-3 py-3 text-right text-red-500 dark:text-red-400">
                                                                 {entry.benefit.pagibig ? formatCurrency(entry.pagibigDeduction) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                                                             </td>
-                                                            <td className="px-4 py-3 text-right text-red-600 dark:text-red-400 font-medium">{formatCurrency(entry.totalDeductions)}</td>
-                                                            <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(entry.netPay)}</td>
+                                                            <td className="px-3 py-3 text-right text-red-600 dark:text-red-400 font-medium">{formatCurrency(entry.totalDeductions)}</td>
+                                                            <td className="px-3 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(entry.netPay)}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
                                                 <tfoot className="bg-slate-50 dark:bg-slate-900/60 border-t-2 border-slate-300 dark:border-slate-600">
                                                     <tr>
-                                                        <td colSpan={4} className="px-4 py-3 font-bold text-slate-700 dark:text-slate-200 uppercase text-xs tracking-wider">
+                                                        <td colSpan={4} className="px-3 py-3 font-bold text-slate-700 dark:text-slate-200 uppercase text-xs tracking-wider">
                                                             Totals ({payrollEntries.length} employee{payrollEntries.length !== 1 ? 's' : ''})
                                                         </td>
-                                                        <td className="px-4 py-3 text-right font-bold text-slate-800 dark:text-slate-100">{formatCurrency(totals.gross)}</td>
+                                                        <td className="px-3 py-3 text-center font-bold text-amber-600">{payrollEntries.reduce((s, e) => s + e.overtimeHours, 0).toFixed(1)}</td>
+                                                        <td className="px-3 py-3"></td>
+                                                        <td className="px-3 py-3 text-center font-bold">{payrollEntries.reduce((s, e) => s + e.holidayDays, 0)}</td>
+                                                        <td className="px-3 py-3"></td>
+                                                        <td className="px-3 py-3 text-right font-bold text-slate-800 dark:text-slate-100">{formatCurrency(totals.gross)}</td>
                                                         <td colSpan={3}></td>
-                                                        <td className="px-4 py-3 text-right font-bold text-red-600 dark:text-red-400">{formatCurrency(totals.deductions)}</td>
-                                                        <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(totals.net)}</td>
+                                                        <td className="px-3 py-3 text-right font-bold text-red-600 dark:text-red-400">{formatCurrency(totals.deductions)}</td>
+                                                        <td className="px-3 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(totals.net)}</td>
                                                     </tr>
                                                 </tfoot>
                                             </table>
@@ -638,9 +987,21 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                                     </div>
                                                     <div className="space-y-1.5 text-sm">
                                                         <div className="flex justify-between">
-                                                            <span className="text-slate-500 dark:text-slate-400">Days Worked</span>
-                                                            <span className="font-medium">{entry.daysWorked} days ({entry.hoursWorked.toFixed(1)} hrs)</span>
+                                                            <span className="text-slate-500 dark:text-slate-400">Regular Hours</span>
+                                                            <span className="font-medium">{entry.regularHours.toFixed(1)} hrs</span>
                                                         </div>
+                                                        {entry.overtimeHours > 0 && (
+                                                            <div className="flex justify-between text-amber-600 dark:text-amber-400">
+                                                                <span>OT Hours ({entry.overtimeHours.toFixed(1)}h @ ₱{entry.otHourlyRate.toFixed(2)}/hr)</span>
+                                                                <span className="font-medium">+{formatCurrency(entry.overtimePay)}</span>
+                                                            </div>
+                                                        )}
+                                                        {entry.holidayDays > 0 && (
+                                                            <div className="flex justify-between text-red-500 dark:text-red-400">
+                                                                <span>Holiday Bonus ({entry.holidayDays} day{entry.holidayDays > 1 ? 's' : ''})</span>
+                                                                <span className="font-medium">+{formatCurrency(entry.holidayPay)}</span>
+                                                            </div>
+                                                        )}
                                                         <div className="flex justify-between">
                                                             <span className="text-slate-500 dark:text-slate-400">Gross Pay</span>
                                                             <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(entry.grossPay)}</span>
@@ -674,18 +1035,152 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                         )}
                     </div>
                 );
+            case 'holidays':
+                return (
+                    <div className="space-y-6">
+                        {/* Payroll Settings Panel */}
+                        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                            <div className="flex items-center gap-2 mb-4">
+                                <CogIcon className="w-5 h-5 text-slate-500" />
+                                <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">Payroll Rate Settings</h3>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Overtime Premium (%)</label>
+                                    <input type="number" value={settingsDraft.otPremiumPercent} onChange={e => { setSettingsDraft(s => ({ ...s, otPremiumPercent: parseFloat(e.target.value) || 0 })); setSettingsSaved(false); }} min={0} max={300} step={5} className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-sm" />
+                                    <p className="text-xs text-slate-400 mt-1">OT = hourly rate × (1 + {settingsDraft.otPremiumPercent}/100)</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Regular Holiday Multiplier (×)</label>
+                                    <input type="number" value={settingsDraft.regularHolidayMultiplier} onChange={e => { setSettingsDraft(s => ({ ...s, regularHolidayMultiplier: parseFloat(e.target.value) || 1 })); setSettingsSaved(false); }} min={1} max={5} step={0.1} className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-sm" />
+                                    <p className="text-xs text-slate-400 mt-1">Employee gets ×{settingsDraft.regularHolidayMultiplier} of daily rate</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Special Holiday Multiplier (×)</label>
+                                    <input type="number" value={settingsDraft.specialHolidayMultiplier} onChange={e => { setSettingsDraft(s => ({ ...s, specialHolidayMultiplier: parseFloat(e.target.value) || 1 })); setSettingsSaved(false); }} min={1} max={5} step={0.1} className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-sm" />
+                                    <p className="text-xs text-slate-400 mt-1">Employee gets ×{settingsDraft.specialHolidayMultiplier} of daily rate</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Default Hours Per Day</label>
+                                    <input type="number" value={settingsDraft.defaultHoursPerDay} onChange={e => { setSettingsDraft(s => ({ ...s, defaultHoursPerDay: parseFloat(e.target.value) || 8 })); setSettingsSaved(false); }} min={1} max={24} step={1} className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-sm" />
+                                </div>
+                            </div>
+
+                            {/* Live Preview */}
+                            <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-700 rounded-lg text-sm">
+                                <p className="font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Live Preview (based on ₱500/day, {settingsDraft.defaultHoursPerDay}hrs):</p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                    <div><span className="text-slate-500">Hourly:</span> <span className="font-bold">₱{(500 / settingsDraft.defaultHoursPerDay).toFixed(2)}</span></div>
+                                    <div><span className="text-emerald-600">OT Rate:</span> <span className="font-bold">₱{(500 / settingsDraft.defaultHoursPerDay * (1 + settingsDraft.otPremiumPercent / 100)).toFixed(2)}</span></div>
+                                    <div><span className="text-red-600">Regular Hol:</span> <span className="font-bold">₱{(500 * settingsDraft.regularHolidayMultiplier).toFixed(2)}</span></div>
+                                    <div><span className="text-blue-600">Special Hol:</span> <span className="font-bold">₱{(500 * settingsDraft.specialHolidayMultiplier).toFixed(2)}</span></div>
+                                </div>
+                            </div>
+
+                            <div className="mt-4 flex justify-end">
+                                <button onClick={handleSaveSettings} disabled={isSubmitting || settingsSaved} className="px-4 py-2 bg-[--color-primary-600] text-white text-sm font-semibold rounded-lg disabled:opacity-50">
+                                    {isSubmitting ? 'Saving...' : settingsSaved ? '✓ Saved' : 'Save Settings'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Holiday Rules Info Box */}
+                        <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700 rounded-lg p-4 text-sm">
+                            <p className="font-bold text-amber-800 dark:text-amber-300 mb-2">Holiday Pay Rules (Philippine Labor Code):</p>
+                            <ul className="list-disc list-inside space-y-1 text-amber-700 dark:text-amber-400">
+                                <li><strong>Regular Holiday:</strong> Employee receives ×{payrollSettings.regularHolidayMultiplier} ({(payrollSettings.regularHolidayMultiplier - 1) * 100}%) of daily rate if they report for work</li>
+                                <li><strong>Special Holiday:</strong> Employee receives ×{payrollSettings.specialHolidayMultiplier} ({(payrollSettings.specialHolidayMultiplier - 1) * 100}% additional) of daily rate if they report for work</li>
+                                <li><strong>Overtime on Holiday:</strong> OT rate is computed on top of the holiday-multiplied rate</li>
+                            </ul>
+                        </div>
+
+                        {/* Holiday List */}
+                        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+                                <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                                    <CalendarIcon className="w-5 h-5" /> Philippine Holidays
+                                </h3>
+                                <button onClick={() => { setEditingHoliday(null); setHolidayForm({ name: '', date: '', type: 'regular' }); setIsHolidayModalOpen(true); }} className="bg-[--color-primary-600] text-white text-sm font-bold py-2 px-4 rounded-lg">Add Holiday</button>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left">Date</th>
+                                            <th className="px-4 py-3 text-left">Holiday Name</th>
+                                            <th className="px-4 py-3 text-center">Type</th>
+                                            <th className="px-4 py-3 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {holidays.length === 0 ? (
+                                            <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">No holidays added yet. Click "Add Holiday" to get started.</td></tr>
+                                        ) : holidays.map(hol => (
+                                            <tr key={hol.id} className="border-b dark:border-slate-700">
+                                                <td className="px-4 py-3 font-medium">{hol.date}</td>
+                                                <td className="px-4 py-3">{hol.name}</td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <span className={`text-xs font-bold px-2 py-1 rounded ${hol.type === 'regular' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}`}>
+                                                        {hol.type === 'regular' ? `Regular (×${payrollSettings.regularHolidayMultiplier})` : `Special (×${payrollSettings.specialHolidayMultiplier})`}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-right space-x-2">
+                                                    <button onClick={() => { setEditingHoliday(hol); setHolidayForm({ name: hol.name, date: hol.date, type: hol.type }); setIsHolidayModalOpen(true); }} className="p-1"><EditIcon className="w-5 h-5"/></button>
+                                                    <button onClick={() => deleteHoliday(hol.id)} className="p-1"><TrashIcon className="w-5 h-5"/></button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Holiday Modal */}
+                        {isHolidayModalOpen && (
+                            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                                <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md">
+                                    <div className="p-6">
+                                        <h3 className="text-xl font-bold mb-4">{editingHoliday ? 'Edit Holiday' : 'Add Holiday'}</h3>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label>Holiday Name</label>
+                                                <input value={holidayForm.name} onChange={e => setHolidayForm(f => ({ ...f, name: e.target.value }))} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" placeholder="e.g. New Year's Day" />
+                                            </div>
+                                            <div>
+                                                <label>Date</label>
+                                                <input type="date" value={holidayForm.date} onChange={e => setHolidayForm(f => ({ ...f, date: e.target.value }))} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                            </div>
+                                            <div>
+                                                <label>Type</label>
+                                                <select value={holidayForm.type} onChange={e => setHolidayForm(f => ({ ...f, type: e.target.value as 'regular' | 'special' }))} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                                    <option value="regular">Regular (×{payrollSettings.regularHolidayMultiplier})</option>
+                                                    <option value="special">Special (×{payrollSettings.specialHolidayMultiplier})</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-4">
+                                        <button onClick={() => { setIsHolidayModalOpen(false); setEditingHoliday(null); }} disabled={isSubmitting}>Cancel</button>
+                                        <button onClick={handleSaveHoliday} disabled={isSubmitting || !holidayForm.name || !holidayForm.date} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md disabled:opacity-50">{isSubmitting ? 'Saving...' : 'Save'}</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
         }
     };
     
     return (
         <div className="max-w-4xl mx-auto space-y-6">
             <EmployeeFormModal isOpen={isEmployeeModalOpen} onClose={() => setIsEmployeeModalOpen(false)} onSave={handleSaveEmployee} initialData={editingEmployee} isSubmitting={isSubmitting} />
-            {selectedEmployeeForDtr && <TimeRecordModal isOpen={isTimeRecordModalOpen} onClose={() => setIsTimeRecordModalOpen(false)} onSave={handleSaveTimeRecord} initialData={editingTimeRecord} employeeId={selectedEmployeeForDtr.id} isSubmitting={isSubmitting} />}
+            {selectedEmployeeForDtr && <TimeRecordModal isOpen={isTimeRecordModalOpen} onClose={() => setIsTimeRecordModalOpen(false)} onSave={handleSaveTimeRecord} initialData={editingTimeRecord} employeeId={selectedEmployeeForDtr.id} employeeRate={selectedEmployeeForDtr.rate} employeeSalaryType={selectedEmployeeForDtr.salaryType} employeeHoursPerDay={selectedEmployeeForDtr.hoursPerDay || payrollSettings.defaultHoursPerDay} holidays={holidays} payrollSettings={payrollSettings} isSubmitting={isSubmitting} />}
             <div className="border-b border-slate-200 dark:border-slate-700">
                 <nav className="flex space-x-2">
                     <button onClick={() => setActiveTab('employees')} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'employees' ? 'border-b-2 border-[--color-primary-500]' : ''}`}><UsersIcon className="w-5 h-5"/> Employees</button>
                     <button onClick={() => setActiveTab('time_records')} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'time_records' ? 'border-b-2 border-[--color-primary-500]' : ''}`}><ClockIcon className="w-5 h-5"/> Time Records</button>
                     <button onClick={() => setActiveTab('generate_payroll')} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'generate_payroll' ? 'border-b-2 border-[--color-primary-500]' : ''}`}><CalculatorIcon className="w-5 h-5"/> Generate Payroll</button>
+                    <button onClick={() => setActiveTab('holidays')} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'holidays' ? 'border-b-2 border-[--color-primary-500]' : ''}`}><CalendarIcon className="w-5 h-5"/> Holidays</button>
                 </nav>
             </div>
             {renderContent()}

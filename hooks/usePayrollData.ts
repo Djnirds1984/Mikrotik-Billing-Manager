@@ -1,11 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Employee, EmployeeBenefit, TimeRecord } from '../types.ts';
+import type { Employee, EmployeeBenefit, TimeRecord, Holiday, PayrollSettings } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
+
+const DEFAULT_PAYROLL_SETTINGS: PayrollSettings = {
+    otPremiumPercent: 50,
+    regularHolidayMultiplier: 2.0,
+    specialHolidayMultiplier: 1.5,
+    defaultHoursPerDay: 8,
+};
 
 export const usePayrollData = (autoLoad: boolean = true) => {
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [benefits, setBenefits] = useState<EmployeeBenefit[]>([]);
     const [timeRecords, setTimeRecords] = useState<TimeRecord[]>([]);
+    const [holidays, setHolidays] = useState<Holiday[]>([]);
+    const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>(DEFAULT_PAYROLL_SETTINGS);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -13,14 +22,23 @@ export const usePayrollData = (autoLoad: boolean = true) => {
         setIsLoading(true);
         setError(null);
         try {
-            const [empData, benData, timeData] = await Promise.all([
+            const [empData, benData, timeData, holidayData, settingsData] = await Promise.all([
                 dbApi.get<Employee[]>('/employees'),
                 dbApi.get<EmployeeBenefit[]>('/employee-benefits'),
                 dbApi.get<TimeRecord[]>('/time-records'),
+                dbApi.get<Holiday[]>('/holidays'),
+                dbApi.get<Record<string, number>>('/payroll-settings'),
             ]);
             setEmployees(empData.sort((a, b) => a.fullName.localeCompare(b.fullName)));
             setBenefits(benData);
             setTimeRecords(timeData);
+            setHolidays(holidayData.sort((a, b) => a.date.localeCompare(b.date)));
+            setPayrollSettings({
+                otPremiumPercent: settingsData.otPremiumPercent ?? DEFAULT_PAYROLL_SETTINGS.otPremiumPercent,
+                regularHolidayMultiplier: settingsData.regularHolidayMultiplier ?? DEFAULT_PAYROLL_SETTINGS.regularHolidayMultiplier,
+                specialHolidayMultiplier: settingsData.specialHolidayMultiplier ?? DEFAULT_PAYROLL_SETTINGS.specialHolidayMultiplier,
+                defaultHoursPerDay: settingsData.defaultHoursPerDay ?? DEFAULT_PAYROLL_SETTINGS.defaultHoursPerDay,
+            });
         } catch (err) {
             setError((err as Error).message);
             console.error("Failed to fetch payroll data from DB", err);
@@ -105,5 +123,46 @@ export const usePayrollData = (autoLoad: boolean = true) => {
         }
     }
 
-    return { employees, benefits, timeRecords, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, isLoading, error, fetchData };
+    const addHoliday = async (holidayData: Omit<Holiday, 'id'>) => {
+        try {
+            const newHoliday: Holiday = { ...holidayData, id: `hol_${Date.now()}` };
+            await dbApi.post('/holidays', newHoliday);
+            await fetchData();
+        } catch (err) {
+            console.error("Failed to add holiday:", err);
+            throw err;
+        }
+    };
+
+    const updateHoliday = async (holiday: Holiday) => {
+        try {
+            await dbApi.patch(`/holidays/${holiday.id}`, holiday);
+            await fetchData();
+        } catch (err) {
+            console.error("Failed to update holiday:", err);
+            throw err;
+        }
+    };
+
+    const deleteHoliday = async (holidayId: string) => {
+        try {
+            await dbApi.delete(`/holidays/${holidayId}`);
+            await fetchData();
+        } catch (err) {
+            console.error("Failed to delete holiday:", err);
+            throw err;
+        }
+    };
+
+    const savePayrollSettings = async (settings: PayrollSettings) => {
+        try {
+            const updated = await dbApi.patch<PayrollSettings>('/payroll-settings', settings);
+            setPayrollSettings(updated);
+        } catch (err) {
+            console.error("Failed to save payroll settings:", err);
+            throw err;
+        }
+    };
+
+    return { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, isLoading, error, fetchData };
 };
