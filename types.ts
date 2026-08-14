@@ -722,6 +722,7 @@ export interface Holiday {
 
 export interface PayrollSettings {
     otPremiumPercent: number; // default 50 (means +50%)
+    restDayOtPremiumPercent: number; // default 50 (Sunday/Rest Day OT premium)
     regularHolidayMultiplier: number; // default 2.0 (means x2)
     specialHolidayMultiplier: number; // default 1.5 (means x1.5)
     defaultHoursPerDay: number; // default 8

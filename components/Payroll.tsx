@@ -67,16 +67,23 @@ const computeHoursFromForm48 = (record: TimeRecord): number => {
 };
 
 // Compute overtime pay — auto-calculated when total hours exceed standard (8 hrs)
+// On Sundays/rest days, uses the rest day OT premium rate instead of the regular one
 const computeOvertimePayForDay = (
     totalHours: number,
     baseRate: number,
     stdHoursPerDay: number,
     otPremiumPercent: number,
-    holidayMultiplier: number | null
+    holidayMultiplier: number | null,
+    date: string,
+    restDayOtPremiumPercent: number
 ) => {
     const effectiveBase = holidayMultiplier ? baseRate * holidayMultiplier : baseRate;
     const hourlyRate = effectiveBase / stdHoursPerDay;
-    const otRate = hourlyRate * (1 + otPremiumPercent / 100);
+    // Check if the date is a Sunday (day 0)
+    const dayOfWeek = new Date(date).getDay();
+    const isSunday = dayOfWeek === 0;
+    const premiumPercent = isSunday ? restDayOtPremiumPercent : otPremiumPercent;
+    const otRate = hourlyRate * (1 + premiumPercent / 100);
     const regularHours = Math.min(totalHours, stdHoursPerDay);
     const autoOtHours = Math.max(0, totalHours - stdHoursPerDay);
     return {
@@ -85,6 +92,8 @@ const computeOvertimePayForDay = (
         otRate,
         regularHours,
         totalOtHours: autoOtHours,
+        isSunday,
+        premiumPercent,
     };
 };
 
@@ -133,7 +142,7 @@ const computePayrollEntry = (
             hoursWorked += effectiveHours;
 
             const baseRate = employee.salaryType === 'daily' ? employee.rate : employee.rate / 26;
-            const otResult = computeOvertimePayForDay(effectiveHours, baseRate, settings.defaultHoursPerDay, settings.otPremiumPercent, holidayMultiplier);
+            const otResult = computeOvertimePayForDay(effectiveHours, baseRate, settings.defaultHoursPerDay, settings.otPremiumPercent, holidayMultiplier, r.date, settings.restDayOtPremiumPercent);
             totalRegularPay += otResult.regularPay;
             totalOvertimePay += otResult.overtimePay;
             totalOtHours += otResult.totalOtHours;
@@ -359,7 +368,9 @@ const TimeRecordModal: React.FC<{
     const baseRate = employeeSalaryType === 'daily' ? employeeRate : employeeRate / 26;
     const effectiveBase = holidayMultiplier ? baseRate * holidayMultiplier : baseRate;
     const hourlyRate = effectiveBase / stdHours;
-    const otRate = hourlyRate * (1 + payrollSettings.otPremiumPercent / 100);
+    const isSunday = record.date ? new Date(record.date).getDay() === 0 : false;
+    const activePremium = isSunday ? payrollSettings.restDayOtPremiumPercent : payrollSettings.otPremiumPercent;
+    const otRate = hourlyRate * (1 + activePremium / 100);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
@@ -451,9 +462,12 @@ const TimeRecordModal: React.FC<{
                                     <span className="font-semibold">₱{hourlyRate.toFixed(2)}/hr</span>
                                 </div>
                                 <div className="flex justify-between mt-1">
-                                    <span className="text-emerald-700 dark:text-emerald-400">OT Rate (+{payrollSettings.otPremiumPercent}%)</span>
+                                    <span className="text-emerald-700 dark:text-emerald-400">OT Rate (+{activePremium}%{isSunday ? ' Sun' : ''})</span>
                                     <span className="font-bold text-emerald-700 dark:text-emerald-400">₱{otRate.toFixed(2)}/hr</span>
                                 </div>
+                                {isSunday && (
+                                    <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 font-semibold">☀️ Sunday / Rest Day premium applies</div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -578,6 +592,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
         const baseRate = selectedEmployeeForDtr.salaryType === 'daily' ? selectedEmployeeForDtr.rate : selectedEmployeeForDtr.rate / 26;
         const hourlyRate = baseRate / stdHrs;
         const otRate = hourlyRate * (1 + payrollSettings.otPremiumPercent / 100);
+        const sundayOtRate = hourlyRate * (1 + payrollSettings.restDayOtPremiumPercent / 100);
 
         win.document.write(`
             <html><head><title>DTR Form 48 - ${selectedEmployeeForDtr.fullName}</title>
@@ -611,6 +626,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                 <tr><td>Holiday Days Worked</td><td>${holidayCount}</td></tr>
                 <tr><td>Hourly Rate</td><td>₱${hourlyRate.toFixed(2)}/hr</td></tr>
                 <tr><td>OT Rate (+${payrollSettings.otPremiumPercent}%)</td><td>₱${otRate.toFixed(2)}/hr</td></tr>
+                <tr><td>Sunday OT Rate (+${payrollSettings.restDayOtPremiumPercent}%)</td><td>₱${sundayOtRate.toFixed(2)}/hr</td></tr>
             </table>
             <div style="margin-top:40px;display:flex;justify-content:space-between">
                 <div style="border-top:1px solid #000;width:200px;text-align:center;padding-top:4px">Employee Signature</div>
@@ -1107,6 +1123,11 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                     <p className="text-xs text-slate-400 mt-1">OT = hourly rate × (1 + {settingsDraft.otPremiumPercent}/100)</p>
                                 </div>
                                 <div>
+                                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">☀️ Sunday / Rest Day OT Premium (%)</label>
+                                    <input type="number" value={settingsDraft.restDayOtPremiumPercent} onChange={e => { setSettingsDraft(s => ({ ...s, restDayOtPremiumPercent: parseFloat(e.target.value) || 0 })); setSettingsSaved(false); }} min={0} max={300} step={5} className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-sm" />
+                                    <p className="text-xs text-slate-400 mt-1">Sunday OT = hourly rate × (1 + {settingsDraft.restDayOtPremiumPercent}/100)</p>
+                                </div>
+                                <div>
                                     <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Regular Holiday Multiplier (×)</label>
                                     <input type="number" value={settingsDraft.regularHolidayMultiplier} onChange={e => { setSettingsDraft(s => ({ ...s, regularHolidayMultiplier: parseFloat(e.target.value) || 1 })); setSettingsSaved(false); }} min={1} max={5} step={0.1} className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-sm" />
                                     <p className="text-xs text-slate-400 mt-1">Employee gets ×{settingsDraft.regularHolidayMultiplier} of daily rate</p>
@@ -1121,9 +1142,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                             {/* Live Preview */}
                             <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-700 rounded-lg text-sm">
                                 <p className="font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Live Preview (based on ₱500/day, {settingsDraft.defaultHoursPerDay}hrs):</p>
-                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                                     <div><span className="text-slate-500">Hourly:</span> <span className="font-bold">₱{(500 / settingsDraft.defaultHoursPerDay).toFixed(2)}</span></div>
                                     <div><span className="text-emerald-600">OT Rate:</span> <span className="font-bold">₱{(500 / settingsDraft.defaultHoursPerDay * (1 + settingsDraft.otPremiumPercent / 100)).toFixed(2)}</span></div>
+                                    <div><span className="text-amber-600">Sunday OT:</span> <span className="font-bold">₱{(500 / settingsDraft.defaultHoursPerDay * (1 + settingsDraft.restDayOtPremiumPercent / 100)).toFixed(2)}</span></div>
                                     <div><span className="text-amber-600">Std Day:</span> <span className="font-bold">{settingsDraft.defaultHoursPerDay} hrs</span></div>
                                 </div>
                             </div>

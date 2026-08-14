@@ -234,6 +234,7 @@ async function initDb() {
 
             // Seed payroll_settings defaults
             await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('otPremiumPercent', 50)");
+            await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('restDayOtPremiumPercent', 50)");
             await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('regularHolidayMultiplier', 2.0)");
             await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('specialHolidayMultiplier', 1.5)");
             await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('defaultHoursPerDay', 8)");

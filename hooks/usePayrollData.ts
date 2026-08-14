@@ -4,6 +4,7 @@ import { dbApi } from '../services/databaseService.ts';
 
 const DEFAULT_PAYROLL_SETTINGS: PayrollSettings = {
     otPremiumPercent: 50,
+    restDayOtPremiumPercent: 50,
     regularHolidayMultiplier: 2.0,
     specialHolidayMultiplier: 1.5,
     defaultHoursPerDay: 8,
@@ -35,6 +36,7 @@ export const usePayrollData = (autoLoad: boolean = true) => {
             setHolidays(holidayData.sort((a, b) => a.date.localeCompare(b.date)));
             setPayrollSettings({
                 otPremiumPercent: settingsData.otPremiumPercent ?? DEFAULT_PAYROLL_SETTINGS.otPremiumPercent,
+                restDayOtPremiumPercent: settingsData.restDayOtPremiumPercent ?? DEFAULT_PAYROLL_SETTINGS.restDayOtPremiumPercent,
                 regularHolidayMultiplier: settingsData.regularHolidayMultiplier ?? DEFAULT_PAYROLL_SETTINGS.regularHolidayMultiplier,
                 specialHolidayMultiplier: settingsData.specialHolidayMultiplier ?? DEFAULT_PAYROLL_SETTINGS.specialHolidayMultiplier,
                 defaultHoursPerDay: settingsData.defaultHoursPerDay ?? DEFAULT_PAYROLL_SETTINGS.defaultHoursPerDay,
