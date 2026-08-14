@@ -177,5 +177,53 @@ export const usePayrollData = (autoLoad: boolean = true) => {
         }
     };
 
-    return { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, isLoading, error, fetchData };
+    // Payroll record persistence
+    const loadLatestPayroll = async () => {
+        try {
+            const record = await dbApi.get<any>('/payroll-records/latest');
+            return record || null;
+        } catch (err) {
+            console.error('Failed to load latest payroll:', err);
+            return null;
+        }
+    };
+
+    const savePayrollRecord = async (data: {
+        periodStart: string;
+        periodEnd: string;
+        entries: any[];
+        totalGross: number;
+        totalDeductions: number;
+        totalNet: number;
+        employeeCount: number;
+    }) => {
+        try {
+            const record = await dbApi.post<any>('/payroll-records', data);
+            return record;
+        } catch (err) {
+            console.error('Failed to save payroll record:', err);
+            throw err;
+        }
+    };
+
+    const markPayrollPaid = async (id: string) => {
+        try {
+            const record = await dbApi.patch<any>(`/payroll-records/${id}/paid`, {});
+            return record;
+        } catch (err) {
+            console.error('Failed to mark payroll as paid:', err);
+            throw err;
+        }
+    };
+
+    const deletePayrollRecord = async (id: string) => {
+        try {
+            await dbApi.delete(`/payroll-records/${id}`);
+        } catch (err) {
+            console.error('Failed to delete payroll record:', err);
+            throw err;
+        }
+    };
+
+    return { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, loadLatestPayroll, savePayrollRecord, markPayrollPaid, deletePayrollRecord, isLoading, error, fetchData };
 };

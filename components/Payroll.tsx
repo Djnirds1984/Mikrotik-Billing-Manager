@@ -238,6 +238,10 @@ interface PayrollProps {
     deleteHoliday: (holidayId: string) => Promise<void>;
     savePayrollSettings: (settings: PayrollSettings) => Promise<void>;
     resetEmployeePassword?: (employeeId: string) => Promise<string | null>;
+    loadLatestPayroll?: () => Promise<any>;
+    savePayrollRecord?: (data: { periodStart: string; periodEnd: string; entries: any[]; totalGross: number; totalDeductions: number; totalNet: number; employeeCount: number }) => Promise<any>;
+    markPayrollPaid?: (id: string) => Promise<any>;
+    deletePayrollRecord?: (id: string) => Promise<void>;
     isLoading: boolean;
     error: string | null;
     onPayrollPaid?: (periodStart: string, periodEnd: string, totalNet: number, employeeCount: number) => Promise<void>;
@@ -530,7 +534,7 @@ const TimeRecordModal: React.FC<{
 }
 
 export const Payroll: React.FC<PayrollProps> = (props) => {
-    const { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, isLoading, error, onPayrollPaid } = props;
+    const { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, loadLatestPayroll, savePayrollRecord, markPayrollPaid, deletePayrollRecord, isLoading, error, onPayrollPaid } = props;
     const [activeTab, setActiveTab] = useState<'employees' | 'time_records' | 'generate_payroll' | 'holidays'>('employees');
     const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
     const [editingEmployee, setEditingEmployee] = useState<{ employee: Employee, benefit: EmployeeBenefit } | null>(null);
@@ -559,21 +563,41 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<Set<string>>(new Set());
     const [generated, setGenerated] = useState(false);
     const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
+    const [savedPayrollId, setSavedPayrollId] = useState<string | null>(null);
+    const [loadedEntries, setLoadedEntries] = useState<PayrollEntry[] | null>(null);
     const printRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         setSettingsDraft(payrollSettings);
     }, [payrollSettings]);
 
+    // Auto-load saved payroll on mount
+    useEffect(() => {
+        if (loadLatestPayroll) {
+            loadLatestPayroll().then(record => {
+                if (record && record.entries && record.entries.length > 0) {
+                    setGenerated(true);
+                    setSavedPayrollId(record.id);
+                    setPayrollPaid(!!record.isPaid);
+                    setPeriodStart(record.periodStart);
+                    setPeriodEnd(record.periodEnd);
+                    setLoadedEntries(record.entries);
+                }
+            });
+        }
+    }, [loadLatestPayroll]);
+
     const payrollEntries = useMemo<PayrollEntry[]>(() => {
         if (!generated) return [];
+        // Use loaded entries from DB if available (survives reload)
+        if (loadedEntries) return loadedEntries;
         const targets = employees.filter(e => selectedEmployeeIds.size === 0 || selectedEmployeeIds.has(e.id));
         return targets.map(emp => {
             const benefit = benefits.find(b => b.employeeId === emp.id) || { id: '', employeeId: emp.id, sss: false, philhealth: false, pagibig: false };
             const empRecords = timeRecords.filter(r => r.employeeId === emp.id);
             return computePayrollEntry(emp, benefit, empRecords, periodStart, periodEnd, holidays, payrollSettings);
         });
-    }, [generated, employees, benefits, timeRecords, selectedEmployeeIds, periodStart, periodEnd, holidays, payrollSettings]);
+    }, [generated, loadedEntries, employees, benefits, timeRecords, selectedEmployeeIds, periodStart, periodEnd, holidays, payrollSettings]);
 
     const totals = useMemo(() => ({
         gross: payrollEntries.reduce((s, e) => s + e.grossPay, 0),
@@ -584,8 +608,32 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const handleGenerate = () => {
         if (!periodStart || !periodEnd) return;
         setGenerated(true);
+        setLoadedEntries(null); // Clear any loaded entries so useMemo recomputes
         setPayrollPaid(false); // Reset paid status when generating new payroll
+        setSavedPayrollId(null);
     };
+
+    // Auto-save payroll entries to DB when they change (after generation)
+    useEffect(() => {
+        if (generated && payrollEntries.length > 0 && savePayrollRecord) {
+            const saveData = {
+                periodStart,
+                periodEnd,
+                entries: payrollEntries,
+                totalGross: totals.gross,
+                totalDeductions: totals.deductions,
+                totalNet: totals.net,
+                employeeCount: payrollEntries.length,
+            };
+            savePayrollRecord(saveData).then(record => {
+                if (record && record.id) {
+                    setSavedPayrollId(record.id);
+                }
+            }).catch(err => {
+                console.error('Failed to auto-save payroll:', err);
+            });
+        }
+    }, [generated, payrollEntries, periodStart, periodEnd, totals, savePayrollRecord]);
 
     const handleMarkAsPaid = async () => {
         if (!onPayrollPaid || payrollEntries.length === 0) return;
@@ -593,6 +641,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
         try {
             setIsProcessingPayment(true);
             await onPayrollPaid(periodStart, periodEnd, totals.net, payrollEntries.length);
+            // Also mark the DB record as paid
+            if (savedPayrollId && markPayrollPaid) {
+                await markPayrollPaid(savedPayrollId);
+            }
             setPayrollPaid(true);
             alert(`Payroll marked as paid! Total net amount: ${formatCurrency(totals.net)} has been recorded as an expense.`);
         } catch (err) {
@@ -610,9 +662,19 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
         });
     };
 
-    const handleDeletePayroll = () => {
+    const handleDeletePayroll = async () => {
         if (window.confirm('Delete this payroll generation? You can then regenerate it.')) {
+            // Delete from DB if saved
+            if (savedPayrollId && deletePayrollRecord) {
+                try {
+                    await deletePayrollRecord(savedPayrollId);
+                } catch (err) {
+                    console.error('Failed to delete payroll record:', err);
+                }
+            }
             setGenerated(false);
+            setLoadedEntries(null);
+            setSavedPayrollId(null);
             setPayrollPaid(false);
         }
     };

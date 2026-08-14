@@ -559,6 +559,18 @@ async function initDb() {
                 key TEXT PRIMARY KEY,
                 value REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS payroll_records (
+                id TEXT PRIMARY KEY,
+                periodStart TEXT NOT NULL,
+                periodEnd TEXT NOT NULL,
+                entriesJson TEXT NOT NULL,
+                totalGross REAL NOT NULL DEFAULT 0,
+                totalDeductions REAL NOT NULL DEFAULT 0,
+                totalNet REAL NOT NULL DEFAULT 0,
+                employeeCount INTEGER NOT NULL DEFAULT 0,
+                isPaid INTEGER NOT NULL DEFAULT 0,
+                createdAt TEXT DEFAULT (datetime('now'))
+            );
              CREATE TABLE IF NOT EXISTS customers (
                 id TEXT PRIMARY KEY,
                 username TEXT UNIQUE,
@@ -1938,6 +1950,67 @@ async function startServer() {
             const settings = {};
             rows.forEach(r => { settings[r.key] = r.value; });
             res.json(settings);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Payroll Records endpoints (persist generated payroll)
+    // GET latest payroll record
+    dbRouter.get('/payroll-records/latest', async (req, res) => {
+        try {
+            const row = await db.get('SELECT * FROM payroll_records ORDER BY createdAt DESC LIMIT 1');
+            if (!row) return res.json(null);
+            row.entries = JSON.parse(row.entriesJson);
+            delete row.entriesJson;
+            res.json(row);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // POST save a new payroll record (replaces any existing for same period)
+    dbRouter.post('/payroll-records', async (req, res) => {
+        try {
+            const { id, periodStart, periodEnd, entries, totalGross, totalDeductions, totalNet, employeeCount } = req.body;
+            // Delete any existing record for the same period
+            await db.run('DELETE FROM payroll_records WHERE periodStart = ? AND periodEnd = ?', [periodStart, periodEnd]);
+            const recordId = id || `payroll_${Date.now()}`;
+            await db.run(
+                'INSERT INTO payroll_records (id, periodStart, periodEnd, entriesJson, totalGross, totalDeductions, totalNet, employeeCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [recordId, periodStart, periodEnd, JSON.stringify(entries), totalGross || 0, totalDeductions || 0, totalNet || 0, employeeCount || 0]
+            );
+            const saved = await db.get('SELECT * FROM payroll_records WHERE id = ?', [recordId]);
+            if (saved) {
+                saved.entries = JSON.parse(saved.entriesJson);
+                delete saved.entriesJson;
+            }
+            res.json(saved);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // PATCH mark payroll as paid
+    dbRouter.patch('/payroll-records/:id/paid', async (req, res) => {
+        try {
+            await db.run('UPDATE payroll_records SET isPaid = 1 WHERE id = ?', [req.params.id]);
+            const row = await db.get('SELECT * FROM payroll_records WHERE id = ?', [req.params.id]);
+            if (row) {
+                row.entries = JSON.parse(row.entriesJson);
+                delete row.entriesJson;
+            }
+            res.json(row);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // DELETE payroll record
+    dbRouter.delete('/payroll-records/:id', async (req, res) => {
+        try {
+            await db.run('DELETE FROM payroll_records WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Deleted' });
         } catch (e) {
             res.status(500).json({ message: e.message });
         }
