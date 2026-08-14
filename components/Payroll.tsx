@@ -324,14 +324,7 @@ const TimeRecordModal: React.FC<{
         }
     }, [isOpen, initialData]);
 
-    if (!isOpen) return null;
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const { name, value, type } = e.target;
-        setRecord(r => ({ ...r, [name]: type === 'number' ? parseFloat(value) || 0 : (type === 'checkbox' ? (e.target as HTMLInputElement).checked ? 1 : 0 : value) }));
-    };
-
-    // Compute total hours from AM/PM
+    // Compute total hours from AM/PM (must be before early return to satisfy Rules of Hooks)
     const totalHours = useMemo(() => {
         let h = 0;
         if (record.timeInAM && record.timeOutAM) {
@@ -348,6 +341,13 @@ const TimeRecordModal: React.FC<{
         }
         return h;
     }, [record.timeInAM, record.timeOutAM, record.timeInPM, record.timeOutPM]);
+
+    if (!isOpen) return null;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value, type } = e.target;
+        setRecord(r => ({ ...r, [name]: type === 'number' ? parseFloat(value) || 0 : (type === 'checkbox' ? (e.target as HTMLInputElement).checked ? 1 : 0 : value) }));
+    };
 
     // Detect holiday
     const holiday = holidays.find(h => h.date === record.date) || null;
