@@ -36,6 +36,14 @@ interface PayrollEntry {
     holidayPay: number;
     holidayDays: number;
     totalPay: number;
+    // Regular vs Sunday breakdown
+    regularDayPay: number;       // income from regular (Mon-Sat) regular hours
+    regularDayOtPay: number;     // OT pay from regular days
+    sundayPay: number;           // income from Sunday regular hours
+    sundayOtPay: number;         // OT pay from Sunday work
+    sundayHours: number;         // total hours worked on Sundays
+    sundayDays: number;          // number of Sundays worked
+    regularDayHours: number;     // total hours on regular days
 }
 
 const computeHoursWorked = (timeIn: string, timeOut: string): number => {
@@ -128,6 +136,14 @@ const computePayrollEntry = (
     let totalHolidayPay = 0;
     let holidayDaysCount = 0;
     let lastOtRate = 0;
+    // Regular vs Sunday breakdown
+    let regularDayPay = 0;
+    let regularDayOtPay = 0;
+    let sundayPay = 0;
+    let sundayOtPay = 0;
+    let sundayHours = 0;
+    let sundayDays = 0;
+    let regularDayHours = 0;
 
     filtered.forEach(r => {
         const h = computeHoursFromForm48(r);
@@ -148,6 +164,18 @@ const computePayrollEntry = (
             totalOtHours += otResult.totalOtHours;
             totalRegularHours += otResult.regularHours;
             lastOtRate = otResult.otRate;
+
+            // Split regular vs Sunday
+            if (otResult.isSunday) {
+                sundayPay += otResult.regularPay;
+                sundayOtPay += otResult.overtimePay;
+                sundayHours += effectiveHours;
+                sundayDays += 1;
+            } else {
+                regularDayPay += otResult.regularPay;
+                regularDayOtPay += otResult.overtimePay;
+                regularDayHours += effectiveHours;
+            }
 
             // Holiday bonus: extra pay on top of base
             if (holiday && holidayMultiplier) {
@@ -180,6 +208,13 @@ const computePayrollEntry = (
         holidayPay: totalHolidayPay,
         holidayDays: holidayDaysCount,
         totalPay: grossPay,
+        regularDayPay,
+        regularDayOtPay,
+        sundayPay,
+        sundayOtPay,
+        sundayHours,
+        sundayDays,
+        regularDayHours,
     };
 };
 
@@ -510,6 +545,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const [periodEnd, setPeriodEnd] = useState(lastOfMonth);
     const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<Set<string>>(new Set());
     const [generated, setGenerated] = useState(false);
+    const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
     const printRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -982,124 +1018,293 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                         <h2 className="hidden print:block text-xl font-bold text-center mb-1">Payroll Report</h2>
                                         <p className="hidden print:block text-center text-sm text-slate-500 mb-4">Period: {periodStart} to {periodEnd}</p>
 
-                                        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                                        {/* Print-only table */}
+                                        <div className="hidden print:block overflow-x-auto">
                                             <table className="w-full text-sm">
-                                                <thead className="bg-slate-50 dark:bg-slate-900/60 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                                <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
                                                     <tr>
                                                         <th className="px-3 py-3 text-left">Employee</th>
-                                                        <th className="px-3 py-3 text-left">Role</th>
                                                         <th className="px-3 py-3 text-center">Days</th>
-                                                        <th className="px-3 py-3 text-center">Hours</th>
+                                                        <th className="px-3 py-3 text-center">Reg Hrs</th>
+                                                        <th className="px-3 py-3 text-center">Sun Hrs</th>
                                                         <th className="px-3 py-3 text-center">OT Hrs</th>
+                                                        <th className="px-3 py-3 text-right">Reg Income</th>
+                                                        <th className="px-3 py-3 text-right">Sunday Income</th>
                                                         <th className="px-3 py-3 text-right">OT Pay</th>
-                                                        <th className="px-3 py-3 text-center">Hol</th>
-                                                        <th className="px-3 py-3 text-right">Hol Pay</th>
                                                         <th className="px-3 py-3 text-right">Gross</th>
-                                                        <th className="px-3 py-3 text-right">SSS</th>
-                                                        <th className="px-3 py-3 text-right">PhilHealth</th>
-                                                        <th className="px-3 py-3 text-right">Pag-IBIG</th>
                                                         <th className="px-3 py-3 text-right">Deductions</th>
-                                                        <th className="px-3 py-3 text-right font-bold text-slate-700 dark:text-slate-200">Net Pay</th>
+                                                        <th className="px-3 py-3 text-right font-bold">Net Pay</th>
                                                     </tr>
                                                 </thead>
-                                                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                                <tbody className="divide-y divide-slate-100">
                                                     {payrollEntries.map(entry => (
-                                                        <tr key={entry.employee.id} className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                                                            <td className="px-3 py-3 font-semibold text-slate-800 dark:text-slate-100">{entry.employee.fullName}</td>
-                                                            <td className="px-3 py-3 text-slate-500 dark:text-slate-400">{entry.employee.role}</td>
+                                                        <tr key={entry.employee.id}>
+                                                            <td className="px-3 py-3 font-semibold">{entry.employee.fullName}</td>
                                                             <td className="px-3 py-3 text-center">{entry.daysWorked}</td>
-                                                            <td className="px-3 py-3 text-center">{entry.regularHours.toFixed(1)}</td>
-                                                            <td className="px-3 py-3 text-center text-amber-600 font-medium">{entry.overtimeHours > 0 ? entry.overtimeHours.toFixed(1) : '—'}</td>
-                                                            <td className="px-3 py-3 text-right text-amber-600">{entry.overtimePay > 0 ? formatCurrency(entry.overtimePay) : '—'}</td>
-                                                            <td className="px-3 py-3 text-center">{entry.holidayDays > 0 ? <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">{entry.holidayDays}d</span> : '—'}</td>
-                                                            <td className="px-3 py-3 text-right text-red-500">{entry.holidayPay > 0 ? formatCurrency(entry.holidayPay) : '—'}</td>
-                                                            <td className="px-3 py-3 text-right font-medium">{formatCurrency(entry.grossPay)}</td>
-                                                            <td className="px-3 py-3 text-right text-red-500 dark:text-red-400">
-                                                                {entry.benefit.sss ? formatCurrency(entry.sssDeduction) : <span className="text-slate-300 dark:text-slate-600">—</span>}
-                                                            </td>
-                                                            <td className="px-3 py-3 text-right text-red-500 dark:text-red-400">
-                                                                {entry.benefit.philhealth ? formatCurrency(entry.philhealthDeduction) : <span className="text-slate-300 dark:text-slate-600">—</span>}
-                                                            </td>
-                                                            <td className="px-3 py-3 text-right text-red-500 dark:text-red-400">
-                                                                {entry.benefit.pagibig ? formatCurrency(entry.pagibigDeduction) : <span className="text-slate-300 dark:text-slate-600">—</span>}
-                                                            </td>
-                                                            <td className="px-3 py-3 text-right text-red-600 dark:text-red-400 font-medium">{formatCurrency(entry.totalDeductions)}</td>
-                                                            <td className="px-3 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(entry.netPay)}</td>
+                                                            <td className="px-3 py-3 text-center">{entry.regularDayHours.toFixed(1)}</td>
+                                                            <td className="px-3 py-3 text-center">{entry.sundayHours.toFixed(1)}</td>
+                                                            <td className="px-3 py-3 text-center">{entry.overtimeHours.toFixed(1)}</td>
+                                                            <td className="px-3 py-3 text-right">{formatCurrency(entry.regularDayPay + entry.regularDayOtPay)}</td>
+                                                            <td className="px-3 py-3 text-right">{formatCurrency(entry.sundayPay + entry.sundayOtPay)}</td>
+                                                            <td className="px-3 py-3 text-right">{formatCurrency(entry.overtimePay)}</td>
+                                                            <td className="px-3 py-3 text-right">{formatCurrency(entry.grossPay)}</td>
+                                                            <td className="px-3 py-3 text-right">{formatCurrency(entry.totalDeductions)}</td>
+                                                            <td className="px-3 py-3 text-right font-bold">{formatCurrency(entry.netPay)}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
-                                                <tfoot className="bg-slate-50 dark:bg-slate-900/60 border-t-2 border-slate-300 dark:border-slate-600">
-                                                    <tr>
-                                                        <td colSpan={4} className="px-3 py-3 font-bold text-slate-700 dark:text-slate-200 uppercase text-xs tracking-wider">
-                                                            Totals ({payrollEntries.length} employee{payrollEntries.length !== 1 ? 's' : ''})
-                                                        </td>
-                                                        <td className="px-3 py-3 text-center font-bold text-amber-600">{payrollEntries.reduce((s, e) => s + e.overtimeHours, 0).toFixed(1)}</td>
-                                                        <td className="px-3 py-3"></td>
-                                                        <td className="px-3 py-3 text-center font-bold">{payrollEntries.reduce((s, e) => s + e.holidayDays, 0)}</td>
-                                                        <td className="px-3 py-3"></td>
-                                                        <td className="px-3 py-3 text-right font-bold text-slate-800 dark:text-slate-100">{formatCurrency(totals.gross)}</td>
-                                                        <td colSpan={3}></td>
-                                                        <td className="px-3 py-3 text-right font-bold text-red-600 dark:text-red-400">{formatCurrency(totals.deductions)}</td>
-                                                        <td className="px-3 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(totals.net)}</td>
-                                                    </tr>
-                                                </tfoot>
                                             </table>
                                         </div>
 
-                                        {/* Per-employee breakdown cards */}
-                                        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                                            {payrollEntries.map(entry => (
-                                                <div key={entry.employee.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
-                                                    <div className="flex items-start justify-between mb-3">
-                                                        <div>
-                                                            <p className="font-bold text-slate-800 dark:text-slate-100">{entry.employee.fullName}</p>
-                                                            <p className="text-xs text-slate-500 dark:text-slate-400">{entry.employee.role} &bull; {entry.employee.salaryType === 'daily' ? `${formatCurrency(entry.employee.rate)}/day` : `${formatCurrency(entry.employee.rate)}/mo`}</p>
-                                                        </div>
-                                                        <CheckCircleIcon className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                                                    </div>
-                                                    <div className="space-y-1.5 text-sm">
-                                                        <div className="flex justify-between">
-                                                            <span className="text-slate-500 dark:text-slate-400">Regular Hours</span>
-                                                            <span className="font-medium">{entry.regularHours.toFixed(1)} hrs</span>
-                                                        </div>
-                                                        {entry.overtimeHours > 0 && (
-                                                            <div className="flex justify-between text-amber-600 dark:text-amber-400">
-                                                                <span>OT Hours ({entry.overtimeHours.toFixed(1)}h @ ₱{entry.otHourlyRate.toFixed(2)}/hr)</span>
-                                                                <span className="font-medium">+{formatCurrency(entry.overtimePay)}</span>
-                                                            </div>
-                                                        )}
-                                                        {entry.holidayDays > 0 && (
-                                                            <div className="flex justify-between text-red-500 dark:text-red-400">
-                                                                <span>Holiday Bonus ({entry.holidayDays} day{entry.holidayDays > 1 ? 's' : ''})</span>
-                                                                <span className="font-medium">+{formatCurrency(entry.holidayPay)}</span>
-                                                            </div>
-                                                        )}
-                                                        <div className="flex justify-between">
-                                                            <span className="text-slate-500 dark:text-slate-400">Gross Pay</span>
-                                                            <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(entry.grossPay)}</span>
-                                                        </div>
-                                                        {entry.benefit.sss && (
-                                                            <div className="flex justify-between text-red-500 dark:text-red-400">
-                                                                <span>SSS</span><span>- {formatCurrency(entry.sssDeduction)}</span>
-                                                            </div>
-                                                        )}
-                                                        {entry.benefit.philhealth && (
-                                                            <div className="flex justify-between text-red-500 dark:text-red-400">
-                                                                <span>PhilHealth</span><span>- {formatCurrency(entry.philhealthDeduction)}</span>
-                                                            </div>
-                                                        )}
-                                                        {entry.benefit.pagibig && (
-                                                            <div className="flex justify-between text-red-500 dark:text-red-400">
-                                                                <span>Pag-IBIG</span><span>- {formatCurrency(entry.pagibigDeduction)}</span>
-                                                            </div>
-                                                        )}
-                                                        <div className="pt-2 mt-2 border-t border-slate-100 dark:border-slate-700 flex justify-between">
-                                                            <span className="font-bold text-slate-700 dark:text-slate-200">Net Pay</span>
-                                                            <span className="font-bold text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(entry.netPay)}</span>
-                                                        </div>
-                                                    </div>
+                                        {/* Screen: Expandable Employee Cards */}
+                                        <div className="print:hidden">
+                                            {/* Summary totals bar */}
+                                            <div className="flex flex-wrap items-center justify-between gap-4 mb-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
+                                                <div className="text-sm">
+                                                    <span className="text-slate-500 dark:text-slate-400">Total Employees:</span>{' '}
+                                                    <span className="font-bold text-slate-800 dark:text-slate-100">{payrollEntries.length}</span>
                                                 </div>
-                                            ))}
+                                                <div className="text-sm">
+                                                    <span className="text-slate-500 dark:text-slate-400">Gross:</span>{' '}
+                                                    <span className="font-bold text-slate-800 dark:text-slate-100">{formatCurrency(totals.gross)}</span>
+                                                </div>
+                                                <div className="text-sm">
+                                                    <span className="text-slate-500 dark:text-slate-400">Deductions:</span>{' '}
+                                                    <span className="font-bold text-red-600 dark:text-red-400">{formatCurrency(totals.deductions)}</span>
+                                                </div>
+                                                <div className="text-sm">
+                                                    <span className="text-slate-500 dark:text-slate-400">Net Pay:</span>{' '}
+                                                    <span className="font-bold text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(totals.net)}</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Employee cards grid */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                                {payrollEntries.map(entry => {
+                                                    const isExpanded = expandedEntryId === entry.employee.id;
+                                                    return (
+                                                        <div key={entry.employee.id} className={`bg-white dark:bg-slate-800 rounded-xl border shadow-sm transition-all ${isExpanded ? 'border-[--color-primary-400] dark:border-[--color-primary-500] ring-1 ring-[--color-primary-200] dark:ring-[--color-primary-800] col-span-1 md:col-span-2 xl:col-span-3' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}>
+                                                            {/* Card Header (always visible) */}
+                                                            <button
+                                                                onClick={() => setExpandedEntryId(isExpanded ? null : entry.employee.id)}
+                                                                className="w-full text-left p-4 cursor-pointer"
+                                                            >
+                                                                <div className="flex items-center justify-between">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <div className="w-10 h-10 rounded-full bg-[--color-primary-100] dark:bg-[--color-primary-900/30] flex items-center justify-center text-[--color-primary-600] dark:text-[--color-primary-400] font-bold text-sm flex-shrink-0">
+                                                                            {entry.employee.fullName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="font-bold text-slate-800 dark:text-slate-100">{entry.employee.fullName}</p>
+                                                                            <p className="text-xs text-slate-500 dark:text-slate-400">{entry.employee.role} &bull; {entry.daysWorked} days &bull; {entry.hoursWorked.toFixed(1)} hrs</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-4">
+                                                                        <div className="text-right">
+                                                                            <p className="text-xs text-slate-400 dark:text-slate-500">Net Pay</p>
+                                                                            <p className="font-bold text-emerald-600 dark:text-emerald-400 text-lg">{formatCurrency(entry.netPay)}</p>
+                                                                        </div>
+                                                                        <svg xmlns="http://www.w3.org/2000/svg" className={`w-5 h-5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                                        </svg>
+                                                                    </div>
+                                                                </div>
+                                                                {/* Quick summary chips */}
+                                                                {!isExpanded && (
+                                                                    <div className="flex flex-wrap gap-2 mt-3">
+                                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">Regular: {formatCurrency(entry.regularDayPay + entry.regularDayOtPay)}</span>
+                                                                        {entry.sundayDays > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400">☀️ Sunday: {formatCurrency(entry.sundayPay + entry.sundayOtPay)}</span>}
+                                                                        {entry.overtimeHours > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">OT: {formatCurrency(entry.overtimePay)}</span>}
+                                                                    </div>
+                                                                )}
+                                                            </button>
+
+                                                            {/* Expanded Breakdown */}
+                                                            {isExpanded && (
+                                                                <div className="px-4 pb-4 border-t border-slate-100 dark:border-slate-700">
+                                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                                                                        {/* Column 1: Income Breakdown */}
+                                                                        <div className="space-y-3">
+                                                                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Income Breakdown</h4>
+                                                                            
+                                                                            {/* Regular Days */}
+                                                                            <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-3">
+                                                                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Regular Days (Mon-Sat)</p>
+                                                                                <div className="space-y-1 text-sm">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Days Worked</span>
+                                                                                        <span className="font-medium">{entry.daysWorked - entry.sundayDays} days</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Hours</span>
+                                                                                        <span className="font-medium">{entry.regularDayHours.toFixed(1)} hrs</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Regular Pay</span>
+                                                                                        <span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(entry.regularDayPay)}</span>
+                                                                                    </div>
+                                                                                    {entry.regularDayOtPay > 0 && (
+                                                                                        <div className="flex justify-between text-amber-600 dark:text-amber-400">
+                                                                                            <span>OT Pay (+{payrollSettings.otPremiumPercent}%)</span>
+                                                                                            <span className="font-medium">+{formatCurrency(entry.regularDayOtPay)}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    <div className="flex justify-between pt-1 border-t border-slate-200 dark:border-slate-600">
+                                                                                        <span className="font-semibold text-slate-600 dark:text-slate-300">Regular Total</span>
+                                                                                        <span className="font-bold text-slate-800 dark:text-slate-100">{formatCurrency(entry.regularDayPay + entry.regularDayOtPay)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {/* Sundays */}
+                                                                            <div className={`rounded-lg p-3 ${entry.sundayDays > 0 ? 'bg-amber-50 dark:bg-amber-900/10' : 'bg-slate-50 dark:bg-slate-700/30'}`}>
+                                                                                <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 mb-1">☀️ Sunday / Rest Day</p>
+                                                                                <div className="space-y-1 text-sm">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Sundays Worked</span>
+                                                                                        <span className="font-medium">{entry.sundayDays} days</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Hours</span>
+                                                                                        <span className="font-medium">{entry.sundayHours.toFixed(1)} hrs</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Regular Pay (+{payrollSettings.restDayOtPremiumPercent}%)</span>
+                                                                                        <span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(entry.sundayPay)}</span>
+                                                                                    </div>
+                                                                                    {entry.sundayOtPay > 0 && (
+                                                                                        <div className="flex justify-between text-amber-600 dark:text-amber-400">
+                                                                                            <span>OT Pay (+{payrollSettings.restDayOtPremiumPercent}%)</span>
+                                                                                            <span className="font-medium">+{formatCurrency(entry.sundayOtPay)}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    <div className="flex justify-between pt-1 border-t border-amber-200 dark:border-amber-700">
+                                                                                        <span className="font-semibold text-amber-700 dark:text-amber-300">Sunday Total</span>
+                                                                                        <span className="font-bold text-amber-700 dark:text-amber-300">{formatCurrency(entry.sundayPay + entry.sundayOtPay)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {/* Holiday Bonus */}
+                                                                            {entry.holidayDays > 0 && (
+                                                                                <div className="bg-red-50 dark:bg-red-900/10 rounded-lg p-3">
+                                                                                    <p className="text-xs font-semibold text-red-600 dark:text-red-400 mb-1">🎉 Holiday Bonus</p>
+                                                                                    <div className="space-y-1 text-sm">
+                                                                                        <div className="flex justify-between">
+                                                                                            <span className="text-slate-500 dark:text-slate-400">Holiday Days</span>
+                                                                                            <span className="font-medium">{entry.holidayDays} day{entry.holidayDays > 1 ? 's' : ''}</span>
+                                                                                        </div>
+                                                                                        <div className="flex justify-between">
+                                                                                            <span className="text-slate-500 dark:text-slate-400">Holiday Premium</span>
+                                                                                            <span className="font-semibold text-red-600 dark:text-red-400">+{formatCurrency(entry.holidayPay)}</span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+
+                                                                        {/* Column 2: Overtime Summary */}
+                                                                        <div className="space-y-3">
+                                                                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Overtime Summary</h4>
+                                                                            <div className="bg-blue-50 dark:bg-blue-900/10 rounded-lg p-3">
+                                                                                <div className="space-y-1 text-sm">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Total OT Hours</span>
+                                                                                        <span className="font-medium text-blue-700 dark:text-blue-300">{entry.overtimeHours.toFixed(1)} hrs</span>
+                                                                                    </div>
+                                                                                    {entry.regularDayOtPay > 0 && (
+                                                                                        <div className="flex justify-between">
+                                                                                            <span className="text-slate-500 dark:text-slate-400">Regular Day OT</span>
+                                                                                            <span className="font-medium">{formatCurrency(entry.regularDayOtPay)}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    {entry.sundayOtPay > 0 && (
+                                                                                        <div className="flex justify-between">
+                                                                                            <span className="text-slate-500 dark:text-slate-400">Sunday OT</span>
+                                                                                            <span className="font-medium text-amber-600 dark:text-amber-400">{formatCurrency(entry.sundayOtPay)}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    <div className="flex justify-between pt-1 border-t border-blue-200 dark:border-blue-700">
+                                                                                        <span className="font-semibold text-blue-700 dark:text-blue-300">Total OT Pay</span>
+                                                                                        <span className="font-bold text-blue-700 dark:text-blue-300">{formatCurrency(entry.overtimePay)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {/* Gross Pay Summary */}
+                                                                            <div className="bg-emerald-50 dark:bg-emerald-900/10 rounded-lg p-3">
+                                                                                <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-1">Gross Pay Summary</p>
+                                                                                <div className="space-y-1 text-sm">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Regular Days</span>
+                                                                                        <span>{formatCurrency(entry.regularDayPay + entry.regularDayOtPay)}</span>
+                                                                                    </div>
+                                                                                    {entry.sundayDays > 0 && (
+                                                                                        <div className="flex justify-between">
+                                                                                            <span className="text-slate-500 dark:text-slate-400">Sunday / Rest Day</span>
+                                                                                            <span>{formatCurrency(entry.sundayPay + entry.sundayOtPay)}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    {entry.holidayDays > 0 && (
+                                                                                        <div className="flex justify-between">
+                                                                                            <span className="text-slate-500 dark:text-slate-400">Holiday Premium</span>
+                                                                                            <span>+{formatCurrency(entry.holidayPay)}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    <div className="flex justify-between pt-1 border-t border-emerald-200 dark:border-emerald-700">
+                                                                                        <span className="font-bold text-emerald-700 dark:text-emerald-300">GROSS PAY</span>
+                                                                                        <span className="font-bold text-emerald-700 dark:text-emerald-300">{formatCurrency(entry.grossPay)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Column 3: Deductions & Net */}
+                                                                        <div className="space-y-3">
+                                                                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Deductions & Net Pay</h4>
+                                                                            <div className="bg-white dark:bg-slate-700/30 rounded-lg p-3 border border-slate-200 dark:border-slate-600">
+                                                                                <div className="space-y-1.5 text-sm">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">SSS</span>
+                                                                                        <span className="text-red-500 dark:text-red-400">
+                                                                                            {entry.benefit.sss ? `- ${formatCurrency(entry.sssDeduction)}` : '—'}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">PhilHealth</span>
+                                                                                        <span className="text-red-500 dark:text-red-400">
+                                                                                            {entry.benefit.philhealth ? `- ${formatCurrency(entry.philhealthDeduction)}` : '—'}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-slate-500 dark:text-slate-400">Pag-IBIG</span>
+                                                                                        <span className="text-red-500 dark:text-red-400">
+                                                                                            {entry.benefit.pagibig ? `- ${formatCurrency(entry.pagibigDeduction)}` : '—'}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between pt-1 border-t border-slate-200 dark:border-slate-600">
+                                                                                        <span className="font-semibold text-red-600 dark:text-red-400">Total Deductions</span>
+                                                                                        <span className="font-bold text-red-600 dark:text-red-400">- {formatCurrency(entry.totalDeductions)}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {/* NET PAY */}
+                                                                            <div className="bg-emerald-600 dark:bg-emerald-700 rounded-lg p-4 text-center">
+                                                                                <p className="text-xs font-semibold text-emerald-100 uppercase tracking-wider mb-1">Net Salary</p>
+                                                                                <p className="text-3xl font-bold text-white">{formatCurrency(entry.netPay)}</p>
+                                                                                <p className="text-xs text-emerald-200 mt-1">
+                                                                                    {entry.employee.salaryType === 'daily' ? `${formatCurrency(entry.employee.rate)}/day` : `${formatCurrency(entry.employee.rate)}/mo`}
+                                                                                </p>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
                                     </div>
                                 )}
