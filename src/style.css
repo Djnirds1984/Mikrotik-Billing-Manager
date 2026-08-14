@@ -77,4 +77,24 @@
     color: black !important;
     background: white !important;
   }
+
+  /* Employee ID Card print layout */
+  .employee-id-print-area {
+    visibility: visible !important;
+    position: absolute !important;
+    left: 50% !important;
+    top: 20mm !important;
+    transform: translateX(-50%) !important;
+    width: 80mm !important;
+    color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .employee-id-print-area * {
+    visibility: visible !important;
+    color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 }

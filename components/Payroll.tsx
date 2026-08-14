@@ -4,6 +4,7 @@ import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, UsersIcon, ClockIcon, CalculatorIcon, CheckCircleIcon, CalendarIcon, CogIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { printPayrollThermal } from './PayrollThermalPrint.tsx';
+import { EmployeeIDModal } from './EmployeeIDModal.tsx';
 
 // ─── Philippine government contribution rates (2024) ───────────────────────
 // SSS: employee share ~4.5% of MSC, capped at ₱900/month
@@ -482,6 +483,8 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const [holidayForm, setHolidayForm] = useState({ name: '', date: '', type: 'regular' as 'regular' | 'special' });
     const [settingsDraft, setSettingsDraft] = useState<PayrollSettings>(payrollSettings);
     const [settingsSaved, setSettingsSaved] = useState(true);
+    const [selectedEmployeeForId, setSelectedEmployeeForId] = useState<Employee | null>(null);
+    const [isIdModalOpen, setIsIdModalOpen] = useState(false);
 
     // Payroll generation state
     const today = new Date();
@@ -724,7 +727,15 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                         const benefit = benefits.find(b => b.employeeId === emp.id);
                                         return (
                                             <tr key={emp.id} className="border-b dark:border-slate-700">
-                                                <td className="px-6 py-4 font-medium">{emp.fullName}</td>
+                                                <td className="px-6 py-4 font-medium">
+                                                    <button
+                                                        onClick={() => { setSelectedEmployeeForId(emp); setIsIdModalOpen(true); }}
+                                                        className="hover:text-emerald-600 cursor-pointer text-left transition-colors"
+                                                        title="View Employee ID Card"
+                                                    >
+                                                        {emp.fullName}
+                                                    </button>
+                                                </td>
                                                 <td>{emp.role}</td>
                                                 <td>{formatCurrency(emp.rate)} / {emp.salaryType}</td>
                                                 <td className="px-6 py-4 text-right space-x-2">
@@ -1175,6 +1186,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                 </nav>
             </div>
             {renderContent()}
+            <EmployeeIDModal isOpen={isIdModalOpen} onClose={() => setIsIdModalOpen(false)} employee={selectedEmployeeForId} />
         </div>
     );
 };
