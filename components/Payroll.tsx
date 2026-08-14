@@ -256,16 +256,29 @@ const EmployeeFormModal: React.FC<{
 }> = ({ isOpen, onClose, onSave, initialData, isSubmitting }) => {
     const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', rate: 0 });
     const [benefit, setBenefit] = useState<Omit<EmployeeBenefit, 'id' | 'employeeId'>>({ sss: false, philhealth: false, pagibig: false });
+    const [loginPassword, setLoginPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+
+    // Generate a random password
+    const generatePassword = () => {
+        const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+        let pw = '';
+        for (let i = 0; i < 8; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+        return pw;
+    };
 
     useEffect(() => {
         if (isOpen) {
             if (initialData) {
                 setEmployee(initialData.employee);
                 setBenefit(initialData.benefit);
+                setLoginPassword(''); // Don't show existing password hash
             } else {
                 setEmployee({ fullName: '', role: '', hireDate: new Date().toISOString().split('T')[0], salaryType: 'daily', rate: 0 });
                 setBenefit({ sss: false, philhealth: false, pagibig: false });
+                setLoginPassword(generatePassword());
             }
+            setShowPassword(false);
         }
     }, [initialData, isOpen]);
 
@@ -285,18 +298,21 @@ const EmployeeFormModal: React.FC<{
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (initialData) {
-            onSave(
-                { ...initialData.employee, ...employee },
-                { ...initialData.benefit, ...benefit }
-            );
+            // For edit: include password only if a new one was entered
+            const empData = { ...initialData.employee, ...employee };
+            if (loginPassword) {
+                (empData as any).password = loginPassword;
+            }
+            onSave(empData, { ...initialData.benefit, ...benefit });
         } else {
-            onSave(employee, benefit);
+            // For new employee: pass the password
+            onSave({ ...employee, password: loginPassword } as any, benefit);
         }
     };
 
     return (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-2xl">
+            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
                 <form onSubmit={handleSubmit}>
                     <div className="p-6">
                         <h3 className="text-xl font-bold mb-4">{initialData ? 'Edit Employee' : 'Add New Employee'}</h3>
@@ -328,6 +344,62 @@ const EmployeeFormModal: React.FC<{
                                     <input type="number" name="rate" value={employee.rate} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                                 </div>
                             </div>
+
+                            {/* Login Credentials Section */}
+                            <div className="border border-blue-200 dark:border-blue-700 rounded-lg p-4 bg-blue-50 dark:bg-blue-900/10">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                                    </svg>
+                                    <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300">Employee Login Credentials</h4>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-sm">Employee ID (Username)</label>
+                                        <input
+                                            value={initialData?.employee.id || `emp_${Date.now()}`}
+                                            disabled
+                                            className="mt-1 w-full p-2 bg-slate-200 dark:bg-slate-600 rounded-md text-sm text-slate-500 dark:text-slate-400 cursor-not-allowed"
+                                        />
+                                        <p className="text-xs text-slate-400 mt-1">This is the login username</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm">Password</label>
+                                        <div className="mt-1 flex gap-2">
+                                            <input
+                                                type={showPassword ? 'text' : 'password'}
+                                                value={loginPassword}
+                                                onChange={e => setLoginPassword(e.target.value)}
+                                                placeholder="Enter password"
+                                                className="flex-1 p-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-sm"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPassword(!showPassword)}
+                                                className="px-2 py-1 text-xs bg-slate-200 dark:bg-slate-600 rounded-md hover:bg-slate-300 dark:hover:bg-slate-500"
+                                            >
+                                                {showPassword ? 'Hide' : 'Show'}
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => setLoginPassword(generatePassword())}
+                                                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                                            >
+                                                Generate new
+                                            </button>
+                                            {!initialData && (
+                                                <p className="text-xs text-slate-400">Auto-generated — edit if needed</p>
+                                            )}
+                                            {initialData && (
+                                                <p className="text-xs text-amber-600 dark:text-amber-400">Leave empty to keep current password</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div>
                                 <label>Benefits</label>
                                 <div className="mt-2 flex items-center gap-6">
@@ -772,11 +844,20 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const handleSaveEmployee = async (employeeData: any, benefitData: any) => {
         setIsSubmitting(true);
         try {
-            if ('id' in employeeData) {
+            if ('id' in employeeData && !employeeData.password) {
+                // Edit without password change
                 await updateEmployee(employeeData, benefitData);
+            } else if ('id' in employeeData && employeeData.password) {
+                // Edit with password change
+                await updateEmployee(employeeData, benefitData);
+                setGeneratedPassword(employeeData.password);
             } else {
+                // New employee
                 const result = await addEmployee(employeeData, benefitData);
-                if (result?.generatedPassword) {
+                // Show the password that was set in the modal
+                if (employeeData.password) {
+                    setGeneratedPassword(employeeData.password);
+                } else if (result?.generatedPassword) {
                     setGeneratedPassword(result.generatedPassword);
                 }
             }

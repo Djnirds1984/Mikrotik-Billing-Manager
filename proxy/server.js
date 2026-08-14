@@ -1646,12 +1646,18 @@ async function startServer() {
                         req.body.accountNumber = await generateAccountNumber();
                     }
                 }
-                // Auto-generate password for new employees
+                // Hash password for new employees (use provided password or auto-generate)
                 let _empPlaintext = null;
                 if (table === 'employees') {
-                    const namePart = (req.body.fullName || 'emp').toLowerCase().replace(/[^a-z]/g, '').slice(0, 4);
-                    const idSuffix = (req.body.id || Date.now().toString()).replace(/[^0-9]/g, '').slice(-4);
-                    _empPlaintext = `${namePart || 'emp'}_${idSuffix || '0000'}`;
+                    if (req.body.password) {
+                        // Password provided from UI — use it directly (hash it)
+                        _empPlaintext = req.body.password;
+                    } else {
+                        // Fallback: auto-generate password
+                        const namePart = (req.body.fullName || 'emp').toLowerCase().replace(/[^a-z]/g, '').slice(0, 4);
+                        const idSuffix = (req.body.id || Date.now().toString()).replace(/[^0-9]/g, '').slice(-4);
+                        _empPlaintext = `${namePart || 'emp'}_${idSuffix || '0000'}`;
+                    }
                     const hashedPw = await bcrypt.hash(_empPlaintext, 10);
                     req.body.password = hashedPw;
                 }
@@ -1858,6 +1864,10 @@ async function startServer() {
                             }
                         }
                     }
+                }
+                // Hash password if updating employee with a new password
+                if (table === 'employees' && req.body.password) {
+                    req.body.password = await bcrypt.hash(req.body.password, 10);
                 }
                 const updates = Object.keys(req.body).map(k => `${k} = ?`).join(',');
                 const values = [...Object.values(req.body), id];
