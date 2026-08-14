@@ -44,6 +44,15 @@ const computeHoursWorked = (timeIn: string, timeOut: string): number => {
     return diff > 0 ? diff / 60 : 0;
 };
 
+// Convert 24h time ("13:00") to 12h format ("1:00 PM")
+const formatTime12h = (time: string): string => {
+    if (!time) return '';
+    const [h, m] = time.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+};
+
 // Form 48: compute hours from AM/PM split
 const computeHoursFromForm48 = (record: TimeRecord): number => {
     if (record.timeInAM && record.timeOutAM) {
@@ -570,7 +579,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
             if (hol) holidayCount++;
             const holBadge = hol ? (hol.type === 'regular' ? `<span style="color:red;font-weight:bold">RH - ${hol.name}</span>` : `<span style="color:blue;font-weight:bold">SH - ${hol.name}</span>`) : '';
             const otMark = otHrs > 0 ? `<span style="color:#d97706;font-weight:bold">OT ${otHrs.toFixed(1)}h</span>` : '';
-            return `<tr><td>${i + 1}</td><td>${rec.date}</td><td>${rec.timeInAM || rec.timeIn || ''}</td><td>${rec.timeOutPM || rec.timeOut || ''}</td><td style="text-align:center">${hrs.toFixed(2)}</td><td>${otMark}</td><td>${holBadge}</td></tr>`;
+            return `<tr><td>${i + 1}</td><td>${rec.date}</td><td>${formatTime12h(rec.timeInAM || rec.timeIn)}</td><td>${formatTime12h(rec.timeOutAM || rec.timeOut)}</td><td>${formatTime12h(rec.timeInPM)}</td><td>${formatTime12h(rec.timeOutPM)}</td><td style="text-align:center">${hrs.toFixed(2)}</td><td>${otMark}</td><td>${holBadge}</td></tr>`;
         }).join('');
 
         const stdHrs = payrollSettings.defaultHoursPerDay;
@@ -601,7 +610,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                 <span><strong>Period:</strong> ${records.length > 0 ? records[0].date : ''} to ${records.length > 0 ? records[records.length - 1].date : ''}</span>
             </div>
             <table>
-                <thead><tr><th>#</th><th>Date</th><th>Time In</th><th>Time Out</th><th>Hours</th><th>OT</th><th>Holiday</th></tr></thead>
+                <thead><tr><th>#</th><th>Date</th><th>AM In</th><th>AM Out</th><th>PM In</th><th>PM Out</th><th>Hours</th><th>OT</th><th>Holiday</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
             <table class="summary" style="margin-top:16px;width:60%">
@@ -764,8 +773,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                         <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                                             <tr>
                                                 <th className="px-3 py-3">Date</th>
-                                                <th className="px-3 py-3">Time In</th>
-                                                <th className="px-3 py-3">Time Out</th>
+                                                <th className="px-3 py-3">AM In</th>
+                                                <th className="px-3 py-3">AM Out</th>
+                                                <th className="px-3 py-3">PM In</th>
+                                                <th className="px-3 py-3">PM Out</th>
                                                 <th className="px-3 py-3 text-center">Total</th>
                                                 <th className="px-3 py-3 text-center">OT</th>
                                                 <th className="px-3 py-3 text-center">Holiday</th>
@@ -780,8 +791,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                                 return (
                                                 <tr key={rec.id} className={`border-b dark:border-slate-700 ${hol ? (hol.type === 'regular' ? 'bg-red-50 dark:bg-red-900/10' : 'bg-blue-50 dark:bg-blue-900/10') : ''}`}>
                                                     <td className="px-3 py-3 font-medium">{rec.date}</td>
-                                                    <td className="px-3 py-3">{rec.timeInAM || rec.timeIn || '--'}</td>
-                                                    <td className="px-3 py-3">{rec.timeOutPM || rec.timeOut || '--'}</td>
+                                                    <td className="px-3 py-3">{formatTime12h(rec.timeInAM || rec.timeIn) || '--'}</td>
+                                                    <td className="px-3 py-3">{formatTime12h(rec.timeOutAM || rec.timeOut) || '--'}</td>
+                                                    <td className="px-3 py-3">{formatTime12h(rec.timeInPM) || '--'}</td>
+                                                    <td className="px-3 py-3">{formatTime12h(rec.timeOutPM) || '--'}</td>
                                                     <td className="px-3 py-3 text-center">{hrs.toFixed(1)}h</td>
                                                     <td className="px-3 py-3 text-center">
                                                         {otHrs > 0
