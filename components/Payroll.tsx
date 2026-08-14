@@ -75,7 +75,7 @@ const computeHoursFromForm48 = (record: TimeRecord): number => {
 };
 
 // Compute overtime pay — auto-calculated when total hours exceed standard (8 hrs)
-// On Sundays/rest days, uses the rest day OT premium rate instead of the regular one
+// On Sundays/rest days, the rest day premium is applied to the base rate (like a holiday multiplier)
 const computeOvertimePayForDay = (
     totalHours: number,
     baseRate: number,
@@ -90,12 +90,16 @@ const computeOvertimePayForDay = (
     // Check if the date is a Sunday (day 0)
     const dayOfWeek = new Date(date).getDay();
     const isSunday = dayOfWeek === 0;
+    // Sunday premium boosts the base rate for ALL hours (like holiday multiplier)
+    const sundayBaseMultiplier = isSunday ? (1 + restDayOtPremiumPercent / 100) : 1;
+    const effectiveHourlyRate = hourlyRate * sundayBaseMultiplier;
+    // OT premium is applied on top of the already-boosted Sunday rate
     const premiumPercent = isSunday ? restDayOtPremiumPercent : otPremiumPercent;
-    const otRate = hourlyRate * (1 + premiumPercent / 100);
+    const otRate = effectiveHourlyRate * (1 + premiumPercent / 100);
     const regularHours = Math.min(totalHours, stdHoursPerDay);
     const autoOtHours = Math.max(0, totalHours - stdHoursPerDay);
     return {
-        regularPay: hourlyRate * regularHours,
+        regularPay: effectiveHourlyRate * regularHours,
         overtimePay: otRate * autoOtHours,
         otRate,
         regularHours,
@@ -405,7 +409,10 @@ const TimeRecordModal: React.FC<{
     const hourlyRate = effectiveBase / stdHours;
     const isSunday = record.date ? new Date(record.date).getDay() === 0 : false;
     const activePremium = isSunday ? payrollSettings.restDayOtPremiumPercent : payrollSettings.otPremiumPercent;
-    const otRate = hourlyRate * (1 + activePremium / 100);
+    // Sunday premium boosts the base rate for ALL hours
+    const sundayBaseMultiplier = isSunday ? (1 + payrollSettings.restDayOtPremiumPercent / 100) : 1;
+    const effectiveHourlyRate = hourlyRate * sundayBaseMultiplier;
+    const otRate = effectiveHourlyRate * (1 + activePremium / 100);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
@@ -493,15 +500,21 @@ const TimeRecordModal: React.FC<{
                             {/* Rate Display */}
                             <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-700 rounded-md px-3 py-2 text-sm">
                                 <div className="flex justify-between">
-                                    <span className="text-slate-600 dark:text-slate-300">Hourly Rate</span>
+                                    <span className="text-slate-600 dark:text-slate-300">Base Hourly Rate</span>
                                     <span className="font-semibold">₱{hourlyRate.toFixed(2)}/hr</span>
                                 </div>
+                                {isSunday && (
+                                    <div className="flex justify-between mt-1 text-amber-600 dark:text-amber-400">
+                                        <span>☀️ Sunday Rate (+{payrollSettings.restDayOtPremiumPercent}%)</span>
+                                        <span className="font-semibold">₱{effectiveHourlyRate.toFixed(2)}/hr</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between mt-1">
                                     <span className="text-emerald-700 dark:text-emerald-400">OT Rate (+{activePremium}%{isSunday ? ' Sun' : ''})</span>
                                     <span className="font-bold text-emerald-700 dark:text-emerald-400">₱{otRate.toFixed(2)}/hr</span>
                                 </div>
                                 {isSunday && (
-                                    <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 font-semibold">☀️ Sunday / Rest Day premium applies</div>
+                                    <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 font-semibold">☀️ Sunday / Rest Day premium applies to all hours</div>
                                 )}
                             </div>
                         </div>
