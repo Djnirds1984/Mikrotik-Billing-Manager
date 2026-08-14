@@ -700,6 +700,28 @@ export interface TimeRecord {
     date: string; // YYYY-MM-DD
     timeIn: string; // HH:MM
     timeOut: string; // HH:MM
+    timeInAM?: string; // Form 48: morning time in
+    timeOutAM?: string; // Form 48: morning time out
+    timeInPM?: string; // Form 48: afternoon time in
+    timeOutPM?: string; // Form 48: afternoon time out
+    isOvertime?: number; // 0 = regular, 1 = overtime entry (legacy, now auto-calculated)
+    otHours?: number; // overtime hours for this entry (auto-calculated)
+    holidayType?: 'regular' | 'special' | null; // auto-set when date matches a holiday
+}
+
+export interface Holiday {
+    id: string;
+    name: string; // "New Year's Day", "Independence Day", etc.
+    date: string; // YYYY-MM-DD
+    type: 'regular' | 'special';
+    createdAt?: string;
+}
+
+export interface PayrollSettings {
+    otPremiumPercent: number; // default 50 (means +50%)
+    regularHolidayMultiplier: number; // default 2.0 (means x2)
+    specialHolidayMultiplier: number; // default 1.5 (means x1.5)
+    defaultHoursPerDay: number; // default 8
 }
 
 

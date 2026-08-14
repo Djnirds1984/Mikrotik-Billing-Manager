@@ -55,28 +55,25 @@ const computeHoursFromForm48 = (record: TimeRecord): number => {
     return computeHoursWorked(record.timeIn, record.timeOut);
 };
 
-// Compute overtime pay using configurable settings
+// Compute overtime pay — auto-calculated when total hours exceed standard (8 hrs)
 const computeOvertimePayForDay = (
-    employee: Employee,
     totalHours: number,
-    otHoursLogged: number,
-    settings: PayrollSettings,
+    baseRate: number,
+    stdHoursPerDay: number,
+    otPremiumPercent: number,
     holidayMultiplier: number | null
 ) => {
-    const stdHours = employee.hoursPerDay || settings.defaultHoursPerDay;
-    const baseRate = employee.salaryType === 'daily' ? employee.rate : employee.rate / 26;
     const effectiveBase = holidayMultiplier ? baseRate * holidayMultiplier : baseRate;
-    const hourlyRate = effectiveBase / stdHours;
-    const otRate = hourlyRate * (1 + settings.otPremiumPercent / 100);
-    const regularHours = Math.min(totalHours, stdHours);
-    const autoOtHours = Math.max(0, totalHours - stdHours);
-    const totalOtHours = autoOtHours + (otHoursLogged || 0);
+    const hourlyRate = effectiveBase / stdHoursPerDay;
+    const otRate = hourlyRate * (1 + otPremiumPercent / 100);
+    const regularHours = Math.min(totalHours, stdHoursPerDay);
+    const autoOtHours = Math.max(0, totalHours - stdHoursPerDay);
     return {
         regularPay: hourlyRate * regularHours,
-        overtimePay: otRate * totalOtHours,
+        overtimePay: otRate * autoOtHours,
         otRate,
         regularHours,
-        totalOtHours,
+        totalOtHours: autoOtHours,
     };
 };
 
@@ -120,11 +117,12 @@ const computePayrollEntry = (
             : null;
 
         if (h > 0 || (!r.timeIn && !r.timeOut && (!r.timeInAM || !r.timeOutAM))) {
-            const effectiveHours = h > 0 ? h : (employee.hoursPerDay || settings.defaultHoursPerDay);
+            const effectiveHours = h > 0 ? h : settings.defaultHoursPerDay;
             daysWorked += 1;
             hoursWorked += effectiveHours;
 
-            const otResult = computeOvertimePayForDay(employee, effectiveHours, r.otHours || 0, settings, holidayMultiplier);
+            const baseRate = employee.salaryType === 'daily' ? employee.rate : employee.rate / 26;
+            const otResult = computeOvertimePayForDay(effectiveHours, baseRate, settings.defaultHoursPerDay, settings.otPremiumPercent, holidayMultiplier);
             totalRegularPay += otResult.regularPay;
             totalOvertimePay += otResult.overtimePay;
             totalOtHours += otResult.totalOtHours;
@@ -192,7 +190,7 @@ const EmployeeFormModal: React.FC<{
     initialData: { employee: Employee, benefit: EmployeeBenefit } | null;
     isSubmitting: boolean;
 }> = ({ isOpen, onClose, onSave, initialData, isSubmitting }) => {
-    const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', rate: 0, hoursPerDay: 8 });
+    const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', rate: 0 });
     const [benefit, setBenefit] = useState<Omit<EmployeeBenefit, 'id' | 'employeeId'>>({ sss: false, philhealth: false, pagibig: false });
 
     useEffect(() => {
@@ -201,7 +199,7 @@ const EmployeeFormModal: React.FC<{
                 setEmployee(initialData.employee);
                 setBenefit(initialData.benefit);
             } else {
-                setEmployee({ fullName: '', role: '', hireDate: new Date().toISOString().split('T')[0], salaryType: 'daily', rate: 0, hoursPerDay: 8 });
+                setEmployee({ fullName: '', role: '', hireDate: new Date().toISOString().split('T')[0], salaryType: 'daily', rate: 0 });
                 setBenefit({ sss: false, philhealth: false, pagibig: false });
             }
         }
@@ -249,7 +247,7 @@ const EmployeeFormModal: React.FC<{
                                     <input name="role" value={employee.role} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                                 </div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
                                     <label>Hire Date</label>
                                     <input type="date" name="hireDate" value={employee.hireDate} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
@@ -264,10 +262,6 @@ const EmployeeFormModal: React.FC<{
                                 <div>
                                     <label>Rate</label>
                                     <input type="number" name="rate" value={employee.rate} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
-                                </div>
-                                <div>
-                                    <label>Hours / Day</label>
-                                    <input type="number" name="hoursPerDay" value={employee.hoursPerDay || 8} onChange={handleChange} min={1} max={24} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
                                 </div>
                             </div>
                             <div>
@@ -300,31 +294,28 @@ const TimeRecordModal: React.FC<{
     employeeId: string;
     employeeRate: number;
     employeeSalaryType: 'daily' | 'monthly';
-    employeeHoursPerDay: number;
     holidays: Holiday[];
     payrollSettings: PayrollSettings;
     isSubmitting: boolean;
-}> = ({ isOpen, onClose, onSave, initialData, employeeId, employeeRate, employeeSalaryType, employeeHoursPerDay, holidays, payrollSettings, isSubmitting }) => {
-    const [record, setRecord] = useState({ date: '', timeIn: '', timeOut: '', timeInAM: '', timeOutAM: '', timeInPM: '', timeOutPM: '', isOvertime: 0, otHours: 0 });
+}> = ({ isOpen, onClose, onSave, initialData, employeeId, employeeRate, employeeSalaryType, holidays, payrollSettings, isSubmitting }) => {
+    const [record, setRecord] = useState({ date: '', timeIn: '', timeOut: '', timeInAM: '', timeOutAM: '', timeInPM: '', timeOutPM: '' });
 
     useEffect(() => {
-        if(isOpen) {
+        if (isOpen) {
             if (initialData) {
                 setRecord({
                     date: initialData.date,
                     timeIn: initialData.timeIn || '', timeOut: initialData.timeOut || '',
                     timeInAM: initialData.timeInAM || '', timeOutAM: initialData.timeOutAM || '',
                     timeInPM: initialData.timeInPM || '', timeOutPM: initialData.timeOutPM || '',
-                    isOvertime: initialData.isOvertime || 0,
-                    otHours: initialData.otHours || 0,
                 });
             } else {
-                setRecord({ date: new Date().toISOString().split('T')[0], timeIn: '', timeOut: '', timeInAM: '', timeOutAM: '', timeInPM: '', timeOutPM: '', isOvertime: 0, otHours: 0 });
+                setRecord({ date: new Date().toISOString().split('T')[0], timeIn: '', timeOut: '', timeInAM: '', timeOutAM: '', timeInPM: '', timeOutPM: '' });
             }
         }
     }, [isOpen, initialData]);
 
-    // Compute total hours from AM/PM (must be before early return to satisfy Rules of Hooks)
+    // Auto-compute total hours from AM/PM Form 48
     const totalHours = useMemo(() => {
         let h = 0;
         if (record.timeInAM && record.timeOutAM) {
@@ -342,12 +333,8 @@ const TimeRecordModal: React.FC<{
         return h;
     }, [record.timeInAM, record.timeOutAM, record.timeInPM, record.timeOutPM]);
 
-    if (!isOpen) return null;
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const { name, value, type } = e.target;
-        setRecord(r => ({ ...r, [name]: type === 'number' ? parseFloat(value) || 0 : (type === 'checkbox' ? (e.target as HTMLInputElement).checked ? 1 : 0 : value) }));
-    };
+    // Auto-calculate overtime: anything beyond standard hours per day (default 8)
+    const autoOtHours = Math.max(0, totalHours - payrollSettings.defaultHoursPerDay);
 
     // Detect holiday
     const holiday = holidays.find(h => h.date === record.date) || null;
@@ -355,25 +342,34 @@ const TimeRecordModal: React.FC<{
         ? (holiday.type === 'regular' ? payrollSettings.regularHolidayMultiplier : payrollSettings.specialHolidayMultiplier)
         : null;
 
-    // Compute OT rate display
-    const stdHours = employeeHoursPerDay || payrollSettings.defaultHoursPerDay;
+    // Compute rate display
+    const stdHours = payrollSettings.defaultHoursPerDay;
     const baseRate = employeeSalaryType === 'daily' ? employeeRate : employeeRate / 26;
     const effectiveBase = holidayMultiplier ? baseRate * holidayMultiplier : baseRate;
     const hourlyRate = effectiveBase / stdHours;
     const otRate = hourlyRate * (1 + payrollSettings.otPremiumPercent / 100);
 
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target;
+        setRecord(r => ({ ...r, [name]: value }));
+    };
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        const data = {
+        const data: Omit<TimeRecord, 'id'> = {
             ...record,
             employeeId,
+            otHours: autoOtHours,
+            isOvertime: autoOtHours > 0 ? 1 : 0,
             holidayType: holiday ? holiday.type : null,
         };
         onSave(initialData ? { ...data, id: initialData.id } : data);
     };
 
+    if (!isOpen) return null;
+
     return (
-         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
                 <form onSubmit={handleSubmit}>
                     <div className="p-6">
@@ -391,7 +387,7 @@ const TimeRecordModal: React.FC<{
                                 </div>
                             )}
 
-                            {/* AM/PM Split */}
+                            {/* AM/PM Split (Form 48) */}
                             <div className="border border-slate-200 dark:border-slate-600 rounded-lg p-3">
                                 <p className="text-xs font-bold uppercase text-slate-500 mb-2">Morning (AM)</p>
                                 <div className="grid grid-cols-2 gap-3">
@@ -419,27 +415,24 @@ const TimeRecordModal: React.FC<{
                                 </div>
                             </div>
 
-                            {/* Total Hours */}
+                            {/* Auto-computed Summary */}
                             <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-700/50 rounded-md px-3 py-2">
                                 <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Total Hours</span>
                                 <span className="font-bold text-lg">{totalHours.toFixed(2)} hrs</span>
                             </div>
 
-                            {/* Overtime */}
-                            <div className="border border-amber-200 dark:border-amber-700 rounded-lg p-3 bg-amber-50 dark:bg-amber-900/10">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <input type="checkbox" name="isOvertime" checked={record.isOvertime === 1} onChange={handleChange} id="isOvertime" />
-                                    <label htmlFor="isOvertime" className="text-sm font-semibold text-amber-700 dark:text-amber-400">Overtime</label>
-                                </div>
-                                {record.isOvertime === 1 && (
-                                    <div>
-                                        <label className="text-sm">Additional OT Hours</label>
-                                        <input type="number" name="otHours" value={record.otHours} onChange={handleChange} min={0} step={0.5} className="mt-1 w-full p-2 bg-white dark:bg-slate-700 rounded-md border border-amber-200 dark:border-amber-600" />
+                            {/* Auto Overtime Display */}
+                            {autoOtHours > 0 && (
+                                <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700 rounded-md px-3 py-2">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">⏱ Overtime (auto-calculated)</span>
+                                        <span className="font-bold text-amber-700 dark:text-amber-400">{autoOtHours.toFixed(2)} hrs</span>
                                     </div>
-                                )}
-                            </div>
+                                    <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">Exceeds standard {payrollSettings.defaultHoursPerDay}hr work day</p>
+                                </div>
+                            )}
 
-                            {/* OT Rate Display */}
+                            {/* Rate Display */}
                             <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-700 rounded-md px-3 py-2 text-sm">
                                 <div className="flex justify-between">
                                     <span className="text-slate-600 dark:text-slate-300">Hourly Rate</span>
@@ -570,16 +563,17 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
         let holidayCount = 0;
         const rows = records.map((rec, i) => {
             const hrs = computeHoursFromForm48(rec);
+            const otHrs = Math.max(0, hrs - payrollSettings.defaultHoursPerDay);
             totalHours += hrs;
-            if (rec.otHours) totalOtHours += rec.otHours;
+            totalOtHours += otHrs;
             const hol = holidays.find(h => h.date === rec.date);
             if (hol) holidayCount++;
             const holBadge = hol ? (hol.type === 'regular' ? `<span style="color:red;font-weight:bold">RH - ${hol.name}</span>` : `<span style="color:blue;font-weight:bold">SH - ${hol.name}</span>`) : '';
-            const otMark = (rec.isOvertime === 1 || rec.otHours) ? `<span style="color:#d97706;font-weight:bold">OT ${rec.otHours || 0}h</span>` : '';
-            return `<tr><td>${i + 1}</td><td>${rec.date}</td><td>${rec.timeInAM || rec.timeIn || ''}</td><td>${rec.timeOutAM || rec.timeOut || ''}</td><td>${rec.timeInPM || ''}</td><td>${rec.timeOutPM || ''}</td><td style="text-align:center">${hrs.toFixed(2)}</td><td>${otMark}</td><td>${holBadge}</td></tr>`;
+            const otMark = otHrs > 0 ? `<span style="color:#d97706;font-weight:bold">OT ${otHrs.toFixed(1)}h</span>` : '';
+            return `<tr><td>${i + 1}</td><td>${rec.date}</td><td>${rec.timeInAM || rec.timeIn || ''}</td><td>${rec.timeOutPM || rec.timeOut || ''}</td><td style="text-align:center">${hrs.toFixed(2)}</td><td>${otMark}</td><td>${holBadge}</td></tr>`;
         }).join('');
 
-        const stdHrs = selectedEmployeeForDtr.hoursPerDay || payrollSettings.defaultHoursPerDay;
+        const stdHrs = payrollSettings.defaultHoursPerDay;
         const baseRate = selectedEmployeeForDtr.salaryType === 'daily' ? selectedEmployeeForDtr.rate : selectedEmployeeForDtr.rate / 26;
         const hourlyRate = baseRate / stdHrs;
         const otRate = hourlyRate * (1 + payrollSettings.otPremiumPercent / 100);
@@ -607,7 +601,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                 <span><strong>Period:</strong> ${records.length > 0 ? records[0].date : ''} to ${records.length > 0 ? records[records.length - 1].date : ''}</span>
             </div>
             <table>
-                <thead><tr><th>#</th><th>Date</th><th>AM In</th><th>AM Out</th><th>PM In</th><th>PM Out</th><th>Hours</th><th>OT</th><th>Holiday</th></tr></thead>
+                <thead><tr><th>#</th><th>Date</th><th>Time In</th><th>Time Out</th><th>Hours</th><th>OT</th><th>Holiday</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
             <table class="summary" style="margin-top:16px;width:60%">
@@ -770,10 +764,8 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                         <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
                                             <tr>
                                                 <th className="px-3 py-3">Date</th>
-                                                <th className="px-3 py-3">AM In</th>
-                                                <th className="px-3 py-3">AM Out</th>
-                                                <th className="px-3 py-3">PM In</th>
-                                                <th className="px-3 py-3">PM Out</th>
+                                                <th className="px-3 py-3">Time In</th>
+                                                <th className="px-3 py-3">Time Out</th>
                                                 <th className="px-3 py-3 text-center">Total</th>
                                                 <th className="px-3 py-3 text-center">OT</th>
                                                 <th className="px-3 py-3 text-center">Holiday</th>
@@ -783,18 +775,17 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                         <tbody>
                                             {employeeTimeRecords.map(rec => {
                                                 const hrs = computeHoursFromForm48(rec);
+                                                const otHrs = Math.max(0, hrs - payrollSettings.defaultHoursPerDay);
                                                 const hol = holidays.find(h => h.date === rec.date);
                                                 return (
                                                 <tr key={rec.id} className={`border-b dark:border-slate-700 ${hol ? (hol.type === 'regular' ? 'bg-red-50 dark:bg-red-900/10' : 'bg-blue-50 dark:bg-blue-900/10') : ''}`}>
                                                     <td className="px-3 py-3 font-medium">{rec.date}</td>
                                                     <td className="px-3 py-3">{rec.timeInAM || rec.timeIn || '--'}</td>
-                                                    <td className="px-3 py-3">{rec.timeOutAM || rec.timeOut || '--'}</td>
-                                                    <td className="px-3 py-3">{rec.timeInPM || '--'}</td>
-                                                    <td className="px-3 py-3">{rec.timeOutPM || '--'}</td>
+                                                    <td className="px-3 py-3">{rec.timeOutPM || rec.timeOut || '--'}</td>
                                                     <td className="px-3 py-3 text-center">{hrs.toFixed(1)}h</td>
                                                     <td className="px-3 py-3 text-center">
-                                                        {rec.isOvertime === 1 || (rec.otHours && rec.otHours > 0)
-                                                            ? <span className="text-amber-600 font-semibold">{rec.otHours || 0}h</span>
+                                                        {otHrs > 0
+                                                            ? <span className="text-amber-600 font-semibold">{otHrs.toFixed(1)}h</span>
                                                             : <span className="text-slate-400">—</span>}
                                                     </td>
                                                     <td className="px-3 py-3 text-center">
@@ -1060,20 +1051,15 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                     <input type="number" value={settingsDraft.specialHolidayMultiplier} onChange={e => { setSettingsDraft(s => ({ ...s, specialHolidayMultiplier: parseFloat(e.target.value) || 1 })); setSettingsSaved(false); }} min={1} max={5} step={0.1} className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-sm" />
                                     <p className="text-xs text-slate-400 mt-1">Employee gets ×{settingsDraft.specialHolidayMultiplier} of daily rate</p>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Default Hours Per Day</label>
-                                    <input type="number" value={settingsDraft.defaultHoursPerDay} onChange={e => { setSettingsDraft(s => ({ ...s, defaultHoursPerDay: parseFloat(e.target.value) || 8 })); setSettingsSaved(false); }} min={1} max={24} step={1} className="w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md text-sm" />
-                                </div>
                             </div>
 
                             {/* Live Preview */}
                             <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-700 rounded-lg text-sm">
                                 <p className="font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Live Preview (based on ₱500/day, {settingsDraft.defaultHoursPerDay}hrs):</p>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                <div className="grid grid-cols-3 gap-2 text-xs">
                                     <div><span className="text-slate-500">Hourly:</span> <span className="font-bold">₱{(500 / settingsDraft.defaultHoursPerDay).toFixed(2)}</span></div>
                                     <div><span className="text-emerald-600">OT Rate:</span> <span className="font-bold">₱{(500 / settingsDraft.defaultHoursPerDay * (1 + settingsDraft.otPremiumPercent / 100)).toFixed(2)}</span></div>
-                                    <div><span className="text-red-600">Regular Hol:</span> <span className="font-bold">₱{(500 * settingsDraft.regularHolidayMultiplier).toFixed(2)}</span></div>
-                                    <div><span className="text-blue-600">Special Hol:</span> <span className="font-bold">₱{(500 * settingsDraft.specialHolidayMultiplier).toFixed(2)}</span></div>
+                                    <div><span className="text-amber-600">Std Day:</span> <span className="font-bold">{settingsDraft.defaultHoursPerDay} hrs</span></div>
                                 </div>
                             </div>
 
@@ -1174,7 +1160,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     return (
         <div className="max-w-4xl mx-auto space-y-6">
             <EmployeeFormModal isOpen={isEmployeeModalOpen} onClose={() => setIsEmployeeModalOpen(false)} onSave={handleSaveEmployee} initialData={editingEmployee} isSubmitting={isSubmitting} />
-            {selectedEmployeeForDtr && <TimeRecordModal isOpen={isTimeRecordModalOpen} onClose={() => setIsTimeRecordModalOpen(false)} onSave={handleSaveTimeRecord} initialData={editingTimeRecord} employeeId={selectedEmployeeForDtr.id} employeeRate={selectedEmployeeForDtr.rate} employeeSalaryType={selectedEmployeeForDtr.salaryType} employeeHoursPerDay={selectedEmployeeForDtr.hoursPerDay || payrollSettings.defaultHoursPerDay} holidays={holidays} payrollSettings={payrollSettings} isSubmitting={isSubmitting} />}
+            {selectedEmployeeForDtr && <TimeRecordModal isOpen={isTimeRecordModalOpen} onClose={() => setIsTimeRecordModalOpen(false)} onSave={handleSaveTimeRecord} initialData={editingTimeRecord} employeeId={selectedEmployeeForDtr.id} employeeRate={selectedEmployeeForDtr.rate} employeeSalaryType={selectedEmployeeForDtr.salaryType} holidays={holidays} payrollSettings={payrollSettings} isSubmitting={isSubmitting} />}
             <div className="border-b border-slate-200 dark:border-slate-700">
                 <nav className="flex space-x-2">
                     <button onClick={() => setActiveTab('employees')} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'employees' ? 'border-b-2 border-[--color-primary-500]' : ''}`}><UsersIcon className="w-5 h-5"/> Employees</button>
