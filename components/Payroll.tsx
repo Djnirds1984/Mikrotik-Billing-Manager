@@ -3,6 +3,7 @@ import type { Employee, EmployeeBenefit, TimeRecord, Holiday, PayrollSettings } 
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, UsersIcon, ClockIcon, CalculatorIcon, CheckCircleIcon, CalendarIcon, CogIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { printPayrollThermal } from './PayrollThermalPrint.tsx';
 
 // ─── Philippine government contribution rates (2024) ───────────────────────
 // SSS: employee share ~4.5% of MSC, capped at ₱900/month
@@ -535,31 +536,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     };
 
     const handlePrint = () => {
-        const content = printRef.current;
-        if (!content) return;
-        const win = window.open('', '_blank');
-        if (!win) return;
-        win.document.write(`
-            <html><head><title>Payroll Report</title>
-            <style>
-                body { font-family: Arial, sans-serif; font-size: 12px; color: #000; }
-                h2 { text-align: center; margin-bottom: 4px; }
-                p.period { text-align: center; color: #555; margin-bottom: 16px; }
-                table { width: 100%; border-collapse: collapse; }
-                th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
-                th { background: #f0f0f0; font-weight: bold; }
-                td.num { text-align: right; }
-                tr.total td { font-weight: bold; background: #f9f9f9; }
-                .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; }
-                .badge-yes { background: #d1fae5; color: #065f46; }
-                .badge-no  { background: #f3f4f6; color: #6b7280; }
-            </style>
-            </head><body>${content.innerHTML}</body></html>
-        `);
-        win.document.close();
-        win.focus();
-        win.print();
-        win.close();
+        printPayrollThermal({
+            entries: payrollEntries,
+            periodStart, periodEnd,
+        });
     };
 
     const handlePrintDtr = () => {
