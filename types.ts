@@ -683,6 +683,7 @@ export interface Employee {
   role: string;
   hireDate: string; // ISO string YYYY-MM-DD
   salaryType: 'daily' | 'monthly';
+  payFrequency: 'weekly' | 'semi-monthly' | 'monthly'; // How often employee is paid
   rate: number;
   photoUrl?: string; // Employee photo (base64 or URL)
   password?: string; // Auto-generated on creation, only returned once

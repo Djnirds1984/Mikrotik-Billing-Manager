@@ -254,7 +254,7 @@ const EmployeeFormModal: React.FC<{
     initialData: { employee: Employee, benefit: EmployeeBenefit } | null;
     isSubmitting: boolean;
 }> = ({ isOpen, onClose, onSave, initialData, isSubmitting }) => {
-    const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', rate: 0 });
+    const [employee, setEmployee] = useState<Omit<Employee, 'id'>>({ fullName: '', role: '', hireDate: '', salaryType: 'daily', payFrequency: 'monthly', rate: 0 });
     const [benefit, setBenefit] = useState<Omit<EmployeeBenefit, 'id' | 'employeeId'>>({ sss: false, philhealth: false, pagibig: false });
     const [loginPassword, setLoginPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -274,7 +274,7 @@ const EmployeeFormModal: React.FC<{
                 setBenefit(initialData.benefit);
                 setLoginPassword(''); // Don't show existing password hash
             } else {
-                setEmployee({ fullName: '', role: '', hireDate: new Date().toISOString().split('T')[0], salaryType: 'daily', rate: 0 });
+                setEmployee({ fullName: '', role: '', hireDate: new Date().toISOString().split('T')[0], salaryType: 'daily', payFrequency: 'monthly', rate: 0 });
                 setBenefit({ sss: false, philhealth: false, pagibig: false });
                 setLoginPassword(generatePassword());
             }
@@ -342,6 +342,17 @@ const EmployeeFormModal: React.FC<{
                                 <div>
                                     <label>Rate</label>
                                     <input type="number" name="rate" value={employee.rate} onChange={handleChange} required className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md" />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label>Pay Frequency</label>
+                                    <select name="payFrequency" value={employee.payFrequency || 'monthly'} onChange={handleChange} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 rounded-md">
+                                        <option value="weekly">Weekly</option>
+                                        <option value="semi-monthly">Semi-Monthly (1-15 / 16-30)</option>
+                                        <option value="monthly">Monthly</option>
+                                    </select>
+                                    <p className="text-[10px] text-slate-400 mt-1">How often this employee receives their pay</p>
                                 </div>
                             </div>
 
@@ -637,6 +648,38 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
     const [savedPayrollId, setSavedPayrollId] = useState<string | null>(null);
     const [loadedEntries, setLoadedEntries] = useState<PayrollEntry[] | null>(null);
+    const [paidEmployeeIds, setPaidEmployeeIds] = useState<Set<string>>(new Set());
+
+    const handleMarkEmployeePaid = async (entry: PayrollEntry) => {
+        const empId = entry.employee.id;
+        if (paidEmployeeIds.has(empId)) return;
+        if (onPayrollPaid) {
+            try {
+                await onPayrollPaid(periodStart, periodEnd, entry.netPay, 1);
+                if (savedPayrollId && markPayrollPaid) {
+                    await markPayrollPaid(savedPayrollId);
+                }
+                setPaidEmployeeIds(prev => new Set(prev).add(empId));
+                alert(`${entry.employee.fullName} marked as paid! Net amount: ${formatCurrency(entry.netPay)} recorded as expense.`);
+            } catch (err) {
+                console.error('Failed to mark employee as paid:', err);
+                alert('Failed to record payment. Please try again.');
+            }
+        }
+    };
+
+    const handlePrintSingleEmployee = (entry: PayrollEntry) => {
+        printPayrollThermal({ entries: [entry], periodStart, periodEnd });
+    };
+
+    const handleRemoveEmployeeFromPayroll = (entry: PayrollEntry) => {
+        if (window.confirm(`Remove ${entry.employee.fullName} from this payroll generation?`)) {
+            if (loadedEntries) {
+                setLoadedEntries(loadedEntries.filter(e => e.employee.id !== entry.employee.id));
+            }
+            if (expandedEntryId === entry.employee.id) setExpandedEntryId(null);
+        }
+    };
     const printRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -658,6 +701,22 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
             });
         }
     }, [loadLatestPayroll]);
+
+    // Helper: check if employee's pay frequency matches the selected payroll period
+    const doesFrequencyMatchPeriod = (emp: Employee, start: string, end: string): boolean => {
+        const freq = emp.payFrequency || 'monthly';
+        const startDate = new Date(start + 'T00:00:00');
+        const endDate = new Date(end + 'T00:00:00');
+        const dayDiff = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        const startDay = startDate.getDate();
+        const endDay = endDate.getDate();
+        const isMonthStart = startDay === 1;
+        const lastDayOfMonth = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate();
+        const isMonthEnd = endDay === lastDayOfMonth;
+        if (freq === 'weekly') return dayDiff <= 8;
+        if (freq === 'semi-monthly') return (isMonthStart && endDay === 15) || (startDay === 16 && isMonthEnd);
+        return isMonthStart && isMonthEnd;
+    };
 
     const payrollEntries = useMemo<PayrollEntry[]>(() => {
         if (!generated) return [];
@@ -980,7 +1039,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                                     </button>
                                                 </td>
                                                 <td>{emp.role}</td>
-                                                <td>{formatCurrency(emp.rate)} / {emp.salaryType}</td>
+                                                <td>
+                                                                                                    <div>{formatCurrency(emp.rate)} / {emp.salaryType}</div>
+                                                                                                    <div className="text-[10px] text-slate-400">{(emp.payFrequency || 'monthly') === 'weekly' ? 'Weekly' : (emp.payFrequency || 'monthly') === 'semi-monthly' ? 'Semi-Monthly' : 'Monthly'}</div>
+                                                                                                </td>
                                                 <td className="px-6 py-4 text-right space-x-2">
                                                     <button onClick={() => { if(benefit) { setEditingEmployee({ employee: emp, benefit }); setIsEmployeeModalOpen(true); }}} className="p-1" title="Edit"><EditIcon className="w-5 h-5"/></button>
                                                     {resetEmployeePassword && (
@@ -1081,7 +1143,7 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                         {/* Controls */}
                         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                             <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 mb-4">Payroll Period & Employees</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Period Start</label>
                                     <input type="date" value={periodStart} onChange={e => { setPeriodStart(e.target.value); setGenerated(false); }}
@@ -1092,6 +1154,40 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                     <input type="date" value={periodEnd} onChange={e => { setPeriodEnd(e.target.value); setGenerated(false); }}
                                         className="w-full p-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-sm" />
                                 </div>
+                            </div>
+                            {/* Quick Period Buttons */}
+                            <div className="flex flex-wrap gap-2 mb-4">
+                                <span className="text-xs text-slate-400 self-center mr-1">Quick:</span>
+                                {(() => {
+                                    const now = new Date();
+                                    const y = now.getFullYear();
+                                    const m = now.getMonth();
+                                    const lastDay = new Date(y, m + 1, 0).getDate();
+                                    const pad = (n: number) => String(n).padStart(2, '0');
+                                    const fmt = (d: Date) => d.toISOString().split('T')[0];
+                                    // Current week (Mon-Sun)
+                                    const dayOfWeek = now.getDay();
+                                    const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                                    const monday = new Date(now);
+                                    monday.setDate(now.getDate() - mondayOffset);
+                                    const sunday = new Date(monday);
+                                    sunday.setDate(monday.getDate() + 6);
+                                    return [
+                                        { label: 'This Week', start: fmt(monday), end: fmt(sunday) },
+                                        { label: '1st Half (1-15)', start: `${y}-${pad(m+1)}-01`, end: `${y}-${pad(m+1)}-15` },
+                                        { label: '2nd Half (16-' + lastDay + ')', start: `${y}-${pad(m+1)}-16`, end: `${y}-${pad(m+1)}-${lastDay}` },
+                                        { label: 'Full Month', start: `${y}-${pad(m+1)}-01`, end: `${y}-${pad(m+1)}-${lastDay}` },
+                                    ].map(btn => (
+                                        <button key={btn.label} onClick={() => { setPeriodStart(btn.start); setPeriodEnd(btn.end); setGenerated(false); }}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                                periodStart === btn.start && periodEnd === btn.end
+                                                    ? 'bg-[--color-primary-600] text-white border-[--color-primary-600]'
+                                                    : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'
+                                            }`}>
+                                            {btn.label}
+                                        </button>
+                                    ));
+                                })()}
                             </div>
 
                             {/* Employee selector */}
@@ -1105,16 +1201,38 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                     </button>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                    {employees.map(emp => (
+                                    {employees.map(emp => {
+                                        const freq = emp.payFrequency || 'monthly';
+                                        const freqBadge = freq === 'weekly' ? 'W' : freq === 'semi-monthly' ? 'SM' : 'M';
+                                        const freqColor = freq === 'weekly' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : freq === 'semi-monthly' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300';
+                                        return (
                                         <button key={emp.id} onClick={() => toggleEmployee(emp.id)}
-                                            className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
                                                 selectedEmployeeIds.has(emp.id)
                                                     ? 'bg-[--color-primary-600] text-white border-[--color-primary-600]'
                                                     : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600'
                                             }`}>
                                             {emp.fullName}
+                                            <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${selectedEmployeeIds.has(emp.id) ? 'bg-white/20 text-white' : freqColor}`}>{freqBadge}</span>
                                         </button>
-                                    ))}
+                                        );
+                                    })}
+                                </div>
+                                {/* Frequency Legend & Match Info */}
+                                <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px]">
+                                    <span className="text-slate-400">Frequency:</span>
+                                    <span className="inline-flex items-center gap-1"><span className="px-1.5 py-0.5 rounded font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">W</span> Weekly</span>
+                                    <span className="inline-flex items-center gap-1"><span className="px-1.5 py-0.5 rounded font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">SM</span> Semi-Monthly</span>
+                                    <span className="inline-flex items-center gap-1"><span className="px-1.5 py-0.5 rounded font-bold bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300">M</span> Monthly</span>
+                                    {(() => {
+                                        const matching = employees.filter(e => doesFrequencyMatchPeriod(e, periodStart, periodEnd));
+                                        const total = employees.length;
+                                        return matching.length < total ? (
+                                            <span className="text-amber-600 dark:text-amber-400 ml-2">
+                                                {matching.length} of {total} employees match this period
+                                            </span>
+                                        ) : null;
+                                    })()}
                                 </div>
                             </div>
 
@@ -1134,31 +1252,15 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                     <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
                                         Payroll Report &mdash; {periodStart} to {periodEnd}
                                     </h3>
-                                    <div className="flex gap-2">
-                                        {!payrollPaid && onPayrollPaid && (
-                                            <button 
-                                                onClick={handleMarkAsPaid}
-                                                disabled={isProcessingPayment}
-                                                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                                <CheckCircleIcon className="w-4 h-4" />
-                                                {isProcessingPayment ? 'Processing...' : 'Mark as Paid'}
-                                            </button>
-                                        )}
+                                    <div className="flex gap-2 items-center">
                                         {payrollPaid && (
-                                            <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-sm font-semibold rounded-lg">
+                                            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-sm font-semibold rounded-lg">
                                                 <CheckCircleIcon className="w-4 h-4" />
-                                                Paid & Recorded as Expense
+                                                All Paid
                                             </div>
                                         )}
-                                        <button onClick={handlePrint}
-                                            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white text-sm font-semibold rounded-lg transition-colors">
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" />
-                                            </svg>
-                                            Print / Export
-                                        </button>
                                         <button onClick={handleDeletePayroll}
-                                            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                                            className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors">
                                             <TrashIcon className="w-4 h-4" />
                                             Delete
                                         </button>
@@ -1454,6 +1556,37 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                                                                                 </p>
                                                                             </div>
                                                                         </div>
+                                                                    </div>
+
+                                                                    {/* Per-Employee Action Buttons */}
+                                                                    <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-200 dark:border-slate-600">
+                                                                        {!paidEmployeeIds.has(entry.employee.id) && onPayrollPaid ? (
+                                                                            <button
+                                                                                onClick={(e) => { e.stopPropagation(); handleMarkEmployeePaid(entry); }}
+                                                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors">
+                                                                                <CheckCircleIcon className="w-3.5 h-3.5" />
+                                                                                Mark as Paid
+                                                                            </button>
+                                                                        ) : paidEmployeeIds.has(entry.employee.id) ? (
+                                                                            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-xs font-semibold rounded-lg">
+                                                                                <CheckCircleIcon className="w-3.5 h-3.5" />
+                                                                                Paid
+                                                                            </div>
+                                                                        ) : null}
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); handlePrintSingleEmployee(entry); }}
+                                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors">
+                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.565-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.916-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.916-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25C4.504 2.25 4 2.754 4 3.375v3.658" />
+                                                                            </svg>
+                                                                            Print Payslip
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); handleRemoveEmployeeFromPayroll(entry); }}
+                                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg transition-colors border border-red-200 dark:border-red-800">
+                                                                            <TrashIcon className="w-3.5 h-3.5" />
+                                                                            Remove
+                                                                        </button>
                                                                     </div>
                                                                 </div>
                                                             )}

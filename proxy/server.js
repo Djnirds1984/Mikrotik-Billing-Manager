@@ -231,6 +231,7 @@ async function initDb() {
             const empCols = await db.all("PRAGMA table_info(employees)");
             const empColNames = empCols.map(c => c.name);
             if (!empColNames.includes('hoursPerDay')) await db.exec("ALTER TABLE employees ADD COLUMN hoursPerDay REAL DEFAULT 8");
+            if (!empColNames.includes('payFrequency')) await db.exec("ALTER TABLE employees ADD COLUMN payFrequency TEXT DEFAULT 'monthly'");
 
             // Seed payroll_settings defaults
             await db.exec("INSERT OR IGNORE INTO payroll_settings (key, value) VALUES ('otPremiumPercent', 50)");
@@ -522,6 +523,7 @@ async function initDb() {
                 role TEXT,
                 hireDate TEXT,
                 salaryType TEXT,
+                payFrequency TEXT DEFAULT 'monthly',
                 rate REAL,
                 hoursPerDay REAL DEFAULT 8
             );

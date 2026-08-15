@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { TimeRecord } from '../types.ts';
 import { Loader } from './Loader.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
@@ -227,6 +227,18 @@ export const EmployeeLogin: React.FC = () => {
         let total = 0;
         if (amIn !== null && amOut !== null) total += (amOut - amIn) / 60;
         if (pmIn !== null && pmOut !== null) total += (pmOut - pmIn) / 60;
+
+        // Fallback: if AM/PM split is incomplete (e.g. employee self-service
+        // sets timeInAM + timeIn on time-in, and timeOutPM + timeOut on time-out),
+        // compute directly from the earliest time-in to the latest time-out.
+        if (total === 0) {
+            const earliestIn = amIn ?? pmIn;
+            const latestOut = pmOut ?? amOut;
+            if (earliestIn !== null && latestOut !== null) {
+                total = Math.max(0, (latestOut - earliestIn) / 60);
+            }
+        }
+
         return Math.max(0, total);
     };
 
@@ -245,6 +257,82 @@ export const EmployeeLogin: React.FC = () => {
         if (todayRecord.timeInAM || todayRecord.timeIn) return 'timed-in';
         return 'not-in';
     };
+
+    // Helper: compute OT hours for a record (standard 8 hrs/day)
+    const computeOtHours = (rec: TimeRecord): number => {
+        const total = computeHours(rec);
+        return Math.max(0, total - 8);
+    };
+
+    // Helper: check if a date is Sunday
+    const isSunday = (dateStr: string): boolean => {
+        return new Date(dateStr + 'T00:00:00').getDay() === 0;
+    };
+
+    // Print Form 48 DTR
+    const handlePrintForm48 = () => {
+        const win = window.open('', '_blank');
+        if (!win) return;
+        const records = [...dtrRecords].sort((a, b) => a.date.localeCompare(b.date));
+        let totalHours = 0;
+        let totalOtHours = 0;
+        let totalSundayHours = 0;
+        const rows = records.map((rec, i) => {
+            const hrs = computeHours(rec);
+            const otHrs = computeOtHours(rec);
+            const sun = isSunday(rec.date);
+            totalHours += hrs;
+            totalOtHours += otHrs;
+            if (sun) totalSundayHours += hrs;
+            const otMark = otHrs > 0 ? `<span style="color:#d97706;font-weight:bold">OT ${otHrs.toFixed(1)}h</span>` : '';
+            const sunBadge = sun ? '<span style="color:#7c3aed;font-weight:bold">SUN</span>' : '';
+            return `<tr><td>${i + 1}</td><td>${rec.date}</td><td>${formatTime12h(rec.timeInAM || rec.timeIn) || '--'}</td><td>${formatTime12h(rec.timeOutPM || rec.timeOut) || '--'}</td><td style="text-align:center">${hrs.toFixed(2)}</td><td>${otMark}</td><td>${sunBadge}</td></tr>`;
+        }).join('');
+        const dailyRate = employee?.salaryType === 'daily' ? (employee?.rate || 0) : ((employee?.rate || 0) / 26);
+        const hourlyRate = dailyRate / 8;
+        const otRate = hourlyRate * 1.25;
+        const sunOtRate = hourlyRate * 1.5;
+        win.document.write(`<html><head><title>DTR Form 48 - ${employee?.fullName || 'Employee'}</title><style>body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:20px}h2{text-align:center;margin-bottom:2px;font-size:16px}h3{text-align:center;margin-bottom:12px;font-size:12px;color:#555}.info{margin-bottom:12px}.info span{margin-right:24px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:4px 8px;text-align:left}th{background:#e5e7eb;font-weight:bold;font-size:10px;text-transform:uppercase}.summary{margin-top:16px}.summary td{font-weight:bold}.sig{margin-top:40px;display:flex;justify-content:space-between}.sig div{border-top:1px solid #000;width:200px;text-align:center;padding-top:4px}</style></head><body><h2>DAILY TIME RECORD</h2><h3>(Form 48)</h3><div class="info"><span><strong>Name:</strong> ${employee?.fullName || ''}</span><span><strong>Position:</strong> ${employee?.role || ''}</span><span><strong>Period:</strong> ${records.length > 0 ? records[0].date : ''} to ${records.length > 0 ? records[records.length - 1].date : ''}</span></div><table><thead><tr><th>#</th><th>Date</th><th>Time In</th><th>Time Out</th><th>Hours</th><th>OT</th><th>Day</th></tr></thead><tbody>${rows}</tbody></table><table class="summary" style="margin-top:16px;width:60%"><tr><td>Total Hours Worked</td><td>${totalHours.toFixed(2)} hrs</td></tr><tr><td>Total OT Hours</td><td>${totalOtHours.toFixed(2)} hrs</td></tr><tr><td>Sunday Hours</td><td>${totalSundayHours.toFixed(2)} hrs</td></tr><tr><td>Base Rate (Daily)</td><td>\u20B1${dailyRate.toFixed(2)}</td></tr><tr><td>Hourly Rate</td><td>\u20B1${hourlyRate.toFixed(2)}/hr</td></tr><tr><td>OT Rate (+25%)</td><td>\u20B1${otRate.toFixed(2)}/hr</td></tr><tr><td>Sunday OT Rate (+50%)</td><td>\u20B1${sunOtRate.toFixed(2)}/hr</td></tr></table><div class="sig"><div>Employee Signature</div><div>Supervisor Signature</div></div></body></html>`);
+        win.document.close();
+        win.focus();
+        win.print();
+        win.close();
+    };
+
+    // Estimated gross salary calculation (before deductions)
+    const earningsEstimate = useMemo(() => {
+        if (!employee || dtrRecords.length === 0) return null;
+        const dailyRate = employee.salaryType === 'daily' ? employee.rate : employee.rate / 26;
+        const hourlyRate = dailyRate / 8;
+        const otRate = hourlyRate * 1.25;
+        const sunOtRate = hourlyRate * 1.5;
+        let totalHours = 0, totalOtHours = 0, totalSundayHours = 0, totalRegularHours = 0;
+        let regularPay = 0, otPay = 0, sundayPremium = 0;
+        dtrRecords.forEach(rec => {
+            const hrs = computeHours(rec);
+            const otHrs = computeOtHours(rec);
+            const regHrs = Math.min(hrs, 8);
+            const sun = isSunday(rec.date);
+            totalHours += hrs;
+            totalOtHours += otHrs;
+            totalRegularHours += regHrs;
+            if (sun) totalSundayHours += hrs;
+            // Regular pay (includes Sunday base hours at base rate)
+            regularPay += regHrs * hourlyRate;
+            // OT pay
+            if (sun) {
+                otPay += otHrs * sunOtRate;
+            } else {
+                otPay += otHrs * otRate;
+            }
+            // Sunday premium (extra 20% on all Sunday hours)
+            if (sun) {
+                sundayPremium += hrs * hourlyRate * 0.20;
+            }
+        });
+        const grossPay = regularPay + otPay + sundayPremium;
+        return { totalHours, totalOtHours, totalSundayHours, totalRegularHours, regularPay, otPay, sundayPremium, grossPay, dailyRate, hourlyRate };
+    }, [employee, dtrRecords]);
 
     // ─── Render ──────────────────────────────────────────────────────────────
 
@@ -451,36 +539,126 @@ export const EmployeeLogin: React.FC = () => {
 
                 {/* DTR History */}
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100">
+                    <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                         <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">DTR History</h3>
+                        {dtrRecords.length > 0 && (
+                            <button onClick={handlePrintForm48} className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.565-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.916-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.916-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25C4.504 2.25 4 2.754 4 3.375v3.658" /></svg>
+                                Form 48
+                            </button>
+                        )}
                     </div>
                     {dtrRecords.length === 0 ? (
                         <div className="p-6 text-center text-slate-400 text-sm">No DTR records yet.</div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                                    <tr>
-                                        <th className="px-4 py-2 text-left">Date</th>
-                                        <th className="px-4 py-2 text-center">In</th>
-                                        <th className="px-4 py-2 text-center">Out</th>
-                                        <th className="px-4 py-2 text-right">Hours</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {dtrRecords.slice(0, 30).map(rec => (
-                                        <tr key={rec.id} className="border-t border-slate-100">
-                                            <td className="px-4 py-2.5 font-medium text-slate-700">{rec.date}</td>
-                                            <td className="px-4 py-2.5 text-center text-slate-600">{formatTime12h(rec.timeInAM || rec.timeIn) || '--'}</td>
-                                            <td className="px-4 py-2.5 text-center text-slate-600">{formatTime12h(rec.timeOutPM || rec.timeOut) || '--'}</td>
-                                            <td className="px-4 py-2.5 text-right font-medium text-slate-700">{computeHours(rec).toFixed(1)}h</td>
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                                        <tr>
+                                            <th className="px-4 py-2 text-left">Date</th>
+                                            <th className="px-4 py-2 text-center">In</th>
+                                            <th className="px-4 py-2 text-center">Out</th>
+                                            <th className="px-4 py-2 text-right">Hours</th>
+                                            <th className="px-4 py-2 text-right">OT</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        {dtrRecords.slice(0, 30).map(rec => {
+                                            const hrs = computeHours(rec);
+                                            const ot = computeOtHours(rec);
+                                            const sun = isSunday(rec.date);
+                                            return (
+                                                <tr key={rec.id} className={`border-t border-slate-100 ${sun ? 'bg-violet-50/50' : ''}`}>
+                                                    <td className="px-4 py-2.5 font-medium text-slate-700">
+                                                        {rec.date}
+                                                        {sun && <span className="ml-1.5 text-[10px] font-bold text-violet-500 uppercase">Sun</span>}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-center text-slate-600">{formatTime12h(rec.timeInAM || rec.timeIn) || '--'}</td>
+                                                    <td className="px-4 py-2.5 text-center text-slate-600">{formatTime12h(rec.timeOutPM || rec.timeOut) || '--'}</td>
+                                                    <td className="px-4 py-2.5 text-right font-medium text-slate-700">{hrs.toFixed(1)}h</td>
+                                                    <td className="px-4 py-2.5 text-right">
+                                                        {ot > 0 ? (
+                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-700">+{ot.toFixed(1)}h</span>
+                                                        ) : (
+                                                            <span className="text-slate-300">--</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                    <tfoot className="bg-slate-50 border-t border-slate-200">
+                                        <tr>
+                                            <td colSpan={3} className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Total</td>
+                                            <td className="px-4 py-2 text-right font-bold text-slate-700">{dtrRecords.reduce((sum, rec) => sum + computeHours(rec), 0).toFixed(1)}h</td>
+                                            <td className="px-4 py-2 text-right font-bold text-amber-600">{dtrRecords.reduce((sum, rec) => sum + computeOtHours(rec), 0).toFixed(1)}h</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </>
                     )}
                 </div>
+
+                {/* Estimated Earnings */}
+                {earningsEstimate && (
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-100">
+                            <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Estimated Earnings</h3>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Gross estimate before deductions (SSS, PhilHealth, Pag-IBIG)</p>
+                        </div>
+                        <div className="p-4 space-y-3">
+                            {/* Summary stats */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="bg-slate-50 rounded-lg p-3">
+                                    <p className="text-[10px] text-slate-400 uppercase font-semibold">Total Hours</p>
+                                    <p className="text-lg font-bold text-slate-700">{earningsEstimate.totalHours.toFixed(1)}h</p>
+                                    <p className="text-[10px] text-slate-400">{earningsEstimate.totalRegularHours.toFixed(1)} regular + {earningsEstimate.totalOtHours.toFixed(1)} OT</p>
+                                </div>
+                                <div className="bg-violet-50 rounded-lg p-3">
+                                    <p className="text-[10px] text-violet-400 uppercase font-semibold">Sunday Hours</p>
+                                    <p className="text-lg font-bold text-violet-700">{earningsEstimate.totalSundayHours.toFixed(1)}h</p>
+                                    <p className="text-[10px] text-violet-400">+50% premium applied</p>
+                                </div>
+                            </div>
+                            {/* Pay breakdown */}
+                            <div className="space-y-1.5 text-sm">
+                                <div className="flex justify-between">
+                                    <span className="text-slate-500">Regular Pay ({earningsEstimate.totalRegularHours.toFixed(1)}h × ₱{earningsEstimate.hourlyRate.toFixed(2)})</span>
+                                    <span className="font-medium text-slate-700">₱{earningsEstimate.regularPay.toFixed(2)}</span>
+                                </div>
+                                {earningsEstimate.otPay > 0 && (
+                                    <div className="flex justify-between">
+                                        <span className="text-amber-600">Overtime Pay ({earningsEstimate.totalOtHours.toFixed(1)}h)</span>
+                                        <span className="font-medium text-amber-700">₱{earningsEstimate.otPay.toFixed(2)}</span>
+                                    </div>
+                                )}
+                                {earningsEstimate.sundayPremium > 0 && (
+                                    <div className="flex justify-between">
+                                        <span className="text-violet-600">Sunday Premium ({earningsEstimate.totalSundayHours.toFixed(1)}h)</span>
+                                        <span className="font-medium text-violet-700">₱{earningsEstimate.sundayPremium.toFixed(2)}</span>
+                                    </div>
+                                )}
+                            </div>
+                            {/* Gross pay */}
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex justify-between items-center">
+                                <div>
+                                    <p className="text-xs font-semibold text-emerald-600 uppercase">Estimated Gross Salary</p>
+                                    <p className="text-[10px] text-emerald-500">Before deductions</p>
+                                </div>
+                                <p className="text-xl font-bold text-emerald-700">₱{earningsEstimate.grossPay.toFixed(2)}</p>
+                            </div>
+                            {/* Rate info */}
+                            <div className="flex justify-between text-[10px] text-slate-400 px-1">
+                                <span>Daily Rate: ₱{earningsEstimate.dailyRate.toFixed(2)}</span>
+                                <span>Hourly: ₱{earningsEstimate.hourlyRate.toFixed(2)}</span>
+                                <span>OT: ×1.25</span>
+                                <span>Sun OT: ×1.50</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
