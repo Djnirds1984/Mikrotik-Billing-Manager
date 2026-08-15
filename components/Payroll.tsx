@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import type { Employee, EmployeeBenefit, TimeRecord, Holiday, PayrollSettings } from '../types.ts';
+import type { Employee, EmployeeBenefit, TimeRecord, Holiday, PayrollSettings, SalaryRecord } from '../types.ts';
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, UsersIcon, ClockIcon, CalculatorIcon, CheckCircleIcon, CalendarIcon, CogIcon, XMarkIcon, KeyIcon } from '../constants.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
@@ -242,6 +242,10 @@ interface PayrollProps {
     savePayrollRecord?: (data: { periodStart: string; periodEnd: string; entries: any[]; totalGross: number; totalDeductions: number; totalNet: number; employeeCount: number }) => Promise<any>;
     markPayrollPaid?: (id: string) => Promise<any>;
     deletePayrollRecord?: (id: string) => Promise<void>;
+    salaryRecords?: SalaryRecord[];
+    saveSalaryRecord?: (record: Omit<SalaryRecord, 'id'>) => Promise<SalaryRecord>;
+    deleteSalaryRecord?: (id: string) => Promise<void>;
+    fetchSalaryRecords?: () => Promise<void>;
     isLoading: boolean;
     error: string | null;
     onPayrollPaid?: (periodStart: string, periodEnd: string, totalNet: number, employeeCount: number) => Promise<void>;
@@ -617,8 +621,8 @@ const TimeRecordModal: React.FC<{
 }
 
 export const Payroll: React.FC<PayrollProps> = (props) => {
-    const { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, loadLatestPayroll, savePayrollRecord, markPayrollPaid, deletePayrollRecord, isLoading, error, onPayrollPaid } = props;
-    const [activeTab, setActiveTab] = useState<'employees' | 'time_records' | 'generate_payroll' | 'holidays'>('employees');
+    const { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, loadLatestPayroll, savePayrollRecord, markPayrollPaid, deletePayrollRecord, salaryRecords, saveSalaryRecord, deleteSalaryRecord, fetchSalaryRecords, isLoading, error, onPayrollPaid } = props;
+    const [activeTab, setActiveTab] = useState<'employees' | 'time_records' | 'generate_payroll' | 'holidays' | 'salary_monitoring'>('employees');
     const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
     const [editingEmployee, setEditingEmployee] = useState<{ employee: Employee, benefit: EmployeeBenefit } | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -653,24 +657,34 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
     const handleMarkEmployeePaid = async (entry: PayrollEntry) => {
         const empId = entry.employee.id;
         if (paidEmployeeIds.has(empId)) return;
-        if (onPayrollPaid) {
-            try {
-                await onPayrollPaid(periodStart, periodEnd, entry.netPay, 1);
-                // Try to mark the DB record as paid (may not exist if auto-save failed)
-                if (savedPayrollId && markPayrollPaid) {
-                    try {
-                        await markPayrollPaid(savedPayrollId);
-                    } catch (dbErr) {
-                        console.warn('Payroll DB record not found, skipping DB update:', dbErr);
-                        // Continue anyway — the expense was recorded, just the payroll record wasn't in DB
-                    }
-                }
-                setPaidEmployeeIds(prev => new Set(prev).add(empId));
-                alert(`${entry.employee.fullName} marked as paid! Net amount: ${formatCurrency(entry.netPay)} recorded as expense.`);
-            } catch (err) {
-                console.error('Failed to mark employee as paid:', err);
-                alert('Failed to record payment. Please try again.');
+        try {
+            // 1. Save salary record to DB
+            if (saveSalaryRecord) {
+                await saveSalaryRecord({
+                    employeeId: empId,
+                    employeeName: entry.employee.fullName,
+                    periodStart,
+                    periodEnd,
+                    grossPay: entry.grossPay,
+                    deductions: entry.totalDeductions,
+                    netPay: entry.netPay,
+                    paidAt: new Date().toISOString()
+                });
             }
+            // 2. Record as expense
+            if (onPayrollPaid) {
+                await onPayrollPaid(periodStart, periodEnd, entry.netPay, 1);
+            }
+            // 3. Remove employee from generated list
+            if (loadedEntries) {
+                setLoadedEntries(loadedEntries.filter(e => e.employee.id !== empId));
+            }
+            setPaidEmployeeIds(prev => new Set(prev).add(empId));
+            if (expandedEntryId === empId) setExpandedEntryId(null);
+            alert(`${entry.employee.fullName} salary paid! Net: ${formatCurrency(entry.netPay)} recorded as expense and saved to Salary Monitoring.`);
+        } catch (err) {
+            console.error('Failed to mark employee as paid:', err);
+            alert('Failed to record payment. Please try again.');
         }
     };
 
@@ -1745,6 +1759,68 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                         )}
                     </div>
                 );
+            case 'salary_monitoring':
+                return (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-bold dark:text-white">Salary Payment History</h3>
+                            {(salaryRecords?.length ?? 0) > 0 && (
+                                <div className="text-sm text-slate-500 dark:text-slate-400">
+                                    Total: {formatCurrency((salaryRecords || []).reduce((s, r) => s + r.netPay, 0))}
+                                </div>
+                            )}
+                        </div>
+                        {(!salaryRecords || salaryRecords.length === 0) ? (
+                            <div className="text-center py-12 text-slate-400 dark:text-slate-500">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5V21a.75.75 0 01-.75.75h-.75a.75.75 0 01-.75-.75m.375-16.5h-.375c-.621 0-1.125.504-1.125 1.125v9.75c0 .621.504 1.125 1.125 1.125h.375" /></svg>
+                                <p className="font-medium">No salary records yet</p>
+                                <p className="text-sm mt-1">Paid salaries will appear here automatically.</p>
+                            </div>
+                        ) : (
+                            <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
+                                <table className="w-full text-sm">
+                                    <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left">Employee</th>
+                                            <th className="px-4 py-3 text-left">Period</th>
+                                            <th className="px-4 py-3 text-right">Gross</th>
+                                            <th className="px-4 py-3 text-right">Deductions</th>
+                                            <th className="px-4 py-3 text-right">Net Pay</th>
+                                            <th className="px-4 py-3 text-left">Date Paid</th>
+                                            <th className="px-4 py-3 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {(salaryRecords || []).map(rec => (
+                                            <tr key={rec.id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                                <td className="px-4 py-3 font-medium dark:text-white">{rec.employeeName}</td>
+                                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{rec.periodStart} — {rec.periodEnd}</td>
+                                                <td className="px-4 py-3 text-right">{formatCurrency(rec.grossPay)}</td>
+                                                <td className="px-4 py-3 text-right text-red-500">{formatCurrency(rec.deductions)}</td>
+                                                <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(rec.netPay)}</td>
+                                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{rec.paidAt ? new Date(rec.paidAt + 'Z').toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Manila' }) : '—'}</td>
+                                                <td className="px-4 py-3 text-right">
+                                                    <button onClick={() => { if (window.confirm('Delete this salary record?')) deleteSalaryRecord?.(rec.id); }} className="p-1 text-red-400 hover:text-red-600" title="Delete record">
+                                                        <TrashIcon className="w-4 h-4" />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot className="bg-slate-50 dark:bg-slate-900/50 font-bold">
+                                        <tr>
+                                            <td colSpan={2} className="px-4 py-3 dark:text-white">Total ({salaryRecords!.length} records)</td>
+                                            <td className="px-4 py-3 text-right">{formatCurrency((salaryRecords || []).reduce((s, r) => s + r.grossPay, 0))}</td>
+                                            <td className="px-4 py-3 text-right text-red-500">{formatCurrency((salaryRecords || []).reduce((s, r) => s + r.deductions, 0))}</td>
+                                            <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">{formatCurrency((salaryRecords || []).reduce((s, r) => s + r.netPay, 0))}</td>
+                                            <td colSpan={2}></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                );
         }
     };
     
@@ -1758,6 +1834,10 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
                     <button onClick={() => setActiveTab('time_records')} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'time_records' ? 'border-b-2 border-[--color-primary-500]' : ''}`}><ClockIcon className="w-5 h-5"/> Time Records</button>
                     <button onClick={() => setActiveTab('generate_payroll')} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'generate_payroll' ? 'border-b-2 border-[--color-primary-500]' : ''}`}><CalculatorIcon className="w-5 h-5"/> Generate Payroll</button>
                     <button onClick={() => setActiveTab('holidays')} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'holidays' ? 'border-b-2 border-[--color-primary-500]' : ''}`}><CalendarIcon className="w-5 h-5"/> Holidays</button>
+                    <button onClick={() => { setActiveTab('salary_monitoring'); fetchSalaryRecords?.(); }} className={`flex items-center gap-2 px-4 py-2 ${activeTab === 'salary_monitoring' ? 'border-b-2 border-[--color-primary-500]' : ''}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5V21a.75.75 0 01-.75.75h-.75a.75.75 0 01-.75-.75m.375-16.5h-.375c-.621 0-1.125.504-1.125 1.125v9.75c0 .621.504 1.125 1.125 1.125h.375" /></svg>
+                        Salary Monitoring
+                    </button>
                 </nav>
             </div>
             {renderContent()}

@@ -384,6 +384,18 @@ export interface ExpenseRecord {
     routerId?: string; // Optional: associate expense with specific router
 }
 
+export interface SalaryRecord {
+    id: string;
+    employeeId: string;
+    employeeName: string;
+    periodStart: string;
+    periodEnd: string;
+    grossPay: number;
+    deductions: number;
+    netPay: number;
+    paidAt: string;
+}
+
 export interface PisowifiIncomeRecord {
     id: string;
     resellerId?: string;

@@ -573,6 +573,17 @@ async function initDb() {
                 isPaid INTEGER NOT NULL DEFAULT 0,
                 createdAt TEXT DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS salary_records (
+                id TEXT PRIMARY KEY,
+                employeeId TEXT NOT NULL,
+                employeeName TEXT NOT NULL,
+                periodStart TEXT NOT NULL,
+                periodEnd TEXT NOT NULL,
+                grossPay REAL NOT NULL DEFAULT 0,
+                deductions REAL NOT NULL DEFAULT 0,
+                netPay REAL NOT NULL DEFAULT 0,
+                paidAt TEXT DEFAULT (datetime('now'))
+            );
              CREATE TABLE IF NOT EXISTS customers (
                 id TEXT PRIMARY KEY,
                 username TEXT UNIQUE,
@@ -2026,6 +2037,43 @@ async function startServer() {
     dbRouter.delete('/payroll-records/:id', async (req, res) => {
         try {
             await db.run('DELETE FROM payroll_records WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Deleted' });
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // === Salary Records (paid salary history) ===
+    // GET all salary records
+    dbRouter.get('/salary-records', async (req, res) => {
+        try {
+            const rows = await db.all('SELECT * FROM salary_records ORDER BY paidAt DESC');
+            res.json(rows);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // POST save a salary record
+    dbRouter.post('/salary-records', async (req, res) => {
+        try {
+            const { id, employeeId, employeeName, periodStart, periodEnd, grossPay, deductions, netPay } = req.body;
+            const recordId = id || `salary_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            await db.run(
+                'INSERT INTO salary_records (id, employeeId, employeeName, periodStart, periodEnd, grossPay, deductions, netPay) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [recordId, employeeId, employeeName, periodStart, periodEnd, grossPay || 0, deductions || 0, netPay || 0]
+            );
+            const saved = await db.get('SELECT * FROM salary_records WHERE id = ?', [recordId]);
+            res.json(saved);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // DELETE salary record
+    dbRouter.delete('/salary-records/:id', async (req, res) => {
+        try {
+            await db.run('DELETE FROM salary_records WHERE id = ?', [req.params.id]);
             res.json({ message: 'Deleted' });
         } catch (e) {
             res.status(500).json({ message: e.message });

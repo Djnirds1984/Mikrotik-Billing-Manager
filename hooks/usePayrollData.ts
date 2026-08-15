@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Employee, EmployeeBenefit, TimeRecord, Holiday, PayrollSettings } from '../types.ts';
+import type { Employee, EmployeeBenefit, TimeRecord, Holiday, PayrollSettings, SalaryRecord } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
 
 const DEFAULT_PAYROLL_SETTINGS: PayrollSettings = {
@@ -16,6 +16,7 @@ export const usePayrollData = (autoLoad: boolean = true) => {
     const [timeRecords, setTimeRecords] = useState<TimeRecord[]>([]);
     const [holidays, setHolidays] = useState<Holiday[]>([]);
     const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>(DEFAULT_PAYROLL_SETTINGS);
+    const [salaryRecords, setSalaryRecords] = useState<SalaryRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -225,5 +226,37 @@ export const usePayrollData = (autoLoad: boolean = true) => {
         }
     };
 
-    return { employees, benefits, timeRecords, holidays, payrollSettings, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, loadLatestPayroll, savePayrollRecord, markPayrollPaid, deletePayrollRecord, isLoading, error, fetchData };
+    // Salary records (paid salary history)
+    const fetchSalaryRecords = useCallback(async () => {
+        try {
+            const data = await dbApi.get<SalaryRecord[]>('/salary-records');
+            setSalaryRecords(data);
+        } catch (err) {
+            console.error('Failed to fetch salary records:', err);
+        }
+    }, []);
+
+    const saveSalaryRecord = async (record: Omit<SalaryRecord, 'id'>) => {
+        try {
+            const newRecord: SalaryRecord = { ...record, id: `salary_${Date.now()}_${Math.random().toString(36).substring(2, 7)}` };
+            const saved = await dbApi.post<SalaryRecord>('/salary-records', newRecord);
+            await fetchSalaryRecords();
+            return saved;
+        } catch (err) {
+            console.error('Failed to save salary record:', err);
+            throw err;
+        }
+    };
+
+    const deleteSalaryRecord = async (id: string) => {
+        try {
+            await dbApi.delete(`/salary-records/${id}`);
+            await fetchSalaryRecords();
+        } catch (err) {
+            console.error('Failed to delete salary record:', err);
+            throw err;
+        }
+    };
+
+    return { employees, benefits, timeRecords, holidays, payrollSettings, salaryRecords, addEmployee, updateEmployee, deleteEmployee, saveTimeRecord, deleteTimeRecord, addHoliday, updateHoliday, deleteHoliday, savePayrollSettings, resetEmployeePassword, loadLatestPayroll, savePayrollRecord, markPayrollPaid, deletePayrollRecord, fetchSalaryRecords, saveSalaryRecord, deleteSalaryRecord, isLoading, error, fetchData };
 };
