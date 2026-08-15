@@ -3571,14 +3571,17 @@ async function startServer() {
     const employeeDtrRouter = express.Router();
     employeeDtrRouter.use(protectEmployee);
 
-    // Helper: get server time in HH:MM format
+    // Helper: get server time in HH:MM format (Philippine Time)
     const getServerTime = () => {
         const now = new Date();
-        return now.toLocaleTimeString('en-PH', { hour12: false, hour: '2-digit', minute: '2-digit' });
+        return now.toLocaleTimeString('en-PH', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Manila' });
     };
-    // Helper: get today's date in YYYY-MM-DD format
+    // Helper: get today's date in YYYY-MM-DD format (Philippine Time)
     const getTodayDate = () => {
-        return new Date().toISOString().split('T')[0];
+        const now = new Date();
+        // Use Philippine timezone to get the correct local date
+        const phDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+        return phDate.toISOString().split('T')[0];
     };
 
     // Time-In

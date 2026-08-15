@@ -48,12 +48,12 @@ export const EmployeeLogin: React.FC = () => {
         'Authorization': `Bearer ${token}`,
     }), [token]);
 
-    // Live clock
+    // Live clock (Philippine Time)
     useEffect(() => {
         const updateClock = () => {
             const now = new Date();
-            setClockTime(now.toLocaleTimeString('en-PH', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-            setClockDate(now.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }));
+            setClockTime(now.toLocaleTimeString('en-PH', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Manila' }));
+            setClockDate(now.toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Manila' }));
         };
         updateClock();
         clockInterval.current = window.setInterval(updateClock, 1000);
