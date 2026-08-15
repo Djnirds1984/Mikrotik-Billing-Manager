@@ -656,8 +656,14 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
         if (onPayrollPaid) {
             try {
                 await onPayrollPaid(periodStart, periodEnd, entry.netPay, 1);
+                // Try to mark the DB record as paid (may not exist if auto-save failed)
                 if (savedPayrollId && markPayrollPaid) {
-                    await markPayrollPaid(savedPayrollId);
+                    try {
+                        await markPayrollPaid(savedPayrollId);
+                    } catch (dbErr) {
+                        console.warn('Payroll DB record not found, skipping DB update:', dbErr);
+                        // Continue anyway — the expense was recorded, just the payroll record wasn't in DB
+                    }
                 }
                 setPaidEmployeeIds(prev => new Set(prev).add(empId));
                 alert(`${entry.employee.fullName} marked as paid! Net amount: ${formatCurrency(entry.netPay)} recorded as expense.`);
@@ -772,9 +778,13 @@ export const Payroll: React.FC<PayrollProps> = (props) => {
         try {
             setIsProcessingPayment(true);
             await onPayrollPaid(periodStart, periodEnd, totals.net, payrollEntries.length);
-            // Also mark the DB record as paid
+            // Also mark the DB record as paid (may not exist if auto-save failed)
             if (savedPayrollId && markPayrollPaid) {
-                await markPayrollPaid(savedPayrollId);
+                try {
+                    await markPayrollPaid(savedPayrollId);
+                } catch (dbErr) {
+                    console.warn('Payroll DB record not found, skipping DB update:', dbErr);
+                }
             }
             setPayrollPaid(true);
             alert(`Payroll marked as paid! Total net amount: ${formatCurrency(totals.net)} has been recorded as an expense.`);

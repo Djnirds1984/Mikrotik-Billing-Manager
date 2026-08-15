@@ -42,7 +42,10 @@ const fetchData = async <T>(path: string, options: RequestInit = {}): Promise<T>
         return {} as T;
     }
 
-    return response.json() as Promise<T>;
+    // Handle empty response bodies gracefully
+    const text = await response.text();
+    if (!text) return {} as T;
+    return JSON.parse(text) as T;
 };
 
 export const dbApi = {

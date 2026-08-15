@@ -2006,13 +2006,17 @@ async function startServer() {
     // PATCH mark payroll as paid
     dbRouter.patch('/payroll-records/:id/paid', async (req, res) => {
         try {
+            const existing = await db.get('SELECT id FROM payroll_records WHERE id = ?', [req.params.id]);
+            if (!existing) {
+                return res.status(404).json({ message: 'Payroll record not found. It may not have been saved yet.' });
+            }
             await db.run('UPDATE payroll_records SET isPaid = 1 WHERE id = ?', [req.params.id]);
             const row = await db.get('SELECT * FROM payroll_records WHERE id = ?', [req.params.id]);
             if (row) {
                 row.entries = JSON.parse(row.entriesJson);
                 delete row.entriesJson;
             }
-            res.json(row);
+            res.json(row || { message: 'Marked as paid' });
         } catch (e) {
             res.status(500).json({ message: e.message });
         }
