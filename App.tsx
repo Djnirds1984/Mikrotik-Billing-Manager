@@ -361,7 +361,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
   };
 
   return (
-    <div className="flex bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 min-h-screen">
+    <div className="flex bg-[#0A0D18] text-white min-h-screen">
       <Sidebar 
         currentView={currentView} 
         setCurrentView={setCurrentView} 
@@ -386,7 +386,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
           setCurrentView={setCurrentView}
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         />
-        <div className="p-4 sm:p-8 overflow-auto h-full flex flex-col">
+        <div className="p-4 sm:p-8 overflow-auto h-full flex flex-col" style={{ backgroundColor: '#0A0D18' }}>
           <div className="flex-grow">
              {renderView()}
           </div>

@@ -27,8 +27,8 @@ const formatBits = (bits: number): string => {
 // --- COMPONENTS ---
 
 const StatCard: React.FC<{ title: string; children: React.ReactNode; className?: string }> = ({ title, children, className }) => (
-    <div className={`bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm ${className}`}>
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-4">{title}</h3>
+    <div className={`bg-[#151A28] p-6 rounded-xl border border-[#1E2538] shadow-card ${className}`}>
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[#8A94A6] mb-4">{title}</h3>
         <div className="space-y-4">
             {children}
         </div>
@@ -40,16 +40,16 @@ const StatItem: React.FC<{ label: string; value: string | number; subtext?: stri
         <div className="flex justify-between items-center text-sm">
             <div className="flex items-center gap-2">
                  {icon}
-                <span className="font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                <span className="font-medium text-[#8A94A6]">{label}</span>
             </div>
-            <span className="font-bold text-slate-900 dark:text-white">{value} {subtext && <span className="font-normal text-slate-500 dark:text-slate-400">{subtext}</span>}</span>
+            <span className="font-bold text-white">{value} {subtext && <span className="font-normal text-[#5A6478]">{subtext}</span>}</span>
         </div>
         {children && <div className="mt-2">{children}</div>}
     </div>
 );
 
 const ProgressBar: React.FC<{ percent: number; colorClass: string }> = ({ percent, colorClass }) => (
-    <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2">
+    <div className="w-full bg-[#1C2538] rounded-full h-2">
         <div className={`${colorClass} h-2 rounded-full transition-all duration-500`} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}></div>
     </div>
 );
@@ -65,14 +65,14 @@ const TrafficCard: React.FC<{
     currentRx: number;
     currentTx: number;
 }> = ({ interfaceName, allInterfaces, onSelect, onRemove, onToggleStatus, isDisabled, data, currentRx, currentTx }) => {
-    if (!interfaceName) return <div className="h-full bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse"></div>;
+    if (!interfaceName) return <div className="h-full bg-[#151A28] rounded-xl animate-pulse"></div>;
 
     return (
-        <div className={`bg-white dark:bg-slate-800 rounded-xl border ${isDisabled ? 'border-red-200 dark:border-red-900/50' : 'border-slate-200 dark:border-slate-700'} shadow-sm overflow-hidden flex flex-col h-full relative group transition-colors duration-300`}>
+        <div className={`bg-[#151A28] rounded-xl border ${isDisabled ? 'border-red-900/50' : 'border-[#1E2538]'} shadow-card overflow-hidden flex flex-col h-full relative group transition-colors duration-300`}>
             {/* Header */}
-            <div className={`relative p-4 border-b ${isDisabled ? 'border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50'} flex flex-col sm:flex-row justify-between items-center gap-4 transition-colors duration-300 min-h-[72px]`}>
+            <div className={`relative p-4 border-b ${isDisabled ? 'border-red-900/30 bg-red-900/10' : 'border-[#1E2538] bg-[#151A28]'} flex flex-col sm:flex-row justify-between items-center gap-4 transition-colors duration-300 min-h-[72px]`}>
                 <div className="flex items-center gap-3 z-10">
-                    <div className={`p-2 rounded-lg ${isDisabled ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'}`}>
+                    <div className={`p-2 rounded-lg ${isDisabled ? 'bg-red-900/30 text-red-400' : 'bg-[#1C2538] text-[#00E5FF]'}`}>
                         <SignalIcon className="w-5 h-5" />
                     </div>
                     <div>
@@ -84,7 +84,7 @@ const TrafficCard: React.FC<{
                         <select 
                             value={interfaceName} 
                             onChange={(e) => onSelect(e.target.value)}
-                            className="mt-1 bg-transparent font-bold text-slate-800 dark:text-slate-100 text-base focus:outline-none cursor-pointer hover:text-blue-600 transition-colors pr-8 max-w-[140px] truncate"
+                            className="mt-1 bg-transparent font-bold text-white text-base focus:outline-none cursor-pointer hover:text-[#00E5FF] transition-colors pr-8 max-w-[140px] truncate"
                         >
                             {allInterfaces.map(iface => (
                                 <option key={iface} value={iface}>{iface}</option>
@@ -95,29 +95,29 @@ const TrafficCard: React.FC<{
 
                 <div className={`flex gap-4 ml-auto flex-wrap text-center pointer-events-none transition-opacity duration-300 ${isDisabled ? 'opacity-50 grayscale' : 'opacity-100'}`}>
                     <div className="flex flex-col items-center">
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-0.5">Download</p>
-                        <p className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">{formatBits(currentRx)}</p>
+                        <p className="text-[10px] text-[#5A6478] uppercase font-semibold mb-0.5">Download</p>
+                        <p className="text-sm font-mono font-bold text-emerald-400">{formatBits(currentRx)}</p>
                     </div>
                     <div className="flex flex-col items-center">
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold mb-0.5">Upload</p>
-                        <p className="text-sm font-mono font-bold text-sky-600 dark:text-sky-400">{formatBits(currentTx)}</p>
+                        <p className="text-[10px] text-[#5A6478] uppercase font-semibold mb-0.5">Upload</p>
+                        <p className="text-sm font-mono font-bold text-sky-400">{formatBits(currentTx)}</p>
                     </div>
                 </div>
 
                 <div className="absolute top-2 right-2 flex flex-col gap-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button 
                         onClick={onRemove}
-                        className="p-1 text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400 transition-colors"
+                        className="p-1 text-[#5A6478] hover:text-red-400 transition-colors"
                         title="Remove Graph"
                     >
                         <XMarkIcon className="w-5 h-5" />
                     </button>
                     <button 
                         onClick={() => onToggleStatus(interfaceName, isDisabled)}
-                        className={`p-1 transition-colors ${isDisabled ? 'text-emerald-500 hover:text-emerald-600' : 'text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400'}`}
+                        className={`p-1 transition-colors ${isDisabled ? 'text-emerald-400 hover:text-emerald-300' : 'text-[#5A6478] hover:text-red-400'}`}
                         title={isDisabled ? "Enable Interface" : "Disable Interface"}
                     >
-                         <div className={`w-8 h-4 rounded-full p-0.5 flex items-center transition-colors ${isDisabled ? 'bg-slate-300 dark:bg-slate-600 justify-start' : 'bg-emerald-500 justify-end'}`}>
+                         <div className={`w-8 h-4 rounded-full p-0.5 flex items-center transition-colors ${isDisabled ? 'bg-[#2A3348] justify-start' : 'bg-emerald-500 justify-end'}`}>
                             <div className="w-3 h-3 rounded-full bg-white shadow-sm"></div>
                         </div>
                     </button>
@@ -452,9 +452,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                      )}
                  </StatCard>
                  <div className="flex flex-col items-center justify-center h-64 text-center">
-                    <RouterIcon className="w-24 h-24 text-slate-300 dark:text-slate-700 mb-4" />
-                    <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">No Router Selected</h2>
-                    <p className="mt-2 text-slate-500 dark:text-slate-400">Please select a router from the top bar to view live telemetry.</p>
+                    <RouterIcon className="w-24 h-24 text-[#2A3348] mb-4" />
+                    <h2 className="text-2xl font-bold text-white">No Router Selected</h2>
+                    <p className="mt-2 text-[#8A94A6]">Please select a router from the top bar to view live telemetry.</p>
                 </div>
             </div>
         );
@@ -464,15 +464,15 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         const errorMessage = error.message;
         return (
              <div>
-                <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700/50 text-red-700 dark:text-red-300 p-8 rounded-xl text-center">
-                    <ExclamationTriangleIcon className="w-16 h-16 mx-auto mb-4 text-red-500 dark:text-red-400" />
+                <div className="bg-red-900/20 border border-red-800/50 text-red-300 p-8 rounded-xl text-center">
+                    <ExclamationTriangleIcon className="w-16 h-16 mx-auto mb-4 text-red-400" />
                     <h3 className="text-xl font-bold">Connection Error</h3>
                     <p className="mt-2 text-lg">{errorMessage}</p>
                     <div className="flex justify-center gap-4 mt-6">
-                        <button onClick={() => fetchRouterData()} className="px-6 py-2 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 font-semibold">
+                        <button onClick={() => fetchRouterData()} className="px-6 py-2 bg-[#1C2538] text-white rounded-lg hover:bg-[#2A3348] font-semibold">
                            Retry Connection
                         </button>
-                        <button onClick={() => setShowFixer(!showFixer)} className="px-6 py-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 rounded-lg hover:bg-sky-200 dark:hover:bg-sky-800 font-semibold">
+                        <button onClick={() => setShowFixer(!showFixer)} className="px-6 py-2 bg-[#00E5FF]/10 text-[#00E5FF] rounded-lg hover:bg-[#00E5FF]/20 font-semibold">
                             {showFixer ? 'Hide AI Fixer' : 'Launch AI Fixer'}
                         </button>
                     </div>
@@ -513,7 +513,7 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                             <StatItem label="OS Version" value={systemInfo.version} />
                             <StatItem label="CPU Load" value={`${systemInfo.cpuLoad}%`}><ProgressBar percent={systemInfo.cpuLoad} colorClass="bg-emerald-500" /></StatItem>
                             <StatItem label="Memory" value={`${systemInfo.memoryUsage}%`} subtext={`of ${systemInfo.totalMemory}`}><ProgressBar percent={systemInfo.memoryUsage} colorClass="bg-blue-500" /></StatItem>
-                            <div className="col-span-2 pt-2 border-t border-slate-100 dark:border-slate-700 grid grid-cols-2 gap-4">
+                            <div className="col-span-2 pt-2 border-t border-[#1E2538] grid grid-cols-2 gap-4">
                                 <StatItem label="Uptime" value={systemInfo.uptime} icon={<ShareIcon className="w-5 h-5 text-slate-400"/>} />
                                 <StatItem label="Active PPPoE" value={pppoeCount} icon={<UsersIcon className="w-5 h-5 text-slate-400"/>} />
                                 {systemInfo.temperature !== undefined && (
@@ -530,12 +530,12 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
             {/* BOTTOM: TRAFFIC TELEMETRY */}
             <div className="relative">
                 <div className="flex items-center gap-4 mb-4">
-                    <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                        <SignalIcon className="w-6 h-6 text-sky-500" /> Live Traffic Telemetry
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                        <SignalIcon className="w-6 h-6 text-[#00E5FF]" /> Live Traffic Telemetry
                     </h2>
                     <button 
                         onClick={addNewChart}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors text-sm font-semibold border border-blue-200 dark:border-blue-700/50"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-[#00E5FF]/10 text-[#00E5FF] rounded-lg hover:bg-[#00E5FF]/20 transition-colors text-sm font-bold border border-[#00E5FF]/20"
                         title="Add New Traffic Graph"
                     >
                         <PlusIcon className="w-4 h-4" />

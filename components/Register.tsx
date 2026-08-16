@@ -56,52 +56,52 @@ export const Register: React.FC = () => {
 
     return (
         <div className="w-full max-w-md">
-            <h2 className="text-2xl font-bold text-center text-slate-800 dark:text-slate-200 mb-2">
+            <h2 className="text-2xl font-bold text-center text-white mb-2">
                 Create Admin Account
             </h2>
-            <p className="text-center text-sm text-slate-500 dark:text-slate-400 mb-6">Welcome! As the first user, you will be the administrator. Please set up your account and recovery questions.</p>
+            <p className="text-center text-sm text-[#8A94A6] mb-6">Welcome! As the first user, you will be the administrator. Please set up your account and recovery questions.</p>
             <form onSubmit={handleSubmit} className="space-y-4">
                 {error && (
-                    <div className="p-3 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-600 rounded-md text-red-700 dark:text-red-300 text-sm">
+                    <div className="p-3 bg-red-900/20 border border-red-800/50 rounded-md text-red-300 text-sm">
                         {error}
                     </div>
                 )}
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Username</label>
-                    <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md p-2"/>
+                    <label className="block text-sm font-medium text-[#8A94A6]">Username</label>
+                    <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} required className="mt-1 block w-full bg-[#1C2234] border border-[#1E2538] rounded-lg p-2 text-white focus:outline-none focus:ring-1 focus:ring-[#00E5FF]" />
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
-                    <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md p-2"/>
+                    <label className="block text-sm font-medium text-[#8A94A6]">Password</label>
+                    <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="mt-1 block w-full bg-[#1C2234] border border-[#1E2538] rounded-lg p-2 text-white focus:outline-none focus:ring-1 focus:ring-[#00E5FF]" />
                 </div>
                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Confirm Password</label>
-                    <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md p-2"/>
+                    <label className="block text-sm font-medium text-[#8A94A6]">Confirm Password</label>
+                    <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="mt-1 block w-full bg-[#1C2234] border border-[#1E2538] rounded-lg p-2 text-white focus:outline-none focus:ring-1 focus:ring-[#00E5FF]" />
                 </div>
                 
-                <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-2">Password Recovery</h3>
+                <div className="pt-4 border-t border-[#1E2538]">
+                    <h3 className="text-lg font-semibold text-white mb-2">Password Recovery</h3>
                     <div className="space-y-4">
                         <div>
                            <label className="block text-sm font-medium">Question 1</label>
-                           <select value={q1} onChange={e => setQ1(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md">{SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}</select>
-                           <input type="text" placeholder="Answer 1" value={a1} onChange={e => setA1(e.target.value)} required className="mt-2 w-full p-2 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md"/>
+                           <select value={q1} onChange={e => setQ1(e.target.value)} className="mt-1 w-full p-2 bg-[#1C2234] border border-[#1E2538] rounded-lg text-white">{SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}</select>
+                           <input type="text" placeholder="Answer 1" value={a1} onChange={e => setA1(e.target.value)} required className="mt-2 w-full p-2 bg-[#1C2234] border border-[#1E2538] rounded-lg text-white focus:outline-none focus:ring-1 focus:ring-[#00E5FF]"/>
                         </div>
                          <div>
                            <label className="block text-sm font-medium">Question 2</label>
-                           <select value={q2} onChange={e => setQ2(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md">{SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}</select>
-                           <input type="text" placeholder="Answer 2" value={a2} onChange={e => setA2(e.target.value)} required className="mt-2 w-full p-2 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md"/>
+                           <select value={q2} onChange={e => setQ2(e.target.value)} className="mt-1 w-full p-2 bg-[#1C2234] border border-[#1E2538] rounded-lg text-white">{SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}</select>
+                           <input type="text" placeholder="Answer 2" value={a2} onChange={e => setA2(e.target.value)} required className="mt-2 w-full p-2 bg-[#1C2234] border border-[#1E2538] rounded-lg text-white focus:outline-none focus:ring-1 focus:ring-[#00E5FF]"/>
                         </div>
                          <div>
                            <label className="block text-sm font-medium">Question 3</label>
-                           <select value={q3} onChange={e => setQ3(e.target.value)} className="mt-1 w-full p-2 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md">{SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}</select>
-                           <input type="text" placeholder="Answer 3" value={a3} onChange={e => setA3(e.target.value)} required className="mt-2 w-full p-2 bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 rounded-md"/>
+                           <select value={q3} onChange={e => setQ3(e.target.value)} className="mt-1 w-full p-2 bg-[#1C2234] border border-[#1E2538] rounded-lg text-white">{SECURITY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}</select>
+                           <input type="text" placeholder="Answer 3" value={a3} onChange={e => setA3(e.target.value)} required className="mt-2 w-full p-2 bg-[#1C2234] border border-[#1E2538] rounded-lg text-white focus:outline-none focus:ring-1 focus:ring-[#00E5FF]"/>
                         </div>
                     </div>
                 </div>
 
                 <div>
-                    <button type="submit" disabled={isLoading} className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[--color-primary-500] disabled:opacity-50">
+                    <button type="submit" disabled={isLoading} className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg text-sm font-bold text-[#0A0D18] bg-[#00E5FF] hover:bg-[#00C2FF] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#00E5FF] disabled:opacity-50">
                         {isLoading ? <Loader /> : 'Create Account'}
                     </button>
                 </div>

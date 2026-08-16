@@ -16,7 +16,7 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    // Light/Dark mode state
+    // Light/Dark mode state — default to dark for AirCoins theme
     const [theme, setThemeState] = useState<Theme>(() => {
         if (typeof window !== 'undefined' && window.localStorage) {
             const storedTheme = window.localStorage.getItem('theme') as Theme | null;
@@ -24,7 +24,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 return storedTheme;
             }
         }
-        return 'system';
+        return 'dark';
     });
 
     // Color theme state
@@ -35,7 +35,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 return storedColor;
             }
         }
-        return 'orange';
+        return 'sky';
     });
 
     const isDarkMode = useMemo(() => 

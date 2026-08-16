@@ -2,12 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Theme variables (kept from index.html) */
-:root { font-family: Inter, sans-serif; }
-.theme-orange { --color-primary-500: #f97316; }
-.theme-sky { --color-primary-500: #0ea5e9; }
-.theme-emerald { --color-primary-500: #10b981; }
-.theme-violet { --color-primary-500: #8b5cf6; }
+/* ── AirCoins Dark Theme ── */
+:root {
+  font-family: Inter, sans-serif;
+  --color-bg-main: #0A0D18;
+  --color-bg-card: #151A28;
+  --color-bg-elevated: #1C2538;
+  --color-bg-input: #1C2234;
+  --color-bg-sidebar: #101422;
+  --color-accent: #00E5FF;
+  --color-accent-bright: #00C2FF;
+  --color-text-primary: #FFFFFF;
+  --color-text-muted: #8A94A6;
+  --color-text-dim: #5A6478;
+  --color-border: #1E2538;
+  --color-border-light: #2A3348;
+  /* Legacy primary variable kept for backward compat */
+  --color-primary-500: #00E5FF;
+  --color-primary-300: #67E8F9;
+  --color-primary-400: #22D3EE;
+  --color-primary-600: #00C2FF;
+  --color-primary-700: #0891B2;
+  --color-primary-800: #065F73;
+}
+
+/* Force dark background globally */
+html, body {
+  background-color: #0A0D18;
+  color: #FFFFFF;
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0F121D;
+}
+::-webkit-scrollbar-thumb {
+  background: #2A3348;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3A4558;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(0, 229, 255, 0.25);
+  color: #FFFFFF;
+}
+
+/* Theme color overrides (kept for backward compat with existing classes) */
+.theme-orange { --color-primary-500: #00E5FF; --color-primary-600: #00C2FF; }
+.theme-sky    { --color-primary-500: #00E5FF; --color-primary-600: #00C2FF; }
+.theme-emerald{ --color-primary-500: #00E5FF; --color-primary-600: #00C2FF; }
+.theme-violet { --color-primary-500: #00E5FF; --color-primary-600: #00C2FF; }
 
 /* Print styles for receipts */
 @media print {

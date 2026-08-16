@@ -27,16 +27,16 @@ const NavItem: React.FC<{
     <li>
       <button
         onClick={disabled ? undefined : onClick}
-        className={`flex items-center w-full p-3 text-base rounded-lg transition duration-150 group ${
+        className={`flex items-center w-full px-3 py-2.5 text-sm rounded-lg transition duration-150 group ${
           isActive
-            ? 'bg-[--color-primary-500]/10 text-[--color-primary-600] dark:text-[--color-primary-300] font-semibold'
+            ? 'bg-[#1C2538] text-[#00E5FF] font-semibold'
             : disabled
-            ? 'text-slate-400 dark:text-slate-600 cursor-not-allowed bg-slate-100 dark:bg-slate-800'
-            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700/50'
+            ? 'text-[#5A6478] cursor-not-allowed bg-transparent'
+            : 'text-[#8A94A6] hover:bg-[#1C2538]/60 hover:text-white'
         }`}
         disabled={disabled}
       >
-        {icon}
+        <span className={isActive ? 'text-[#00E5FF]' : ''}>{icon}</span>
         <span className="flex-1 ml-3 text-left whitespace-nowrap">{label}</span>
         {badge > 0 && (
             <span className="inline-flex items-center justify-center px-2 py-0.5 ml-3 text-xs font-medium text-white bg-red-500 rounded-full">
@@ -162,39 +162,39 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-50 w-64 h-screen bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-transform duration-300 ease-in-out lg:sticky lg:translate-x-0 ${
+      className={`fixed inset-y-0 left-0 z-50 w-64 h-screen bg-[#101422] border-r border-[#1E2538] transition-transform duration-300 ease-in-out lg:sticky lg:translate-x-0 ${
         isOpen ? 'translate-x-0' : '-translate-x-full'
       }`}
       aria-label="Sidebar"
     >
-      <div className="flex items-center justify-between h-16 border-b border-slate-200 dark:border-slate-800 px-4">
+      <div className="flex items-center justify-between h-16 border-b border-[#1E2538] px-4">
           <div className="flex items-center min-w-0">
               {companySettings.logoBase64 ? (
                 <img src={companySettings.logoBase64} alt="Company Logo" className="h-10 w-auto object-contain flex-shrink-0" />
               ) : (
-                 <MikroTikLogoIcon className="w-8 h-8 text-[--color-primary-500] flex-shrink-0" />
+                 <MikroTikLogoIcon className="w-8 h-8 text-[#00E5FF] flex-shrink-0" />
               )}
-              <span className="self-center ml-3 text-xl font-semibold whitespace-nowrap text-slate-900 dark:text-white truncate">
+              <span className="self-center ml-3 text-lg font-semibold whitespace-nowrap text-white truncate">
                 {companySettings.companyName || 'MikroTik UI'}
               </span>
           </div>
-          <button onClick={() => setIsOpen(false)} className="lg:hidden text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white p-1" aria-label="Close sidebar">
+          <button onClick={() => setIsOpen(false)} className="lg:hidden text-[#8A94A6] hover:text-white p-1" aria-label="Close sidebar">
               <CloseIcon className="w-6 h-6" />
           </button>
       </div>
       <div className="h-[calc(100vh-4rem)] px-3 py-4 overflow-y-auto flex flex-col justify-between">
         <div>
         <div className="relative mb-3">
-          <SearchIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+          <SearchIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#5A6478]" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search pages..."
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[--color-primary-500]/40 focus:border-[--color-primary-500] transition"
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-[#1E2538] bg-[#1C2234] text-white placeholder-[#5A6478] focus:outline-none focus:ring-1 focus:ring-[#00E5FF]/40 focus:border-[#00E5FF] transition"
           />
         </div>
-        <ul className="space-y-2">
+        <ul className="space-y-1">
           {searchedNavItems.map((item) => (
             <NavItem
               key={item.id}
@@ -208,7 +208,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
           ))}
         </ul>
         </div>
-        <div className="text-center text-xs text-slate-400 dark:text-slate-600 mt-4">
+        <div className="text-center text-xs text-[#5A6478] mt-4">
             {appVersion}
         </div>
       </div>

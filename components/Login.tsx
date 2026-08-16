@@ -18,7 +18,7 @@ export const Login: React.FC<LoginProps> = ({ onSwitchToForgotPassword }) => {
 
     return (
         <div className="w-full max-w-md">
-            <h2 className="text-2xl font-bold text-center text-slate-800 dark:text-slate-200 mb-6">
+            <h2 className="text-2xl font-bold text-center text-white mb-6">
                 Login to Panel
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -28,7 +28,7 @@ export const Login: React.FC<LoginProps> = ({ onSwitchToForgotPassword }) => {
                     </div>
                 )}
                 <div>
-                    <label htmlFor="username" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Username</label>
+                    <label htmlFor="username" className="block text-sm font-medium text-[#8A94A6]">Username</label>
                     <input
                         id="username"
                         name="username"
@@ -37,11 +37,11 @@ export const Login: React.FC<LoginProps> = ({ onSwitchToForgotPassword }) => {
                         required
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500]"
+                        className="mt-1 block w-full bg-[#1C2234] border border-[#1E2538] rounded-lg shadow-sm py-2 px-3 text-white placeholder-[#5A6478] focus:outline-none focus:ring-1 focus:ring-[#00E5FF] focus:border-[#00E5FF]"
                     />
                 </div>
                 <div>
-                    <label htmlFor="password"className="block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
+                    <label htmlFor="password"className="block text-sm font-medium text-[#8A94A6]">Password</label>
                     <input
                         id="password"
                         name="password"
@@ -50,21 +50,21 @@ export const Login: React.FC<LoginProps> = ({ onSwitchToForgotPassword }) => {
                         required
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-900 dark:text-white focus:outline-none focus:ring-[--color-primary-500] focus:border-[--color-primary-500]"
+                        className="mt-1 block w-full bg-[#1C2234] border border-[#1E2538] rounded-lg shadow-sm py-2 px-3 text-white placeholder-[#5A6478] focus:outline-none focus:ring-1 focus:ring-[#00E5FF] focus:border-[#00E5FF]"
                     />
                 </div>
                 <div>
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[--color-primary-600] hover:bg-[--color-primary-700] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[--color-primary-500] disabled:opacity-50"
+                        className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg text-sm font-bold text-[#0A0D18] bg-[#00E5FF] hover:bg-[#00C2FF] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#00E5FF] disabled:opacity-50"
                     >
                         {isLoading ? <Loader /> : 'Sign in'}
                     </button>
                 </div>
             </form>
-            <p className="mt-4 text-center text-sm text-slate-600 dark:text-slate-400">
-                <button onClick={onSwitchToForgotPassword} className="font-medium text-[--color-primary-600] hover:text-[--color-primary-500]">
+            <p className="mt-4 text-center text-sm text-[#8A94A6]">
+                <button onClick={onSwitchToForgotPassword} className="font-medium text-[#00E5FF] hover:text-[#00C2FF]">
                     Forgot Password?
                 </button>
             </p>
