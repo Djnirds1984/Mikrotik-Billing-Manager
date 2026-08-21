@@ -11273,167 +11273,18 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     licenseRouter.use(protect);
     
     licenseRouter.get('/status', async (req, res) => {
-        const LICENSE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-        try {
-            const deviceId = await getDeviceId();
-            const settings = await db.get('SELECT licenseKey, licenseCache, licenseCacheAt FROM settings WHERE id = 1');
-            const localLicenseKey = settings?.licenseKey;
-
-            // --- Serve from cache if fresh ---
-            if (settings?.licenseCache && settings?.licenseCacheAt) {
-                const cacheAge = Date.now() - new Date(settings.licenseCacheAt).getTime();
-                if (cacheAge < LICENSE_CACHE_TTL_MS) {
-                    try {
-                        const cached = JSON.parse(settings.licenseCache);
-                        return res.json(cached);
-                    } catch (_) { /* corrupt cache, fall through to re-validate */ }
-                }
-            }
-
-            // --- No local license key: check Supabase by hardware ID ---
-            if (!localLicenseKey) {
-                const { data: existingLicense, error: existingError } = await supabase
-                    .from('mikrotik_licenses')
-                    .select('*')
-                    .eq('hardware_id', deviceId)
-                    .eq('is_active', true)
-                    .maybeSingle();
-
-                if (!existingError && existingLicense) {
-                    await db.run('UPDATE settings SET licenseKey = ? WHERE id = 1', [existingLicense.license_key]);
-                    await supabase
-                        .from('mikrotik_licenses')
-                        .update({ last_check_in: new Date().toISOString() })
-                        .eq('id', existingLicense.id);
-
-                    const result = { 
-                        licensed: true, 
-                        expires: existingLicense.expires_at, 
-                        deviceId, 
-                        licenseKey: existingLicense.license_key,
-                        plan: existingLicense.plan_type,
-                        maxRouters: existingLicense.max_routers,
-                        message: 'License restored from server after system reset.'
-                    };
-                    await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
-                        [JSON.stringify(result), new Date().toISOString()]);
-                    return res.json(result);
-                }
-
-                const result = { licensed: false, deviceId, message: 'No license key found locally.' };
-                // Cache negative result for a shorter time (30 seconds) to avoid hammering Supabase
-                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
-                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
-                return res.json(result);
-            }
-
-            // --- Verify license key with Supabase ---
-            const { data: license, error } = await supabase
-                .from('mikrotik_licenses')
-                .select('*')
-                .eq('license_key', localLicenseKey)
-                .maybeSingle();
-
-            if (error || !license) {
-                const result = { licensed: false, deviceId, message: 'License key not found in server.' };
-                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
-                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
-                return res.json(result);
-            }
-
-            if (license.hardware_id && license.hardware_id !== deviceId) {
-                // --- Self-healing migration ---
-                // The old getDeviceId() included cpu.speed which fluctuates.
-                // If the stored Supabase hardware_id matches the OLD formula for this machine,
-                // automatically migrate it to the new stable ID so the user isn't locked out.
-                let migrated = false;
-                try {
-                    const cpu = await si.cpu();
-                    if (cpu && cpu.brand && cpu.speed && cpu.cores) {
-                        const oldRawId = `${cpu.brand}-${cpu.speed}-${cpu.cores}-${cpu.physicalCores || cpu.cores}`;
-                        const oldDeviceId = crypto.createHash('sha256').update(oldRawId).digest('hex');
-                        if (license.hardware_id === oldDeviceId) {
-                            // This IS the same machine — migrate the hardware_id to the new stable value
-                            await supabase
-                                .from('mikrotik_licenses')
-                                .update({ hardware_id: deviceId })
-                                .eq('id', license.id);
-                            // Also clear the license cache so next check re-validates cleanly
-                            await db.run('UPDATE settings SET licenseCache = NULL, licenseCacheAt = NULL WHERE id = 1');
-                            console.log('[License] Migrated hardware_id from speed-based to stable ID');
-                            migrated = true;
-                        }
-                    }
-                } catch (migErr) {
-                    console.warn('[License] Migration check failed:', migErr.message);
-                }
-
-                if (!migrated) {
-                    const result = { licensed: false, deviceId, message: 'License is bound to another device.' };
-                    await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
-                        [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
-                    return res.json(result);
-                }
-            }
-
-            if (!license.is_active) {
-                const result = { licensed: false, deviceId, message: 'License has been deactivated.' };
-                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
-                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
-                return res.json(result);
-            }
-
-            if (license.expires_at && new Date(license.expires_at) < new Date()) {
-                const result = { licensed: false, deviceId, message: 'License has expired.' };
-                await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
-                    [JSON.stringify(result), new Date(Date.now() - LICENSE_CACHE_TTL_MS + 30000).toISOString()]);
-                return res.json(result);
-            }
-
-            // Bind hardware_id on first use
-            if (!license.hardware_id) {
-                await supabase
-                    .from('mikrotik_licenses')
-                    .update({ hardware_id: deviceId, activated_at: new Date().toISOString() })
-                    .eq('id', license.id);
-            }
-
-            // Update last check-in (fire and forget — don't block the response)
-            supabase
-                .from('mikrotik_licenses')
-                .update({ last_check_in: new Date().toISOString() })
-                .eq('id', license.id)
-                .then(() => {}).catch(() => {});
-
-            const result = { 
-                licensed: true, 
-                expires: license.expires_at, 
-                deviceId, 
-                licenseKey: localLicenseKey,
-                plan: license.plan_type,
-                maxRouters: license.max_routers
-            };
-
-            // Cache the valid result for 5 minutes
-            await db.run('UPDATE settings SET licenseCache = ?, licenseCacheAt = ? WHERE id = 1',
-                [JSON.stringify(result), new Date().toISOString()]);
-
-            res.json(result);
-
-        } catch (err) { 
-            console.error('[License] Status check error:', err);
-            // On unexpected error, try to serve stale cache rather than returning unlicensed
-            try {
-                const settings = await db.get('SELECT licenseCache FROM settings WHERE id = 1');
-                if (settings?.licenseCache) {
-                    const cached = JSON.parse(settings.licenseCache);
-                    console.warn('[License] Serving stale cache due to error');
-                    return res.json(cached);
-                }
-            } catch (_) {}
-            res.status(500).json({ message: err.message }); 
-        }
+        // === TEMPORARY: License check disabled (Supabase restricted) ===
+        // TODO: Restore original license verification when Supabase is available
+        // Original code is in git history — revert this commit to restore.
+        const deviceId = await getDeviceId();
+        return res.json({
+            licensed: true,
+            expires: '2099-12-31T23:59:59.999Z',
+            deviceId,
+            licenseKey: 'TEMP-DISABLED',
+            plan: 'lifetime',
+            maxRouters: 999
+        });
     });
 
     licenseRouter.post('/activate', async (req, res) => {
