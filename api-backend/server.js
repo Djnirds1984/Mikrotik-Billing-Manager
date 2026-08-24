@@ -2712,8 +2712,13 @@ app.post('/:routerId/system/backup/create', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            // Use longer timeout for backup creation
-            await instance.post('/system/backup/save', { name: backupName }, { timeout: 120000 });
+            // REST API: PUT /system/backup (generic proxy translates save → PUT)
+            try {
+                await instance.put('/system/backup', { name: backupName }, { timeout: 120000 });
+            } catch (putErr) {
+                // Fallback to POST if PUT fails
+                await instance.post('/system/backup', { name: backupName }, { timeout: 120000 });
+            }
             await storeBackupInPanel(req.router.id, backupName + '.backup', 'mikrotik');
             res.json({ 
                 fileName: backupName + '.backup', 
@@ -2758,7 +2763,8 @@ app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            const response = await instance.get('/file/print', { timeout: 60000 });
+            // REST API: GET /file (NOT /file/print - that's legacy API syntax)
+            const response = await instance.get('/file', { timeout: 60000 });
             const files = Array.isArray(response.data) ? response.data : [];
             const backupFiles = files.filter(f => f.name && f.name.endsWith('.backup'));
             for (const file of backupFiles) {
@@ -2809,7 +2815,13 @@ app.post('/:routerId/system/backup/restore', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            await instance.post('/system/backup/load', { name: fileName }, { timeout: 120000 });
+            // REST API: POST /system/backup/load
+            try {
+                await instance.post('/system/backup/load', { name: fileName }, { timeout: 120000 });
+            } catch (postErr) {
+                // Fallback: PUT /system/backup/load
+                await instance.put('/system/backup/load', { name: fileName }, { timeout: 120000 });
+            }
             res.json({ message: 'Restore initiated. Router will reboot.' });
         }
     } catch (e) {
@@ -2826,7 +2838,7 @@ app.post('/:routerId/system/backup/delete', getRouter, async (req, res) => {
     if (!fileName) return res.status(400).json({ message: 'fileName is required' });
     
     try {
-        // Delete from MikroTik - find file by name
+        // Delete from MikroTik - find file by name then delete by ID
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
@@ -2841,11 +2853,13 @@ app.post('/:routerId/system/backup/delete', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            const response = await instance.get('/file/print');
+            // REST API: GET /file to find the file, then DELETE /file/{id}
+            const response = await instance.get('/file');
             const files = Array.isArray(response.data) ? response.data : [];
             const match = files.find(f => f.name === fileName);
             if (match) {
-                await instance.delete('/file/remove', { data: { '.id': match['.id'] || match.id } });
+                const fileId = match['.id'] || match.id;
+                await instance.delete(`/file/${fileId}`);
             }
         }
         
@@ -2891,7 +2905,8 @@ app.get('/:routerId/system/backup/download', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            const response = await instance.post('/file/get', { '.id': fileName, '.proplist': 'contents' }, { timeout: 120000 });
+            // REST API: POST /file/{fileName} to get content
+            const response = await instance.post(`/file/${fileName}`, { '.proplist': 'contents' }, { timeout: 120000 });
             let contents = '';
             const data = response.data;
             if (Array.isArray(data) && data.length > 0) {
