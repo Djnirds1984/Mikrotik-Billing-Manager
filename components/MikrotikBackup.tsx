@@ -52,8 +52,18 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
         setIsLoading(true);
         setError(null);
         try {
-            const data = await getMikrotikBackups(selectedRouter);
-            setBackups(Array.isArray(data) ? data : []);
+            const data = await getMikrotikBackups(selectedRouter) as any;
+            // Handle both array response and {backups, warning} response
+            if (Array.isArray(data)) {
+                setBackups(data);
+            } else if (data && data.backups) {
+                setBackups(data.backups);
+                if (data.warning) {
+                    console.warn('Backup list warning:', data.warning);
+                }
+            } else {
+                setBackups([]);
+            }
         } catch (err) {
             setError(`Failed to fetch backups: ${(err as Error).message}`);
             setBackups([]);

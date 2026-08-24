@@ -2741,6 +2741,7 @@ app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
     
     try {
         const backups = [];
+        let mikrotikError = null;
         
         // Get backups from MikroTik - list ALL files then filter by .backup extension
         if (req.router.api_type === 'legacy') {
@@ -2758,14 +2759,30 @@ app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
                         source: 'mikrotik'
                     });
                 }
+            } catch (mtErr) {
+                mikrotikError = mtErr.message;
+                console.warn('[Backup List] MikroTik legacy file list error:', mtErr.message);
             } finally {
                 await client.close();
             }
         } else {
             const instance = req.routerInstance;
-            // REST API: GET /file (NOT /file/print - that's legacy API syntax)
-            const response = await instance.get('/file', { timeout: 60000 });
-            const files = Array.isArray(response.data) ? response.data : [];
+            // Try multiple REST API paths since different RouterOS versions use different paths
+            let files = [];
+            try {
+                // Try GET /file first (standard REST API)
+                const response = await instance.get('/file', { timeout: 60000 });
+                files = Array.isArray(response.data) ? response.data : [];
+            } catch (firstErr) {
+                try {
+                    // Fallback: some RouterOS versions need /file/print even via REST
+                    const response2 = await instance.get('/file/print', { timeout: 60000 });
+                    files = Array.isArray(response2.data) ? response2.data : [];
+                } catch (secondErr) {
+                    mikrotikError = `REST API error: ${firstErr.message}`;
+                    console.warn('[Backup List] MikroTik REST file list error:', firstErr.message, '| Fallback also failed:', secondErr.message);
+                }
+            }
             const backupFiles = files.filter(f => f.name && f.name.endsWith('.backup'));
             for (const file of backupFiles) {
                 backups.push({
@@ -2786,12 +2803,23 @@ app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
             }
         }
         
-        res.json(backups);
+        // Return backups even if MikroTik listing failed (panel backups still available)
+        const result = backups;
+        if (mikrotikError && backups.length === 0) {
+            // Only attach error info if no backups found at all
+            res.json({ backups: result, warning: `Could not list files from MikroTik: ${mikrotikError}` });
+        } else {
+            res.json(result);
+        }
     } catch (e) {
         console.error('[Backup List Error]', e.message);
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.message;
-        res.status(status).json({ message: `Failed to list backups: ${msg}` });
+        // Even on error, try to return panel backups
+        try {
+            const panelBackups = await getPanelBackups(req.params.routerId);
+            res.json({ backups: panelBackups, warning: `Failed to list all backups: ${e.message}` });
+        } catch (e2) {
+            res.status(500).json({ message: `Failed to list backups: ${e.message}` });
+        }
     }
 });
 

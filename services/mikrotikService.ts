@@ -317,8 +317,22 @@ export const createMikrotikBackup = (router: RouterConfigWithId) =>
     apiCall<{ fileName: string; message: string }>(router, 'system/backup/create', 'POST', {});
 
 // List all backups (both on MikroTik and stored in panel)
-export const getMikrotikBackups = (router: RouterConfigWithId) => 
-    apiCall<MikroTikBackupFile[]>(router, 'system/backup/list', 'GET');
+export const getMikrotikBackups = async (router: RouterConfigWithId): Promise<MikroTikBackupFile[] | { backups: MikroTikBackupFile[]; warning?: string }> => {
+    const url = `${BASE_URL}/${router.id}/system/backup/list`;
+    const response = await fetch(url, {
+        headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeader()
+        }
+    });
+
+    if (!response.ok) {
+        const errData = await response.json().catch(() => ({ message: response.statusText }));
+        throw new Error(errData.message || `API Error: ${response.status}`);
+    }
+
+    return response.json();
+};
 
 // Restore a backup to the MikroTik router
 export const restoreMikrotikBackup = (router: RouterConfigWithId, fileName: string) => 
