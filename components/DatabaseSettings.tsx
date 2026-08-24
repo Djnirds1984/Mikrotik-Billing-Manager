@@ -17,7 +17,7 @@ export const DatabaseSettings: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationMsg, setMigrationMsg] = useState<string | null>(null);
-  const [autoBackup, setAutoBackup] = useState<AutoBackupSettings>({ enabled: false, intervalHours: 24, maxBackups: 10, lastBackup: null });
+  const [autoBackup, setAutoBackup] = useState<AutoBackupSettings>({ enabled: false, intervalHours: 24, maxBackups: 5, lastBackup: null });
   const [isSavingBackup, setIsSavingBackup] = useState(false);
   const [isRunningBackup, setIsRunningBackup] = useState(false);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
@@ -217,6 +217,37 @@ export const DatabaseSettings: React.FC = () => {
       setError((e as Error).message);
     } finally {
       setIsRestoring(false);
+    }
+  };
+
+  const handleDeleteBackup = async (filename: string) => {
+    const confirmed = confirm(`Delete backup "${filename}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setBackupMsg(null);
+    setError(null);
+    try {
+      const res = await fetch('/api/delete-backup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ backupFile: filename })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setBackupMsg(`Backup "${filename}" deleted successfully.`);
+      // Refresh backup list
+      const listRes = await fetch('/api/list-backups', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+      });
+      if (listRes.ok) {
+        const list = await listRes.json();
+        setBackupList(list);
+      }
+    } catch (e) {
+      setError((e as Error).message);
     }
   };
 
@@ -441,23 +472,30 @@ export const DatabaseSettings: React.FC = () => {
               <p className="text-sm text-slate-500">No backups found.</p>
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto">
+                <p className="text-xs text-slate-500 mb-1">{backupList.length}/5 backups stored</p>
                 {backupList.map((file) => (
                   <div key={file} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900 rounded">
                     <span className="text-sm text-slate-700 dark:text-slate-300 truncate mr-2">{file}</span>
-                    <div className="flex gap-2 shrink-0">
+                    <div className="flex gap-1.5 shrink-0">
                       <button
                         onClick={() => handleRestoreExisting(file)}
                         disabled={isRestoring}
-                        className="px-3 py-1 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded whitespace-nowrap disabled:opacity-50"
+                        className="px-2.5 py-1 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded whitespace-nowrap disabled:opacity-50"
                       >
                         Restore
                       </button>
                       <a
                         href={`/download-backup/${file}?token=${localStorage.getItem('authToken')}`}
-                        className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded whitespace-nowrap"
+                        className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded whitespace-nowrap"
                       >
                         Download
                       </a>
+                      <button
+                        onClick={() => handleDeleteBackup(file)}
+                        className="px-2.5 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded whitespace-nowrap"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 ))}

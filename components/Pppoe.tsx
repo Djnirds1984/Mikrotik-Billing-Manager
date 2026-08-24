@@ -1050,7 +1050,16 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 // Don't block the save process - MikroTik was already updated
             }
 
-            // Generate PDF application form
+            // Close modal and refresh data IMMEDIATELY — user sees result fast
+            setUserModalOpen(false);
+            setSelectedSecret(null);
+            fetchData(); // fire-and-forget, don't await
+
+            // --- All heavy operations below run in background, don't block the UI ---
+            const backgroundTasks: Promise<any>[] = [];
+
+            // Generate PDF application form (heavy, non-critical)
+            backgroundTasks.push((async () => {
             try {
                 const planData = selectedPlan ? {
                     name: selectedPlan.name,
@@ -1097,47 +1106,32 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 }
             } catch (pdfError) {
                 console.error('Failed to generate PDF application form:', pdfError);
-                // Continue with the save process even if PDF generation fails
             }
+            })());
 
-            // Auto-create or update client portal account if checkbox was checked
+            // Auto-create or update client portal account (non-critical, background)
             if (portalOptions?.createPortalAccount) {
-                try {
-                    const portalRes = await fetch('/api/client-portal/auto-create', {
+                backgroundTasks.push(
+                    fetch('/api/client-portal/auto-create', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                        },
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
                         body: JSON.stringify({
                             routerId: selectedRouter.id,
                             pppoeUsername: secretData.name,
-                            password: secretData.password || undefined, // Only send if provided
+                            password: secretData.password || undefined,
                             accountNumber: enrichedCustomerData.accountNumber,
-                            linkedEmail: enrichedCustomerData.email || undefined // For OTP on new devices
+                            linkedEmail: enrichedCustomerData.email || undefined
                         })
-                    });
-                    const portalData = await portalRes.json();
-                    if (!portalRes.ok) {
-                        console.warn('[PPPoE Save] Failed to create/update portal account:', portalData.message);
-                    } else {
-                        console.log(`[PPPoE Save] Portal account ${portalData.created ? 'created' : 'updated'} successfully`);
-                    }
-                } catch (portalError) {
-                    console.warn('[PPPoE Save] Failed to create/update portal account:', portalError);
-                    // Don't block the save process if portal account creation fails
-                }
+                    }).then(r => r.json()).then(data => {
+                        console.log(`[PPPoE Save] Portal account ${data.created ? 'created' : 'updated'} successfully`);
+                    }).catch(err => console.warn('[PPPoE Save] Failed to create/update portal account:', err))
+                );
             }
             
-            // Generate invoice for new users only (not edits)
+            // Generate invoice for new users only (background, non-critical)
             if (!selectedSecret && (subscriptionData.planType === 'postpaid' || subscriptionData.planType === 'prepaid')) {
-                const shouldGenerateInvoice = window.confirm(
-                    'User created successfully. Generate an invoice for this client?'
-                );
-                
-                if (shouldGenerateInvoice) {
+                backgroundTasks.push((async () => {
                     try {
-                        // Calculate invoice amount (prorate for first month if postpaid)
                         let subscriptionAmount = selectedPlan?.price || 0;
                         if (subscriptionData.planType === 'postpaid' && subscriptionData.dueDate) {
                             const prorate = calculateProrate(selectedPlan, subscriptionData.dueDate);
@@ -1154,15 +1148,12 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         
                         if (rawInstallFee > 0) {
                             if (deductFromProrate && isPostpaid) {
-                                // Deduct from prorate only — cap at 0, no credit carryover
                                 installationFee = -Math.min(rawInstallFee, subscriptionAmount);
                                 totalInvoiceAmount = Math.max(0, subscriptionAmount - rawInstallFee);
                             } else if (deductFromMonthly) {
-                                // Full deduction — can go negative (creates credit balance)
                                 installationFee = -rawInstallFee;
                                 totalInvoiceAmount = subscriptionAmount - rawInstallFee;
                             } else {
-                                // No deduction — add on top
                                 installationFee = rawInstallFee;
                                 totalInvoiceAmount = subscriptionAmount + rawInstallFee;
                             }
@@ -1183,10 +1174,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             status: 'PENDING'
                         };
                         
-                        // Save to client_invoices
                         await dbApi.post('/client-invoices', invoiceData);
                         
-                        // Add to sales_records
                         const saleData: SaleRecord = {
                             id: `sale_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                             routerId: selectedRouter.id,
@@ -1205,42 +1194,30 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         
                         await addSale(saleData);
                         
-                        // If total is negative (deduction exceeds subscription), record credit for the client
                         if (totalInvoiceAmount < 0) {
-                            try {
-                                await fetch('/api/client-balance', {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                                    },
-                                    body: JSON.stringify({
-                                        routerId: selectedRouter.id,
-                                        username: secretData.name,
-                                        accountNumber: enrichedCustomerData.accountNumber,
-                                        amount: totalInvoiceAmount // negative = credit
-                                    })
-                                });
-                                console.log(`[PPPoE Save] Client credit recorded: ${totalInvoiceAmount}`);
-                            } catch (balErr) {
-                                console.warn('[PPPoE Save] Failed to record client credit:', balErr);
-                            }
+                            await fetch('/api/client-balance', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+                                body: JSON.stringify({
+                                    routerId: selectedRouter.id,
+                                    username: secretData.name,
+                                    accountNumber: enrichedCustomerData.accountNumber,
+                                    amount: totalInvoiceAmount
+                                })
+                            }).then(() => console.log(`[PPPoE Save] Client credit recorded: ${totalInvoiceAmount}`))
+                              .catch(err => console.warn('[PPPoE Save] Failed to record client credit:', err));
                         }
                         
-                        // Set receipt for printing
                         setReceiptToPrint(saleData);
-                        
                         console.log('[PPPoE Save] Invoice generated successfully');
                     } catch (invoiceError) {
                         console.error('[PPPoE Save] Failed to generate invoice:', invoiceError);
-                        // Don't block the process if invoice generation fails
                     }
-                }
+                })());
             }
-            
-            setUserModalOpen(false);
-            setSelectedSecret(null);
-            await fetchData();
+
+            // Run all background tasks (they won't block the UI)
+            Promise.all(backgroundTasks).catch(err => console.warn('[PPPoE Save] Background task error:', err));
         } catch(err) {
             alert(`Failed to save user: ${(err as Error).message}`);
         } finally {
@@ -1265,41 +1242,41 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             } catch (dbErr) {
                 console.warn('Failed to delete customer from database:', dbErr);
             }
-            await fetchData();
+            fetchData(); // fire-and-forget
         } catch (err) { alert(`Error deleting user: ${(err as Error).message}`); }
     };
 
     const handlePayment = async ({ sale, payment }: any) => {
         if (!selectedSecret) return false;
         try {
+            // Step 1: Process payment on MikroTik (must be first, everything else depends on success)
             await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
+            
+            // Step 2: Record the sale
             const saleResult = await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString(), processedBy: processedByLabel });
 
-            // Auto-mark the linked pending invoice as PAID (non-blocking).
-            // The sale above carries invoiceId, so the backend PATCH skips creating a duplicate sales record.
+            // Step 3: Run all post-payment updates IN PARALLEL (none depend on each other)
+            const postPaymentTasks: Promise<any>[] = [];
+
+            // Mark invoice as PAID
             if (sale.invoiceId) {
-                try {
-                    await dbApi.patch(`/client-invoices/${encodeURIComponent(sale.invoiceId)}`, { status: 'PAID' });
-                } catch (invErr) {
-                    console.warn('[PPPoE Payment] Failed to mark invoice as PAID:', invErr);
-                }
+                postPaymentTasks.push(
+                    dbApi.patch(`/client-invoices/${encodeURIComponent(sale.invoiceId)}`, { status: 'PAID' })
+                        .catch(err => console.warn('[PPPoE Payment] Failed to mark invoice as PAID:', err))
+                );
             }
 
             // Update billing ledger for postpaid users
-            const coveredMonth = payment.coveredMonth; // YYYY-MM format
-            if (coveredMonth) {
-                try {
-                    await fetch('/api/billing-ledger', {
+            if (payment.coveredMonth) {
+                postPaymentTasks.push(
+                    fetch('/api/billing-ledger', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                        },
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
                         body: JSON.stringify({
                             routerId: selectedRouter.id,
                             username: selectedSecret.name,
                             accountNumber: (() => { try { return JSON.parse(selectedSecret.comment || '{}').accountNumber || JSON.parse(selectedSecret.comment || '{}').customer?.accountNumber || null; } catch { return null; } })(),
-                            month: coveredMonth,
+                            month: payment.coveredMonth,
                             status: 'paid',
                             planName: sale.planName,
                             planPrice: sale.planPrice,
@@ -1307,57 +1284,39 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                             saleId: saleResult?.id || null,
                             paymentDate: payment.paymentDate || new Date().toISOString()
                         })
-                    });
-                } catch (ledgerErr) {
-                    console.warn('[PPPoE Payment] Failed to update billing ledger:', ledgerErr);
-                }
+                    }).catch(err => console.warn('[PPPoE Payment] Failed to update billing ledger:', err))
+                );
             }
 
             // Update client balance: reduce credit by the amount applied
             const creditApplied = payment.creditApplied || 0;
             if (creditApplied > 0) {
-                try {
-                    await fetch('/api/client-balance', {
+                postPaymentTasks.push(
+                    fetch('/api/client-balance', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                        },
-                        body: JSON.stringify({
-                            routerId: selectedRouter.id,
-                            username: selectedSecret.name,
-                            amount: creditApplied // positive amount reduces the credit (balance + positive)
-                        })
-                    });
-                    console.log(`[PPPoE Payment] Client credit reduced by ${creditApplied}`);
-                } catch (balErr) {
-                    console.warn('[PPPoE Payment] Failed to update client balance:', balErr);
-                }
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+                        body: JSON.stringify({ routerId: selectedRouter.id, username: selectedSecret.name, amount: creditApplied })
+                    }).then(() => console.log(`[PPPoE Payment] Client credit reduced by ${creditApplied}`))
+                      .catch(err => console.warn('[PPPoE Payment] Failed to update client balance:', err))
+                );
             }
 
             // Add overpayment credit to client balance
             const overpaymentCredit = payment.overpaymentCredit || 0;
             if (overpaymentCredit > 0) {
-                try {
-                    await fetch('/api/client-balance', {
+                postPaymentTasks.push(
+                    fetch('/api/client-balance', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-                        },
-                        body: JSON.stringify({
-                            routerId: selectedRouter.id,
-                            username: selectedSecret.name,
-                            amount: -overpaymentCredit // negative amount adds credit (balance + negative)
-                        })
-                    });
-                    console.log(`[PPPoE Payment] Client credit increased by ${overpaymentCredit} (overpayment)`);
-                } catch (balErr) {
-                    console.warn('[PPPoE Payment] Failed to add overpayment credit:', balErr);
-                }
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+                        body: JSON.stringify({ routerId: selectedRouter.id, username: selectedSecret.name, amount: -overpaymentCredit })
+                    }).then(() => console.log(`[PPPoE Payment] Client credit increased by ${overpaymentCredit} (overpayment)`))
+                      .catch(err => console.warn('[PPPoE Payment] Failed to add overpayment credit:', err))
+                );
             }
 
-            await fetchData();
+            // Fire all post-payment tasks + data refresh in parallel, don't block the response
+            Promise.all([...postPaymentTasks, fetchData()]).catch(err => console.warn('[PPPoE Payment] Background refresh failed:', err));
+
             return true;
         } catch (err) {
             alert(`Payment failed: ${(err as Error).message}`);
@@ -1386,7 +1345,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 subscriptionData: { dueDate: '', nonPaymentProfile: billingSettings.nonPaymentProfile, graceDays, graceTime, planId: chosenPlan?.id }
             });
             setGraceModalOpen(false);
-            await fetchData();
+            fetchData(); // fire-and-forget
             return true;
         } catch (err) {
             alert(`Failed to grant grace: ${(err as Error).message}`);

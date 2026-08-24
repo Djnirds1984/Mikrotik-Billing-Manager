@@ -2780,6 +2780,26 @@ app.post('/:routerId/system/backup/create', getRouter, async (req, res) => {
             [req.router.id, fileName, 'panel', fileSize, new Date().toISOString()]
         );
         
+        // Step 5: Enforce max 5 backups - delete oldest if over limit
+        const MAX_BACKUPS = 5;
+        const allBackups = await d.all(
+            'SELECT name FROM mikrotik_backups WHERE router_id = ? ORDER BY created_at ASC',
+            [req.router.id]
+        );
+        if (allBackups.length > MAX_BACKUPS) {
+            const toDelete = allBackups.slice(0, allBackups.length - MAX_BACKUPS);
+            for (const old of toDelete) {
+                const oldPath = path.join(routerDir, old.name);
+                try {
+                    if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+                } catch (e) {
+                    console.warn(`[Backup Rotation] Failed to delete old backup ${old.name}:`, e.message);
+                }
+                await d.run('DELETE FROM mikrotik_backups WHERE router_id = ? AND name = ?', [req.router.id, old.name]);
+                console.log(`[Backup Rotation] Deleted old backup: ${old.name}`);
+            }
+        }
+        
         res.json({ fileName, message: 'Backup created and saved to panel storage successfully', size: fileSize });
     } catch (e) {
         console.error('[Backup Create Error]', e.message);

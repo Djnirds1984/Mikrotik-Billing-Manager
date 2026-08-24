@@ -321,7 +321,7 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
                     <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-                        Available Backups ({backups.length})
+                        Available Backups ({backups.length}/5)
                     </h3>
                     <button
                         onClick={fetchBackups}
@@ -357,37 +357,37 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                        <table className="w-full text-sm" style={{ minWidth: '700px' }}>
                             <thead className="text-xs uppercase bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
                                 <tr>
-                                    <th className="px-6 py-3 text-left">Filename</th>
-                                    <th className="px-6 py-3 text-left">Size</th>
-                                    <th className="px-6 py-3 text-left">Created</th>
-                                    <th className="px-6 py-3 text-right">Actions</th>
+                                    <th className="px-4 py-3 text-left">Filename</th>
+                                    <th className="px-4 py-3 text-left whitespace-nowrap">Size</th>
+                                    <th className="px-4 py-3 text-left whitespace-nowrap">Created</th>
+                                    <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                                 {backups.map((backup) => (
                                     <tr key={backup.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-2">
-                                                <CloudArrowDownIcon className="w-5 h-5 text-blue-500" />
-                                                <span className="font-medium text-slate-800 dark:text-slate-200">
+                                        <td className="px-4 py-4">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <CloudArrowDownIcon className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                                                <span className="font-medium text-slate-800 dark:text-slate-200 truncate" title={backup.name}>
                                                     {backup.name}
                                                 </span>
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4 text-slate-600 dark:text-slate-400">
+                                        <td className="px-4 py-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                             {formatFileSize(backup.size)}
                                         </td>
-                                        <td className="px-6 py-4 text-slate-600 dark:text-slate-400">
+                                        <td className="px-4 py-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                             {formatDate(backup.createdAt)}
                                         </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex justify-end gap-2">
+                                        <td className="px-4 py-4 whitespace-nowrap">
+                                            <div className="flex justify-end gap-1.5">
                                                 <button
                                                     onClick={() => handleDownload(backup)}
-                                                    className="px-3 py-1 text-xs bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded hover:bg-slate-300 dark:hover:bg-slate-600"
+                                                    className="px-2.5 py-1 text-xs bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded hover:bg-slate-300 dark:hover:bg-slate-600"
                                                     title="Download to local machine"
                                                 >
                                                     Download
@@ -395,7 +395,7 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
                                                 <button
                                                     onClick={() => handleRestore(backup)}
                                                     disabled={isRestoring === backup.id}
-                                                    className="px-3 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
+                                                    className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
                                                     title="Restore this backup to the router"
                                                 >
                                                     {isRestoring === backup.id ? 'Restoring...' : 'Restore'}
@@ -403,7 +403,7 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
                                                 <button
                                                     onClick={() => handleDelete(backup)}
                                                     disabled={isDeleting === backup.id}
-                                                    className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                                                    className="px-2.5 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
                                                     title="Delete this backup"
                                                 >
                                                     {isDeleting === backup.id ? 'Deleting...' : 'Delete'}
@@ -424,9 +424,10 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
                 <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
                     <li>Backups are full system backups (.backup files) that include all configuration, certificates, and data</li>
                     <li>Backups are stored securely in the panel's local storage for fast access and download</li>
+                    <li>Maximum of 5 backups per router — oldest backups are automatically deleted when the limit is reached</li>
                     <li>Restoring a backup will upload it to the router, overwrite the current configuration, and reboot</li>
-                    <li>Auto backups run on the schedule you configure and automatically clean up old backups</li>
-                    <li>Download backups to your local machine for off-site storage</li>
+                    <li>Auto backups run on the schedule you configure and follow the same 5-backup rotation</li>
+                    <li>Download backups to your local machine for off-site storage before they get rotated out</li>
                 </ul>
             </div>
         </div>

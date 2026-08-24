@@ -11463,9 +11463,22 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const backupName = `panel_backup_${timestamp}.db`;
         const backupPath = path.join(BACKUP_DIR, backupName);
+        const MAX_BACKUPS = 5;
         
         try {
             await fs.promises.copyFile(DB_PATH, backupPath);
+
+            // Enforce max 5 backups - delete oldest if over limit
+            const files = await fs.promises.readdir(BACKUP_DIR);
+            const allBackups = files.filter(f => f.endsWith('.db')).sort((a, b) => a.localeCompare(b));
+            if (allBackups.length > MAX_BACKUPS) {
+                const toDelete = allBackups.slice(0, allBackups.length - MAX_BACKUPS);
+                for (const old of toDelete) {
+                    await fs.promises.unlink(path.join(BACKUP_DIR, old));
+                    console.log(`[Backup Rotation] Deleted old database backup: ${old}`);
+                }
+            }
+
             res.json({ message: 'Backup created successfully' });
         } catch (e) {
             res.status(500).json({ message: e.message });
@@ -11494,7 +11507,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         if (s && s.autoBackupSettings) {
             try { return JSON.parse(s.autoBackupSettings); } catch (e) {}
         }
-        return { enabled: false, intervalHours: 24, maxBackups: 10, lastBackup: null };
+        return { enabled: false, intervalHours: 24, maxBackups: 5, lastBackup: null };
     };
 
     const performAutoBackup = async () => {
@@ -11510,13 +11523,13 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             settings.lastBackup = new Date().toISOString();
             await db.run('UPDATE settings SET autoBackupSettings = ? WHERE id = 1', [JSON.stringify(settings)]);
 
-            // Cleanup old backups beyond maxBackups
+            // Cleanup old backups beyond maxBackups (count ALL .db backups, not just auto)
             const files = await fs.promises.readdir(BACKUP_DIR);
-            const autoBackups = files.filter(f => f.startsWith('auto_backup_') && f.endsWith('.db'))
+            const allBackups = files.filter(f => f.endsWith('.db'))
                 .sort((a, b) => a.localeCompare(b)); // oldest first
             
-            while (autoBackups.length > settings.maxBackups) {
-                const oldest = autoBackups.shift();
+            while (allBackups.length > settings.maxBackups) {
+                const oldest = allBackups.shift();
                 await fs.promises.unlink(path.join(BACKUP_DIR, oldest));
                 console.log(`[AutoBackup] Deleted old backup: ${oldest}`);
             }
