@@ -2068,6 +2068,7 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     const [error, setError] = useState<string | null>(null);
     const [isKicking, setIsKicking] = useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = useState(Date.now());
+    const [searchTerm, setSearchTerm] = useState('');
     
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -2149,6 +2150,18 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     // Sorting Logic
     const sortedActiveUsers = useMemo(() => {
         let sortableItems = [...activeUsers];
+        
+        // Apply search filter first
+        if (searchTerm) {
+            const term = searchTerm.toLowerCase();
+            sortableItems = sortableItems.filter(user => 
+                (user.name || '').toLowerCase().includes(term) ||
+                (user.address || '').toLowerCase().includes(term) ||
+                (user['caller-id'] || '').toLowerCase().includes(term) ||
+                (user.service || '').toLowerCase().includes(term)
+            );
+        }
+        
         if (sortConfig !== null) {
             sortableItems.sort((a, b) => {
                 let aValue: any = '';
@@ -2199,7 +2212,7 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
             });
         }
         return sortableItems;
-    }, [activeUsers, sortConfig, trafficStats]);
+    }, [activeUsers, sortConfig, trafficStats, searchTerm]);
 
     const requestSort = (key: string) => {
         let direction: 'asc' | 'desc' = 'asc';
@@ -2217,11 +2230,30 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden">
             <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
-                    <SignalIcon className="w-5 h-5 text-emerald-500" />
-                    <span className="font-semibold">
-                        Found {activeUsers.length} online users (active connections)
-                    </span>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                        <SignalIcon className="w-5 h-5 text-emerald-500" />
+                        <span className="font-semibold">
+                            Found {activeUsers.length} online users (active connections)
+                        </span>
+                    </div>
+                    <div className="relative w-full md:w-80">
+                        <input
+                            type="text"
+                            placeholder="Search by username, IP, MAC, or service..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 rounded-lg border dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                        <button 
+                            className="absolute left-3 top-2.5 text-slate-400 hover:text-primary-500 focus:outline-none"
+                            onClick={() => {}}
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
             {freshHoveredUser && hoverPosition && (
@@ -2345,7 +2377,7 @@ const ActiveUsersManager: React.FC<{ selectedRouter: RouterConfigWithId }> = ({ 
                          {sortedActiveUsers.length === 0 && (
                             <tr>
                                 <td colSpan={7} className="text-center py-8 text-slate-500">
-                                    No active PPPoE users.
+                                    {searchTerm ? `No active users matching "${searchTerm}"` : 'No active PPPoE users.'}
                                 </td>
                             </tr>
                         )}
