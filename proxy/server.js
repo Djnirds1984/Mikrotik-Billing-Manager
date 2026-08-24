@@ -1229,6 +1229,8 @@ async function startServer() {
     app.use('/mt-api', createProxyMiddleware({
         target: 'http://localhost:3002',
         changeOrigin: true,
+        proxyTimeout: 120000, // 2 minutes for backup operations
+        timeout: 120000,
         pathRewrite: {
             // Nginx config strips /mt-api/ so we do the same here for consistency
             '^/mt-api': ''

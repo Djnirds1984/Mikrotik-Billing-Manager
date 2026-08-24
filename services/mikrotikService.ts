@@ -354,7 +354,7 @@ export const downloadMikrotikBackup = async (router: RouterConfigWithId, fileNam
 
 // Get auto backup settings for a router
 export const getAutoBackupSettings = async (router: RouterConfigWithId): Promise<AutoBackupConfig | null> => {
-    const response = await fetch(`/api/router/${router.id}/auto-backup-settings`, {
+    const response = await fetch(`/mt-api/${router.id}/auto-backup-settings`, {
         headers: {
             'Content-Type': 'application/json',
             ...getAuthHeader()
@@ -367,7 +367,7 @@ export const getAutoBackupSettings = async (router: RouterConfigWithId): Promise
 
 // Save auto backup settings for a router
 export const saveAutoBackupSettings = async (router: RouterConfigWithId, settings: AutoBackupConfig): Promise<void> => {
-    const response = await fetch(`/api/router/${router.id}/auto-backup-settings`, {
+    const response = await fetch(`/mt-api/${router.id}/auto-backup-settings`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

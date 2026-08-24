@@ -53,9 +53,10 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
         setError(null);
         try {
             const data = await getMikrotikBackups(selectedRouter);
-            setBackups(data);
+            setBackups(Array.isArray(data) ? data : []);
         } catch (err) {
             setError(`Failed to fetch backups: ${(err as Error).message}`);
+            setBackups([]);
         } finally {
             setIsLoading(false);
         }
@@ -77,6 +78,17 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
         fetchBackups();
         fetchAutoSettings();
     }, [fetchBackups, fetchAutoSettings]);
+
+    // Auto-dismiss success/error messages after 8 seconds
+    useEffect(() => {
+        if (success || error) {
+            const timer = setTimeout(() => {
+                setSuccess(null);
+                setError(null);
+            }, 8000);
+            return () => clearTimeout(timer);
+        }
+    }, [success, error]);
 
     const handleCreateBackup = async () => {
         if (!selectedRouter) return;
@@ -307,21 +319,41 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
 
             {/* Backups List */}
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
                     <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
                         Available Backups ({backups.length})
                     </h3>
+                    <button
+                        onClick={fetchBackups}
+                        disabled={isLoading}
+                        className="px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 disabled:opacity-50 flex items-center gap-1"
+                    >
+                        <ArrowPathIcon className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </button>
                 </div>
                 
                 {isLoading ? (
-                    <div className="flex justify-center p-8">
+                    <div className="flex flex-col items-center justify-center p-8 gap-3">
                         <Loader />
+                        <p className="text-sm text-slate-500 dark:text-slate-400">Loading backups... This may take a moment on larger routers.</p>
                     </div>
-                ) : backups.length === 0 ? (
+                ) : backups.length === 0 && !error ? (
                     <div className="p-8 text-center text-slate-500 dark:text-slate-400">
                         <CloudArrowDownIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
                         <p>No backups found.</p>
                         <p className="text-sm mt-1">Click "Create Backup" to create your first backup.</p>
+                    </div>
+                ) : backups.length === 0 && error ? (
+                    <div className="p-8 text-center">
+                        <ExclamationTriangleIcon className="w-12 h-12 mx-auto mb-3 text-red-400 opacity-50" />
+                        <p className="text-red-500 dark:text-red-400 mb-3">Could not load backups.</p>
+                        <button
+                            onClick={fetchBackups}
+                            className="px-4 py-2 text-sm bg-[--color-primary-600] text-white rounded-lg hover:bg-[--color-primary-700]"
+                        >
+                            Retry
+                        </button>
                     </div>
                 ) : (
                     <div className="overflow-x-auto">

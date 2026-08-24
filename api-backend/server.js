@@ -2689,39 +2689,39 @@ app.post('/:routerId/file/get-content', getRouter, async (req, res) => {
 
 // Create a new backup on the MikroTik router
 app.post('/:routerId/system/backup/create', getRouter, async (req, res) => {
+    // Backup creation can take a long time on larger routers
+    req.setTimeout(120000, () => {});
+    res.setTimeout(120000, () => {});
+    
     try {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const backupName = `backup_${req.router.name || 'router'}_${timestamp}`;
+        const backupName = `backup_${(req.router.name || 'router').replace(/\s+/g, '_')}_${timestamp}`;
         
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
                 await writeLegacySafe(client, ['/system/backup/save', `=name=${backupName}`]);
-                
-                // Also store a copy in the panel
                 await storeBackupInPanel(req.router.id, backupName + '.backup', 'mikrotik');
-                
                 res.json({ 
                     fileName: backupName + '.backup', 
-                    message: 'Backup created successfully on MikroTik and stored in panel' 
+                    message: 'Backup created successfully' 
                 });
             } finally {
                 await client.close();
             }
         } else {
             const instance = req.routerInstance;
-            await instance.post('/system/backup/save', { name: backupName });
-            
-            // Also store a copy in the panel
+            // Use longer timeout for backup creation
+            await instance.post('/system/backup/save', { name: backupName }, { timeout: 120000 });
             await storeBackupInPanel(req.router.id, backupName + '.backup', 'mikrotik');
-            
             res.json({ 
                 fileName: backupName + '.backup', 
-                message: 'Backup created successfully on MikroTik and stored in panel' 
+                message: 'Backup created successfully' 
             });
         }
     } catch (e) {
+        console.error('[Backup Create Error]', e.message);
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.message;
         res.status(status).json({ message: `Failed to create backup: ${msg}` });
@@ -2730,16 +2730,21 @@ app.post('/:routerId/system/backup/create', getRouter, async (req, res) => {
 
 // List all backups (from MikroTik and panel storage)
 app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
+    // File listing can be slow on large routers
+    req.setTimeout(60000, () => {});
+    res.setTimeout(60000, () => {});
+    
     try {
         const backups = [];
         
-        // Get backups from MikroTik
+        // Get backups from MikroTik - list ALL files then filter by .backup extension
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
-                const files = await writeLegacySafe(client, ['/file/print', '?type=backup']);
-                for (const file of files) {
+                const files = await writeLegacySafe(client, ['/file/print']);
+                const backupFiles = files.filter(f => f.name && f.name.endsWith('.backup'));
+                for (const file of backupFiles) {
                     backups.push({
                         id: `mt-${file.name}`,
                         name: file.name,
@@ -2753,9 +2758,10 @@ app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            const response = await instance.get('/file/print', { params: { type: 'backup' } });
+            const response = await instance.get('/file/print', { timeout: 60000 });
             const files = Array.isArray(response.data) ? response.data : [];
-            for (const file of files) {
+            const backupFiles = files.filter(f => f.name && f.name.endsWith('.backup'));
+            for (const file of backupFiles) {
                 backups.push({
                     id: `mt-${file.name}`,
                     name: file.name,
@@ -2769,7 +2775,6 @@ app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
         // Also get backups stored in panel DB
         const panelBackups = await getPanelBackups(req.router.id);
         for (const pb of panelBackups) {
-            // Avoid duplicates
             if (!backups.find(b => b.name === pb.name)) {
                 backups.push(pb);
             }
@@ -2777,6 +2782,7 @@ app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
         
         res.json(backups);
     } catch (e) {
+        console.error('[Backup List Error]', e.message);
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.message;
         res.status(status).json({ message: `Failed to list backups: ${msg}` });
@@ -2787,6 +2793,9 @@ app.get('/:routerId/system/backup/list', getRouter, async (req, res) => {
 app.post('/:routerId/system/backup/restore', getRouter, async (req, res) => {
     const { fileName } = req.body;
     if (!fileName) return res.status(400).json({ message: 'fileName is required' });
+    
+    req.setTimeout(120000, () => {});
+    res.setTimeout(120000, () => {});
     
     try {
         if (req.router.api_type === 'legacy') {
@@ -2800,10 +2809,11 @@ app.post('/:routerId/system/backup/restore', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            await instance.post('/system/backup/load', { name: fileName });
+            await instance.post('/system/backup/load', { name: fileName }, { timeout: 120000 });
             res.json({ message: 'Restore initiated. Router will reboot.' });
         }
     } catch (e) {
+        console.error('[Backup Restore Error]', e.message);
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.message;
         res.status(status).json({ message: `Failed to restore backup: ${msg}` });
@@ -2816,24 +2826,26 @@ app.post('/:routerId/system/backup/delete', getRouter, async (req, res) => {
     if (!fileName) return res.status(400).json({ message: 'fileName is required' });
     
     try {
-        // Delete from MikroTik
+        // Delete from MikroTik - find file by name
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
             try {
-                // Find the file ID first
-                const files = await writeLegacySafe(client, ['/file/print', `?name=${fileName}`]);
-                if (files.length > 0) {
-                    await writeLegacySafe(client, ['/file/remove', `=.id=${files[0]['.id']}`]);
+                const files = await writeLegacySafe(client, ['/file/print']);
+                const match = files.find(f => f.name === fileName);
+                if (match) {
+                    await writeLegacySafe(client, ['/file/remove', `=.id=${match['.id']}`]);
                 }
             } finally {
                 await client.close();
             }
         } else {
             const instance = req.routerInstance;
-            const files = await instance.get('/file/print', { params: { name: fileName } });
-            if (Array.isArray(files.data) && files.data.length > 0) {
-                await instance.delete('/file/remove', { data: { '.id': files.data[0]['.id'] } });
+            const response = await instance.get('/file/print');
+            const files = Array.isArray(response.data) ? response.data : [];
+            const match = files.find(f => f.name === fileName);
+            if (match) {
+                await instance.delete('/file/remove', { data: { '.id': match['.id'] || match.id } });
             }
         }
         
@@ -2842,6 +2854,7 @@ app.post('/:routerId/system/backup/delete', getRouter, async (req, res) => {
         
         res.json({ message: 'Backup deleted successfully' });
     } catch (e) {
+        console.error('[Backup Delete Error]', e.message);
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.message;
         res.status(status).json({ message: `Failed to delete backup: ${msg}` });
@@ -2853,8 +2866,10 @@ app.get('/:routerId/system/backup/download', getRouter, async (req, res) => {
     const { fileName } = req.query;
     if (!fileName) return res.status(400).json({ message: 'fileName is required' });
     
+    req.setTimeout(120000, () => {});
+    res.setTimeout(120000, () => {});
+    
     try {
-        // Get file content from MikroTik
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
@@ -2868,7 +2883,6 @@ app.get('/:routerId/system/backup/download', getRouter, async (req, res) => {
                     contents = result.ret || result.value || result.contents || result.data || '';
                 }
                 
-                // Send as downloadable file
                 res.setHeader('Content-Type', 'application/octet-stream');
                 res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
                 res.send(Buffer.from(contents, 'base64'));
@@ -2877,7 +2891,7 @@ app.get('/:routerId/system/backup/download', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            const response = await instance.post('/file/get', { '.id': fileName, '.proplist': 'contents' });
+            const response = await instance.post('/file/get', { '.id': fileName, '.proplist': 'contents' }, { timeout: 120000 });
             let contents = '';
             const data = response.data;
             if (Array.isArray(data) && data.length > 0) {
@@ -2886,12 +2900,12 @@ app.get('/:routerId/system/backup/download', getRouter, async (req, res) => {
                 contents = data.contents || data.ret || '';
             }
             
-            // Send as downloadable file
             res.setHeader('Content-Type', 'application/octet-stream');
             res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
             res.send(Buffer.from(contents, 'base64'));
         }
     } catch (e) {
+        console.error('[Backup Download Error]', e.message);
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.message;
         res.status(status).json({ message: `Failed to download backup: ${msg}` });
@@ -2942,30 +2956,36 @@ async function deletePanelBackup(routerId, fileName) {
     }
 }
 
-// Auto backup settings endpoints
-app.get('/:routerId/auto-backup-settings', getRouter, async (req, res) => {
+// Auto backup settings endpoints (only need panel DB, no MikroTik connection required)
+app.get('/:routerId/auto-backup-settings', async (req, res) => {
     try {
+        const routerId = req.params.routerId;
+        if (!routerId) return res.status(400).json({ message: 'Router ID missing' });
         const d = await getDb();
-        const row = await d.get('SELECT auto_backup_settings FROM routers WHERE id = ?', [req.router.id]);
+        const row = await d.get('SELECT auto_backup_settings FROM routers WHERE id = ?', [routerId]);
         if (row && row.auto_backup_settings) {
             res.json(JSON.parse(row.auto_backup_settings));
         } else {
             res.json({ enabled: false, intervalHours: 24, maxBackups: 7 });
         }
     } catch (e) {
-        res.status(500).json({ message: 'Failed to get auto backup settings' });
+        console.error('[AutoBackup Settings GET Error]', e.message);
+        res.status(500).json({ message: 'Failed to get auto backup settings: ' + e.message });
     }
 });
 
-app.post('/:routerId/auto-backup-settings', getRouter, async (req, res) => {
+app.post('/:routerId/auto-backup-settings', async (req, res) => {
     try {
+        const routerId = req.params.routerId;
+        if (!routerId) return res.status(400).json({ message: 'Router ID missing' });
         const { enabled, intervalHours, maxBackups } = req.body;
-        const settings = JSON.stringify({ enabled, intervalHours, maxBackups, lastBackup: null });
+        const settings = JSON.stringify({ enabled, intervalHours, maxBackups });
         const d = await getDb();
-        await d.run('UPDATE routers SET auto_backup_settings = ? WHERE id = ?', [settings, req.router.id]);
+        await d.run('UPDATE routers SET auto_backup_settings = ? WHERE id = ?', [settings, routerId]);
         res.json({ message: 'Auto backup settings saved' });
     } catch (e) {
-        res.status(500).json({ message: 'Failed to save auto backup settings' });
+        console.error('[AutoBackup Settings POST Error]', e.message);
+        res.status(500).json({ message: 'Failed to save auto backup settings: ' + e.message });
     }
 });
 
