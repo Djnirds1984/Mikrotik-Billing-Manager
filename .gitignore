@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# MikroTik backup storage
+proxy/mikrotik-backups/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

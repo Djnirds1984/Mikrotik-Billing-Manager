@@ -52,18 +52,8 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
         setIsLoading(true);
         setError(null);
         try {
-            const data = await getMikrotikBackups(selectedRouter) as any;
-            // Handle both array response and {backups, warning} response
-            if (Array.isArray(data)) {
-                setBackups(data);
-            } else if (data && data.backups) {
-                setBackups(data.backups);
-                if (data.warning) {
-                    console.warn('Backup list warning:', data.warning);
-                }
-            } else {
-                setBackups([]);
-            }
+            const data = await getMikrotikBackups(selectedRouter);
+            setBackups(Array.isArray(data) ? data : []);
         } catch (err) {
             setError(`Failed to fetch backups: ${(err as Error).message}`);
             setBackups([]);
@@ -346,7 +336,7 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
                 {isLoading ? (
                     <div className="flex flex-col items-center justify-center p-8 gap-3">
                         <Loader />
-                        <p className="text-sm text-slate-500 dark:text-slate-400">Loading backups... This may take a moment on larger routers.</p>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">Loading backups...</p>
                     </div>
                 ) : backups.length === 0 && !error ? (
                     <div className="p-8 text-center text-slate-500 dark:text-slate-400">
@@ -373,7 +363,6 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
                                     <th className="px-6 py-3 text-left">Filename</th>
                                     <th className="px-6 py-3 text-left">Size</th>
                                     <th className="px-6 py-3 text-left">Created</th>
-                                    <th className="px-6 py-3 text-left">Source</th>
                                     <th className="px-6 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -393,15 +382,6 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
                                         </td>
                                         <td className="px-6 py-4 text-slate-600 dark:text-slate-400">
                                             {formatDate(backup.createdAt)}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                                backup.source === 'mikrotik' 
-                                                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' 
-                                                    : 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
-                                            }`}>
-                                                {backup.source === 'mikrotik' ? 'MikroTik' : 'Panel'}
-                                            </span>
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             <div className="flex justify-end gap-2">
@@ -443,8 +423,8 @@ export const MikrotikBackup: React.FC<{ selectedRouter: RouterConfigWithId | nul
                 <h4 className="font-semibold text-blue-800 dark:text-blue-400 mb-2">About MikroTik Backups</h4>
                 <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
                     <li>Backups are full system backups (.backup files) that include all configuration, certificates, and data</li>
-                    <li>Restoring a backup will overwrite the current configuration and reboot the router</li>
-                    <li>Backups are stored on both the MikroTik device and the panel for redundancy</li>
+                    <li>Backups are stored securely in the panel's local storage for fast access and download</li>
+                    <li>Restoring a backup will upload it to the router, overwrite the current configuration, and reboot</li>
                     <li>Auto backups run on the schedule you configure and automatically clean up old backups</li>
                     <li>Download backups to your local machine for off-site storage</li>
                 </ul>

@@ -316,23 +316,9 @@ export interface AutoBackupConfig {
 export const createMikrotikBackup = (router: RouterConfigWithId) => 
     apiCall<{ fileName: string; message: string }>(router, 'system/backup/create', 'POST', {});
 
-// List all backups (both on MikroTik and stored in panel)
-export const getMikrotikBackups = async (router: RouterConfigWithId): Promise<MikroTikBackupFile[] | { backups: MikroTikBackupFile[]; warning?: string }> => {
-    const url = `${BASE_URL}/${router.id}/system/backup/list`;
-    const response = await fetch(url, {
-        headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeader()
-        }
-    });
-
-    if (!response.ok) {
-        const errData = await response.json().catch(() => ({ message: response.statusText }));
-        throw new Error(errData.message || `API Error: ${response.status}`);
-    }
-
-    return response.json();
-};
+// List all backups from panel storage
+export const getMikrotikBackups = (router: RouterConfigWithId) => 
+    apiCall<MikroTikBackupFile[]>(router, 'system/backup/list', 'GET');
 
 // Restore a backup to the MikroTik router
 export const restoreMikrotikBackup = (router: RouterConfigWithId, fileName: string) => 
@@ -342,9 +328,9 @@ export const restoreMikrotikBackup = (router: RouterConfigWithId, fileName: stri
 export const deleteMikrotikBackup = (router: RouterConfigWithId, fileName: string) => 
     apiCall<{ message: string }>(router, 'system/backup/delete', 'POST', { fileName });
 
-// Download a backup file to local machine
+// Download a backup file to local machine (from panel storage)
 export const downloadMikrotikBackup = async (router: RouterConfigWithId, fileName: string): Promise<void> => {
-    const url = `/mt-api/${router.id}/system/backup/download?fileName=${encodeURIComponent(fileName)}`;
+    const url = `${BASE_URL}/${router.id}/system/backup/download?fileName=${encodeURIComponent(fileName)}`;
     const response = await fetch(url, {
         headers: {
             ...getAuthHeader()
