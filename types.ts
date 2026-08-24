@@ -25,6 +25,7 @@ export type View =
   | 'help'
   | 'ai_assistant'
   | 'mikrotik_files'
+  | 'mikrotik_backup'
   | 'license'
   | 'super_admin'
   | 'dhcp-portal'

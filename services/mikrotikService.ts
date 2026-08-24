@@ -295,6 +295,92 @@ export const createFile = (router: RouterConfigWithId, name: string, contents: s
 
 export const getRouterLogs = (router: RouterConfigWithId) => apiCall<MikroTikLogEntry[]>(router, 'log/print');
 
+// --- MikroTik Backup Management ---
+
+export interface MikroTikBackupFile {
+    id: string;
+    name: string;
+    size: number;
+    createdAt: string;
+    source: 'mikrotik' | 'panel';
+}
+
+export interface AutoBackupConfig {
+    enabled: boolean;
+    intervalHours: number;
+    maxBackups: number;
+    lastBackup?: string;
+}
+
+// Create a new .backup on the MikroTik router
+export const createMikrotikBackup = (router: RouterConfigWithId) => 
+    apiCall<{ fileName: string; message: string }>(router, 'system/backup/create', 'POST', {});
+
+// List all backups (both on MikroTik and stored in panel)
+export const getMikrotikBackups = (router: RouterConfigWithId) => 
+    apiCall<MikroTikBackupFile[]>(router, 'system/backup/list', 'GET');
+
+// Restore a backup to the MikroTik router
+export const restoreMikrotikBackup = (router: RouterConfigWithId, fileName: string) => 
+    apiCall<{ message: string }>(router, 'system/backup/restore', 'POST', { fileName });
+
+// Delete a backup file
+export const deleteMikrotikBackup = (router: RouterConfigWithId, fileName: string) => 
+    apiCall<{ message: string }>(router, 'system/backup/delete', 'POST', { fileName });
+
+// Download a backup file to local machine
+export const downloadMikrotikBackup = async (router: RouterConfigWithId, fileName: string): Promise<void> => {
+    const url = `/mt-api/${router.id}/system/backup/download?fileName=${encodeURIComponent(fileName)}`;
+    const response = await fetch(url, {
+        headers: {
+            ...getAuthHeader()
+        }
+    });
+    
+    if (!response.ok) {
+        throw new Error(`Failed to download backup: ${response.statusText}`);
+    }
+    
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(downloadUrl);
+};
+
+// Get auto backup settings for a router
+export const getAutoBackupSettings = async (router: RouterConfigWithId): Promise<AutoBackupConfig | null> => {
+    const response = await fetch(`/api/router/${router.id}/auto-backup-settings`, {
+        headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeader()
+        }
+    });
+    
+    if (!response.ok) return null;
+    return response.json();
+};
+
+// Save auto backup settings for a router
+export const saveAutoBackupSettings = async (router: RouterConfigWithId, settings: AutoBackupConfig): Promise<void> => {
+    const response = await fetch(`/api/router/${router.id}/auto-backup-settings`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeader()
+        },
+        body: JSON.stringify(settings)
+    });
+    
+    if (!response.ok) {
+        throw new Error('Failed to save auto backup settings');
+    }
+};
+
 // --- Misc ---
 
 export const getSslCertificates = (router: RouterConfigWithId) => apiCall<SslCertificate[]>(router, 'certificate/print');

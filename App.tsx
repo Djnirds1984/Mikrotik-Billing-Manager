@@ -44,6 +44,7 @@ const ForgotPassword = React.lazy(() => import('./components/ForgotPassword.tsx'
 const Logs = React.lazy(() => import('./components/Logs.tsx').then(m => ({ default: m.Logs })));
 const PanelRoles = React.lazy(() => import('./components/PanelRoles.tsx').then(m => ({ default: m.PanelRoles })));
 const MikrotikFiles = React.lazy(() => import('./components/MikrotikFiles.tsx').then(m => ({ default: m.MikrotikFiles })));
+const MikrotikBackup = React.lazy(() => import('./components/MikrotikBackup.tsx').then(m => ({ default: m.MikrotikBackup })));
 const License = React.lazy(() => import('./components/License.tsx').then(m => ({ default: m.License })));
 const SuperAdmin = React.lazy(() => import('./components/SuperAdmin.tsx').then(m => ({ default: m.SuperAdmin })));
 const UnlicensedComponent = React.lazy(() => import('./components/UnlicensedComponent.tsx').then(m => ({ default: m.UnlicensedComponent })));
@@ -314,6 +315,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                       return <Remote />;
                   case 'mikrotik_files':
                       return <MikrotikFiles selectedRouter={selectedRouter} />;
+                  case 'mikrotik_backup':
+                      return <MikrotikBackup selectedRouter={selectedRouter} />;
                   case 'company':
                       return <Company settings={companySettings} onSave={updateCompanySettings} />;
                   case 'system':
