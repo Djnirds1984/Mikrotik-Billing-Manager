@@ -107,6 +107,7 @@ const StockManager: React.FC<{
     const { formatCurrency } = useLocalization();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
 
     const handleDelete = (id: string) => {
         if (window.confirm("Are you sure you want to delete this item?")) {
@@ -124,13 +125,35 @@ const StockManager: React.FC<{
         setEditingItem(null);
     };
 
+    const filteredItems = items.filter(item => {
+        const query = searchQuery.toLowerCase();
+        return (
+            item.name.toLowerCase().includes(query) ||
+            (item.serialNumber && item.serialNumber.toLowerCase().includes(query))
+        );
+    });
+
     return (
         <div className="space-y-6">
             <ItemFormModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingItem(null); }} onSave={handleSave} initialData={editingItem} />
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
-                <div className="p-6 flex justify-between items-center">
+                <div className="p-6 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                     <h3 className="text-xl font-bold">Stock Items</h3>
-                    <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md hover:bg-[--color-primary-500]">Add Item</button>
+                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                        <div className="relative flex-1 sm:w-64">
+                            <input
+                                type="text"
+                                placeholder="Search items..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 pl-9 pr-3 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary-500]"
+                            />
+                            <svg className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </div>
+                        <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-[--color-primary-600] text-white rounded-md hover:bg-[--color-primary-500] whitespace-nowrap">Add Item</button>
+                    </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -145,23 +168,31 @@ const StockManager: React.FC<{
                             </tr>
                         </thead>
                         <tbody>
-                            {items.map(item => (
-                                <tr key={item.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                                    <td className="px-6 py-4 font-medium">{item.name}</td>
-                                    <td className="px-6 py-4">{item.quantity}</td>
-                                    <td className="px-6 py-4 font-mono">{item.price ? formatCurrency(item.price) : '—'}</td>
-                                    <td className="px-6 py-4 font-mono text-slate-500">{item.serialNumber || '—'}</td>
-                                    <td className="px-6 py-4 text-slate-500">{new Date(item.dateAdded).toLocaleDateString()}</td>
-                                    <td className="px-6 py-4 text-right space-x-2">
-                                        <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500 rounded-md" title="Edit">
-                                            <EditIcon className="h-5 w-5" />
-                                        </button>
-                                        <button onClick={() => handleDelete(item.id)} className="p-2 text-slate-500 hover:text-red-500 rounded-md" title="Delete">
-                                            <TrashIcon className="h-5 w-5" />
-                                        </button>
+                            {filteredItems.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400">
+                                        No items match your search.
                                     </td>
                                 </tr>
-                            ))}
+                            ) : (
+                                filteredItems.map(item => (
+                                    <tr key={item.id} className="border-b border-slate-200 dark:border-slate-700 last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                        <td className="px-6 py-4 font-medium">{item.name}</td>
+                                        <td className="px-6 py-4">{item.quantity}</td>
+                                        <td className="px-6 py-4 font-mono">{item.price ? formatCurrency(item.price) : '—'}</td>
+                                        <td className="px-6 py-4 font-mono text-slate-500">{item.serialNumber || '—'}</td>
+                                        <td className="px-6 py-4 text-slate-500">{new Date(item.dateAdded).toLocaleDateString()}</td>
+                                        <td className="px-6 py-4 text-right space-x-2">
+                                            <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="p-2 text-slate-500 hover:text-sky-500 rounded-md" title="Edit">
+                                                <EditIcon className="h-5 w-5" />
+                                            </button>
+                                            <button onClick={() => handleDelete(item.id)} className="p-2 text-slate-500 hover:text-red-500 rounded-md" title="Delete">
+                                                <TrashIcon className="h-5 w-5" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                     </table>
                 </div>
