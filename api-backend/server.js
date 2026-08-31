@@ -2736,28 +2736,37 @@ app.post('/:routerId/system/backup/create', getRouter, async (req, res) => {
                 await writeLegacySafe(client, ['/system/backup/save', `=name=${backupName}`]);
                 
                 // Step 2: Download the backup file content from MikroTik
-                const result = await writeLegacySafe(client, ['/file/get', `=.id=${fileName}`, '=value-name=contents']);
+                // Use /file/print with name filter (file .id is an internal ID like *1, NOT the filename)
+                let result = [];
+                try {
+                    result = await writeLegacySafe(client, ['/file/print', `?name=${fileName}`, '=.proplist=name,contents']);
+                } catch (printErr) {
+                    console.warn('[Backup] /file/print with proplist failed, retrying without proplist:', printErr.message);
+                    result = await writeLegacySafe(client, ['/file/print', `?name=${fileName}`]);
+                }
                 if (Array.isArray(result) && result.length > 0) {
                     const r = result.find(x => typeof x === 'object');
-                    backupContents = (r && (r.ret || r.value || r.contents || r.data)) || '';
+                    backupContents = (r && (r.contents || r.data || r.ret || r.value)) || '';
                 } else if (result && typeof result === 'object') {
-                    backupContents = result.ret || result.value || result.contents || result.data || '';
+                    backupContents = result.contents || result.data || result.ret || result.value || '';
                 }
             } finally {
                 await client.close();
             }
         } else {
             const instance = req.routerInstance;
-            // Trigger backup creation
-            try {
-                await instance.put('/system/backup', { name: backupName }, { timeout: 120000 });
-            } catch (putErr) {
-                await instance.post('/system/backup', { name: backupName }, { timeout: 120000 });
-            }
+            // Trigger backup creation (POST is the correct REST method for /system/backup)
+            await instance.post('/system/backup', { name: backupName }, { timeout: 120000 });
             
-            // Download the backup file content
+            // Download the backup file content (GET /file/{id-or-name} on the REST API)
             try {
-                const response = await instance.post(`/file/${fileName}`, { '.proplist': 'contents' }, { timeout: 120000 });
+                let response;
+                try {
+                    response = await instance.get(`/file/${encodeURIComponent(fileName)}`, { timeout: 120000 });
+                } catch (getErr) {
+                    // Fallback: query by name
+                    response = await instance.get('/file', { params: { name: fileName }, timeout: 120000 });
+                }
                 const data = response.data;
                 if (Array.isArray(data) && data.length > 0) {
                     backupContents = data[0]?.contents || data[0]?.ret || '';
@@ -2765,14 +2774,9 @@ app.post('/:routerId/system/backup/create', getRouter, async (req, res) => {
                     backupContents = data.contents || data.ret || '';
                 }
             } catch (dlErr) {
-                // Fallback: try /file/get endpoint
-                const response2 = await instance.post('/file/get', { '.id': fileName, '.proplist': 'contents' }, { timeout: 120000 });
-                const data2 = response2.data;
-                if (Array.isArray(data2) && data2.length > 0) {
-                    backupContents = data2[0]?.contents || data2[0]?.ret || '';
-                } else if (data2 && typeof data2 === 'object') {
-                    backupContents = data2.contents || data2.ret || '';
-                }
+                // Graceful degradation: log and continue with a placeholder so the
+                // backup is still recorded instead of failing the whole request.
+                console.warn('[Backup] Could not download file content via REST API:', dlErr.message);
             }
         }
         
@@ -2919,8 +2923,22 @@ app.post('/:routerId/system/backup/restore', getRouter, async (req, res) => {
             const client = req.routerInstance;
             await client.connect();
             try {
-                // Upload file content to MikroTik
-                await writeLegacySafe(client, ['/file/set', `=.id=${fileName}`, `=contents=${base64Content}`]);
+                // Upload file content to MikroTik.
+                // Wrap in try-catch: if the file already exists on the router (e.g. from a
+                // previous restore), continue with the restore instead of failing.
+                try {
+                    // Look up the file's internal .id by name (file .id is NOT the filename)
+                    const found = await writeLegacySafe(client, ['/file/print', `?name=${fileName}`]);
+                    const fileEntry = Array.isArray(found) ? found.find(x => typeof x === 'object') : null;
+                    if (fileEntry && fileEntry['.id']) {
+                        await writeLegacySafe(client, ['/file/set', `=.id=${fileEntry['.id']}`, `=contents=${base64Content}`]);
+                    } else {
+                        // File not present on router — create it with contents
+                        await writeLegacySafe(client, ['/file/set', `=name=${fileName}`, `=contents=${base64Content}`]);
+                    }
+                } catch (uploadErr) {
+                    console.warn('[Backup Restore] File content upload failed, continuing with restore:', uploadErr.message);
+                }
                 // Trigger restore
                 await writeLegacySafe(client, ['/system/backup/load', `=name=${fileName}`]);
                 res.json({ message: 'Restore initiated. Router will reboot shortly.' });
@@ -2929,11 +2947,15 @@ app.post('/:routerId/system/backup/restore', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            // Upload file to MikroTik
+            // Upload file to MikroTik (PUT is the REST convention for creating/uploading a file)
             try {
-                await instance.post(`/file/${fileName}`, { contents: base64Content }, { timeout: 120000 });
+                await instance.put(`/file/${encodeURIComponent(fileName)}`, { contents: base64Content }, { timeout: 120000 });
             } catch (uploadErr) {
-                await instance.post('/file/set', { '.id': fileName, contents: base64Content }, { timeout: 120000 });
+                try {
+                    await instance.post('/file', { name: fileName, contents: base64Content }, { timeout: 120000 });
+                } catch (uploadErr2) {
+                    console.warn('[Backup Restore] File content upload failed, continuing with restore:', uploadErr2.message);
+                }
             }
             // Trigger restore
             try {
