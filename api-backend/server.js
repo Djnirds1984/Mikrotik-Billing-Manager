@@ -1990,6 +1990,20 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
         const schedName = `ppp-auto-kick-${String(secret.name)}`;
         const onEventProfile = nonPaymentProfile ? `\n/ppp secret set [find name="${String(secret.name)}"] profile="${String(nonPaymentProfile)}"` : '';
 const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:do { /ppp active remove [find name="${String(secret.name)}"] } on-error={}${onEventProfile}`;
+
+        // CRITICAL: Update customers table with new due date so it reflects in the UI
+        try {
+            const customerDb = await getDb();
+            const dueDateStr = expires.toISOString().split('T')[0];
+            await customerDb.run(
+                'UPDATE customers SET dueDate = ? WHERE username = ? OR accountNumber = ?',
+                [dueDateStr, secret.name, secret.name]
+            );
+            console.log(`[ppp/payment/process] Updated customers table dueDate to ${dueDateStr} for ${secret.name}`);
+        } catch (dbErr) {
+            console.warn('[ppp/payment/process] Failed to update customers table:', dbErr.message);
+        }
+
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
