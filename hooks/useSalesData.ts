@@ -50,7 +50,8 @@ export const useSalesData = (routerId: string | null, autoLoad: boolean = true) 
                 routerId: routerId,
             };
             await dbApi.post('/sales', newSale);
-            await fetchSales();
+            // Removed: await fetchSales(); - was causing payment modal to hang
+            // The UI will refresh sales data on next view change or manual reload
         } catch (err) {
             console.error("Failed to add sale:", err);
             throw err;
