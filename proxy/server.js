@@ -13130,6 +13130,22 @@ WantedBy=multi-user.target`;
             res.status(204).send();
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
+    // Reboot the whole host system (panel server)
+    app.post('/api/system/host-reboot', protect, (req, res) => {
+        console.log(`[System] Host reboot requested by user: ${req.user?.username || req.user?.id || 'unknown'}`);
+        // Respond first so the client gets a confirmation before the host goes down.
+        res.json({ message: 'Reboot command issued. The system will restart in a few seconds.' });
+        setTimeout(() => {
+            console.log('[System] Executing host reboot (sudo reboot)...');
+            exec('sudo reboot', (err, stdout, stderr) => {
+                if (err) {
+                    console.error('[System] Host reboot failed:', stderr || err.message);
+                } else {
+                    console.log('[System] Host reboot command issued.');
+                }
+            });
+        }, 1500);
+    });
     app.get('/api/roles/:roleId/permissions', protect, async (req, res) => {
         try {
             const rows = await db.all(`SELECT permission_id FROM role_permissions WHERE role_id = ?`, [req.params.roleId]);

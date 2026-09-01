@@ -63,6 +63,13 @@ export const togglePanelNtp = (enabled: boolean): Promise<{ message: string }> =
     });
 };
 
+// Host system reboot
+export const rebootHost = (): Promise<{ message: string }> => {
+    return fetchData<{ message: string }>('/api/system/host-reboot', {
+        method: 'POST',
+    });
+};
+
 
 // --- Database Backup Services ---
 export const createDatabaseBackup = (): Promise<{ message: string }> => {

@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { initializeAiClient } from '../services/geminiService.ts';
 import { getPanelSettings, savePanelSettings, getAuthHeader, factoryReset } from '../services/databaseService.ts';
+import { rebootHost } from '../services/panelService.ts';
 import { Loader } from './Loader.tsx';
 import { KeyIcon, CogIcon } from '../constants.tsx';
 import { WanSettingsPanel } from './WanSettingsPanel.tsx';
@@ -110,6 +111,7 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
     const [passwordError, setPasswordError] = React.useState<string | null>(null);
     const [passwordSuccess, setPasswordSuccess] = React.useState<string | null>(null);
     const [isResetting, setIsResetting] = React.useState(false);
+    const [isRebooting, setIsRebooting] = React.useState(false);
     const { logout } = useAuth();
 
     const handlePasswordChange = async (e: React.FormEvent) => {
@@ -143,6 +145,21 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
             setPasswordError((err as Error).message);
         } finally {
             setIsSavingPassword(false);
+        }
+    };
+
+    const handleReboot = async () => {
+        if (!window.confirm('⚠️ Reboot the entire system?\n\nAll services (including this panel) will go offline until the server finishes restarting.')) {
+            return;
+        }
+        setIsRebooting(true);
+        try {
+            const result = await rebootHost();
+            alert(result.message || 'Reboot command issued. The system will restart in a few seconds.');
+        } catch (err) {
+            alert('Reboot failed: ' + (err as Error).message);
+        } finally {
+            setIsRebooting(false);
         }
     };
 
@@ -281,6 +298,31 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
                             >
                                 {isResetting && <Loader />}
                                 {isResetting ? 'Resetting...' : '⚠️ Factory Reset'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </SettingsSection>
+
+            <SettingsSection title="System Reboot">
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                        <svg className="w-6 h-6 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                        </svg>
+                        <div className="flex-1">
+                            <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Reboot Host System</h4>
+                            <p className="text-sm text-amber-700 dark:text-amber-400 mb-4">
+                                This will restart the entire server hosting this panel (runs <code className="font-mono">sudo reboot</code>).
+                                All services, including this panel, will be temporarily unavailable until the system comes back online.
+                            </p>
+                            <button
+                                onClick={handleReboot}
+                                disabled={isRebooting}
+                                className="px-6 py-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {isRebooting && <Loader />}
+                                {isRebooting ? 'Rebooting...' : '🔄 Reboot System'}
                             </button>
                         </div>
                     </div>
