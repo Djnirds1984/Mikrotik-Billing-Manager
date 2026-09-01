@@ -7,6 +7,7 @@ const cors = require('cors');
 const { RouterOSAPI } = require('node-routeros-v2');
 const axios = require('axios');
 const https = require('https');
+const http = require('http');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 let sqlite3;
@@ -145,6 +146,19 @@ async function getDb() {
 }
 
 // Helper to create router instance based on config
+// Shared keep-alive agents: reusing sockets avoids a full TCP+TLS handshake
+// to the router on every single request (major source of panel lag on REST/v7).
+const sharedHttpsAgent = new https.Agent({
+    keepAlive: true,
+    maxSockets: 4,
+    rejectUnauthorized: false,
+    minVersion: 'TLSv1.2',
+});
+const sharedHttpAgent = new http.Agent({
+    keepAlive: true,
+    maxSockets: 4,
+});
+
 const createRouterInstance = (config) => {
     if (!config || !config.host || !config.user) {
         throw new Error('Invalid router configuration');
@@ -167,10 +181,11 @@ const createRouterInstance = (config) => {
     const baseURL = `${protocol}://${config.host}:${config.port}/rest`;
     const auth = { username: config.user, password: config.password || '' };
 
-    const instance = axios.create({ 
-        baseURL, 
+    const instance = axios.create({
+        baseURL,
         auth,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1.2' }),
+        httpsAgent: protocol === 'https' ? sharedHttpsAgent : undefined,
+        httpAgent: protocol === 'http' ? sharedHttpAgent : undefined,
         timeout: 15000,
         headers: {
             'Accept': 'application/json',
@@ -201,21 +216,33 @@ const createRouterInstance = (config) => {
     return instance;
 };
 
+// Cached axios instances per router so we don't rebuild the client (and
+// renegotiate TLS sessions) on every request. Invalidate when config changes.
+const routerInstanceCache = new Map(); // routerId -> { sig, instance }
+const getRouterInstance = (router) => {
+    const sig = `${router.host}|${router.port}|${router.user}|${router.password || ''}|${router.api_type || ''}`;
+    const cached = routerInstanceCache.get(router.id);
+    if (cached && cached.sig === sig) return cached.instance;
+    const instance = createRouterInstance(router);
+    routerInstanceCache.set(router.id, { sig, instance });
+    return instance;
+};
+
 // Middleware to attach router config based on ID
 const getRouter = async (req, res, next) => {
     try {
         const routerId = req.params.routerId;
         if (!routerId) return res.status(400).json({ message: 'Router ID missing' });
-        
+
         const database = await getDb();
         const router = await database.get('SELECT * FROM routers WHERE id = ?', [routerId]);
         if (!router) {
             console.warn(`[Backend] Router ID ${routerId} not found in DB.`);
             return res.status(404).json({ message: 'Router not found' });
         }
-        
+
         req.router = router;
-        req.routerInstance = createRouterInstance(router);
+        req.routerInstance = getRouterInstance(router);
         next();
     } catch (e) {
         console.error("DB Error in getRouter:", e);
@@ -3038,6 +3065,39 @@ app.post('/:routerId/auto-backup-settings', async (req, res) => {
 });
 
 // 3. Generic Proxy Handler for all other MikroTik calls
+// --- Generic Proxy: read cache + in-flight coalescing ---
+// The UI polls router data aggressively (Dashboard every 2s, others 5-8s).
+// Caching short-TTL read results and coalescing identical in-flight requests
+// prevents redundant router round-trips (major lag/error source on REST/v7).
+const ROUTER_CACHE_TTL_MS = 2500;
+const routerReadCache = new Map();   // key -> { expiresAt, data }
+const routerInFlight = new Map();    // key -> Promise<data>
+
+const routerReadCacheKey = (routerId, endpoint, query) =>
+    `${routerId}::${endpoint}::${query || ''}`;
+
+const fetchRouterReadWithCache = async (routerId, endpoint, query, doFetch) => {
+    const key = routerReadCacheKey(routerId, endpoint, query);
+    const cached = routerReadCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.data;
+
+    // Coalesce: if an identical request is already in flight, share its result
+    const pending = routerInFlight.get(key);
+    if (pending) return pending;
+
+    const exec = (async () => {
+        try {
+            const data = await doFetch();
+            routerReadCache.set(key, { expiresAt: Date.now() + ROUTER_CACHE_TTL_MS, data });
+            return data;
+        } finally {
+            routerInFlight.delete(key);
+        }
+    })();
+    routerInFlight.set(key, exec);
+    return exec;
+};
+
 app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
     const { endpoint } = req.params;
     const method = req.method;
@@ -3047,17 +3107,21 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance;
             await client.connect();
+            try {
+                const cmd = '/' + endpoint;
 
-            const cmd = '/' + endpoint;
-
-            if (method === 'POST' && body) {
-                await client.write(cmd, body);
-                res.json({ message: 'Command executed' });
-            } else {
-                const data = await writeLegacySafe(client, [cmd]);
-                res.json(data.map(normalizeLegacyObject));
+                if (method === 'POST' && body) {
+                    await client.write(cmd, body);
+                    res.json({ message: 'Command executed' });
+                } else {
+                    const data = await writeLegacySafe(client, [cmd]);
+                    res.json(data.map(normalizeLegacyObject));
+                }
+            } finally {
+                // Always close, even on error, so failed requests don't leak
+                // connections into the router's API session table.
+                try { await client.close(); } catch (_) {}
             }
-            await client.close();
         } else {
             // REST API translation layer for legacy-style endpoints
             const instance = req.routerInstance;
@@ -3106,31 +3170,53 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
 
             console.log(`[REST Proxy] ${restMethod} ${finalUrl}`);
 
-            try {
-                const response = await instance.request({
-                    method: restMethod,
-                    url: finalUrl,
-                    data: restData
-                });
-                res.json(response.data);
-            } catch (err) {
-                if (restMethod === 'PUT') {
-                    const fallback = await instance.request({
-                        method: 'POST',
-                        url: restUrl,
+            const doRequest = async () => {
+                try {
+                    const response = await instance.request({
+                        method: restMethod,
+                        url: finalUrl,
                         data: restData
                     });
-                    res.json(fallback.data);
-                } else {
+                    return response.data;
+                } catch (err) {
+                    if (restMethod === 'PUT') {
+                        const fallback = await instance.request({
+                            method: 'POST',
+                            url: restUrl,
+                            data: restData
+                        });
+                        return fallback.data;
+                    }
                     throw err;
                 }
+            };
+
+            // Read-only requests (GET, incl. translated 'print') are heavily polled
+            // by the UI: serve from a short-TTL cache and coalesce identical
+            // in-flight requests to avoid hammering the router.
+            if (restMethod === 'GET') {
+                const data = await fetchRouterReadWithCache(req.router.id, restUrl, queryParams, doRequest);
+                res.json(data);
+            } else {
+                // Writes invalidate the read cache for this router so stale data
+                // isn't served after a mutation.
+                for (const key of routerReadCache.keys()) {
+                    if (key.startsWith(`${req.router.id}::`)) routerReadCache.delete(key);
+                }
+                const data = await doRequest();
+                res.json(data);
             }
         }
     } catch (e) {
         const bodyKeys = body && typeof body === 'object' ? Object.keys(body) : [];
         console.error('[Proxy Error]', safeStringify({ endpoint, method, routerId: req.params.routerId, bodyKeys, message: e.message, status: e.response?.status, data: e.response?.data }));
         const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        let msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+        if (e.code === 'ECONNABORTED' || /timeout/i.test(String(e.message))) {
+            msg = 'MikroTik router request timed out. The router may be busy or unreachable.';
+            res.status(504).json({ message: msg });
+            return;
+        }
         res.status(status).json({ message: msg });
     }
 });
