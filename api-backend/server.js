@@ -970,8 +970,10 @@ app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
                 await client.close();
             }
         } else {
-            // REST API (v7+)
-            const response = await req.routerInstance.post('/interface/print', { 'stats': true, 'detail': true });
+            // REST API (v7+) — cached: this endpoint is polled aggressively by the UI
+            const response = await fetchRouterReadWithCache(req.params.routerId, 'interface/stats', '', () =>
+                req.routerInstance.post('/interface/print', { 'stats': true, 'detail': true })
+            );
             res.json(response.data);
         }
     } catch (e) {
@@ -993,7 +995,10 @@ app.get('/:routerId/interface/print', getRouter, async (req, res) => {
                 await client.close();
             }
         } else {
-            const response = await req.routerInstance.get('/interface');
+            // REST — cached (heavy endpoint, polled by Dashboard/Network every few seconds)
+            const response = await fetchRouterReadWithCache(req.params.routerId, 'interface/print', '', () =>
+                req.routerInstance.get('/interface')
+            );
             res.json(response.data);
         }
     } catch (e) {
@@ -1037,20 +1042,24 @@ app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
 
             } finally { await client.close(); }
         } else {
-            const response = await req.routerInstance.get('/system/resource');
-            resource = Array.isArray(response.data) ? response.data[0] : response.data;
+            // REST — cached (polled every 2s by Dashboard)
+            await fetchRouterReadWithCache(req.params.routerId, 'system/resource/print', '', async () => {
+                const response = await req.routerInstance.get('/system/resource');
+                resource = Array.isArray(response.data) ? response.data[0] : response.data;
 
-            // Try fetching health for temperature
-            try {
-                const hRes = await req.routerInstance.get('/system/health');
-                const h = Array.isArray(hRes.data) ? hRes.data[0] : hRes.data;
-                if (h) {
-                     if (h.temperature) temperature = parseFloat(h.temperature);
-                     else if (h['cpu-temperature']) temperature = parseFloat(h['cpu-temperature']);
+                // Try fetching health for temperature
+                try {
+                    const hRes = await req.routerInstance.get('/system/health');
+                    const h = Array.isArray(hRes.data) ? hRes.data[0] : hRes.data;
+                    if (h) {
+                         if (h.temperature) temperature = parseFloat(h.temperature);
+                         else if (h['cpu-temperature']) temperature = parseFloat(h['cpu-temperature']);
+                    }
+                } catch (hErr) {
+                    // Ignore
                 }
-            } catch (hErr) {
-                // Ignore
-            }
+                return true;
+            });
         }
         const parseMemory = (memStr) => {
             if (!memStr || typeof memStr !== 'string') return 0;
@@ -1153,15 +1162,10 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
                 await client.close();
             }
         } else {
-            // Generous timeout: routers with many active sessions can exceed the 15s default.
-            const response = await req.routerInstance.get('/ppp/active', { timeout: 60000 });
-            
-            // For REST, we can also fetch interface stats
-            // Same issue: real-time speed (bits/sec) vs total bytes.
-            // /interface/print usually returns rx-byte/tx-byte (counters).
-            // To get speed, we calculate delta or use monitor-traffic.
-            // Let's just return the active users for now, and handle the "speed" fetching in the frontend 
-            // by querying a new endpoint `ppp/active/stats` or similar to avoid blocking this call.
+            // REST — cached (heavy endpoint on routers with many active sessions; polled every 2s)
+            const response = await fetchRouterReadWithCache(req.params.routerId, 'ppp/active/print', '', () =>
+                req.routerInstance.get('/ppp/active', { timeout: 60000 })
+            );
             res.json(response.data);
         }
     } catch (e) {
@@ -1204,6 +1208,23 @@ app.get('/:routerId/log/print', getRouter, async (req, res) => {
 // Key: routerId, Value: { data: Interface[], expiresAt: number }
 const INTERFACE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 const interfaceListCache = new Map();
+
+// Run async tasks over `items` with bounded concurrency. The old code fired a
+// monitor-traffic POST per active PPPoE user simultaneously (up to 6 tries each);
+// with hundreds of sessions that saturates RouterOS v7's REST service and causes
+// the "timeout of 15000ms exceeded" errors seen on the Dashboard.
+const mapLimit = async (items, limit, fn) => {
+    const results = new Array(items.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) {
+            const idx = next++;
+            results[idx] = await fn(items[idx], idx);
+        }
+    });
+    await Promise.all(workers);
+    return results;
+};
 
 const fetchPppoeInterfaces = async (req) => {
     const routerId = req.router.id;
@@ -1297,6 +1318,14 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
              return res.json({});
         }
 
+        // Cache key shared by legacy/REST paths (defined by the generic-proxy cache below).
+        const trafficCacheKey = `${req.router.id}::ppp-traffic::${[...uniqueInterfaces].sort().join(',')}`;
+        const cachedTraffic = routerReadCache.get(trafficCacheKey);
+        if (cachedTraffic && cachedTraffic.expiresAt > Date.now()) {
+            if (req.router.api_type === 'legacy') await client.close();
+            return res.json(cachedTraffic.data);
+        }
+
         // 2. Monitor Traffic
         const result = {};
 
@@ -1351,7 +1380,7 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
                 }
             });
 
-            await Promise.all(uniqueInterfaces.map(async (key) => {
+            await mapLimit(uniqueInterfaces, 6, async (key) => {
                 const entry = Object.values(interfaceMap).find(v => v.id === key || v.name === key);
                 const fallbackName = entry ? (entry.name || '').replace(/^</, '').replace(/>$/, '') : key;
 
@@ -1407,9 +1436,13 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
                     const detail = lastErr.response?.data?.detail || lastErr.response?.data?.message || lastErr.message;
                     console.warn(`REST Traffic monitor failed for interface="${entry?.name || key}" status=${status || 'n/a'}: ${detail}`);
                 }
-            }));
+            });
         }
-        
+
+        // Short-lived cache: the UI polls this endpoint every few seconds; identical
+        // requests within the TTL window reuse the same snapshot instead of re-hitting
+        // the router with N monitor-traffic calls.
+        routerReadCache.set(trafficCacheKey, { expiresAt: Date.now() + 2000, data: result });
         res.json(result);
 
     } catch (e) {
