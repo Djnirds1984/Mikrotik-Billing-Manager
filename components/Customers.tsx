@@ -5,6 +5,7 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import type { Customer } from '../types.ts';
 import type { RouterConfigWithId } from '../types.ts';
 import { CustomInvoiceModal } from './CustomInvoiceModal.tsx';
+import { BillingStatement } from './BillingStatement.tsx';
 import { dbApi } from '../services/databaseService.ts';
 
 // Icons
@@ -504,6 +505,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [soaCustomer, setSoaCustomer] = useState<Customer | null>(null);
+    const [billingStatementCustomer, setBillingStatementCustomer] = useState<Customer | null>(null);
     const [isCustomInvoiceOpen, setIsCustomInvoiceOpen] = useState(false);
     const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null);
     const [routers, setRouters] = useState<any[]>([]);
@@ -685,6 +687,13 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
                                             <DocumentIcon className="w-4 h-4" />
                                         </button>
                                         <button
+                                            onClick={() => setBillingStatementCustomer(customer)}
+                                            className="inline-flex items-center p-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-md transition ml-1"
+                                            title="Billing Statement (Unpaid Months)"
+                                        >
+                                            <ReceiptInvoiceIcon className="w-4 h-4" />
+                                        </button>
+                                        <button
                                             onClick={() => handleOpenEdit(customer)}
                                             className="inline-flex items-center p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-md transition ml-1"
                                             title="Edit"
@@ -726,6 +735,15 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
                 customer={soaCustomer}
                 routerId={routerId || ''}
                 companyName={companySettings.companyName || ''}
+            />
+
+            {/* Billing Statement Modal (Unpaid Months) */}
+            <BillingStatement
+                isOpen={!!billingStatementCustomer}
+                onClose={() => setBillingStatementCustomer(null)}
+                customer={billingStatementCustomer}
+                routerId={routerId || ''}
+                companySettings={companySettings}
             />
 
             {/* Custom Invoice Modal */}
