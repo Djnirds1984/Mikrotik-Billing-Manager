@@ -2,6 +2,7 @@
 import React from 'react';
 import type { SaleRecord, CompanySettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { BirInfoBlock } from './BirInfo.tsx';
 
 interface PrintableReceiptProps {
     sale: SaleRecord | null;
@@ -28,6 +29,7 @@ export const PrintableReceipt: React.FC<PrintableReceiptProps> = ({ sale, compan
                     </div>
                 )}
             </header>
+            <BirInfoBlock companySettings={companySettings} />
 
             <section className="my-6">
                 <div className="flex justify-between">

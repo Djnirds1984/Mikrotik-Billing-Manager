@@ -3071,8 +3071,8 @@ async function startServer() {
 
     dbRouter.post('/company-settings', async (req, res) => {
         try {
-            // Extract GCash fields and store them in companySettings JSON
-            const { gcashNumber, gcashAccountName, ...directFields } = req.body;
+            // Extract GCash fields and BIR fields and store them in companySettings JSON
+            const { gcashNumber, gcashAccountName, tinNumber, registeredBusinessName, businessStyleName, dtiSecRegNo, businessPermitNo, vatType, birStatement, ...directFields } = req.body;
             
             // Get existing companySettings
             const existing = await db.get('SELECT companySettings FROM settings WHERE id = 1');
@@ -3086,6 +3086,15 @@ async function startServer() {
             // Update with new GCash fields
             if (gcashNumber !== undefined) companySettings.gcashNumber = gcashNumber;
             if (gcashAccountName !== undefined) companySettings.gcashAccountName = gcashAccountName;
+
+            // BIR information fields
+            if (tinNumber !== undefined) companySettings.tinNumber = tinNumber;
+            if (registeredBusinessName !== undefined) companySettings.registeredBusinessName = registeredBusinessName;
+            if (businessStyleName !== undefined) companySettings.businessStyleName = businessStyleName;
+            if (dtiSecRegNo !== undefined) companySettings.dtiSecRegNo = dtiSecRegNo;
+            if (businessPermitNo !== undefined) companySettings.businessPermitNo = businessPermitNo;
+            if (vatType !== undefined) companySettings.vatType = vatType;
+            if (birStatement !== undefined) companySettings.birStatement = birStatement;
             
             // Save direct fields as columns
             const keys = Object.keys(directFields);
@@ -4483,11 +4492,15 @@ async function startServer() {
 
     app.get('/api/public/landing-page', async (req, res) => {
         try {
-            const s = await db.get('SELECT companyName, logoBase64, email, landingPageConfig FROM settings WHERE id = 1');
+            const s = await db.get('SELECT companyName, logoBase64, email, landingPageConfig, companySettings FROM settings WHERE id = 1');
             let cfg = {};
             try { cfg = JSON.parse(s?.landingPageConfig || '{}'); } catch (_) {}
+            // BIR fields stored in companySettings JSON (see POST /company-settings)
+            let birInfo = {};
+            try { birInfo = JSON.parse(s?.companySettings || '{}'); } catch (_) {}
             res.json({
-                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '', email: s?.email || '' },
+                company: { companyName: s?.companyName || '', logoBase64: s?.logoBase64 || '', email: s?.email || '', address: s?.address || '', contactNumber: s?.contactNumber || '',
+                    tinNumber: birInfo.tinNumber || '', registeredBusinessName: birInfo.registeredBusinessName || '', businessStyleName: birInfo.businessStyleName || '', dtiSecRegNo: birInfo.dtiSecRegNo || '', businessPermitNo: birInfo.businessPermitNo || '', vatType: birInfo.vatType || '', birStatement: birInfo.birStatement || '' },
                 config: cfg
             });
         } catch (e) {
@@ -7029,33 +7042,6 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 console.log(`[PayMongo Webhook] Created webhook id=${newWebhook.id} at ${webhookUrl}`);
                 correctWebhookId = newWebhook.id;
                 result = { success: true, message: 'Webhook created and registered.', webhookId: newWebhook.id, webhookUrl };
-            }
-
-            // Disable stale webhooks with mismatched URLs
-            if (correctWebhookId) {
-                for (const wh of webhooks) {
-                    if (wh.id !== correctWebhookId && (wh.attributes?.url || '') !== webhookUrl) {
-                        // Skip if already disabled
-                        if (wh.attributes?.status === 'disabled') {
-                            console.log(`[PayMongo Webhook] Stale webhook already disabled: ${wh.id}`);
-                            continue;
-                        }
-                        try {
-                            await axios.post(`https://api.paymongo.com/v1/webhooks/${wh.id}/disable`, {}, {
-                                headers: { 'Authorization': authHeader },
-                                timeout: 10000
-                            });
-                            console.log(`[PayMongo Webhook] Disabled stale webhook: ${wh.id} -> ${wh.attributes?.url || ''}`);
-                        } catch (disableErr) {
-                            const errCode = disableErr.response?.data?.errors?.[0]?.code;
-                            if (errCode === 'resource_disabled_state') {
-                                console.log(`[PayMongo Webhook] Stale webhook ${wh.id} was already disabled (confirmed by API).`);
-                            } else {
-                                console.warn(`[PayMongo Webhook] Could not disable stale webhook ${wh.id}:`, disableErr.response?.data || disableErr.message);
-                            }
-                        }
-                    }
-                }
             }
 
             return result || { success: false, message: 'Webhook handling did not complete.' };

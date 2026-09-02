@@ -4,6 +4,7 @@ import { CurrencyDollarIcon, TrashIcon, PrinterIcon, ArrowPathIcon } from '../co
 import { SearchableSelect } from './SearchableSelect.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
 import { PrintableThermalReceipt } from './PrintableThermalReceipt.tsx';
+import { BirInfoBlock } from './BirInfo.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { dbApi } from '../services/databaseService.ts';
@@ -435,6 +436,7 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                 </div>
                             )}
                         </header>
+                        <BirInfoBlock companySettings={companySettings} />
                         <section className="my-6">
                             <div className="flex justify-between">
                                 <div>

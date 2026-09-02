@@ -1,6 +1,7 @@
 import React from 'react';
 import type { SaleRecord, CompanySettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { birThermalLine } from './BirInfo.tsx';
 
 interface PrintableThermalReceiptProps {
     sale: SaleRecord | null;
@@ -34,6 +35,7 @@ export const PrintableThermalReceipt: React.FC<PrintableThermalReceiptProps> = (
                 {companySettings.address && <div style={{ fontSize: '9px', marginBottom: '1px', wordWrap: 'break-word' }}>{companySettings.address}</div>}
                 {companySettings.contactNumber && <div style={{ fontSize: '9px', marginBottom: '1px' }}>{companySettings.contactNumber}</div>}
                 {companySettings.email && <div style={{ fontSize: '9px' }}>{companySettings.email}</div>}
+                {birThermalLine(companySettings) && <div style={{ fontSize: '8px', marginTop: '2px', wordWrap: 'break-word' }}>{birThermalLine(companySettings)}</div>}
             </div>
             <div style={{ textAlign: 'center', fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>ACKNOWLEDGEMENT RECEIPT ONLY</div>
             

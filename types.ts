@@ -426,6 +426,14 @@ export interface CompanySettings {
     logoBase64?: string;
     gcashNumber?: string;
     gcashAccountName?: string;
+    // BIR (Bureau of Internal Revenue) information
+    tinNumber?: string;
+    registeredBusinessName?: string;
+    businessStyleName?: string;
+    dtiSecRegNo?: string;
+    businessPermitNo?: string;
+    vatType?: 'VAT' | 'NON-VAT' | 'EXEMPT';
+    birStatement?: string;
 }
 
 export interface Application {

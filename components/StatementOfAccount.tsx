@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { RouterConfigWithId } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { useCompanySettings } from '../hooks/useCompanySettings.ts';
+import { BirInfoBlock } from './BirInfo.tsx';
 import { Loader } from './Loader.tsx';
 import { PrinterIcon } from '../constants.tsx';
 
@@ -23,6 +25,7 @@ interface StatementOfAccountProps {
 
 export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selectedRouter }) => {
   const { t, formatCurrency } = useLocalization();
+  const { settings: companySettings } = useCompanySettings();
   const [searchQuery, setSearchQuery] = useState('');
   const [clients, setClients] = useState<any[]>([]);
   const [selectedClient, setSelectedClient] = useState<any | null>(null);
@@ -154,7 +157,12 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({ selected
         <div className="soa-print-layout hidden print:block p-8 max-w-none">
           {/* SOA Print Header */}
           <div className="mb-8 border-b-2 border-black pb-4">
-            <h1 className="text-3xl font-bold mb-2">STATEMENT OF ACCOUNT</h1>
+            {companySettings?.companyName && (
+              <h2 className="text-2xl font-bold">{companySettings.companyName}</h2>
+            )}
+            {companySettings?.address && <p className="text-sm text-gray-700">{companySettings.address}</p>}
+            <BirInfoBlock companySettings={companySettings} />
+            <h1 className="text-3xl font-bold mb-2 mt-2">STATEMENT OF ACCOUNT</h1>
             <p className="text-sm text-gray-600">Generated: {new Date().toLocaleString()}</p>
           </div>
 

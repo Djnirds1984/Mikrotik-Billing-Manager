@@ -121,6 +121,46 @@ export const Company: React.FC<CompanyProps> = ({ settings, onSave }) => {
                                 </div>
                             </div>
                         </div>
+                        {/* BIR Information */}
+                        <div className="pt-6 border-t border-slate-200 dark:border-slate-700">
+                            <h4 className="text-base font-semibold text-slate-800 dark:text-slate-200 mb-4">🧾 BIR Information (printed on invoices, receipts & statements)</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label htmlFor="registeredBusinessName" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Registered Business Name</label>
+                                    <input type="text" name="registeredBusinessName" id="registeredBusinessName" value={formState.registeredBusinessName || ''} onChange={handleChange} placeholder="e.g. Cityconnect Internet Services" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                </div>
+                                <div>
+                                    <label htmlFor="tinNumber" className="block text-sm font-medium text-slate-700 dark:text-slate-300">TIN Number</label>
+                                    <input type="text" name="tinNumber" id="tinNumber" value={formState.tinNumber || ''} onChange={handleChange} placeholder="000-000-000-000" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                </div>
+                                <div>
+                                    <label htmlFor="businessStyleName" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Business Style / Trade Name</label>
+                                    <input type="text" name="businessStyleName" id="businessStyleName" value={formState.businessStyleName || ''} onChange={handleChange} placeholder="e.g. Cityconnect WiFi" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                </div>
+                                <div>
+                                    <label htmlFor="dtiSecRegNo" className="block text-sm font-medium text-slate-700 dark:text-slate-300">DTI / SEC Registration No.</label>
+                                    <input type="text" name="dtiSecRegNo" id="dtiSecRegNo" value={formState.dtiSecRegNo || ''} onChange={handleChange} placeholder="e.g. DTI-1234567 or SEC CS2019000123" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                </div>
+                                <div>
+                                    <label htmlFor="businessPermitNo" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Business / Mayor's Permit No.</label>
+                                    <input type="text" name="businessPermitNo" id="businessPermitNo" value={formState.businessPermitNo || ''} onChange={handleChange} placeholder="e.g. BP-2026-001234" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white" />
+                                </div>
+                                <div>
+                                    <label htmlFor="vatType" className="block text-sm font-medium text-slate-700 dark:text-slate-300">VAT Registration Type</label>
+                                    <select name="vatType" id="vatType" value={formState.vatType || ''} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
+                                        <option value="">— None —</option>
+                                        <option value="VAT">VAT-Registered</option>
+                                        <option value="NON-VAT">Non-VAT Registered</option>
+                                        <option value="EXEMPT">VAT-Exempt</option>
+                                    </select>
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label htmlFor="birStatement" className="block text-sm font-medium text-slate-700 dark:text-slate-300">BIR Statement / ATP Note (optional)</label>
+                                    <textarea name="birStatement" id="birStatement" value={formState.birStatement || ''} onChange={handleChange} rows={2} placeholder="e.g. This serves as official receipt. Authority to Print (ATP) No. 0000000000000" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
                          
                         {status && (
                             <div className={`mt-4 text-sm p-3 rounded-md ${status.type === 'success' ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300'}`}>

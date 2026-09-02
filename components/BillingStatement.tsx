@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Customer, CompanySettings } from '../types.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
+import { birHtmlLine } from './BirInfo.tsx';
 
 // Simple inline icons
 const XMarkIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -213,6 +214,7 @@ export const BillingStatement: React.FC<BillingStatementProps> = ({ isOpen, onCl
                         ${companySettings?.contactNumber ? 'Contact: ' + escapeHtml(companySettings.contactNumber) : ''}
                         ${companySettings?.email ? (companySettings?.contactNumber ? ' &bull; ' : '') + 'Email: ' + escapeHtml(companySettings.email) : ''}
                     </div>
+                    ${birHtmlLine(companySettings) ? `<div class="company-info" style="margin-top:2px;">${birHtmlLine(companySettings)}</div>` : ''}
                 </div>`;
         const footerHtml = `
                 <div class="footer">
