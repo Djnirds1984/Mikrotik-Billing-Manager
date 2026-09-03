@@ -12,6 +12,7 @@ const defaultSettings: StoreSettings = {
     walledGardenEnabled: false,
     autoSyncWorkerEnabled: false,
     customExpiredMessage: '',
+    externalStoreUrl: '',
     storeEnabled: true,
     paymentMethods: { paymongo: true, manualGcash: true, xendit: true },
     gcashNumber: '',
@@ -315,6 +316,17 @@ export const StoreSettingsPage: React.FC = () => {
                                 placeholder="Your subscription has expired. Please renew to restore internet access."
                             />
                             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Leave empty to use the default message</p>
+                        </div>
+                        <div className="mt-4">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">External Store URL</label>
+                            <input
+                                type="text"
+                                value={settings.externalStoreUrl}
+                                onChange={e => updateSetting('externalStoreUrl', e.target.value)}
+                                className="block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white focus:ring-1 focus:ring-[--color-primary-500] focus:border-[--color-primary-500]"
+                                placeholder="http://192.168.88.1/store"
+                            />
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Used by the expired portal's "Access Store" button. Leave empty to use http://&lt;router-ip&gt;/store</p>
                         </div>
                     </div>
                 </div>

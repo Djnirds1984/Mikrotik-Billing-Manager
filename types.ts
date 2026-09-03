@@ -646,6 +646,7 @@ export interface StoreSettings {
     walledGardenEnabled: boolean;
     autoSyncWorkerEnabled: boolean;
     customExpiredMessage: string;
+    externalStoreUrl: string;
     storeEnabled: boolean;
     paymentMethods: { paymongo: boolean; manualGcash: boolean; xendit: boolean };
     gcashNumber: string;

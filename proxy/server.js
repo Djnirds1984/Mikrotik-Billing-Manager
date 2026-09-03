@@ -3130,6 +3130,7 @@ async function startServer() {
                     walledGardenEnabled: false,
                     autoSyncWorkerEnabled: false,
                     customExpiredMessage: '',
+                    externalStoreUrl: '',
                     storeEnabled: true,
                     paymentMethods: { paymongo: true, manualGcash: true },
                     gcashNumber: '',
@@ -5456,6 +5457,7 @@ async function startServer() {
                     const settings = JSON.parse(s.storeSettings);
                     res.json({
                         customExpiredMessage: settings.customExpiredMessage || '',
+                        externalStoreUrl: settings.externalStoreUrl || '',
                         storeBannerText: settings.storeBannerText || '',
                         storeEnabled: settings.storeEnabled !== false,
                         paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },
@@ -13717,6 +13719,7 @@ WantedBy=multi-user.target`;
                     const settings = JSON.parse(s.storeSettings);
                     res.json({
                         customExpiredMessage: settings.customExpiredMessage || '',
+                        externalStoreUrl: settings.externalStoreUrl || '',
                         storeBannerText: settings.storeBannerText || '',
                         storeEnabled: settings.storeEnabled !== false,
                         paymentMethods: settings.paymentMethods || { paymongo: true, manualGcash: true },

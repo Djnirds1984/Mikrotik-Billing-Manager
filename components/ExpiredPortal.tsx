@@ -178,6 +178,7 @@ export const ExpiredPortal: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [isNavigating, setIsNavigating] = useState(false);
     const [customExpiredMessage, setCustomExpiredMessage] = useState('');
+    const [externalStoreUrl, setExternalStoreUrl] = useState('');
     const [manualQuery, setManualQuery] = useState('');
     const [manualLoading, setManualLoading] = useState(false);
     const [manualError, setManualError] = useState('');
@@ -189,6 +190,7 @@ export const ExpiredPortal: React.FC = () => {
         // Load store settings for custom expired message
         fetch('/api/public/store-settings').then(r => r.ok ? r.json() : null).then(data => {
             if (data?.customExpiredMessage) setCustomExpiredMessage(data.customExpiredMessage);
+            if (data?.externalStoreUrl) setExternalStoreUrl(data.externalStoreUrl);
         }).catch(() => {});
 
         const lookupCustomer = async () => {
@@ -289,37 +291,41 @@ export const ExpiredPortal: React.FC = () => {
     const handleGoToStore = async () => {
         setIsNavigating(true);
         // Identified customer: use auto-login store session. Otherwise fall back to the store page.
-        if (!customer) {
-            window.location.href = `${window.location.protocol}//${window.location.host}/store`;
-            return;
-        }
-        try {
-            const resp = await fetch('/api/public/expired/auto-login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    username: customer.username,
-                    routerId: customer.routerId,
-                    accountNumber: customer.accountNumber
-                })
-            });
-            const data = await resp.json();
-            if (!resp.ok) {
-                alert(data.message || 'Failed to create store session. Please try again.');
-                setIsNavigating(false);
+            const join = (base: string, qs: string) => base + (base.includes('?') ? '&' : '?') + qs;
+            const external = externalStoreUrl.trim().replace(/\/+$/, '');
+            if (!customer) {
+                window.location.href = external || `http://${window.location.hostname}/store`;
                 return;
             }
-            // Redirect to store using the URL from the server (points to main app, not captive portal)
-            if (data.storeUrl) {
-                window.location.href = data.storeUrl;
-            } else {
-                // Fallback: redirect to /store on current host (ip/store)
-                window.location.href = `${window.location.protocol}//${window.location.host}/store?session=${encodeURIComponent(data.token)}`;
+            try {
+                const resp = await fetch('/api/public/expired/auto-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: customer.username,
+                        routerId: customer.routerId,
+                        accountNumber: customer.accountNumber
+                    })
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    alert(data.message || 'Failed to create store session. Please try again.');
+                    setIsNavigating(false);
+                    return;
+                }
+                // Redirect to store. Prefer the configured External Store URL (separate store app),
+                // then the server-provided storeUrl, then http://<ip>/store as a last fallback.
+                if (external) {
+                    window.location.href = data.token ? join(external, `session=${encodeURIComponent(data.token)}`) : external;
+                } else if (data.storeUrl) {
+                    window.location.href = data.storeUrl;
+                } else {
+                    window.location.href = `http://${window.location.hostname}/store?session=${encodeURIComponent(data.token)}`;
+                }
+            } catch (err) {
+                alert('Failed to connect to store. Please try again.');
+                setIsNavigating(false);
             }
-        } catch (err) {
-            alert('Failed to connect to store. Please try again.');
-            setIsNavigating(false);
-        }
     };
 
     return (
