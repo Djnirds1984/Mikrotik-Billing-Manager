@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MikroTikLogoIcon, QuestionMarkCircleIcon } from '../constants.tsx';
-import type { ChatMessage } from '../types.ts';
+import type { ChatMessage, CompanySettings } from '../types.ts';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { Loader } from './Loader.tsx';
@@ -151,9 +151,27 @@ interface BillingPlan {
     description?: string;
 }
 
+// Public company settings (no auth) — the expired portal is viewed by
+// disconnected customers who have no auth token, so the authenticated
+// /api/db/company-settings endpoint cannot be used here.
 export const ExpiredPortal: React.FC = () => {
     useTheme();
-    const { settings: companySettings, isLoading: isLoadingCompany } = useCompanySettings();
+    const { settings: fallbackSettings } = useCompanySettings();
+    const [publicSettings, setPublicSettings] = useState<CompanySettings | null>(null);
+    // Prefer publicly-fetched settings (works for disconnected customers);
+    // fall back to the authenticated hook when the public fetch fails (e.g. admin preview).
+    const companySettings: CompanySettings = (publicSettings && (publicSettings.companyName || publicSettings.logoBase64)) ? publicSettings : fallbackSettings;
+
+    // Fetch company settings from the public (no-auth) endpoint so the logo
+    // and company info appear for disconnected customers.
+    useEffect(() => {
+        let cancelled = false;
+        fetch('/api/company-settings')
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (!cancelled && data) setPublicSettings(data); })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, []);
     const [customer, setCustomer] = useState<CustomerInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -303,7 +321,7 @@ export const ExpiredPortal: React.FC = () => {
         <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50 to-yellow-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 flex flex-col justify-center items-center py-12 px-4">
             {/* Company Logo */}
             <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-8">
-                {isLoadingCompany ? <Loader /> : companySettings.logoBase64 ? (
+                {companySettings.logoBase64 ? (
                     <img src={companySettings.logoBase64} alt="Company Logo" className="mx-auto h-20 w-auto object-contain" />
                 ) : (
                     <MikroTikLogoIcon className="mx-auto h-16 w-auto text-[--color-primary-500]" />
@@ -315,6 +333,20 @@ export const ExpiredPortal: React.FC = () => {
 
             {/* Main Card */}
             <div className="bg-white dark:bg-slate-800 py-8 px-6 shadow-2xl sm:rounded-2xl sm:px-10 border border-slate-200 dark:border-slate-700 w-full max-w-lg">
+
+                {/* Disconnection Notice */}
+                <div className="mb-6 flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-800">
+                    <svg className="w-6 h-6 flex-shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9.303 3.376c.866 1.5-.213 3.374-1.948 3.374H4.645c-1.73 0-2.813-1.874-1.948-3.374L10.05 3.378c.866-1.5 3.032-1.5 3.898 0l7.355 12.748zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <div>
+                        <h2 className="font-bold text-red-700 dark:text-red-300">You Are Currently Disconnected</h2>
+                        <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                            You are seeing this page because your internet service is currently disconnected.
+                            {companySettings.companyName ? ` Please contact ${companySettings.companyName}` : ' Please contact your service provider'} or renew your subscription below to restore your connection.
+                        </p>
+                    </div>
+                </div>
 
                 {loading ? (
                     <div className="flex flex-col items-center py-8">
