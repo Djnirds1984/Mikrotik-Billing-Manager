@@ -290,7 +290,7 @@ export const ExpiredPortal: React.FC = () => {
         setIsNavigating(true);
         // Identified customer: use auto-login store session. Otherwise fall back to the store page.
         if (!customer) {
-            window.location.href = '/store';
+            window.location.href = `${window.location.protocol}//${window.location.host}/store`;
             return;
         }
         try {
@@ -313,8 +313,8 @@ export const ExpiredPortal: React.FC = () => {
             if (data.storeUrl) {
                 window.location.href = data.storeUrl;
             } else {
-                // Fallback: redirect to /store on current host
-                window.location.href = `/store?session=${encodeURIComponent(data.token)}`;
+                // Fallback: redirect to /store on current host (ip/store)
+                window.location.href = `${window.location.protocol}//${window.location.host}/store?session=${encodeURIComponent(data.token)}`;
             }
         } catch (err) {
             alert('Failed to connect to store. Please try again.');
