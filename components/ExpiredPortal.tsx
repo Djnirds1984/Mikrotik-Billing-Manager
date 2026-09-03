@@ -4,7 +4,6 @@ import type { ChatMessage } from '../types.ts';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { Loader } from './Loader.tsx';
-import { CodeBlock } from './CodeBlock.tsx';
 
 // Self-contained help chat widget (same pattern as CaptivePortalPage)
 const ExpiredHelp: React.FC = () => {
@@ -152,64 +151,6 @@ interface BillingPlan {
     description?: string;
 }
 
-const MIKROTIK_SCRIPT = `# ============================================
-# EXPIRED CLIENT WALLED GARDEN SETUP
-# Run this script on your MikroTik router
-# Non-payment IP pool: 172.16.44.0/24
-# ============================================
-
-# 1. Create address list for the portal/store server
-/ip firewall address-list
-add list=PORTAL_SERVER address=<PORTAL_IP> comment="Billing Portal Server"
-
-# 2. Non-payment pool address list (expired clients get IPs from this range)
-/ip firewall address-list
-add list=NON_PAYMENT_POOL address=172.16.44.0/24 comment="Non-payment profile IP pool"
-
-# 3. Mangle rule: mark expired client traffic going outside portal
-/ip firewall mangle
-add chain=prerouting \\
-    src-address-list=NON_PAYMENT_POOL \\
-    dst-address-list=!PORTAL_SERVER \\
-    action=mark-connection \\
-    new-connection-mark=expired_blocked \\
-    passthrough=yes \\
-    comment="Block expired clients except portal"
-
-# 4. Filter rule: drop marked traffic (block internet, allow portal only)
-/ip firewall filter
-add chain=forward \\
-    connection-mark=expired_blocked \\
-    action=drop \\
-    comment="Drop expired client traffic to non-portal destinations"
-
-# 5. NAT redirect: force HTTP traffic from expired clients to portal
-/ip firewall nat
-add chain=dstnat \\
-    protocol=tcp \\
-    dst-port=80 \\
-    src-address-list=NON_PAYMENT_POOL \\
-    dst-address-list=!PORTAL_SERVER \\
-    action=dst-nat \\
-    to-addresses=<PORTAL_IP> \\
-    to-ports=<PORTAL_PORT> \\
-    comment="Redirect expired HTTP to portal"
-
-# 6. DNS redirect: redirect DNS to router so portal domain resolves
-/ip firewall nat
-add chain=dstnat \\
-    protocol=udp \\
-    dst-port=53 \\
-    src-address-list=NON_PAYMENT_POOL \\
-    action=redirect \\
-    to-ports=53 \\
-    comment="Redirect expired DNS to router"
-
-# NOTE: The billing system also dynamically manages an EXPIRED_CLIENTS
-# address-list via API for per-client IP tracking. The NON_PAYMENT_POOL
-# covers the entire subnet assigned to the non-payment PPPoE profile.
-`;
-
 export const ExpiredPortal: React.FC = () => {
     useTheme();
     const { settings: companySettings, isLoading: isLoadingCompany } = useCompanySettings();
@@ -217,7 +158,6 @@ export const ExpiredPortal: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isNavigating, setIsNavigating] = useState(false);
-    const [showScript, setShowScript] = useState(false);
     const [customExpiredMessage, setCustomExpiredMessage] = useState('');
     const [manualQuery, setManualQuery] = useState('');
     const [manualLoading, setManualLoading] = useState(false);
@@ -550,27 +490,6 @@ export const ExpiredPortal: React.FC = () => {
                         </div>
                     </>
                 ) : null}
-            </div>
-
-            {/* MikroTik Script Section - for admin reference */}
-            <div className="mt-6 w-full max-w-lg">
-                <button
-                    onClick={() => setShowScript(!showScript)}
-                    className="w-full text-left text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors flex items-center gap-2"
-                >
-                    <svg className={`w-4 h-4 transition-transform ${showScript ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                    </svg>
-                    {showScript ? 'Hide' : 'Show'} MikroTik Walled Garden Setup Script (Admin Reference)
-                </button>
-                {showScript && (
-                    <div className="mt-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                            Copy and paste this script into your MikroTik router's terminal. Replace <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">&lt;PORTAL_IP&gt;</code> and <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">&lt;PORTAL_PORT&gt;</code> with your actual portal server IP and port.
-                        </p>
-                        <CodeBlock script={MIKROTIK_SCRIPT} />
-                    </div>
-                )}
             </div>
 
             {/* Footer */}
