@@ -173,13 +173,6 @@ export const ExpiredPortal: React.FC = () => {
         return () => { cancelled = true; };
     }, []);
 
-    // Show the upgrade dialog once the page has finished its initial lookup
-    useEffect(() => {
-        if (!loading) {
-            const t = window.setTimeout(() => setShowUpgradeDialog(true), 800);
-            return () => window.clearTimeout(t);
-        }
-    }, [loading]);
     const [customer, setCustomer] = useState<CustomerInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -189,7 +182,6 @@ export const ExpiredPortal: React.FC = () => {
     const [manualLoading, setManualLoading] = useState(false);
     const [manualError, setManualError] = useState('');
     const [detectedIp, setDetectedIp] = useState('');
-    const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
     const [billingPlans, setBillingPlans] = useState<BillingPlan[]>([]);
     const [plansLoading, setPlansLoading] = useState(false);
 
@@ -361,14 +353,21 @@ export const ExpiredPortal: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Upgrade / Store CTA */}
+                {/* Upgrade / Store CTA — inline, no popup */}
                 <button
-                    onClick={() => setShowUpgradeDialog(true)}
-                    className="mb-6 w-full px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+                    onClick={handleGoToStore}
+                    disabled={isNavigating}
+                    className="mb-6 w-full px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:from-slate-400 disabled:to-slate-500 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
                 >
-                    <span className="text-lg">⚡</span>
-                    <span>Upgrade Subscription — Access Store</span>
+                    {isNavigating ? (
+                        <><span className="animate-spin">⏳</span><span>Connecting to Store...</span></>
+                    ) : (
+                        <><span className="text-lg">⚡</span><span>Upgrade Your Subscription — Access Store Now!</span></>
+                    )}
                 </button>
+                <p className="mb-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                    Do you want to upgrade your subscription? Access the store now to choose a plan.
+                </p>
 
                 {loading ? (
                     <div className="flex flex-col items-center py-8">
@@ -550,42 +549,6 @@ export const ExpiredPortal: React.FC = () => {
             <footer className="mt-8 text-center text-sm text-slate-500 dark:text-slate-400">
                 <p>Powered by {companySettings.companyName || 'Mikrotik Billing Management by AJC'}</p>
             </footer>
-
-            {/* Upgrade Subscription Dialog */}
-            {showUpgradeDialog && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowUpgradeDialog(false)}>
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-6 border border-slate-200 dark:border-slate-700" onClick={e => e.stopPropagation()}>
-                        <div className="text-center">
-                            <div className="mx-auto w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mb-4">
-                                <span className="text-3xl">⚡</span>
-                            </div>
-                            <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">Upgrade Your Subscription?</h3>
-                            <p className="mt-2 text-slate-600 dark:text-slate-300">
-                                Do you want to upgrade your subscription? <strong>Access the Store now</strong> to choose a plan that suits your needs.
-                            </p>
-                        </div>
-                        <div className="mt-6 space-y-3">
-                            <button
-                                onClick={handleGoToStore}
-                                disabled={isNavigating}
-                                className="w-full px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:from-slate-400 disabled:to-slate-500 text-white rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
-                            >
-                                {isNavigating ? (
-                                    <><span className="animate-spin">⏳</span><span>Connecting to Store...</span></>
-                                ) : (
-                                    <><span className="text-lg">🛒</span><span>Access Store Now</span></>
-                                )}
-                            </button>
-                            <button
-                                onClick={() => setShowUpgradeDialog(false)}
-                                className="w-full px-6 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg font-medium transition-colors"
-                            >
-                                Maybe Later
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             <ExpiredHelp />
         </div>
