@@ -1043,23 +1043,29 @@ app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
             } finally { await client.close(); }
         } else {
             // REST — cached (polled every 2s by Dashboard)
-            await fetchRouterReadWithCache(req.params.routerId, 'system/resource/print', '', async () => {
+            // NOTE: the callback must RETURN the data. On a cache hit
+            // fetchRouterReadWithCache does NOT execute the callback,
+            // so any values assigned via side effects stay undefined.
+            const cachedResult = await fetchRouterReadWithCache(req.params.routerId, 'system/resource/print', '', async () => {
                 const response = await req.routerInstance.get('/system/resource');
-                resource = Array.isArray(response.data) ? response.data[0] : response.data;
+                const res0 = Array.isArray(response.data) ? response.data[0] : response.data;
 
                 // Try fetching health for temperature
+                let temp = null;
                 try {
                     const hRes = await req.routerInstance.get('/system/health');
                     const h = Array.isArray(hRes.data) ? hRes.data[0] : hRes.data;
                     if (h) {
-                         if (h.temperature) temperature = parseFloat(h.temperature);
-                         else if (h['cpu-temperature']) temperature = parseFloat(h['cpu-temperature']);
+                         if (h.temperature) temp = parseFloat(h.temperature);
+                         else if (h['cpu-temperature']) temp = parseFloat(h['cpu-temperature']);
                     }
                 } catch (hErr) {
                     // Ignore
                 }
-                return true;
+                return { resource: res0 || {}, temperature: temp };
             });
+            resource = cachedResult?.resource || {};
+            temperature = (cachedResult?.temperature !== null && !isNaN(cachedResult?.temperature)) ? cachedResult.temperature : null;
         }
         const parseMemory = (memStr) => {
             if (!memStr || typeof memStr !== 'string') return 0;
@@ -1077,6 +1083,7 @@ app.get('/:routerId/system/resource/print', getRouter, async (req, res) => {
             const v = parseFloat((bytes / Math.pow(k, i)).toFixed(1));
             return `${v}${sizes[i]}`;
         };
+        resource = resource || {};
         const totalMemoryBytes = parseMemory(resource['total-memory']);
         const freeMemoryBytes = parseMemory(resource['free-memory']);
         const usedMemoryBytes = totalMemoryBytes > 0 ? (totalMemoryBytes - freeMemoryBytes) : 0;
