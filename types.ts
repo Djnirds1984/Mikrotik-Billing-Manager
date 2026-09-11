@@ -1097,6 +1097,8 @@ export interface NetworkEquipment {
     snmp_port?: number;
     total_pon_ports: number;
     status: 'active' | 'inactive' | 'maintenance';
+    location?: string; // data center / site location of this equipment
+    gps?: string; // "lat, lng" coordinates of the data center
     notes?: string;
     created_at?: string;
     updated_at?: string;
@@ -1121,6 +1123,7 @@ export interface OltSplitter {
     name: string;
     split_ratio: string;
     location?: string;
+    gps?: string; // "lat, lng" coordinates of the splitter
     max_ports: number;
     installed_ports: number;
     status: 'active' | 'inactive' | 'maintenance';
@@ -1133,6 +1136,7 @@ export interface OltSplitter {
 export interface OltNap {
     id: string;
     splitter_id?: string;
+    splitter_port?: string; // port number on the splitter where this NAP is connected
     name: string;
     location?: string;
     gps?: string;

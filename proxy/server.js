@@ -985,6 +985,36 @@ async function initDb() {
             }
         } catch (_) {}
 
+        // Add splitter_port to olt_naps (records which splitter port the NAP is connected to)
+        try {
+            const napCols = await db.all("PRAGMA table_info(olt_naps)");
+            const napColNames = napCols.map(c => c.name);
+            if (!napColNames.includes('splitter_port')) {
+                await db.exec("ALTER TABLE olt_naps ADD COLUMN splitter_port TEXT");
+                console.log('[Migration] \u2713 splitter_port column added to olt_naps');
+            }
+        } catch (_) {}
+
+        // Add location/gps to network_equipment (data center location of OLT) and gps to olt_splitters
+        try {
+            const eqCols = await db.all("PRAGMA table_info(network_equipment)");
+            const eqColNames = eqCols.map(c => c.name);
+            for (const col of ['location', 'gps']) {
+                if (!eqColNames.includes(col)) {
+                    await db.exec(`ALTER TABLE network_equipment ADD COLUMN ${col} TEXT`);
+                    console.log(`[Migration] \u2713 ${col} column added to network_equipment`);
+                }
+            }
+        } catch (_) {}
+        try {
+            const splCols = await db.all("PRAGMA table_info(olt_splitters)");
+            const splColNames = splCols.map(c => c.name);
+            if (!splColNames.includes('gps')) {
+                await db.exec("ALTER TABLE olt_splitters ADD COLUMN gps TEXT");
+                console.log('[Migration] \u2713 gps column added to olt_splitters');
+            }
+        } catch (_) {}
+
         // Add custom invoice columns to client_invoices
         try {
             const invCols = await db.all("PRAGMA table_info(client_invoices)");
@@ -13182,13 +13212,13 @@ WantedBy=multi-user.target`;
 
     // Add equipment
     app.post('/api/network-equipment', protect, async (req, res) => {
-        const { router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes } = req.body;
+        const { router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes, location, gps } = req.body;
         if (!name) return res.status(400).json({ message: 'Name is required' });
         try {
             const id = genId('olt');
             await db.run(
-                `INSERT INTO network_equipment (id, router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-                [id, router_id || null, name, type || 'olt', brand || null, model || null, ip_address || null, snmp_community || 'public', snmp_port || 161, total_pon_ports || 0, status || 'active', notes || null]
+                `INSERT INTO network_equipment (id, router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes, location, gps) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                [id, router_id || null, name, type || 'olt', brand || null, model || null, ip_address || null, snmp_community || 'public', snmp_port || 161, total_pon_ports || 0, status || 'active', notes || null, location || null, gps || null]
             );
             const row = await db.get('SELECT * FROM network_equipment WHERE id = ?', [id]);
             res.json(row);
@@ -13197,11 +13227,11 @@ WantedBy=multi-user.target`;
 
     // Update equipment
     app.put('/api/network-equipment/:id', protect, async (req, res) => {
-        const { router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes } = req.body;
+        const { router_id, name, type, brand, model, ip_address, snmp_community, snmp_port, total_pon_ports, status, notes, location, gps } = req.body;
         try {
             await db.run(
-                `UPDATE network_equipment SET router_id=?, name=?, type=?, brand=?, model=?, ip_address=?, snmp_community=?, snmp_port=?, total_pon_ports=?, status=?, notes=?, updated_at=datetime('now') WHERE id=?`,
-                [router_id || null, name, type || 'olt', brand || null, model || null, ip_address || null, snmp_community || 'public', snmp_port || 161, total_pon_ports || 0, status || 'active', notes || null, req.params.id]
+                `UPDATE network_equipment SET router_id=?, name=?, type=?, brand=?, model=?, ip_address=?, snmp_community=?, snmp_port=?, total_pon_ports=?, status=?, notes=?, location=?, gps=?, updated_at=datetime('now') WHERE id=?`,
+                [router_id || null, name, type || 'olt', brand || null, model || null, ip_address || null, snmp_community || 'public', snmp_port || 161, total_pon_ports || 0, status || 'active', notes || null, location || null, gps || null, req.params.id]
             );
             const row = await db.get('SELECT * FROM network_equipment WHERE id = ?', [req.params.id]);
             res.json(row);
@@ -13293,15 +13323,15 @@ WantedBy=multi-user.target`;
 
     // Add splitter
     app.post('/api/olt-splitters', protect, async (req, res) => {
-        const { pon_port_id, name, split_ratio, location, max_ports, installed_ports, status, notes } = req.body;
+        const { pon_port_id, name, split_ratio, location, gps, max_ports, installed_ports, status, notes } = req.body;
         if (!name) return res.status(400).json({ message: 'Name is required' });
         try {
             const id = genId('split');
             const ratio = split_ratio || '1:8';
             const computedMax = max_ports || parseInt(ratio.split(':')[1]) || 8;
             await db.run(
-                `INSERT INTO olt_splitters (id, pon_port_id, name, split_ratio, location, max_ports, installed_ports, status, notes) VALUES (?,?,?,?,?,?,?,?,?)`,
-                [id, pon_port_id || null, name, ratio, location || null, computedMax, installed_ports || 0, status || 'active', notes || null]
+                `INSERT INTO olt_splitters (id, pon_port_id, name, split_ratio, location, gps, max_ports, installed_ports, status, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+                [id, pon_port_id || null, name, ratio, location || null, gps || null, computedMax, installed_ports || 0, status || 'active', notes || null]
             );
             const row = await db.get('SELECT * FROM olt_splitters WHERE id = ?', [id]);
             res.json(row);
@@ -13310,11 +13340,11 @@ WantedBy=multi-user.target`;
 
     // Update splitter
     app.put('/api/olt-splitters/:id', protect, async (req, res) => {
-        const { pon_port_id, name, split_ratio, location, max_ports, installed_ports, status, notes } = req.body;
+        const { pon_port_id, name, split_ratio, location, gps, max_ports, installed_ports, status, notes } = req.body;
         try {
             await db.run(
-                `UPDATE olt_splitters SET pon_port_id=?, name=?, split_ratio=?, location=?, max_ports=?, installed_ports=?, status=?, notes=? WHERE id=?`,
-                [pon_port_id || null, name, split_ratio || '1:8', location || null, max_ports || 8, installed_ports || 0, status || 'active', notes || null, req.params.id]
+                `UPDATE olt_splitters SET pon_port_id=?, name=?, split_ratio=?, location=?, gps=?, max_ports=?, installed_ports=?, status=?, notes=? WHERE id=?`,
+                [pon_port_id || null, name, split_ratio || '1:8', location || null, gps || null, max_ports || 8, installed_ports || 0, status || 'active', notes || null, req.params.id]
             );
             const row = await db.get('SELECT * FROM olt_splitters WHERE id = ?', [req.params.id]);
             res.json(row);
@@ -13344,14 +13374,14 @@ WantedBy=multi-user.target`;
 
     // Add NAP
     app.post('/api/olt-naps', protect, async (req, res) => {
-        const { splitter_id, name, location, gps, total_ports, status, notes } = req.body;
+        const { splitter_id, name, location, gps, total_ports, status, notes, splitter_port } = req.body;
         if (!name) return res.status(400).json({ message: 'Name is required' });
         try {
             const id = genId('nap');
             const ports = total_ports || 8;
             await db.run(
-                `INSERT INTO olt_naps (id, splitter_id, name, location, gps, total_ports, used_ports, status, notes) VALUES (?,?,?,?,?,?,0,?,?)`,
-                [id, splitter_id || null, name, location || null, gps || null, ports, status || 'active', notes || null]
+                `INSERT INTO olt_naps (id, splitter_id, splitter_port, name, location, gps, total_ports, used_ports, status, notes) VALUES (?,?,?,?,?,?,?,0,?,?)`,
+                [id, splitter_id || null, splitter_port || null, name, location || null, gps || null, ports, status || 'active', notes || null]
             );
             // Auto-create NAP port entries
             for (let i = 1; i <= ports; i++) {
@@ -13367,11 +13397,11 @@ WantedBy=multi-user.target`;
 
     // Update NAP
     app.put('/api/olt-naps/:id', protect, async (req, res) => {
-        const { splitter_id, name, location, gps, total_ports, used_ports, status, notes } = req.body;
+        const { splitter_id, name, location, gps, total_ports, used_ports, status, notes, splitter_port } = req.body;
         try {
             await db.run(
-                `UPDATE olt_naps SET splitter_id=?, name=?, location=?, gps=?, total_ports=?, used_ports=?, status=?, notes=? WHERE id=?`,
-                [splitter_id || null, name, location || null, gps || null, total_ports || 8, used_ports || 0, status || 'active', notes || null, req.params.id]
+                `UPDATE olt_naps SET splitter_id=?, splitter_port=?, name=?, location=?, gps=?, total_ports=?, used_ports=?, status=?, notes=? WHERE id=?`,
+                [splitter_id || null, splitter_port || null, name, location || null, gps || null, total_ports || 8, used_ports || 0, status || 'active', notes || null, req.params.id]
             );
             const row = await db.get('SELECT * FROM olt_naps WHERE id = ?', [req.params.id]);
             res.json(row);

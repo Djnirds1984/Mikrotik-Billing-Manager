@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS network_equipment (
     snmp_port INTEGER DEFAULT 161,
     total_pon_ports INTEGER DEFAULT 0,
     status TEXT DEFAULT 'active',
+    location TEXT,
+    gps TEXT,
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT
@@ -42,6 +44,7 @@ CREATE TABLE IF NOT EXISTS olt_splitters (
     name TEXT NOT NULL,
     split_ratio TEXT NOT NULL DEFAULT '1:8',
     location TEXT,
+    gps TEXT,
     max_ports INTEGER NOT NULL,
     installed_ports INTEGER DEFAULT 0,
     status TEXT DEFAULT 'active',
@@ -53,6 +56,7 @@ CREATE TABLE IF NOT EXISTS olt_splitters (
 CREATE TABLE IF NOT EXISTS olt_naps (
     id TEXT PRIMARY KEY,
     splitter_id TEXT,
+    splitter_port TEXT,
     name TEXT NOT NULL,
     location TEXT,
     gps TEXT,

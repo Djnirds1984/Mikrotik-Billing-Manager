@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { NetworkEquipment, OltPonPort, OltSplitter, OltNap, OltNapPort } from '../types.ts';
 import { Loader } from './Loader.tsx';
-import { EditIcon, TrashIcon, PlusIcon, XMarkIcon } from '../constants.tsx';
+import { EditIcon, TrashIcon, PlusIcon, XMarkIcon, PrinterIcon } from '../constants.tsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -67,6 +67,10 @@ const EquipmentFormModal: React.FC<{
                         <div className="grid grid-cols-2 gap-4">
                             <div><label className="text-sm font-medium">Model</label><input type="text" value={form.model || ''} onChange={e => setForm(f => ({ ...f, model: e.target.value }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                             <div><label className="text-sm font-medium">IP Address</label><input type="text" value={form.ip_address || ''} onChange={e => setForm(f => ({ ...f, ip_address: e.target.value }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="text-sm font-medium">Data Center / Location</label><input type="text" value={form.location || ''} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} placeholder="e.g., Main Data Center" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                            <div><label className="text-sm font-medium">GPS (for Map)</label><input type="text" value={form.gps || ''} onChange={e => setForm(f => ({ ...f, gps: e.target.value }))} placeholder="lat, lng" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div><label className="text-sm font-medium">SNMP Community</label><input type="text" value={form.snmp_community || 'public'} onChange={e => setForm(f => ({ ...f, snmp_community: e.target.value }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
@@ -140,7 +144,10 @@ const SplitterFormModal: React.FC<{
                             <div><label className="text-sm font-medium">Split Ratio</label><select value={form.split_ratio || '1:8'} onChange={e => setForm(f => ({ ...f, split_ratio: e.target.value }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700"><option value="1:4">1:4</option><option value="1:8">1:8</option><option value="1:16">1:16</option><option value="1:32">1:32</option><option value="1:64">1:64</option></select></div>
                             <div><label className="text-sm font-medium">Status</label><select value={form.status || 'active'} onChange={e => setForm(f => ({ ...f, status: e.target.value as any }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700"><option value="active">Active</option><option value="inactive">Inactive</option><option value="maintenance">Maintenance</option></select></div>
                         </div>
-                        <div><label className="text-sm font-medium">Location</label><input type="text" value={form.location || ''} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="text-sm font-medium">Location</label><input type="text" value={form.location || ''} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                            <div><label className="text-sm font-medium">GPS (for Map)</label><input type="text" value={form.gps || ''} onChange={e => setForm(f => ({ ...f, gps: e.target.value }))} placeholder="lat, lng" className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
+                        </div>
                     </div>
                     <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-3">
                         <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-md hover:bg-slate-200 dark:hover:bg-slate-700">Cancel</button>
@@ -167,7 +174,10 @@ const NapFormModal: React.FC<{
                     <div className="p-6 space-y-4">
                         <h3 className="text-lg font-bold">{initialData ? 'Edit NAP' : 'Add NAP'}</h3>
                         <div><label className="text-sm font-medium">Name *</label><input type="text" value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
-                        <div><label className="text-sm font-medium">Splitter</label><select value={form.splitter_id || ''} onChange={e => setForm(f => ({ ...f, splitter_id: e.target.value }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700"><option value="">-- None --</option>{splitters.map(s => <option key={s.id} value={s.id}>{s.name} ({s.split_ratio})</option>)}</select></div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="text-sm font-medium">Splitter</label><select value={form.splitter_id || ''} onChange={e => setForm(f => ({ ...f, splitter_id: e.target.value }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700"><option value="">-- None --</option>{splitters.map(s => <option key={s.id} value={s.id}>{s.name} ({s.split_ratio})</option>)}</select></div>
+                            <div><label className="text-sm font-medium">Splitter Port</label><select value={form.splitter_port || ''} onChange={e => setForm(f => ({ ...f, splitter_port: e.target.value }))} disabled={!form.splitter_id} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700 disabled:opacity-50"><option value="">-- None --</option>{(() => { const sel = splitters.find(s => s.id === form.splitter_id); const maxP = sel?.max_ports || 8; return Array.from({ length: maxP }, (_, i) => i + 1).map(p => <option key={p} value={String(p)}>{p}</option>); })()}</select></div>
+                        </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div><label className="text-sm font-medium">Total Ports</label><input type="number" value={form.total_ports || 8} onChange={e => setForm(f => ({ ...f, total_ports: parseInt(e.target.value) || 8 }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700" /></div>
                             <div><label className="text-sm font-medium">Status</label><select value={form.status || 'active'} onChange={e => setForm(f => ({ ...f, status: e.target.value as any }))} className="mt-1 w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700"><option value="active">Active</option><option value="inactive">Inactive</option><option value="maintenance">Maintenance</option></select></div>
@@ -513,7 +523,7 @@ export const NetworkEquipmentManager: React.FC = () => {
                                 {naps.map(n => (
                                     <tr key={n.id} className="border-t border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                         <td className="p-3 font-medium">{n.name}</td>
-                                        <td className="p-3">{n.splitter_name || '-'}</td>
+                                        <td className="p-3">{n.splitter_name || '-'}{n.splitter_port ? <span className="ml-1 text-xs font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">Port {n.splitter_port}</span> : null}</td>
                                         <td className="p-3">{n.location || '-'}</td>
                                         <td className="p-3"><OccupancyBar used={n.used_ports} total={n.total_ports} /></td>
                                         <td className="p-3"><StatusBadge status={n.status} /></td>
@@ -537,7 +547,7 @@ export const NetworkEquipmentManager: React.FC = () => {
 
             {/* ─── Map Tab ─── */}
             {activeTab === 'map' && (
-                <NapMap naps={naps} />
+                <NapMap naps={naps} equipment={equipment} splitters={splitters} />
             )}
 
             {/* ─── Modals ─── */}
@@ -551,10 +561,14 @@ export const NetworkEquipmentManager: React.FC = () => {
 };
 
 // ─── NAP Map Component ────────────────────────────────────────────
-const NapMap: React.FC<{ naps: OltNap[] }> = ({ naps }) => {
+const NapMap: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitters: OltSplitter[] }> = ({ naps, equipment, splitters }) => {
     const mapRef = useRef<HTMLDivElement>(null);
     const mapInstanceRef = useRef<L.Map | null>(null);
     const [napsWithGps, setNapsWithGps] = useState<Array<OltNap & { lat: number; lng: number }>>([]);
+    const [showPrintable, setShowPrintable] = useState(false);
+
+    const oltsWithGps = equipment.filter(eq => eq.gps && parseGpsCoords(eq.gps)).map(eq => ({ ...eq, coords: parseGpsCoords(eq.gps)! }));
+    const splittersWithGps = splitters.filter(s => s.gps && parseGpsCoords(s.gps)).map(s => ({ ...s, coords: parseGpsCoords(s.gps)! }));
 
     // Parse GPS coordinates from NAPs
     useEffect(() => {
@@ -593,6 +607,38 @@ const NapMap: React.FC<{ naps: OltNap[] }> = ({ naps }) => {
             }
         });
 
+        const boundsAll: L.LatLngExpression[] = [];
+
+        // Add markers for OLT / data center locations
+        oltsWithGps.forEach(eq => {
+            const marker = L.marker([eq.coords.lat, eq.coords.lng], { icon: oltMapIcon() }).addTo(map);
+            marker.bindTooltip(eq.name, { permanent: true, direction: 'top', offset: [0, -10], className: 'olt-map-label' });
+            marker.bindPopup(`
+                <div style="min-width: 200px;">
+                    <h3 style="margin:0 0 8px 0; font-size: 14px; font-weight: bold;">🏢 ${eq.name}</h3>
+                    <p style="margin: 2px 0; font-size: 12px; color: #666;">Data Center / OLT Location</p>
+                    <p style="margin: 2px 0; font-size: 12px; color: #666;">${eq.location || 'No location'}</p>
+                    <p style="margin: 2px 0; font-size: 11px; color: #888;">GPS: ${eq.coords.lat.toFixed(6)}, ${eq.coords.lng.toFixed(6)}</p>
+                    <p style="margin: 4px 0 0 0; font-size: 12px;"><strong>Type:</strong> ${eq.type.toUpperCase()} &bull; <strong>Brand:</strong> ${eq.brand || '-'}</p>
+                </div>`);
+            boundsAll.push([eq.coords.lat, eq.coords.lng]);
+        });
+
+        // Add markers for splitters
+        splittersWithGps.forEach(s => {
+            const marker = L.marker([s.coords.lat, s.coords.lng], { icon: splitterMapIcon() }).addTo(map);
+            marker.bindTooltip(s.name, { permanent: true, direction: 'top', offset: [0, -10], className: 'splitter-map-label' });
+            marker.bindPopup(`
+                <div style="min-width: 200px;">
+                    <h3 style="margin:0 0 8px 0; font-size: 14px; font-weight: bold;">🔀 ${s.name}</h3>
+                    <p style="margin: 2px 0; font-size: 12px; color: #666;">Splitter (${s.split_ratio})</p>
+                    <p style="margin: 2px 0; font-size: 12px; color: #666;">${s.location || 'No location'}</p>
+                    <p style="margin: 2px 0; font-size: 11px; color: #888;">GPS: ${s.coords.lat.toFixed(6)}, ${s.coords.lng.toFixed(6)}</p>
+                    <p style="margin: 4px 0 0 0; font-size: 12px;"><strong>Ports:</strong> ${s.installed_ports}/${s.max_ports} installed</p>
+                </div>`);
+            boundsAll.push([s.coords.lat, s.coords.lng]);
+        });
+
         // Add markers for NAPs with GPS
         if (napsWithGps.length > 0) {
             const bounds: L.LatLngBoundsExpression = [];
@@ -629,15 +675,17 @@ const NapMap: React.FC<{ naps: OltNap[] }> = ({ naps }) => {
                 bounds.push([nap.lat, nap.lng]);
             });
 
-            // Fit map to show all markers
-            if (bounds.length > 0) {
-                map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
-            }
+            // Fit map to show all markers (NAPs, splitters and OLTs)
+            boundsAll.push(...(bounds as L.LatLngExpression[]));
+        }
+
+        if (boundsAll.length > 0) {
+            map.fitBounds(boundsAll as L.LatLngBoundsExpression, { padding: [50, 50], maxZoom: 15 });
         }
 
         // Force a resize after a short delay to fix rendering issues
         setTimeout(() => map.invalidateSize(), 100);
-    }, [napsWithGps]);
+    }, [napsWithGps, oltsWithGps, splittersWithGps]);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -655,10 +703,17 @@ const NapMap: React.FC<{ naps: OltNap[] }> = ({ naps }) => {
         <div className="space-y-4">
             <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">NAP Locations</h3>
-                <div className="flex items-center gap-4 text-xs">
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500 inline-block"></span> Active</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-500 inline-block"></span> Maintenance</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-gray-500 inline-block"></span> Inactive</span>
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 text-xs">
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-700 inline-block border border-black"></span> Data Center / OLT</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-orange-500 inline-block border border-black rotate-45"></span> Splitter</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500 inline-block"></span> Active NAP</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-500 inline-block"></span> Maintenance</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-gray-500 inline-block"></span> Inactive</span>
+                    </div>
+                    <button onClick={() => setShowPrintable(true)} className="no-print flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                        <PrinterIcon className="w-4 h-4" /> Print Map
+                    </button>
                 </div>
             </div>
 
@@ -707,6 +762,227 @@ const NapMap: React.FC<{ naps: OltNap[] }> = ({ naps }) => {
                     )}
                 </div>
             )}
+            {showPrintable && <PrintableMapPreview naps={naps} equipment={equipment} splitters={splitters} onClose={() => setShowPrintable(false)} />}
+        </div>
+    );
+};
+
+// ─── Printable NAP Map (for NTC / DTIP Requirements) ──────────────────────────
+const parseGpsCoords = (gps?: string): { lat: number; lng: number } | null => {
+    if (!gps || !gps.trim()) return null;
+    const parts = gps.split(',').map(s => parseFloat(s.trim()));
+    if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) return { lat: parts[0], lng: parts[1] };
+    return null;
+};
+
+// Map marker icons for OLT (data center) and splitters
+const oltMapIcon = () => L.divIcon({
+    className: '',
+    html: '<div style="width:16px;height:16px;background:#1d4ed8;border:2px solid #000;"></div>',
+    iconSize: [16, 16], iconAnchor: [8, 8]
+});
+const splitterMapIcon = () => L.divIcon({
+    className: '',
+    html: '<div style="width:12px;height:12px;background:#f97316;border:1.5px solid #000;transform:rotate(45deg);margin:2px;"></div>',
+    iconSize: [16, 16], iconAnchor: [8, 8]
+});
+
+const PrintableMapPreview: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitters: OltSplitter[]; onClose: () => void }> = ({ naps, equipment, splitters, onClose }) => {
+    const printMapRef = useRef<HTMLDivElement>(null);
+
+    const plotted = naps
+        .map(n => ({ ...n, coords: parseGpsCoords(n.gps) }))
+        .filter((n): n is OltNap & { coords: { lat: number; lng: number } } => n.coords !== null);
+
+    const oltsWithGps = equipment.filter(eq => eq.gps && parseGpsCoords(eq.gps)).map(eq => ({ ...eq, coords: parseGpsCoords(eq.gps)! }));
+    const splittersWithGps = splitters.filter(s => s.gps && parseGpsCoords(s.gps)).map(s => ({ ...s, coords: parseGpsCoords(s.gps)! }));
+
+    const [header, setHeader] = useState<{ operator?: string; address?: string; appNo?: string; preparedBy?: string; position?: string }>(() => {
+        try { return JSON.parse(localStorage.getItem('dtipMapHeader') || '{}'); } catch { return {}; }
+    });
+
+    const updateHeader = (key: string, value: string) => setHeader(h => {
+        const next = { ...h, [key]: value };
+        try { localStorage.setItem('dtipMapHeader', JSON.stringify(next)); } catch { /* ignore */ }
+        return next;
+    });
+
+    // Build a dedicated print-oriented map (labeled markers, scale bar, fitted bounds)
+    useEffect(() => {
+        if (!printMapRef.current) return;
+        const map = L.map(printMapRef.current, { zoomControl: false }).setView([14.5995, 120.9842], 11);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(map);
+        L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
+
+        const bounds: L.LatLngExpression[] = [];
+
+        // OLT / data center markers (blue squares, labeled)
+        oltsWithGps.forEach(eq => {
+            const marker = L.marker([eq.coords.lat, eq.coords.lng], { icon: oltMapIcon() }).addTo(map);
+            marker.bindTooltip(eq.name, { permanent: true, direction: 'top', offset: [0, -8] });
+            marker.bindPopup(`<div style="min-width:200px;"><h3 style="margin:0 0 6px 0;font-size:14px;font-weight:bold;">🏢 ${eq.name}</h3><p style="margin:2px 0;font-size:12px;color:#555;">Data Center / OLT (${eq.type.toUpperCase()})</p><p style="margin:2px 0;font-size:12px;color:#555;">${eq.location || 'No location'}</p><p style="margin:2px 0;font-size:11px;color:#888;">GPS: ${eq.coords.lat.toFixed(6)}, ${eq.coords.lng.toFixed(6)}</p></div>`);
+            bounds.push([eq.coords.lat, eq.coords.lng]);
+        });
+
+        // Splitter markers (orange diamonds, labeled)
+        splittersWithGps.forEach(s => {
+            const marker = L.marker([s.coords.lat, s.coords.lng], { icon: splitterMapIcon() }).addTo(map);
+            marker.bindTooltip(s.name, { permanent: true, direction: 'top', offset: [0, -8] });
+            marker.bindPopup(`<div style="min-width:200px;"><h3 style="margin:0 0 6px 0;font-size:14px;font-weight:bold;">🔀 ${s.name}</h3><p style="margin:2px 0;font-size:12px;color:#555;">Splitter (${s.split_ratio})</p><p style="margin:2px 0;font-size:12px;color:#555;">${s.location || 'No location'}</p><p style="margin:2px 0;font-size:11px;color:#888;">GPS: ${s.coords.lat.toFixed(6)}, ${s.coords.lng.toFixed(6)}</p></div>`);
+            bounds.push([s.coords.lat, s.coords.lng]);
+        });
+
+        plotted.forEach(nap => {
+            const statusColor = nap.status === 'active' ? '#22c55e' : nap.status === 'maintenance' ? '#eab308' : '#6b7280';
+            const marker = L.circleMarker([nap.coords.lat, nap.coords.lng], {
+                radius: 8, fillColor: statusColor, color: '#000', weight: 1.5, opacity: 1, fillOpacity: 0.9
+            }).addTo(map);
+            marker.bindTooltip(nap.name, { permanent: true, direction: 'top', offset: [0, -8] });
+            const occupancyPct = nap.total_ports > 0 ? Math.round((nap.used_ports / nap.total_ports) * 100) : 0;
+            marker.bindPopup(`<div style="min-width:200px;"><h3 style="margin:0 0 6px 0;font-size:14px;font-weight:bold;">${nap.name}</h3><p style="margin:2px 0;font-size:12px;color:#555;">${nap.location || 'No location'}</p><p style="margin:2px 0;font-size:11px;color:#888;">GPS: ${nap.coords.lat.toFixed(6)}, ${nap.coords.lng.toFixed(6)}</p><p style="margin:4px 0 0 0;font-size:12px;"><strong>Ports:</strong> ${nap.used_ports}/${nap.total_ports} occupied (${occupancyPct}%)</p></div>`);
+            bounds.push([nap.coords.lat, nap.coords.lng]);
+        });
+        if (bounds.length > 0) map.fitBounds(bounds as L.LatLngBoundsExpression, { padding: [40, 40] });
+        const t = setTimeout(() => map.invalidateSize(), 100);
+        return () => { clearTimeout(t); map.remove(); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const generatedOn = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    const totalPorts = plotted.reduce((s, n) => s + (n.total_ports || 0), 0);
+    const usedPorts = plotted.reduce((s, n) => s + (n.used_ports || 0), 0);
+    const inputCls = "w-full bg-transparent border-b border-slate-400 focus:outline-none focus:border-blue-600 text-sm text-slate-900 placeholder-slate-400 pb-0.5";
+
+    return (
+        <div className="fixed inset-0 z-[2000] overflow-auto bg-black/70 p-6">
+            <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>
+            <div className="no-print sticky top-0 z-10 mb-4 flex items-center justify-between bg-slate-900/90 rounded-lg px-4 py-2">
+                <p className="text-sm text-slate-200">Print preview — NAP Deployment Map for NTC / DTIP submission</p>
+                <div className="flex gap-2">
+                    <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"><PrinterIcon className="w-4 h-4" /> Print</button>
+                    <button onClick={onClose} className="px-4 py-2 text-sm rounded-md text-white hover:bg-slate-700">Close</button>
+                </div>
+            </div>
+            <div className="printable-area relative mx-auto bg-white text-slate-900 shadow-2xl" style={{ width: '1050px', maxWidth: '100%', padding: '32px 40px' }}>
+                {/* Header */}
+                <div className="flex justify-between items-start border-b-2 border-slate-900 pb-3">
+                    <div className="w-1/2">
+                        <input value={header.operator || ''} onChange={e => updateHeader('operator', e.target.value)} placeholder="Network Operator / Company Name" className={`${inputCls} text-lg font-bold`} />
+                        <input value={header.address || ''} onChange={e => updateHeader('address', e.target.value)} placeholder="Business Address" className={`${inputCls} mt-2`} />
+                        <div className="mt-2 text-sm text-slate-700">NTC / DTIP Application No.:
+                            <input value={header.appNo || ''} onChange={e => updateHeader('appNo', e.target.value)} placeholder="e.g., NTC-RXX-0000-2026" className={`${inputCls} inline-block w-72 ml-2`} />
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <h1 className="text-2xl font-bold tracking-wide">FIBER NETWORK FACILITY MAP</h1>
+                        <p className="text-sm text-slate-600">Network Access Points (NAP) Deployment Plan</p>
+                        <p className="text-xs text-slate-500 mt-1">Submitted to the National Telecommunications Commission (NTC)<br />in support of DTIP requirements</p>
+                        <p className="text-xs text-slate-500 mt-1">Generated on: {generatedOn}</p>
+                    </div>
+                </div>
+
+                {/* Map */}
+                <div className="mt-4 border border-slate-700" style={{ height: '440px' }}>
+                    <div ref={printMapRef} style={{ width: '100%', height: '100%', background: '#e5e7eb' }} />
+                </div>
+
+                {/* Legend + Summary */}
+                <div className="mt-3 flex items-center justify-between text-xs text-slate-800">
+                    <div className="flex items-center gap-4">
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 inline-block" style={{ background: '#1d4ed8', border: '1px solid #000' }}></span> Data Center / OLT</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 inline-block" style={{ background: '#f97316', border: '1px solid #000', transform: 'rotate(45deg)' }}></span> Splitter</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: '#22c55e', border: '1px solid #000' }}></span> Active NAP</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: '#eab308', border: '1px solid #000' }}></span> Under Maintenance</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: '#6b7280', border: '1px solid #000' }}></span> Inactive</span>
+                    </div>
+                    <div className="text-right">
+                        <span className="font-semibold">Summary:</span> {oltsWithGps.length} OLT &bull; {splittersWithGps.length} splitter{splittersWithGps.length !== 1 ? 's' : ''} &bull; {plotted.length} NAP{plotted.length !== 1 ? 's' : ''} &bull; {totalPorts} total ports &bull; {usedPorts} occupied ({totalPorts > 0 ? Math.round((usedPorts / totalPorts) * 100) : 0}% utilization)
+                    </div>
+                </div>
+                {/* Facilities & NAP Coordinates Table */}
+                <table className="w-full mt-4 text-xs border-collapse" style={{ border: '1px solid #334155' }}>
+                    <thead>
+                        <tr className="bg-slate-200">
+                            <th className="p-1.5 text-left" style={{ border: '1px solid #334155', width: '4%' }}>#</th>
+                            <th className="p-1.5 text-left" style={{ border: '1px solid #334155', width: '12%' }}>Type</th>
+                            <th className="p-1.5 text-left" style={{ border: '1px solid #334155', width: '16%' }}>Name</th>
+                            <th className="p-1.5 text-left" style={{ border: '1px solid #334155', width: '17%' }}>Upstream Splitter / Port</th>
+                            <th className="p-1.5 text-left" style={{ border: '1px solid #334155', width: '17%' }}>Location</th>
+                            <th className="p-1.5 text-left" style={{ border: '1px solid #334155', width: '16%' }}>GPS Coordinates</th>
+                            <th className="p-1.5 text-left" style={{ border: '1px solid #334155', width: '9%' }}>Status</th>
+                            <th className="p-1.5 text-left" style={{ border: '1px solid #334155' }}>Ports</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {plotted.length === 0 && oltsWithGps.length === 0 && splittersWithGps.length === 0 && (
+                            <tr><td colSpan={8} className="p-3 text-center text-slate-500" style={{ border: '1px solid #334155' }}>No facilities or NAPs with GPS coordinates plotted.</td></tr>
+                        )}
+                        {oltsWithGps.map(eq => (
+                            <tr key={eq.id} className="bg-blue-50">
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>D</td>
+                                <td className="p-1.5 font-semibold" style={{ border: '1px solid #334155' }}>OLT / Data Center</td>
+                                <td className="p-1.5 font-semibold" style={{ border: '1px solid #334155' }}>{eq.name}{eq.type !== 'olt' ? ` (${eq.type.toUpperCase()})` : ''}</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>—</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>{eq.location || '—'}</td>
+                                <td className="p-1.5 font-mono" style={{ border: '1px solid #334155' }}>{eq.coords.lat.toFixed(6)}, {eq.coords.lng.toFixed(6)}</td>
+                                <td className="p-1.5 capitalize" style={{ border: '1px solid #334155' }}>{eq.status}</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>—</td>
+                            </tr>
+                        ))}
+                        {splittersWithGps.map(s => (
+                            <tr key={s.id} className="bg-orange-50">
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>S</td>
+                                <td className="p-1.5 font-semibold" style={{ border: '1px solid #334155' }}>Splitter</td>
+                                <td className="p-1.5 font-semibold" style={{ border: '1px solid #334155' }}>{s.name}</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>{s.split_ratio}</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>{s.location || '—'}</td>
+                                <td className="p-1.5 font-mono" style={{ border: '1px solid #334155' }}>{s.coords.lat.toFixed(6)}, {s.coords.lng.toFixed(6)}</td>
+                                <td className="p-1.5 capitalize" style={{ border: '1px solid #334155' }}>{s.status}</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>{s.installed_ports}/{s.max_ports}</td>
+                            </tr>
+                        ))}
+                        {plotted.map((nap, i) => (
+                            <tr key={nap.id}>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>{i + 1}</td>
+                                <td className="p-1.5 font-semibold" style={{ border: '1px solid #334155' }}>NAP</td>
+                                <td className="p-1.5 font-semibold" style={{ border: '1px solid #334155' }}>{nap.name}</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>{nap.splitter_name || '—'}{nap.splitter_port ? ` — Port ${nap.splitter_port}` : ''}</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>{nap.location || '—'}</td>
+                                <td className="p-1.5 font-mono" style={{ border: '1px solid #334155' }}>{nap.coords.lat.toFixed(6)}, {nap.coords.lng.toFixed(6)}</td>
+                                <td className="p-1.5 capitalize" style={{ border: '1px solid #334155' }}>{nap.status}</td>
+                                <td className="p-1.5" style={{ border: '1px solid #334155' }}>{nap.used_ports}/{nap.total_ports}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                {naps.length > plotted.length && (
+                    <p className="text-[10px] text-slate-500 mt-1">+ {naps.length - plotted.length} NAP{naps.length - plotted.length !== 1 ? 's' : ''} without GPS coordinates (not shown on map)</p>
+                )}
+                {/* Signature blocks */}
+                <div className="mt-10 grid grid-cols-2 gap-16 text-xs text-slate-900">
+                    <div>
+                        <p className="font-semibold mb-8">Prepared by:</p>
+                        <div className="border-t border-slate-900 w-56">
+                            <input value={header.preparedBy || ''} onChange={e => updateHeader('preparedBy', e.target.value)} placeholder="Name & Signature" className={`${inputCls} mt-1`} />
+                            <input value={header.position || ''} onChange={e => updateHeader('position', e.target.value)} placeholder="Position / Title" className={`${inputCls} mt-2`} />
+                        </div>
+                    </div>
+                    <div>
+                        <p className="font-semibold mb-8">Received / Noted by (NTC):</p>
+                        <div className="border-t border-slate-900 w-56">
+                            <p className="mt-1 text-slate-400">Name &amp; Signature</p>
+                            <p className="mt-2 text-slate-400">Date: ______________________</p>
+                        </div>
+                    </div>
+                </div>
+
+                <p className="mt-6 text-[10px] text-slate-400 border-t border-slate-300 pt-2">
+                    Map data &copy; OpenStreetMap contributors. Coordinates are in WGS84 (decimal degrees). This document was generated by the Network Equipment module on {generatedOn}.
+                </p>
+            </div>
         </div>
     );
 };
