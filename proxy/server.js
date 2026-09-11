@@ -13454,32 +13454,70 @@ WantedBy=multi-user.target`;
     app.get('/api/network-topology', protect, async (req, res) => {
         try {
             const equipment = await db.all('SELECT * FROM network_equipment ORDER BY name');
+            const allPonIds = new Set((await db.all('SELECT id FROM olt_pon_ports')).map(p => p.id));
             const result = [];
+
+            const loadNapsForSplitter = async (splitterId) => {
+                const naps = await db.all('SELECT * FROM olt_naps WHERE splitter_id = ? ORDER BY name', [splitterId]);
+                for (const nap of naps) {
+                    nap.ports = await db.all('SELECT * FROM olt_nap_ports WHERE nap_id = ? ORDER BY port_number', [nap.id]);
+                }
+                return naps;
+            };
 
             for (const eq of equipment) {
                 const ponPorts = await db.all('SELECT * FROM olt_pon_ports WHERE equipment_id = ? ORDER BY port_index', [eq.id]);
                 const ponData = [];
+                const splitterIdsInTree = new Set();
 
                 for (const pon of ponPorts) {
-                    let splitterData = null;
+                    // Splitters are linked to PON ports via olt_splitters.pon_port_id (primary),
+                    // with legacy support for olt_pon_ports.splitter_id
+                    const splitters = await db.all('SELECT * FROM olt_splitters WHERE pon_port_id = ? ORDER BY name', [pon.id]);
                     if (pon.splitter_id) {
-                        const splitter = await db.get('SELECT * FROM olt_splitters WHERE id = ?', [pon.splitter_id]);
-                        if (splitter) {
-                            const naps = await db.all('SELECT * FROM olt_naps WHERE splitter_id = ? ORDER BY name', [splitter.id]);
-                            const napData = [];
-
-                            for (const nap of naps) {
-                                const ports = await db.all('SELECT * FROM olt_nap_ports WHERE nap_id = ? ORDER BY port_number', [nap.id]);
-                                napData.push({ ...nap, ports });
-                            }
-
-                            splitterData = { ...splitter, naps: napData };
-                        }
+                        const legacy = await db.get('SELECT * FROM olt_splitters WHERE id = ?', [pon.splitter_id]);
+                        if (legacy && !splitters.some(s => s.id === legacy.id)) splitters.push(legacy);
                     }
-                    ponData.push({ ...pon, splitter: splitterData });
+                    const splData = [];
+                    for (const spl of splitters) {
+                        splitterIdsInTree.add(spl.id);
+                        splData.push({ ...spl, naps: await loadNapsForSplitter(spl.id) });
+                    }
+                    ponData.push({ ...pon, splitters: splData, splitter: splData[0] || null });
                 }
 
                 result.push({ ...eq, ponPorts: ponData });
+            }
+
+            // Orphaned splitters (no PON port linked anywhere) — group under a virtual node
+            const allSplitters = await db.all('SELECT * FROM olt_splitters ORDER BY name');
+            const unlinkedSplitters = [];
+            for (const spl of allSplitters) {
+                if (!spl.pon_port_id || !allPonIds.has(spl.pon_port_id)) {
+                    unlinkedSplitters.push({ ...spl, naps: await loadNapsForSplitter(spl.id) });
+                }
+            }
+
+            // NAPs not assigned to any splitter at all
+            const splitterIds = new Set(allSplitters.map(s => s.id));
+            const allNaps = await db.all('SELECT * FROM olt_naps ORDER BY name');
+            const unassignedNaps = [];
+            for (const nap of allNaps) {
+                if (!nap.splitter_id || !splitterIds.has(nap.splitter_id)) {
+                    nap.ports = await db.all('SELECT * FROM olt_nap_ports WHERE nap_id = ? ORDER BY port_number', [nap.id]);
+                    unassignedNaps.push(nap);
+                }
+            }
+
+            if (unlinkedSplitters.length > 0 || unassignedNaps.length > 0) {
+                result.push({
+                    id: 'unlinked',
+                    name: '⚠ Unlinked Splitters / NAPs (not connected to an OLT)',
+                    status: 'inactive',
+                    ponPorts: [],
+                    unlinkedSplitters,
+                    unassignedNaps
+                });
             }
 
             res.json({ equipment: result });
@@ -13508,7 +13546,7 @@ WantedBy=multi-user.target`;
                 brands: snmpService.getSupportedBrands(),
                 message: snmpService.isAvailable()
                     ? 'SNMP monitoring is active'
-                    : 'net-snmp package not installed. Run: cd proxy && npm install net-snmp'
+                    : 'net-snmp package not installed. Run: npm install net-snmp (in the project root, where package.json is)'
             });
         } catch (e) {
             res.json({ available: false, brands: [], message: e.message });

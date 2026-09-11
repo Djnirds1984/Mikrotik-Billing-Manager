@@ -3,14 +3,21 @@
  * Supports Huawei, ZTE, BDCOM, VSOL, CDATA, FiberHome, Nokia, Calix, Dasan, and generic OLTs
  * 
  * Uses net-snmp package. If not installed, gracefully degrades to no-op.
- * Install with: npm install net-snmp (in proxy/ directory)
+ * Install with: npm install net-snmp (in the project root, or in proxy/ — both work)
  */
 
 let snmp = null;
+// Try standard resolution first (root node_modules / services/node_modules),
+// then fall back to proxy/node_modules for installs done via "cd proxy && npm install net-snmp"
 try {
     snmp = require('net-snmp');
 } catch (e) {
-    console.warn('[SNMP] net-snmp package not installed. SNMP monitoring disabled. Install with: npm install net-snmp');
+    try {
+        snmp = require('path').join(__dirname, '..', 'proxy', 'node_modules', 'net-snmp');
+        snmp = require(snmp);
+    } catch (e2) {
+        console.warn('[SNMP] net-snmp package not installed. SNMP monitoring disabled. Install with: npm install net-snmp');
+    }
 }
 
 // ─── Standard MIBs (shared fallback for most brands) ───

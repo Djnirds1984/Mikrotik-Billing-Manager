@@ -1189,9 +1189,12 @@ export interface TopologySplitter extends OltSplitter {
 }
 
 export interface TopologyPonPort extends OltPonPort {
+    splitters: TopologySplitter[];
     splitter: TopologySplitter | null;
 }
 
 export interface TopologyEquipment extends NetworkEquipment {
     ponPorts: TopologyPonPort[];
+    unlinkedSplitters?: TopologySplitter[];
+    unassignedNaps?: TopologyNap[];
 }

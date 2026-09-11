@@ -1078,9 +1078,9 @@ const SnmpDashboard: React.FC<{ equipment: NetworkEquipment[] }> = ({ equipment 
                             <h4 className="font-semibold text-amber-800 dark:text-amber-300">SNMP Monitoring Not Available</h4>
                             <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">{snmpStatus.message}</p>
                             <div className="mt-3 bg-amber-100 dark:bg-amber-900/40 rounded p-3">
-                                <p className="text-xs font-mono text-amber-800 dark:text-amber-300">cd proxy && npm install net-snmp</p>
+                                <p className="text-xs font-mono text-amber-800 dark:text-amber-300">npm install net-snmp</p>
                             </div>
-                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">Without SNMP, you can still manage equipment inventory and topology. Use "Test Connection" to verify SNMP after installing.</p>
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">Run this in the project root folder (where package.json is), then restart the server. Without SNMP, you can still manage equipment inventory and topology. Use "Test Connection" to verify SNMP after installing.</p>
                         </div>
                     </div>
                 </div>
@@ -1233,15 +1233,47 @@ const NetworkTopologyPlaceholder: React.FC<{ equipment: NetworkEquipment[] }> = 
     if (loading) return <Loader />;
     if (!topology?.equipment?.length) return <div className="p-8 text-center text-slate-500">No topology data. Add equipment, PON ports, splitters, and NAPs first.</div>;
 
+    const renderNap = (nap: any, badge?: string) => (
+        <div key={nap.id} className="ml-4 border-l-2 border-purple-300 dark:border-purple-700 pl-4 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <StatusBadge status={nap.status} />
+                <span className="font-semibold">{nap.name}</span>
+                {nap.splitter_port && <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">Port {nap.splitter_port}</span>}
+                {badge && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 font-medium">{badge}</span>}
+                <OccupancyBar used={nap.used_ports} total={nap.total_ports} />
+            </div>
+            <div className="grid grid-cols-4 sm:grid-cols-8 gap-1">
+                {nap.ports?.map((port: any) => (
+                    <div key={port.id} className={`text-center p-1 rounded text-[10px] font-mono ${port.status === 'occupied' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' : port.status === 'faulty' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`} title={port.client_id ? JSON.parse(port.client_id || '{}').username || '' : 'Available'}>
+                        {port.port_number}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+
+    const renderSplitter = (spl: any, badge?: string) => (
+        <div key={spl.id} className="ml-4 border-l-2 border-green-300 dark:border-green-700 pl-4 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <StatusBadge status={spl.status} />
+                <span className="font-semibold">{spl.name}</span>
+                <span className="text-xs text-slate-500">({spl.split_ratio})</span>
+                {badge && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 font-medium">{badge}</span>}
+                <OccupancyBar used={spl.installed_ports} total={spl.max_ports} />
+            </div>
+            {spl.naps?.map((nap: any) => renderNap(nap))}
+        </div>
+    );
+
     return (
         <div className="space-y-4">
             <h3 className="text-lg font-semibold">Network Topology Tree</h3>
             {topology.equipment.map((eq: any) => (
                 <div key={eq.id} className="border border-slate-200 dark:border-slate-700 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center gap-2 mb-3 flex-wrap">
                         <StatusBadge status={eq.status} />
                         <span className="font-bold text-lg">{eq.name}</span>
-                        <span className="text-xs text-slate-500 capitalize">({eq.brand || 'unknown'} {eq.model || ''})</span>
+                        {eq.brand !== undefined && <span className="text-xs text-slate-500 capitalize">({eq.brand || 'unknown'} {eq.model || ''})</span>}
                     </div>
                     {eq.ponPorts?.map((pon: any) => (
                         <div key={pon.id} className="ml-4 border-l-2 border-blue-300 dark:border-blue-700 pl-4 mb-3">
@@ -1250,34 +1282,15 @@ const NetworkTopologyPlaceholder: React.FC<{ equipment: NetworkEquipment[] }> = 
                                 <span className="font-semibold">PON {pon.port_index}</span>
                                 {pon.port_name && <span className="text-xs text-slate-500">({pon.port_name})</span>}
                             </div>
-                            {pon.splitter && (
-                                <div className="ml-4 border-l-2 border-green-300 dark:border-green-700 pl-4 mb-2">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <StatusBadge status={pon.splitter.status} />
-                                        <span className="font-semibold">{pon.splitter.name}</span>
-                                        <span className="text-xs text-slate-500">({pon.splitter.split_ratio})</span>
-                                        <OccupancyBar used={pon.splitter.installed_ports} total={pon.splitter.max_ports} />
-                                    </div>
-                                    {pon.splitter.naps?.map((nap: any) => (
-                                        <div key={nap.id} className="ml-4 border-l-2 border-purple-300 dark:border-purple-700 pl-4 mb-2">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <StatusBadge status={nap.status} />
-                                                <span className="font-semibold">{nap.name}</span>
-                                                <OccupancyBar used={nap.used_ports} total={nap.total_ports} />
-                                            </div>
-                                            <div className="grid grid-cols-4 sm:grid-cols-8 gap-1">
-                                                {nap.ports?.map((port: any) => (
-                                                    <div key={port.id} className={`text-center p-1 rounded text-[10px] font-mono ${port.status === 'occupied' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' : port.status === 'faulty' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`} title={port.client_id ? JSON.parse(port.client_id || '{}').username || '' : 'Available'}>
-                                                        {port.port_number}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                            {(pon.splitters?.length ? pon.splitters : pon.splitter ? [pon.splitter] : []).map((spl: any) => renderSplitter(spl))}
+                            {!pon.splitters?.length && !pon.splitter && <p className="text-xs text-slate-400">No splitter connected to this PON port.</p>}
                         </div>
                     ))}
+                    {eq.ponPorts?.length === 0 && eq.id !== 'unlinked' && (
+                        <p className="text-xs text-slate-400">No PON ports configured for this equipment yet.</p>
+                    )}
+                    {eq.unlinkedSplitters?.map((spl: any) => renderSplitter(spl, 'No PON port linked'))}
+                    {eq.unassignedNaps?.map((nap: any) => renderNap(nap, 'No splitter assigned'))}
                 </div>
             ))}
         </div>
