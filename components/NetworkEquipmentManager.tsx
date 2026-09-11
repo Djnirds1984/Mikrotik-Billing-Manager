@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { NetworkEquipment, OltPonPort, OltSplitter, OltNap, OltNapPort } from '../types.ts';
 import { Loader } from './Loader.tsx';
 import { EditIcon, TrashIcon, PlusIcon, XMarkIcon, PrinterIcon } from '../constants.tsx';
@@ -856,17 +857,69 @@ const PrintableMapPreview: React.FC<{ naps: OltNap[]; equipment: NetworkEquipmen
     const usedPorts = plotted.reduce((s, n) => s + (n.used_ports || 0), 0);
     const inputCls = "w-full bg-transparent border-b border-slate-400 focus:outline-none focus:border-blue-600 text-sm text-slate-900 placeholder-slate-400 pb-0.5";
 
-    return (
-        <div className="fixed inset-0 z-[2000] overflow-auto bg-black/70 p-6">
-            <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } }`}</style>
+    const overlayRef = useRef<HTMLDivElement>(null);
+
+    const handlePrint = () => {
+        // Print captures the page from the overlay's current scroll position —
+        // always scroll back to the top so the header (company name / title) is included
+        if (overlayRef.current) overlayRef.current.scrollTop = 0;
+        setTimeout(() => window.print(), 100);
+    };
+
+    // Render via a portal to <body> so no app-shell container (fixed headers, h-screen
+    // wrappers, overflow rules) can clip or offset the document while printing
+    return createPortal(
+        <div ref={overlayRef} className="map-print-overlay fixed inset-0 z-[2000] overflow-auto bg-black/70 p-6">
+            <style>{`
+                @media print {
+                    @page { size: A4 landscape; margin: 8mm; }
+                    html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+                    /* The app content is only visibility:hidden (still occupies layout space);
+                       remove it from the print flow entirely so the document starts at page 1 */
+                    #root { display: none !important; }
+                    /* Neutralize the fixed preview overlay so the browser paginates the document normally */
+                    .map-print-overlay {
+                        position: static !important;
+                        inset: auto !important;
+                        overflow: visible !important;
+                        height: auto !important;
+                        max-height: none !important;
+                        padding: 0 !important;
+                        margin: 0 !important;
+                        background: none !important;
+                        z-index: auto !important;
+                    }
+                    /* Override the global print rule (.printable-area -> position:absolute top:0)
+                       which re-anchors the document inside the overlay and cuts off the header */
+                    .printable-area.map-print-doc {
+                        position: static !important;
+                        left: auto !important;
+                        top: auto !important;
+                        width: 100% !important;
+                        max-width: 1050px !important;
+                        margin: 0 auto !important;
+                        padding: 0 !important;
+                        box-shadow: none !important;
+                    }
+                    .map-print-doc * {
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
+                    .map-print-doc table, .map-print-doc tr,
+                    .map-print-doc .map-print-signatures {
+                        break-inside: avoid;
+                        page-break-inside: avoid;
+                    }
+                }
+            `}</style>
             <div className="no-print sticky top-0 z-10 mb-4 flex items-center justify-between bg-slate-900/90 rounded-lg px-4 py-2">
                 <p className="text-sm text-slate-200">Print preview — NAP Deployment Map for NTC / DTIP submission</p>
                 <div className="flex gap-2">
-                    <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"><PrinterIcon className="w-4 h-4" /> Print</button>
+                    <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"><PrinterIcon className="w-4 h-4" /> Print</button>
                     <button onClick={onClose} className="px-4 py-2 text-sm rounded-md text-white hover:bg-slate-700">Close</button>
                 </div>
             </div>
-            <div className="printable-area relative mx-auto bg-white text-slate-900 shadow-2xl" style={{ width: '1050px', maxWidth: '100%', padding: '32px 40px' }}>
+            <div className="printable-area map-print-doc relative mx-auto bg-white text-slate-900 shadow-2xl" style={{ width: '1050px', maxWidth: '100%', padding: '32px 40px' }}>
                 {/* Header */}
                 <div className="flex justify-between items-start border-b-2 border-slate-900 pb-3">
                     <div className="w-1/2">
@@ -962,7 +1015,7 @@ const PrintableMapPreview: React.FC<{ naps: OltNap[]; equipment: NetworkEquipmen
                     <p className="text-[10px] text-slate-500 mt-1">+ {naps.length - plotted.length} NAP{naps.length - plotted.length !== 1 ? 's' : ''} without GPS coordinates (not shown on map)</p>
                 )}
                 {/* Signature blocks */}
-                <div className="mt-10 grid grid-cols-2 gap-16 text-xs text-slate-900">
+                <div className="map-print-signatures mt-10 grid grid-cols-2 gap-16 text-xs text-slate-900">
                     <div>
                         <p className="font-semibold mb-8">Prepared by:</p>
                         <div className="border-t border-slate-900 w-56">
@@ -983,7 +1036,8 @@ const PrintableMapPreview: React.FC<{ naps: OltNap[]; equipment: NetworkEquipmen
                     Map data &copy; OpenStreetMap contributors. Coordinates are in WGS84 (decimal degrees). This document was generated by the Network Equipment module on {generatedOn}.
                 </p>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 
