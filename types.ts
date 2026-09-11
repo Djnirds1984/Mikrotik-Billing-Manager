@@ -510,6 +510,24 @@ export interface PanelHostStatus {
   temperature?: number;
   wanIp?: string;
   localIps?: { iface: string; ip: string }[];
+  cpu?: {
+    manufacturer?: string | null;
+    brand?: string | null;
+    speed?: number | null; // GHz
+    cores?: number | null;
+    physicalCores?: number | null;
+  } | null;
+  board?: {
+    manufacturer?: string | null;
+    model?: string | null;
+    version?: string | null;
+  } | null;
+  os?: {
+    platform?: string | null;
+    distro?: string | null;
+    arch?: string | null;
+    kernel?: string | null;
+  } | null;
 }
 
 export interface TelegramSettings {

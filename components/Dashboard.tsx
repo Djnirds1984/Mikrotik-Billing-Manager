@@ -433,6 +433,33 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         }
     };
 
+    // --- Hardware info for Panel Host Status card (CPU model, motherboard, OS) ---
+    const cpuModelLabel = [hostStatus?.cpu?.manufacturer, hostStatus?.cpu?.brand].filter(Boolean).join(' ');
+    const cpuDetailText = [
+        hostStatus?.cpu?.speed ? `${hostStatus.cpu.speed.toFixed(2)} GHz` : null,
+        hostStatus?.cpu?.cores ? `${hostStatus.cpu.physicalCores || '?'}C / ${hostStatus.cpu.cores}T` : null,
+    ].filter(Boolean).join(' • ');
+    const boardLabel = [hostStatus?.board?.manufacturer, hostStatus?.board?.model].filter(Boolean).join(' ');
+    const osLabel = [hostStatus?.os?.distro || hostStatus?.os?.platform, hostStatus?.os?.arch].filter(Boolean).join(' • ');
+
+    const cpuModelItem = cpuModelLabel ? (
+        <StatItem label="CPU" value={cpuModelLabel} subtext={cpuDetailText || undefined} icon={<ChipIcon className="w-4 h-4 text-slate-400" />} />
+    ) : null;
+    const cpuCoresItem = hostStatus?.cpu?.cores ? (
+        <StatItem
+            label="CPU Cores"
+            value={`${hostStatus.cpu.physicalCores || hostStatus.cpu.cores} Cores`}
+            subtext={hostStatus.cpu.physicalCores && hostStatus.cpu.physicalCores !== hostStatus.cpu.cores ? `${hostStatus.cpu.cores} Threads` : undefined}
+            icon={<ChipIcon className="w-4 h-4 text-slate-400" />}
+        />
+    ) : null;
+    const boardOsItems = (
+        <>
+            {boardLabel && <StatItem label="Motherboard" value={boardLabel} icon={<ChipIcon className="w-4 h-4 text-slate-400" />} />}
+            {osLabel && <StatItem label="Operating System" value={osLabel} />}
+        </>
+    );
+
     // --- RENDER ---
 
     if (!selectedRouter) {
@@ -444,6 +471,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         <StatItem label="CPU Usage" value={`${(hostStatus.cpuUsage || 0).toFixed(1)}%`}><ProgressBar percent={hostStatus.cpuUsage || 0} colorClass="bg-green-500" /></StatItem>
                         <StatItem label="RAM Usage" value={`${(hostStatus.memory?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.memory?.used}/${hostStatus.memory?.total})`}><ProgressBar percent={hostStatus.memory?.percent || 0} colorClass="bg-sky-500" /></StatItem>
                         <StatItem label="Disk Usage" value={`${(hostStatus.disk?.percent || 0).toFixed(1)}%`} subtext={`(${hostStatus.disk?.used}/${hostStatus.disk?.total})`}><ProgressBar percent={hostStatus.disk?.percent || 0} colorClass="bg-amber-500" /></StatItem>
+                        {cpuModelItem}
+                        {cpuCoresItem}
+                        {boardOsItems}
                         <StatItem label="WAN IP" value={hostStatus.wanIp || '—'} />
                         {hostStatus.localIps && hostStatus.localIps.length > 0 && hostStatus.localIps.map(({ iface, ip }) => (
                             <StatItem key={iface} label={`Local IP (${iface})`} value={ip} />
@@ -495,6 +525,9 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
                         {hostStatus.temperature !== undefined && hostStatus.temperature !== null && (
                              <StatItem label="Temperature" value={`${hostStatus.temperature.toFixed(1)}°C`}><ProgressBar percent={hostStatus.temperature} colorClass="bg-orange-500" /></StatItem>
                         )}
+                        {cpuModelItem}
+                        {cpuCoresItem}
+                        {boardOsItems}
                         <StatItem
                             label="WAN IP"
                             value={hostStatus.wanIp || '—'}

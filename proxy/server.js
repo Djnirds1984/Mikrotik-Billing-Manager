@@ -11371,6 +11371,53 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     let wanIpCache = { ip: null, fetchedAt: 0 };
     const WAN_IP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+    // Static hardware/host info (CPU model, motherboard, OS) — fetched once and cached,
+    // since these values never change while the server runs and host-status is polled frequently
+    let hostHardwareCache = null;
+    const sanitizeHw = (v) => {
+        if (!v || typeof v !== 'string') return null;
+        const s = v.trim();
+        if (!s) return null;
+        // Board vendors often leave placeholder strings in DMI data
+        if (/^(to be filled|default string|system (product|serial|manufacturer)|unknown|none|not (specified|available)|n\/a)$/i.test(s)) return null;
+        return s;
+    };
+    const getHostHardwareInfo = async () => {
+        if (hostHardwareCache) return hostHardwareCache;
+        try {
+            const [cpu, baseboard, system, osInfo] = await Promise.all([
+                si.cpu(),
+                si.baseboard().catch(() => ({})),
+                si.system().catch(() => ({})),
+                si.osInfo().catch(() => ({})),
+            ]);
+            hostHardwareCache = {
+                cpu: {
+                    manufacturer: sanitizeHw(cpu.manufacturer),
+                    brand: sanitizeHw(cpu.brand),
+                    speed: cpu.speed || null,             // GHz
+                    cores: cpu.cores || null,
+                    physicalCores: cpu.physicalCores || null,
+                },
+                board: {
+                    // Baseboard is the motherboard; fall back to system info (SBCs often only expose this)
+                    manufacturer: sanitizeHw(baseboard?.manufacturer) || sanitizeHw(system?.manufacturer),
+                    model: sanitizeHw(baseboard?.model) || sanitizeHw(system?.model),
+                    version: sanitizeHw(baseboard?.version),
+                },
+                os: {
+                    platform: sanitizeHw(osInfo?.platform) || process.platform,
+                    distro: sanitizeHw(osInfo?.distro),
+                    arch: sanitizeHw(osInfo?.arch) || process.arch,
+                    kernel: sanitizeHw(osInfo?.kernel),
+                },
+            };
+        } catch (err) {
+            hostHardwareCache = { cpu: null, board: null, os: null };
+        }
+        return hostHardwareCache;
+    };
+
     app.get('/api/host-status', protect, async (req, res) => {
         try {
             const cpu = await si.currentLoad();
@@ -11378,6 +11425,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const fsSize = await si.fsSize();
             // Use root volume or first available
             const disk = fsSize.find(d => d.mount === '/') || fsSize[0] || { size: 1, used: 0, use: 0 };
+            const hw = await getHostHardwareInfo();
             
             let temperature = null;
             try {
@@ -11440,6 +11488,9 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 uptime: os.uptime() + 's',
                 wanIp,
                 localIps,
+                cpu: hw.cpu,
+                board: hw.board,
+                os: hw.os,
             });
         } catch (e) {
             res.status(500).json({ message: e.message });
