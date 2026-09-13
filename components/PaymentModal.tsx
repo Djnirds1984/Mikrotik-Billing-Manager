@@ -22,7 +22,7 @@ interface PendingInvoiceEntry {
 interface PaymentModalProps {
     isOpen: boolean;
     onClose: () => void;
-    secret: PppSecret | null;
+    secret: (PppSecret & { subscription?: { plan?: string; planId?: string; planType?: string }; billingPlan?: BillingPlanWithId | null }) | null;
     plans: BillingPlanWithId[];
     nonPaymentProfile: string;
     onSave: (data: {
@@ -37,6 +37,10 @@ interface PaymentModalProps {
 export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, secret, plans, nonPaymentProfile, onSave, companySettings, preselectedMonth, routerId }) => {
     const { t, formatCurrency } = useLocalization();
     const [selectedPlanId, setSelectedPlanId] = useState('');
+    // Tracks whether the user manually changed the plan dropdown after the
+    // modal opened. When false, the modal keeps auto-syncing to the PPPoE
+    // user's own billing plan (e.g. when plans finish loading late).
+    const userTouchedPlanRef = useRef(false);
     const [discountDays, setDiscountDays] = useState('0');
     const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,6 +61,47 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     const secretRef = useRef(secret);
     secretRef.current = secret;
 
+    // Resolve which billing plan belongs to this PPPoE user.
+    // Priority: (1) enriched subscription.planId, (2) enriched billingPlan.id,
+    // (3) comment planName/plan, (4) MikroTik profile -> plan.pppoeProfile.
+    const resolveUserPlanId = (s: PaymentModalProps['secret'], list: BillingPlanWithId[]): string => {
+        if (!s || list.length === 0) return '';
+        const sub = (s as any)?.subscription as { plan?: string; planId?: string } | undefined;
+        const enrichedPlan = (s as any)?.billingPlan as BillingPlanWithId | null | undefined;
+        if (sub?.planId) {
+            const byId = list.find(p => p.id === sub.planId);
+            if (byId) return byId.id;
+        }
+        if (enrichedPlan?.id) {
+            const byEnriched = list.find(p => p.id === enrichedPlan.id);
+            if (byEnriched) return byEnriched.id;
+        }
+        let commentPlanName = '';
+        try {
+            const c = JSON.parse(String(s?.comment || '{}'));
+            commentPlanName = String(c.planName || c.plan || '').trim();
+        } catch {}
+        const subPlanName = String(sub?.plan || '').trim();
+        const wantedName = (commentPlanName || subPlanName || '').toLowerCase();
+        if (wantedName && wantedName !== 'n/a') {
+            const byName = list.find(p => String(p.name || '').toLowerCase() === wantedName);
+            if (byName) return byName.id;
+        }
+        // Fallback: many setups name the MikroTik PPP profile after the plan.
+        // Match secret.profile against plan.pppoeProfile / plan name.
+        const profileName = String(s?.profile || '').trim().toLowerCase();
+        const nonPayTags = ['non-payment', 'nonpayment', 'non_payment', 'cut', 'disable', 'disabled', 'expired', 'grace'];
+        const isNonPayProfile = nonPayTags.some(tag => profileName.includes(tag));
+        if (profileName && !isNonPayProfile) {
+            const byProfile = list.find(p =>
+                String(p.pppoeProfile || '').toLowerCase() === profileName ||
+                String(p.name || '').toLowerCase() === profileName
+            );
+            if (byProfile) return byProfile.id;
+        }
+        return '';
+    };
+
     useEffect(() => {
         if (isOpen) {
             const secret = secretRef.current;
@@ -71,9 +116,18 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             setPaymentType('CASH');
             setPendingInvoices([]);
             setSelectedInvoiceId('');
+            userTouchedPlanRef.current = false;
 
-            if (plans.length > 0) {
+            // Default to the PPPoE user's OWN billing plan — never blindly
+            // plans[0]. Only fall back to plans[0] when the user's plan
+            // cannot be resolved (e.g. plan deleted).
+            const userPlanId = resolveUserPlanId(secret, plans);
+            if (userPlanId) {
+                setSelectedPlanId(userPlanId);
+            } else if (plans.length > 0) {
                 setSelectedPlanId(plans[0].id);
+            } else {
+                setSelectedPlanId('');
             }
 
             // Detect plan type
@@ -158,14 +212,34 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
         // the parent re-rendered with recreated props.
     }, [isOpen, secret?.name, preselectedMonth, routerId]);
 
-    // If plans finish loading after the modal is already open, apply the default
-    // plan without resetting anything else (previously handled by the effect above
-    // re-running on `plans` identity change).
+    // If plans finish loading after the modal is already open, sync to the
+    // user's own plan (unless the cashier already picked one manually).
+    // Also re-syncs if a different user is opened while plans stay cached.
     useEffect(() => {
-        if (isOpen && plans.length > 0) {
-            setSelectedPlanId(prev => prev || plans[0].id);
+        if (isOpen && plans.length > 0 && !userTouchedPlanRef.current) {
+            const userPlanId = resolveUserPlanId(secretRef.current, plans);
+            if (userPlanId) {
+                setSelectedPlanId(userPlanId);
+            } else {
+                setSelectedPlanId(prev => prev || plans[0].id);
+            }
         }
-    }, [isOpen, plans]);
+    }, [isOpen, plans, secret?.name]);
+
+    // If the postpaid ledger reports a plan for the selected/unpaid month and
+    // it differs from the current dropdown, auto-correct (unless manually touched).
+    useEffect(() => {
+        if (!isOpen || userTouchedPlanRef.current || unpaidMonths.length === 0 || plans.length === 0) return;
+        const targetMonth = selectedMonth || unpaidMonths[0]?.month;
+        const entry = unpaidMonths.find(m => m.month === targetMonth) || unpaidMonths[0];
+        const wanted = String(entry?.planName || '').trim().toLowerCase();
+        if (!wanted) return;
+        const match = plans.find(p => String(p.name || '').toLowerCase() === wanted);
+        if (match && match.id !== selectedPlanId) {
+            setSelectedPlanId(match.id);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, unpaidMonths, selectedMonth, plans]);
 
     if (!isOpen || !secret) return null;
 
@@ -397,14 +471,48 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
                                 )}
 
                                 <div>
-                                    <label htmlFor="plan" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Billing Plan</label>
-                                    <select id="plan" value={selectedPlanId} onChange={(e) => setSelectedPlanId(e.target.value)} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
+                                    <label htmlFor="plan" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                                        Billing Plan
+                                        {(() => {
+                                            const userPlanId = resolveUserPlanId(secret, plans);
+                                            const isMismatch = !!userPlanId && !!selectedPlanId && userPlanId !== selectedPlanId;
+                                            // Show the user's subscribed plan as a hint so cashier can verify
+                                            const userPlan = plans.find(p => p.id === userPlanId);
+                                            return userPlan ? (
+                                                <span className={`ml-2 text-xs font-semibold ${isMismatch ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                                                    {isMismatch ? `⚠ User's plan: ${userPlan.name} (${formatCurrency(userPlan.price)})` : `✓ User's plan: ${userPlan.name}`}
+                                                </span>
+                                            ) : null;
+                                        })()}
+                                    </label>
+                                    <select id="plan" value={selectedPlanId} onChange={(e) => { userTouchedPlanRef.current = true; setSelectedPlanId(e.target.value); }} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white">
                                         {plans.map(plan => (
                                             <option key={plan.id} value={plan.id}>
                                                 {plan.name} ({formatCurrency(plan.price)})
                                             </option>
                                         ))}
                                     </select>
+                                    {(() => {
+                                        const userPlanId = resolveUserPlanId(secret, plans);
+                                        if (userPlanId && selectedPlanId && userPlanId !== selectedPlanId) {
+                                            const userPlan = plans.find(p => p.id === userPlanId);
+                                            return (
+                                                <div className="mt-2 flex items-center justify-between gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md px-2.5 py-2">
+                                                    <p className="text-xs text-red-700 dark:text-red-300 font-medium">
+                                                        Selected plan differs from {secret.customer?.fullName || secret.name}'s subscribed plan{userPlan ? ` (${userPlan.name} — ${formatCurrency(userPlan.price)})` : ''}.
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { userTouchedPlanRef.current = false; setSelectedPlanId(userPlanId); }}
+                                                        className="shrink-0 px-2 py-1 text-xs font-semibold rounded bg-red-600 text-white hover:bg-red-700"
+                                                    >
+                                                        Use user's plan
+                                                    </button>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
                                 </div>
                                 <div>
                                     <label htmlFor="paymentType" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Payment Method</label>

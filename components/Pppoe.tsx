@@ -994,6 +994,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             if (selectedPlan) {
                 secretData.profile = selectedPlan.pppoeProfile; // Set the actual profile on the secret
                 commentJson.plan = selectedPlan.name;
+                commentJson.planName = selectedPlan.name; // canonical key used by pay modal
+                commentJson.planId = selectedPlan.id; // stable key (plan names can be renamed)
                 commentJson.price = selectedPlan.price;
                 commentJson.currency = selectedPlan.currency;
             }
