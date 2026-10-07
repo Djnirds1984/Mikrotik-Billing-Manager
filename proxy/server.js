@@ -342,6 +342,7 @@ async function initDb() {
             { id: 'perm_sidebar_repair_tickets', name: 'view:sidebar:repair_tickets', description: 'View Repair Tickets' },
             { id: 'perm_sidebar_ntc_compliance', name: 'view:sidebar:ntc-compliance', description: 'View NTC Compliance' },
             { id: 'perm_sidebar_network_equipment', name: 'view:sidebar:network_equipment', description: 'View Network Equipment' },
+            { id: 'perm_sidebar_ftth_planner', name: 'view:sidebar:ftth_planner', description: 'View FTTH Planner' },
             { id: 'perm_sidebar_database', name: 'view:sidebar:database', description: 'View Database' },
             { id: 'perm_sidebar_manual_payments', name: 'view:sidebar:manual_payments', description: 'View Manual Payments' },
             { id: 'perm_sidebar_store_settings', name: 'view:sidebar:store_settings', description: 'View Store Settings' },
@@ -1012,6 +1013,34 @@ async function initDb() {
             if (!splColNames.includes('gps')) {
                 await db.exec("ALTER TABLE olt_splitters ADD COLUMN gps TEXT");
                 console.log('[Migration] \u2713 gps column added to olt_splitters');
+            }
+        } catch (_) {}
+
+        // Add pole_id to olt_splitters and olt_naps (FTTH planner link)
+        try {
+            const splCols2 = await db.all("PRAGMA table_info(olt_splitters)");
+            const splColNames2 = splCols2.map(c => c.name);
+            if (!splColNames2.includes('pole_id')) {
+                await db.exec("ALTER TABLE olt_splitters ADD COLUMN pole_id TEXT");
+                console.log('[Migration] ✓ pole_id column added to olt_splitters');
+            }
+        } catch (_) {}
+        try {
+            const napCols = await db.all("PRAGMA table_info(olt_naps)");
+            const napColNames = napCols.map(c => c.name);
+            if (!napColNames.includes('pole_id')) {
+                await db.exec("ALTER TABLE olt_naps ADD COLUMN pole_id TEXT");
+                console.log('[Migration] ✓ pole_id column added to olt_naps');
+            }
+        } catch (_) {}
+
+        // Add serial_number to electric_poles (FTTH planner)
+        try {
+            const poleCols = await db.all("PRAGMA table_info(electric_poles)");
+            const poleColNames = poleCols.map(c => c.name);
+            if (!poleColNames.includes('serial_number')) {
+                await db.exec("ALTER TABLE electric_poles ADD COLUMN serial_number TEXT");
+                console.log('[Migration] ✓ serial_number column added to electric_poles');
             }
         } catch (_) {}
 
@@ -13684,6 +13713,285 @@ WantedBy=multi-user.target`;
                 });
             }
             res.json(result);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // --- FTTH Planner: Electric Poles, Fiber Cables, Splice Closures ---
+
+    // List all electric poles
+    app.get('/api/electric-poles', protect, async (req, res) => {
+        try {
+            const { router_id } = req.query;
+            let rows;
+            if (router_id) {
+                rows = await db.all('SELECT * FROM electric_poles WHERE router_id = ? ORDER BY pole_tag', [router_id]);
+            } else {
+                rows = await db.all('SELECT * FROM electric_poles ORDER BY pole_tag');
+            }
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Add electric pole
+    app.post('/api/electric-poles', protect, async (req, res) => {
+        const { pole_tag, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url } = req.body;
+        if (!pole_tag || !gps) return res.status(400).json({ message: 'pole_tag and gps are required' });
+        try {
+            const id = genId('pole');
+            await db.run(
+                `INSERT INTO electric_poles (id, pole_tag, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                [id, pole_tag, material || 'concrete', function_type || 'intermediate', height_meters || 10, burial_depth_m || 1.6, condition || 'good', load_capacity_kg || null, gps, elevation_m || null, location || null, router_id || null, has_power_lines ? 1 : 0, has_fiber_attachment ? 1 : 0, notes || null, photo_url || null]
+            );
+            const row = await db.get('SELECT * FROM electric_poles WHERE id = ?', [id]);
+            res.json(row);
+        } catch (e) {
+            if (e.message.includes('UNIQUE constraint failed: electric_poles.pole_tag')) {
+                return res.status(409).json({ message: 'Pole tag already exists' });
+            }
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Update electric pole
+    app.put('/api/electric-poles/:id', protect, async (req, res) => {
+        const { pole_tag, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url } = req.body;
+        try {
+            await db.run(
+                `UPDATE electric_poles SET pole_tag=?, material=?, function_type=?, height_meters=?, burial_depth_m=?, condition=?, load_capacity_kg=?, gps=?, elevation_m=?, location=?, router_id=?, has_power_lines=?, has_fiber_attachment=?, notes=?, photo_url=?, updated_at=datetime('now') WHERE id=?`,
+                [pole_tag, material || 'concrete', function_type || 'intermediate', height_meters || 10, burial_depth_m || 1.6, condition || 'good', load_capacity_kg || null, gps, elevation_m || null, location || null, router_id || null, has_power_lines ? 1 : 0, has_fiber_attachment ? 1 : 0, notes || null, photo_url || null, req.params.id]
+            );
+            const row = await db.get('SELECT * FROM electric_poles WHERE id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete electric pole
+    app.delete('/api/electric-poles/:id', protect, async (req, res) => {
+        try {
+            await db.run('UPDATE splice_closures SET pole_id = NULL WHERE pole_id = ?', [req.params.id]);
+            await db.run('DELETE FROM electric_poles WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Pole deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // --- Fiber Cables ---
+
+    // List all fiber cables
+    app.get('/api/fiber-cables', protect, async (req, res) => {
+        try {
+            const { router_id } = req.query;
+            let rows;
+            if (router_id) {
+                rows = await db.all('SELECT * FROM fiber_cables WHERE router_id = ? ORDER BY cable_tag', [router_id]);
+            } else {
+                rows = await db.all('SELECT * FROM fiber_cables ORDER BY cable_tag');
+            }
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Get waypoints for a cable
+    app.get('/api/fiber-cables/:id/waypoints', protect, async (req, res) => {
+        try {
+            const rows = await db.all('SELECT * FROM cable_route_waypoints WHERE cable_id = ? ORDER BY sequence_order', [req.params.id]);
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Add fiber cable with waypoints
+    app.post('/api/fiber-cables', protect, async (req, res) => {
+        const { cable_tag, cable_type, deployment_method, fiber_count, fiber_technology, from_element_type, from_element_id, to_element_type, to_element_id, length_meters, slack_factor, router_id, notes, waypoints } = req.body;
+        if (!cable_tag || !from_element_type || !from_element_id || !to_element_type || !to_element_id) {
+            return res.status(400).json({ message: 'cable_tag, from_element_type, from_element_id, to_element_type, to_element_id are required' });
+        }
+        try {
+            const id = genId('cable');
+            await db.run(
+                `INSERT INTO fiber_cables (id, cable_tag, cable_type, deployment_method, fiber_count, fibers_used, fiber_technology, from_element_type, from_element_id, to_element_type, to_element_id, length_meters, slack_factor, router_id, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                [id, cable_tag, cable_type || 'distribution', deployment_method || 'aerial', fiber_count || 12, 0, fiber_technology || 'G.652D', from_element_type, from_element_id, to_element_type, to_element_id, length_meters || null, slack_factor || 0.05, router_id || null, notes || null]
+            );
+            if (waypoints && Array.isArray(waypoints) && waypoints.length > 0) {
+                for (let i = 0; i < waypoints.length; i++) {
+                    const wp = waypoints[i];
+                    await db.run(
+                        `INSERT INTO cable_route_waypoints (id, cable_id, sequence_order, gps, element_type, element_id, elevation_m, notes) VALUES (?,?,?,?,?,?,?,?)`,
+                        [genId('wp'), id, i + 1, wp.gps, wp.element_type || null, wp.element_id || null, wp.elevation_m || null, wp.notes || null]
+                    );
+                }
+            }
+            const row = await db.get('SELECT * FROM fiber_cables WHERE id = ?', [id]);
+            const wps = await db.all('SELECT * FROM cable_route_waypoints WHERE cable_id = ? ORDER BY sequence_order', [id]);
+            res.json({ ...row, waypoints: wps });
+        } catch (e) {
+            if (e.message.includes('UNIQUE constraint failed: fiber_cables.cable_tag')) {
+                return res.status(409).json({ message: 'Cable tag already exists' });
+            }
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Update fiber cable
+    app.put('/api/fiber-cables/:id', protect, async (req, res) => {
+        const { cable_tag, cable_type, deployment_method, fiber_count, fibers_used, fiber_technology, from_element_type, from_element_id, to_element_type, to_element_id, length_meters, slack_factor, router_id, notes } = req.body;
+        try {
+            await db.run(
+                `UPDATE fiber_cables SET cable_tag=?, cable_type=?, deployment_method=?, fiber_count=?, fibers_used=?, fiber_technology=?, from_element_type=?, from_element_id=?, to_element_type=?, to_element_id=?, length_meters=?, slack_factor=?, router_id=?, notes=?, updated_at=datetime('now') WHERE id=?`,
+                [cable_tag, cable_type || 'distribution', deployment_method || 'aerial', fiber_count || 12, fibers_used || 0, fiber_technology || 'G.652D', from_element_type, from_element_id, to_element_type, to_element_id, length_meters || null, slack_factor || 0.05, router_id || null, notes || null, req.params.id]
+            );
+            const row = await db.get('SELECT * FROM fiber_cables WHERE id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Update cable waypoints (replace all)
+    app.put('/api/fiber-cables/:id/waypoints', protect, async (req, res) => {
+        const { waypoints } = req.body;
+        try {
+            await db.run('DELETE FROM cable_route_waypoints WHERE cable_id = ?', [req.params.id]);
+            if (waypoints && Array.isArray(waypoints)) {
+                for (let i = 0; i < waypoints.length; i++) {
+                    const wp = waypoints[i];
+                    await db.run(
+                        `INSERT INTO cable_route_waypoints (id, cable_id, sequence_order, gps, element_type, element_id, elevation_m, notes) VALUES (?,?,?,?,?,?,?,?)`,
+                        [genId('wp'), req.params.id, i + 1, wp.gps, wp.element_type || null, wp.element_id || null, wp.elevation_m || null, wp.notes || null]
+                    );
+                }
+            }
+            const wps = await db.all('SELECT * FROM cable_route_waypoints WHERE cable_id = ? ORDER BY sequence_order', [req.params.id]);
+            res.json(wps);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete fiber cable
+    app.delete('/api/fiber-cables/:id', protect, async (req, res) => {
+        try {
+            await db.run('DELETE FROM cable_route_waypoints WHERE cable_id = ?', [req.params.id]);
+            await db.run('DELETE FROM splice_records WHERE input_cable_id = ? OR output_cable_id = ?', [req.params.id, req.params.id]);
+            await db.run('DELETE FROM fiber_cables WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Cable and related data deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // --- Splice Closures ---
+
+    // List all splice closures
+    app.get('/api/splice-closures', protect, async (req, res) => {
+        try {
+            const { router_id } = req.query;
+            let rows;
+            if (router_id) {
+                rows = await db.all('SELECT sc.*, ep.pole_tag FROM splice_closures sc LEFT JOIN electric_poles ep ON sc.pole_id = ep.id WHERE sc.router_id = ? ORDER BY sc.closure_tag', [router_id]);
+            } else {
+                rows = await db.all('SELECT sc.*, ep.pole_tag FROM splice_closures sc LEFT JOIN electric_poles ep ON sc.pole_id = ep.id ORDER BY sc.closure_tag');
+            }
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Add splice closure
+    app.post('/api/splice-closures', protect, async (req, res) => {
+        const { closure_tag, closure_type, fiber_count, gps, pole_id, location, router_id, notes } = req.body;
+        if (!closure_tag || !gps) return res.status(400).json({ message: 'closure_tag and gps are required' });
+        try {
+            const id = genId('splice');
+            await db.run(
+                `INSERT INTO splice_closures (id, closure_tag, closure_type, fiber_count, gps, pole_id, location, router_id, notes) VALUES (?,?,?,?,?,?,?,?,?)`,
+                [id, closure_tag, closure_type || 'aerial', fiber_count || 12, gps, pole_id || null, location || null, router_id || null, notes || null]
+            );
+            const row = await db.get('SELECT sc.*, ep.pole_tag FROM splice_closures sc LEFT JOIN electric_poles ep ON sc.pole_id = ep.id WHERE sc.id = ?', [id]);
+            res.json(row);
+        } catch (e) {
+            if (e.message.includes('UNIQUE constraint failed: splice_closures.closure_tag')) {
+                return res.status(409).json({ message: 'Closure tag already exists' });
+            }
+            res.status(500).json({ message: e.message });
+        }
+    });
+
+    // Update splice closure
+    app.put('/api/splice-closures/:id', protect, async (req, res) => {
+        const { closure_tag, closure_type, fiber_count, gps, pole_id, location, router_id, notes } = req.body;
+        try {
+            await db.run(
+                `UPDATE splice_closures SET closure_tag=?, closure_type=?, fiber_count=?, gps=?, pole_id=?, location=?, router_id=?, notes=?, updated_at=datetime('now') WHERE id=?`,
+                [closure_tag, closure_type || 'aerial', fiber_count || 12, gps, pole_id || null, location || null, router_id || null, notes || null, req.params.id]
+            );
+            const row = await db.get('SELECT sc.*, ep.pole_tag FROM splice_closures sc LEFT JOIN electric_poles ep ON sc.pole_id = ep.id WHERE sc.id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete splice closure
+    app.delete('/api/splice-closures/:id', protect, async (req, res) => {
+        try {
+            await db.run('DELETE FROM splice_records WHERE closure_id = ?', [req.params.id]);
+            await db.run('DELETE FROM splice_closures WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Closure and splice records deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // --- Splice Records ---
+
+    // List splice records for a closure
+    app.get('/api/splice-closures/:id/splices', protect, async (req, res) => {
+        try {
+            const rows = await db.all('SELECT * FROM splice_records WHERE closure_id = ? ORDER BY input_fiber_number', [req.params.id]);
+            res.json(rows);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Add splice record
+    app.post('/api/splice-records', protect, async (req, res) => {
+        const { closure_id, input_cable_id, input_fiber_number, output_cable_id, output_fiber_number, splice_loss_db, splice_type, notes } = req.body;
+        if (!closure_id || !input_fiber_number || !output_fiber_number) {
+            return res.status(400).json({ message: 'closure_id, input_fiber_number, output_fiber_number are required' });
+        }
+        try {
+            const id = genId('splicerec');
+            await db.run(
+                `INSERT INTO splice_records (id, closure_id, input_cable_id, input_fiber_number, output_cable_id, output_fiber_number, splice_loss_db, splice_type, notes) VALUES (?,?,?,?,?,?,?,?,?)`,
+                [id, closure_id, input_cable_id || null, input_fiber_number, output_cable_id || null, output_fiber_number, splice_loss_db || 0.1, splice_type || 'fusion', notes || null]
+            );
+            const row = await db.get('SELECT * FROM splice_records WHERE id = ?', [id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Update splice record
+    app.put('/api/splice-records/:id', protect, async (req, res) => {
+        const { input_cable_id, input_fiber_number, output_cable_id, output_fiber_number, splice_loss_db, splice_type, notes } = req.body;
+        try {
+            await db.run(
+                `UPDATE splice_records SET input_cable_id=?, input_fiber_number=?, output_cable_id=?, output_fiber_number=?, splice_loss_db=?, splice_type=?, notes=? WHERE id=?`,
+                [input_cable_id || null, input_fiber_number, output_cable_id || null, output_fiber_number, splice_loss_db || 0.1, splice_type || 'fusion', notes || null, req.params.id]
+            );
+            const row = await db.get('SELECT * FROM splice_records WHERE id = ?', [req.params.id]);
+            res.json(row);
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // Delete splice record
+    app.delete('/api/splice-records/:id', protect, async (req, res) => {
+        try {
+            await db.run('DELETE FROM splice_records WHERE id = ?', [req.params.id]);
+            res.json({ message: 'Splice record deleted' });
+        } catch (e) { res.status(500).json({ message: e.message }); }
+    });
+
+    // FTTH Dashboard summary
+    app.get('/api/ftth-planner/dashboard', protect, async (req, res) => {
+        try {
+            const poleCount = await db.get('SELECT COUNT(*) as total, SUM(CASE WHEN has_fiber_attachment = 1 THEN 1 ELSE 0 END) as with_fiber FROM electric_poles');
+            const cableStats = await db.get('SELECT COUNT(*) as total, SUM(length_meters) as total_length, SUM(fiber_count) as total_fibers, SUM(fibers_used) as used_fibers FROM fiber_cables');
+            const closureCount = await db.get('SELECT COUNT(*) as total FROM splice_closures');
+            const poleByMaterial = await db.all('SELECT material, COUNT(*) as count FROM electric_poles GROUP BY material');
+            const poleByCondition = await db.all('SELECT condition, COUNT(*) as count FROM electric_poles GROUP BY condition');
+            const cableByType = await db.all('SELECT cable_type, COUNT(*) as count, SUM(length_meters) as total_length FROM fiber_cables GROUP BY cable_type');
+            res.json({
+                poles: { ...poleCount, by_material: poleByMaterial, by_condition: poleByCondition },
+                cables: { ...cableStats, by_type: cableByType },
+                closures: closureCount
+            });
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 

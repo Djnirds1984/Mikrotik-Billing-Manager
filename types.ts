@@ -42,7 +42,8 @@ export type View =
   | 'job_orders'
   | 'customers'
   | 'collectibles'
-  | 'sms_admin';
+  | 'sms_admin'
+  | 'ftth_planner';
 
 export interface Notification {
   id: string;
@@ -1215,4 +1216,94 @@ export interface TopologyEquipment extends NetworkEquipment {
     ponPorts: TopologyPonPort[];
     unlinkedSplitters?: TopologySplitter[];
     unassignedNaps?: TopologyNap[];
+}
+
+// --- FTTH Planner Types ---
+
+export type PoleMaterial = 'wood' | 'concrete' | 'steel' | 'fiberglass' | 'ductile_iron';
+export type PoleFunction = 'intermediate' | 'corner' | 'anchor' | 'end' | 'branch' | 'a_frame' | 'h_frame';
+export type PoleCondition = 'good' | 'fair' | 'poor' | 'needs_replacement';
+export type CableType = 'feeder' | 'distribution' | 'drop';
+export type DeploymentMethod = 'aerial' | 'underground' | 'direct_buried';
+export type ClosureType = 'aerial' | 'underground' | 'dome';
+
+export interface ElectricPole {
+    id: string;
+    pole_tag: string;
+    serial_number?: string;
+    material: PoleMaterial;
+    function_type: PoleFunction;
+    height_meters: number;
+    burial_depth_m: number;
+    condition: PoleCondition;
+    load_capacity_kg?: number;
+    gps: string;
+    elevation_m?: number;
+    location?: string;
+    router_id?: string;
+    has_power_lines: boolean;
+    has_fiber_attachment: boolean;
+    notes?: string;
+    photo_url?: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface FiberCable {
+    id: string;
+    cable_tag: string;
+    cable_type: CableType;
+    deployment_method: DeploymentMethod;
+    fiber_count: number;
+    fibers_used: number;
+    fiber_technology: string;
+    from_element_type: string;
+    from_element_id: string;
+    to_element_type: string;
+    to_element_id: string;
+    length_meters: number;
+    slack_factor: number;
+    router_id?: string;
+    notes?: string;
+    waypoints?: CableRouteWaypoint[];
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface CableRouteWaypoint {
+    id: string;
+    cable_id: string;
+    sequence_order: number;
+    gps: string;
+    element_type?: string;
+    element_id?: string;
+    elevation_m?: number;
+    notes?: string;
+}
+
+export interface SpliceClosure {
+    id: string;
+    closure_tag: string;
+    closure_type: ClosureType;
+    fiber_count: number;
+    gps: string;
+    pole_id?: string;
+    location?: string;
+    router_id?: string;
+    notes?: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface SpliceRecord {
+    id: string;
+    closure_id: string;
+    input_cable_id?: string;
+    input_fiber_number: number;
+    output_cable_id?: string;
+    output_fiber_number: number;
+    splice_loss_db: number;
+    splice_type: 'fusion' | 'mechanical';
+    notes?: string;
+    created_at?: string;
 }

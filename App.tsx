@@ -65,6 +65,7 @@ const ExpiredPortal = React.lazy(() => import('./components/ExpiredPortal.tsx').
 const StoreSettingsPage = React.lazy(() => import('./components/StoreSettings.tsx').then(m => ({ default: m.StoreSettingsPage })));
 const NtcCompliance = React.lazy(() => import('./components/NtcCompliance.tsx').then(m => ({ default: m.NtcCompliance })));
 const NetworkEquipmentManager = React.lazy(() => import('./components/NetworkEquipmentManager.tsx').then(m => ({ default: m.NetworkEquipmentManager })));
+const FtthPlanner = React.lazy(() => import('./components/FtthPlanner.tsx').then(m => ({ default: m.FtthPlanner })));
 const DatabaseSettings = React.lazy(() => import('./components/DatabaseSettings.tsx').then(m => ({ default: m.DatabaseSettings })));
 const JobOrders = React.lazy(() => import('./components/JobOrders.tsx').then(m => ({ default: m.JobOrders })));
 const Customers = React.lazy(() => import('./components/Customers.tsx').then(m => ({ default: m.Customers })));
@@ -339,6 +340,8 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                     return <NtcCompliance />;
                   case 'network_equipment':
                     return <NetworkEquipmentManager />;
+                  case 'ftth_planner':
+                    return <FtthPlanner />;
                   case 'database':
                     return <DatabaseSettings />;
                   case 'job_orders':

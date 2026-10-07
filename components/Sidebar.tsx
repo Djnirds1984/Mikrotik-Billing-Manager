@@ -106,6 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
     { id: 'routers', label: t('sidebar.routers'), icon: <RouterIcon className="w-6 h-6" /> },
     { id: 'network', label: t('sidebar.network'), icon: <ShareIcon className="w-6 h-6" /> },
     { id: 'network_equipment', label: 'Network Equipment', icon: <NetworkEquipmentIcon className="w-6 h-6" /> },
+    { id: 'ftth_planner', label: 'FTTH Planner', icon: <ShareIcon className="w-6 h-6" /> },
     { id: 'dhcp-portal', label: t('sidebar.dhcp-portal'), icon: <ServerIcon className="w-6 h-6" /> },
     { id: 'pppoe', label: t('sidebar.pppoe'), icon: <UsersIcon className="w-6 h-6" /> },
     { id: 'customers', label: 'Customers', icon: <UsersIcon className="w-6 h-6" /> },
@@ -158,7 +159,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, c
 
   const licensedViews: View[] = [
       'dashboard', 'scripting', 'terminal', 'network', 'pppoe', 'facebook-clients', 'billing', 'sales',
-      'inventory', 'accounting', 'payroll', 'hotspot', 'mikrotik_files', 'mikrotik_backup', 'remote', 'logs', 'dhcp-portal', 'repair_tickets', 'network_equipment', 'job_orders', 'collectibles'
+      'inventory', 'accounting', 'payroll', 'hotspot', 'mikrotik_files', 'mikrotik_backup', 'remote', 'logs', 'dhcp-portal', 'repair_tickets', 'network_equipment', 'ftth_planner', 'job_orders', 'collectibles'
   ];
 
   return (
