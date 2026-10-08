@@ -313,7 +313,7 @@ export const FtthPlanner: React.FC = () => {
             const bounds = L.latLngBounds(allCoords);
             mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50] });
         }
-    }, [poles, cables, closures, showPoleLayer, showCableLayer, showClosureLayer]);
+    }, [poles, cables, closures, showPoleLayer, showCableLayer, showClosureLayer, activeTab]);
 
     const openNewPoleModal = () => {
         setEditingPole(null);
