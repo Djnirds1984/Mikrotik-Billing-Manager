@@ -447,7 +447,7 @@ export const FtthPlanner: React.FC = () => {
             }
         };
 
-        const data = { nodes: new (window as any).vis.DataSet(nodes), edges: new (window as any).vis.DataSet(edges) };
+        const data = { nodes: new DataSet(nodes), edges: new DataSet(edges) };
         networkRef.current = new Network(topologyRef.current, data, options);
 
         return () => {
