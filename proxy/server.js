@@ -371,20 +371,8 @@ async function initDb() {
             await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_collector', permId);
         }
 
-        // Grant read-only view permissions to Visitor role
-        const visitorPerms = [
-            'perm_sidebar_dashboard',
-            'perm_sidebar_notifications',
-            'perm_sidebar_customers',
-            'perm_sidebar_pppoe',
-            'perm_sidebar_dhcp_portal',
-            'perm_sidebar_billing',
-            'perm_sidebar_sales',
-            'perm_sidebar_inventory',
-            'perm_sidebar_collectibles',
-            'perm_sidebar_network_equipment',
-            'perm_sidebar_ftth_planner'
-        ];
+        // Grant read-only view permissions to Visitor role (all pages, no edit/delete)
+        const visitorPerms = sidebarPerms.map(p => p.id);
         for (const permId of visitorPerms) {
             await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_visitor', permId);
         }
@@ -414,22 +402,10 @@ async function initDb() {
         const visitorExists = await db.get("SELECT id FROM roles WHERE id = 'role_visitor'");
         if (!visitorExists) {
             await db.run("INSERT OR IGNORE INTO roles (id, name, description) VALUES (?, ?, ?)", 
-                'role_visitor', 'Visitor', 'Read-only access to view dashboards and reports');
-            const visitorNewPerms = [
-                'perm_sidebar_dashboard',
-                'perm_sidebar_notifications',
-                'perm_sidebar_customers',
-                'perm_sidebar_pppoe',
-                'perm_sidebar_dhcp_portal',
-                'perm_sidebar_billing',
-                'perm_sidebar_sales',
-                'perm_sidebar_inventory',
-                'perm_sidebar_collectibles',
-                'perm_sidebar_network_equipment',
-                'perm_sidebar_ftth_planner'
-            ];
-            for (const permId of visitorNewPerms) {
-                await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_visitor', permId);
+                'role_visitor', 'Visitor', 'Read-only access to view all pages');
+            const allSidebarPerms = await db.all("SELECT id FROM permissions WHERE name LIKE 'view:sidebar:%'");
+            for (const perm of allSidebarPerms) {
+                await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_visitor', perm.id);
             }
         }
 
