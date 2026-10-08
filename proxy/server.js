@@ -295,6 +295,7 @@ async function initDb() {
             await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_admin', 'Administrator', 'Full access to all features');
             await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_employee', 'Employee', 'Can view and process payments but cannot delete or edit users');
             await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_collector', 'Collector', 'Can access customer pages and process payments');
+            await db.run("INSERT INTO roles (id, name, description) VALUES (?, ?, ?)", 'role_visitor', 'Visitor', 'Read-only access to view dashboards and reports');
             
             await db.run("INSERT INTO permissions (id, name, description) VALUES (?, ?, ?)", 'perm_all', '*:*', 'All Permissions');
             await db.run("INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_admin', 'perm_all');
@@ -314,43 +315,44 @@ async function initDb() {
         const sidebarPerms = [
             { id: 'perm_sidebar_dashboard', name: 'view:sidebar:dashboard', description: 'View Dashboard' },
             { id: 'perm_sidebar_notifications', name: 'view:sidebar:notifications', description: 'View Notifications' },
+            { id: 'perm_sidebar_ai_assistant', name: 'view:sidebar:ai_assistant', description: 'View AI Assistant' },
             { id: 'perm_sidebar_captive_chat', name: 'view:sidebar:captive_chat', description: 'View Captive Chat' },
             { id: 'perm_sidebar_application_form', name: 'view:sidebar:application_form', description: 'View Application Form' },
             { id: 'perm_sidebar_scripting', name: 'view:sidebar:scripting', description: 'View AI Scripting' },
             { id: 'perm_sidebar_terminal', name: 'view:sidebar:terminal', description: 'View Terminal' },
             { id: 'perm_sidebar_routers', name: 'view:sidebar:routers', description: 'View Routers' },
             { id: 'perm_sidebar_network', name: 'view:sidebar:network', description: 'View Network' },
+            { id: 'perm_sidebar_network_equipment', name: 'view:sidebar:network_equipment', description: 'View Network Equipment' },
+            { id: 'perm_sidebar_ftth_planner', name: 'view:sidebar:ftth_planner', description: 'View FTTH Planner' },
             { id: 'perm_sidebar_dhcp_portal', name: 'view:sidebar:dhcp-portal', description: 'View DHCP Portal' },
             { id: 'perm_sidebar_pppoe', name: 'view:sidebar:pppoe', description: 'View PPPoE Management' },
+            { id: 'perm_sidebar_customers', name: 'view:sidebar:customers', description: 'View Customers' },
+            { id: 'perm_sidebar_facebook_clients', name: 'view:sidebar:facebook-clients', description: 'View Facebook Clients' },
             { id: 'perm_sidebar_billing', name: 'view:sidebar:billing', description: 'View Billing Plans' },
             { id: 'perm_sidebar_sales', name: 'view:sidebar:sales', description: 'View Sales Report' },
             { id: 'perm_sidebar_inventory', name: 'view:sidebar:inventory', description: 'View Inventory' },
+            { id: 'perm_sidebar_accounting', name: 'view:sidebar:accounting', description: 'View Accounting & Expenses' },
             { id: 'perm_sidebar_payroll', name: 'view:sidebar:payroll', description: 'View Payroll' },
             { id: 'perm_sidebar_hotspot', name: 'view:sidebar:hotspot', description: 'View Hotspot' },
             { id: 'perm_sidebar_remote', name: 'view:sidebar:remote', description: 'View Remote Access' },
             { id: 'perm_sidebar_mikrotik_files', name: 'view:sidebar:mikrotik_files', description: 'View Mikrotik Files' },
+            { id: 'perm_sidebar_mikrotik_backup', name: 'view:sidebar:mikrotik_backup', description: 'View MikroTik Backup' },
             { id: 'perm_sidebar_company', name: 'view:sidebar:company', description: 'View Company Settings' },
+            { id: 'perm_sidebar_ntc_compliance', name: 'view:sidebar:ntc-compliance', description: 'View NTC Compliance' },
             { id: 'perm_sidebar_system', name: 'view:sidebar:system', description: 'View System Settings' },
+            { id: 'perm_sidebar_database', name: 'view:sidebar:database', description: 'View Database' },
             { id: 'perm_sidebar_panel_roles', name: 'view:sidebar:panel_roles', description: 'View Panel Roles' },
             { id: 'perm_sidebar_client_portal_users', name: 'view:sidebar:client_portal_users', description: 'View Client Users' },
+            { id: 'perm_sidebar_repair_tickets', name: 'view:sidebar:repair_tickets', description: 'View Repair Tickets' },
+            { id: 'perm_sidebar_job_orders', name: 'view:sidebar:job_orders', description: 'View Job Orders' },
+            { id: 'perm_sidebar_manual_payments', name: 'view:sidebar:manual_payments', description: 'View Manual Payments' },
+            { id: 'perm_sidebar_collectibles', name: 'view:sidebar:collectibles', description: 'View Collectibles' },
+            { id: 'perm_sidebar_sms_admin', name: 'view:sidebar:sms_admin', description: 'SMS Management' },
+            { id: 'perm_sidebar_store_settings', name: 'view:sidebar:store_settings', description: 'View Store Settings' },
             { id: 'perm_sidebar_updater', name: 'view:sidebar:updater', description: 'View Updater' },
             { id: 'perm_sidebar_logs', name: 'view:sidebar:logs', description: 'View System Logs' },
             { id: 'perm_sidebar_license', name: 'view:sidebar:license', description: 'View License Page' },
-            { id: 'perm_sidebar_super_admin', name: 'view:sidebar:super_admin', description: 'View Super Admin' },
-            { id: 'perm_sidebar_job_orders', name: 'view:sidebar:job_orders', description: 'View Job Orders' },
-            { id: 'perm_sidebar_accounting', name: 'view:sidebar:accounting', description: 'View Accounting & Expenses' },
-            { id: 'perm_sidebar_repair_tickets', name: 'view:sidebar:repair_tickets', description: 'View Repair Tickets' },
-            { id: 'perm_sidebar_ntc_compliance', name: 'view:sidebar:ntc-compliance', description: 'View NTC Compliance' },
-            { id: 'perm_sidebar_network_equipment', name: 'view:sidebar:network_equipment', description: 'View Network Equipment' },
-            { id: 'perm_sidebar_ftth_planner', name: 'view:sidebar:ftth_planner', description: 'View FTTH Planner' },
-            { id: 'perm_sidebar_database', name: 'view:sidebar:database', description: 'View Database' },
-            { id: 'perm_sidebar_manual_payments', name: 'view:sidebar:manual_payments', description: 'View Manual Payments' },
-            { id: 'perm_sidebar_store_settings', name: 'view:sidebar:store_settings', description: 'View Store Settings' },
-            { id: 'perm_sidebar_soa', name: 'view:sidebar:soa', description: 'View Statement of Account' },
-            { id: 'perm_sidebar_facebook_clients', name: 'view:sidebar:facebook-clients', description: 'View Facebook Clients' },
-            { id: 'perm_sidebar_collectibles', name: 'view:sidebar:collectibles', description: 'View Collectibles' },
-            { id: 'perm_sidebar_customers', name: 'view:sidebar:customers', description: 'View Customers' },
-            { id: 'perm_sidebar_sms_admin', name: 'view:sidebar:sms_admin', description: 'SMS Management' }
+            { id: 'perm_sidebar_super_admin', name: 'view:sidebar:super_admin', description: 'View Super Admin' }
         ];
         for (const p of sidebarPerms) {
             await db.run("INSERT OR IGNORE INTO permissions (id, name, description) VALUES (?, ?, ?)", p.id, p.name, p.description);
@@ -367,6 +369,24 @@ async function initDb() {
         ];
         for (const permId of collectorPerms) {
             await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_collector', permId);
+        }
+
+        // Grant read-only view permissions to Visitor role
+        const visitorPerms = [
+            'perm_sidebar_dashboard',
+            'perm_sidebar_notifications',
+            'perm_sidebar_customers',
+            'perm_sidebar_pppoe',
+            'perm_sidebar_dhcp_portal',
+            'perm_sidebar_billing',
+            'perm_sidebar_sales',
+            'perm_sidebar_inventory',
+            'perm_sidebar_collectibles',
+            'perm_sidebar_network_equipment',
+            'perm_sidebar_ftth_planner'
+        ];
+        for (const permId of visitorPerms) {
+            await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_visitor', permId);
         }
 
         // Grant collectibles permission to Employee role
@@ -387,6 +407,29 @@ async function initDb() {
             ];
             for (const permId of collectorNewPerms) {
                 await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_collector', permId);
+            }
+        }
+
+        // Ensure Visitor role exists for existing deployments
+        const visitorExists = await db.get("SELECT id FROM roles WHERE id = 'role_visitor'");
+        if (!visitorExists) {
+            await db.run("INSERT OR IGNORE INTO roles (id, name, description) VALUES (?, ?, ?)", 
+                'role_visitor', 'Visitor', 'Read-only access to view dashboards and reports');
+            const visitorNewPerms = [
+                'perm_sidebar_dashboard',
+                'perm_sidebar_notifications',
+                'perm_sidebar_customers',
+                'perm_sidebar_pppoe',
+                'perm_sidebar_dhcp_portal',
+                'perm_sidebar_billing',
+                'perm_sidebar_sales',
+                'perm_sidebar_inventory',
+                'perm_sidebar_collectibles',
+                'perm_sidebar_network_equipment',
+                'perm_sidebar_ftth_planner'
+            ];
+            for (const permId of visitorNewPerms) {
+                await db.run("INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", 'role_visitor', permId);
             }
         }
 
