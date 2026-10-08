@@ -93,12 +93,14 @@ export const FtthPlanner: React.FC = () => {
     // Map
     const mapRef = useRef<HTMLDivElement>(null);
     const mapInstanceRef = useRef<L.Map | null>(null);
+    const tileLayerRef = useRef<L.TileLayer | null>(null);
     const poleLayerRef = useRef<L.LayerGroup | null>(null);
     const cableLayerRef = useRef<L.LayerGroup | null>(null);
     const closureLayerRef = useRef<L.LayerGroup | null>(null);
     const [showPoleLayer, setShowPoleLayer] = useState(true);
     const [showCableLayer, setShowCableLayer] = useState(true);
     const [showClosureLayer, setShowClosureLayer] = useState(true);
+    const [mapType, setMapType] = useState<'street' | 'satellite' | 'terrain'>('street');
     const [placingPole, setPlacingPole] = useState(false);
 
     // Topology
@@ -190,9 +192,21 @@ export const FtthPlanner: React.FC = () => {
         if (activeTab !== 'map' || !mapRef.current || mapInstanceRef.current) return;
 
         const map = L.map(mapRef.current).setView([14.5995, 120.9842], 14);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
+        
+        const tileLayers = {
+            street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri'
+            }),
+            terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenTopoMap contributors'
+            })
+        };
+
+        tileLayerRef.current = tileLayers[mapType];
+        tileLayerRef.current.addTo(map);
 
         poleLayerRef.current = L.layerGroup().addTo(map);
         cableLayerRef.current = L.layerGroup().addTo(map);
@@ -212,8 +226,30 @@ export const FtthPlanner: React.FC = () => {
         return () => {
             map.remove();
             mapInstanceRef.current = null;
+            tileLayerRef.current = null;
         };
     }, [activeTab, placingPole]);
+
+    // Update map tile layer when mapType changes
+    useEffect(() => {
+        if (!mapInstanceRef.current || !tileLayerRef.current) return;
+
+        const tileLayers = {
+            street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri'
+            }),
+            terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenTopoMap contributors'
+            })
+        };
+
+        mapInstanceRef.current.removeLayer(tileLayerRef.current);
+        tileLayerRef.current = tileLayers[mapType];
+        tileLayerRef.current.addTo(mapInstanceRef.current);
+    }, [mapType]);
 
     // Update map layers when data changes
     useEffect(() => {
@@ -715,8 +751,18 @@ export const FtthPlanner: React.FC = () => {
                             <input type="checkbox" checked={showClosureLayer} onChange={() => setShowClosureLayer(!showClosureLayer)} className="rounded" />
                             <span className="w-3 h-3 rounded-full bg-yellow-400 inline-block"></span> Splice Closures
                         </label>
-                        <div className="ml-auto text-xs text-gray-400">
-                            {poles.length} poles | {cables.length} cables | {closures.length} closures
+                        <div className="ml-auto flex items-center gap-4">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Map:</span>
+                                <select value={mapType} onChange={e => setMapType(e.target.value as 'street' | 'satellite' | 'terrain')} className="px-2 py-1 text-sm border border-gray-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
+                                    <option value="street">Street</option>
+                                    <option value="satellite">Satellite</option>
+                                    <option value="terrain">Terrain</option>
+                                </select>
+                            </div>
+                            <div className="text-xs text-gray-400">
+                                {poles.length} poles | {cables.length} cables | {closures.length} closures
+                            </div>
                         </div>
                     </div>
                     <div ref={mapRef} className="w-full h-[600px] rounded-lg shadow" style={{ zIndex: 0 }}></div>

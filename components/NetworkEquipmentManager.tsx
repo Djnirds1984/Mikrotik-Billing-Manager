@@ -565,8 +565,10 @@ export const NetworkEquipmentManager: React.FC = () => {
 const NapMap: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitters: OltSplitter[] }> = ({ naps, equipment, splitters }) => {
     const mapRef = useRef<HTMLDivElement>(null);
     const mapInstanceRef = useRef<L.Map | null>(null);
+    const tileLayerRef = useRef<L.TileLayer | null>(null);
     const [napsWithGps, setNapsWithGps] = useState<Array<OltNap & { lat: number; lng: number }>>([]);
     const [showPrintable, setShowPrintable] = useState(false);
+    const [mapType, setMapType] = useState<'street' | 'satellite' | 'terrain'>('street');
 
     const oltsWithGps = equipment.filter(eq => eq.gps && parseGpsCoords(eq.gps)).map(eq => ({ ...eq, coords: parseGpsCoords(eq.gps)! }));
     const splittersWithGps = splitters.filter(s => s.gps && parseGpsCoords(s.gps)).map(s => ({ ...s, coords: parseGpsCoords(s.gps)! }));
@@ -593,10 +595,24 @@ const NapMap: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitter
         // Create map if it doesn't exist
         if (!mapInstanceRef.current) {
             mapInstanceRef.current = L.map(mapRef.current).setView([14.5995, 120.9842], 12); // Default: Manila
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-                maxZoom: 19
-            }).addTo(mapInstanceRef.current);
+            
+            const tileLayers = {
+                street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                    maxZoom: 19
+                }),
+                satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri',
+                    maxZoom: 19
+                }),
+                terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenTopoMap contributors',
+                    maxZoom: 17
+                })
+            };
+
+            tileLayerRef.current = tileLayers[mapType];
+            tileLayerRef.current.addTo(mapInstanceRef.current);
         }
 
         const map = mapInstanceRef.current;
@@ -688,6 +704,30 @@ const NapMap: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitter
         setTimeout(() => map.invalidateSize(), 100);
     }, [napsWithGps, oltsWithGps, splittersWithGps]);
 
+    // Update map tile layer when mapType changes
+    useEffect(() => {
+        if (!mapInstanceRef.current || !tileLayerRef.current) return;
+
+        const tileLayers = {
+            street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                maxZoom: 19
+            }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri',
+                maxZoom: 19
+            }),
+            terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenTopoMap contributors',
+                maxZoom: 17
+            })
+        };
+
+        mapInstanceRef.current.removeLayer(tileLayerRef.current);
+        tileLayerRef.current = tileLayers[mapType];
+        tileLayerRef.current.addTo(mapInstanceRef.current);
+    }, [mapType]);
+
     // Cleanup on unmount
     useEffect(() => {
         return () => {
@@ -711,6 +751,14 @@ const NapMap: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitter
                         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-500 inline-block"></span> Active NAP</span>
                         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-yellow-500 inline-block"></span> Maintenance</span>
                         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-gray-500 inline-block"></span> Inactive</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Map:</span>
+                        <select value={mapType} onChange={e => setMapType(e.target.value as 'street' | 'satellite' | 'terrain')} className="px-2 py-1 text-sm border border-gray-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
+                            <option value="street">Street</option>
+                            <option value="satellite">Satellite</option>
+                            <option value="terrain">Terrain</option>
+                        </select>
                     </div>
                     <button onClick={() => setShowPrintable(true)} className="no-print flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                         <PrinterIcon className="w-4 h-4" /> Print Map
