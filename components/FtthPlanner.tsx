@@ -249,29 +249,36 @@ export const FtthPlanner: React.FC = () => {
             cableLayerRef.current.clearLayers();
             if (showCableLayer) {
                 cables.forEach(cable => {
-                    const fromPole = poles.find(p => p.id === cable.from_element_id);
-                    const toPole = poles.find(p => p.id === cable.to_element_id);
-                    if (fromPole && toPole) {
-                        const fromCoords = parseGps(fromPole.gps);
-                        const toCoords = parseGps(toPole.gps);
-                        if (fromCoords && toCoords) {
-                            const color = CABLE_TYPE_COLORS[cable.cable_type] || '#3B82F6';
-                            const polyline = L.polyline([fromCoords, toCoords], {
-                                color,
-                                weight: cable.cable_type === 'feeder' ? 4 : cable.cable_type === 'distribution' ? 3 : 2,
-                                dashArray: cable.deployment_method === 'underground' ? '8,4' : undefined
-                            }).addTo(cableLayerRef.current!);
-                            polyline.bindTooltip(`${cable.cable_tag} (${cable.cable_type})`, { permanent: false });
-                            polyline.bindPopup(`
-                                <div style="min-width:200px">
-                                    <b>${cable.cable_tag}</b><br/>
-                                    Type: ${cable.cable_type}<br/>
-                                    Method: ${cable.deployment_method}<br/>
-                                    Fibers: ${cable.fiber_count} (${cable.fibers_used} used)<br/>
-                                    Length: ${cable.length_meters ? cable.length_meters.toFixed(0) + 'm' : 'N/A'}
-                                </div>
-                            `);
+                    const resolveCoords = (type: string, id: string): [number, number] | null => {
+                        if (type === 'pole') {
+                            const el = poles.find(p => p.id === id);
+                            return el ? parseGps(el.gps) : null;
                         }
+                        if (type === 'splice_closure') {
+                            const el = closures.find(c => c.id === id);
+                            return el ? parseGps(el.gps) : null;
+                        }
+                        return null;
+                    };
+                    const fromCoords = resolveCoords(cable.from_element_type, cable.from_element_id);
+                    const toCoords = resolveCoords(cable.to_element_type, cable.to_element_id);
+                    if (fromCoords && toCoords) {
+                        const color = CABLE_TYPE_COLORS[cable.cable_type] || '#3B82F6';
+                        const polyline = L.polyline([fromCoords, toCoords], {
+                            color,
+                            weight: cable.cable_type === 'feeder' ? 4 : cable.cable_type === 'distribution' ? 3 : 2,
+                            dashArray: cable.deployment_method === 'underground' ? '8,4' : undefined
+                        }).addTo(cableLayerRef.current!);
+                        polyline.bindTooltip(`${cable.cable_tag} (${cable.cable_type})`, { permanent: false });
+                        polyline.bindPopup(`
+                            <div style="min-width:200px">
+                                <b>${cable.cable_tag}</b><br/>
+                                Type: ${cable.cable_type}<br/>
+                                Method: ${cable.deployment_method}<br/>
+                                Fibers: ${cable.fiber_count} (${cable.fibers_used} used)<br/>
+                                Length: ${cable.length_meters ? cable.length_meters.toFixed(0) + 'm' : 'N/A'}
+                            </div>
+                        `);
                     }
                 });
             }
@@ -671,8 +678,11 @@ export const FtthPlanner: React.FC = () => {
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
                                 {filteredCables.map(cable => {
-                                    const fromPole = poles.find(p => p.id === cable.from_element_id);
-                                    const toPole = poles.find(p => p.id === cable.to_element_id);
+                                    const resolveName = (type: string, id: string) => {
+                                        if (type === 'pole') return poles.find(p => p.id === id)?.pole_tag;
+                                        if (type === 'splice_closure') return closures.find(c => c.id === id)?.closure_tag;
+                                        return id.slice(0, 8);
+                                    };
                                     return (
                                         <tr key={cable.id} className="hover:bg-gray-50 dark:hover:bg-slate-750">
                                             <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{cable.cable_tag}</td>
@@ -687,7 +697,7 @@ export const FtthPlanner: React.FC = () => {
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{cable.fiber_technology}</td>
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{cable.length_meters ? `${cable.length_meters.toFixed(0)}m` : '-'}</td>
                                             <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
-                                                {fromPole?.pole_tag || cable.from_element_id.slice(0, 8)} → {toPole?.pole_tag || cable.to_element_id.slice(0, 8)}
+                                                {resolveName(cable.from_element_type, cable.from_element_id) || cable.from_element_id.slice(0, 8)} → {resolveName(cable.to_element_type, cable.to_element_id) || cable.to_element_id.slice(0, 8)}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex gap-2">
@@ -884,10 +894,8 @@ export const FtthPlanner: React.FC = () => {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Element Type</label>
-                                    <select value={cableForm.from_element_type || 'pole'} onChange={e => setCableForm({ ...cableForm, from_element_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
+                                    <select value={cableForm.from_element_type || 'pole'} onChange={e => setCableForm({ ...cableForm, from_element_type: e.target.value, from_element_id: '' })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
                                         <option value="pole">Pole</option>
-                                        <option value="olt">OLT</option>
-                                        <option value="splitter">Splitter</option>
                                         <option value="splice_closure">Splice Closure</option>
                                     </select>
                                 </div>
@@ -895,15 +903,13 @@ export const FtthPlanner: React.FC = () => {
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Element</label>
                                     <select value={cableForm.from_element_id || ''} onChange={e => setCableForm({ ...cableForm, from_element_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
                                         <option value="">Select...</option>
-                                        {poles.map(p => <option key={p.id} value={p.id}>{p.pole_tag}</option>)}
+                                        {(cableForm.from_element_type === 'splice_closure' ? closures : poles).map(p => <option key={p.id} value={p.id}>{'pole_tag' in p ? p.pole_tag : p.closure_tag}</option>)}
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Element Type</label>
-                                    <select value={cableForm.to_element_type || 'pole'} onChange={e => setCableForm({ ...cableForm, to_element_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
+                                    <select value={cableForm.to_element_type || 'pole'} onChange={e => setCableForm({ ...cableForm, to_element_type: e.target.value, to_element_id: '' })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
                                         <option value="pole">Pole</option>
-                                        <option value="olt">OLT</option>
-                                        <option value="splitter">Splitter</option>
                                         <option value="splice_closure">Splice Closure</option>
                                     </select>
                                 </div>
@@ -911,7 +917,7 @@ export const FtthPlanner: React.FC = () => {
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Element</label>
                                     <select value={cableForm.to_element_id || ''} onChange={e => setCableForm({ ...cableForm, to_element_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
                                         <option value="">Select...</option>
-                                        {poles.map(p => <option key={p.id} value={p.id}>{p.pole_tag}</option>)}
+                                        {(cableForm.to_element_type === 'splice_closure' ? closures : poles).map(p => <option key={p.id} value={p.id}>{'pole_tag' in p ? p.pole_tag : p.closure_tag}</option>)}
                                     </select>
                                 </div>
                             </div>
