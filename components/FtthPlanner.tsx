@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Network, Options } from 'vis-network/standalone';
+import { DataSet } from 'vis-data';
 import 'vis-network/styles/vis-network.css';
 import { PlusIcon, EditIcon, TrashIcon, SearchIcon, XMarkIcon, CogIcon, ServerIcon, ShareIcon, CheckCircleIcon, ExclamationTriangleIcon } from '../constants';
 import type { ElectricPole, FiberCable, SpliceClosure, PoleMaterial, PoleFunction, PoleCondition, CableType, DeploymentMethod, ClosureType } from '../types';
@@ -285,6 +286,17 @@ export const FtthPlanner: React.FC = () => {
                                 Length: ${cable.length_meters ? cable.length_meters.toFixed(0) + 'm' : 'N/A'}
                             </div>
                         `);
+                    } else {
+                        console.warn(`Cable ${cable.cable_tag} cannot be rendered:`, {
+                            fromType: cable.from_element_type,
+                            fromId: cable.from_element_id,
+                            fromResolved: !!fromCoords,
+                            toType: cable.to_element_type,
+                            toId: cable.to_element_id,
+                            toResolved: !!toCoords,
+                            availablePoles: poles.map(p => p.id),
+                            availableClosures: closures.map(c => c.id)
+                        });
                     }
                 });
             }
@@ -806,11 +818,21 @@ export const FtthPlanner: React.FC = () => {
                                     const resolveName = (type: string, id: string) => {
                                         if (type === 'pole') return poles.find(p => p.id === id)?.pole_tag;
                                         if (type === 'splice_closure') return closures.find(c => c.id === id)?.closure_tag;
-                                        return id.slice(0, 8);
+                                        return null;
                                     };
+                                    const fromName = resolveName(cable.from_element_type, cable.from_element_id);
+                                    const toName = resolveName(cable.to_element_type, cable.to_element_id);
+                                    const hasBrokenEndpoint = !fromName || !toName;
                                     return (
-                                        <tr key={cable.id} className="hover:bg-gray-50 dark:hover:bg-slate-750">
-                                            <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{cable.cable_tag}</td>
+                                        <tr key={cable.id} className={`hover:bg-gray-50 dark:hover:bg-slate-750 ${hasBrokenEndpoint ? 'bg-orange-50 dark:bg-orange-900/10' : ''}`}>
+                                            <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                                                <div className="flex items-center gap-1">
+                                                    {cable.cable_tag}
+                                                    {hasBrokenEndpoint && (
+                                                        <ExclamationTriangleIcon className="w-4 h-4 text-orange-500" title="Cable endpoints not found - cannot render on map" />
+                                                    )}
+                                                </div>
+                                            </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-2">
                                                     <div className="w-3 h-3 rounded" style={{ background: CABLE_TYPE_COLORS[cable.cable_type] }}></div>
@@ -821,8 +843,14 @@ export const FtthPlanner: React.FC = () => {
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{cable.fibers_used}/{cable.fiber_count}</td>
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{cable.fiber_technology}</td>
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{cable.length_meters ? `${cable.length_meters.toFixed(0)}m` : '-'}</td>
-                                            <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
-                                                {resolveName(cable.from_element_type, cable.from_element_id) || cable.from_element_id.slice(0, 8)} → {resolveName(cable.to_element_type, cable.to_element_id) || cable.to_element_id.slice(0, 8)}
+                                            <td className="px-4 py-3 text-xs">
+                                                <span className={fromName ? 'text-gray-500 dark:text-gray-400' : 'text-orange-500 font-medium'}>
+                                                    {fromName || `${cable.from_element_type}:${cable.from_element_id.slice(0, 8)}`}
+                                                </span>
+                                                {' → '}
+                                                <span className={toName ? 'text-gray-500 dark:text-gray-400' : 'text-orange-500 font-medium'}>
+                                                    {toName || `${cable.to_element_type}:${cable.to_element_id.slice(0, 8)}`}
+                                                </span>
                                             </td>
                                             <td className="px-4 py-3">
                                                 <div className="flex gap-2">
