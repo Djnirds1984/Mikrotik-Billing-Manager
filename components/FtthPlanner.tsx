@@ -94,6 +94,7 @@ export const FtthPlanner: React.FC = () => {
     const mapRef = useRef<HTMLDivElement>(null);
     const mapInstanceRef = useRef<L.Map | null>(null);
     const tileLayerRef = useRef<L.TileLayer | null>(null);
+    const hasFittedBoundsRef = useRef(false);
     const poleLayerRef = useRef<L.LayerGroup | null>(null);
     const cableLayerRef = useRef<L.LayerGroup | null>(null);
     const closureLayerRef = useRef<L.LayerGroup | null>(null);
@@ -366,13 +367,14 @@ export const FtthPlanner: React.FC = () => {
             }
         }
 
-        // Fit bounds if we have data
+        // Fit bounds if we have data (only on initial load)
         const allCoords: [number, number][] = [];
         poles.forEach(p => { const c = parseGps(p.gps); if (c) allCoords.push(c); });
         closures.forEach(c => { const c2 = parseGps(c.gps); if (c2) allCoords.push(c2); });
-        if (allCoords.length > 0 && mapInstanceRef.current) {
+        if (allCoords.length > 0 && mapInstanceRef.current && !hasFittedBoundsRef.current) {
             const bounds = L.latLngBounds(allCoords);
             mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50] });
+            hasFittedBoundsRef.current = true;
         }
     }, [poles, cables, closures, showPoleLayer, showCableLayer, showClosureLayer, activeTab]);
 

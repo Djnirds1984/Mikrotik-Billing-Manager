@@ -566,6 +566,7 @@ const NapMap: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitter
     const mapRef = useRef<HTMLDivElement>(null);
     const mapInstanceRef = useRef<L.Map | null>(null);
     const tileLayerRef = useRef<L.TileLayer | null>(null);
+    const hasFittedBoundsRef = useRef(false);
     const [napsWithGps, setNapsWithGps] = useState<Array<OltNap & { lat: number; lng: number }>>([]);
     const [showPrintable, setShowPrintable] = useState(false);
     const [mapType, setMapType] = useState<'street' | 'satellite' | 'terrain'>('street');
@@ -696,8 +697,9 @@ const NapMap: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitter
             boundsAll.push(...(bounds as L.LatLngExpression[]));
         }
 
-        if (boundsAll.length > 0) {
+        if (boundsAll.length > 0 && !hasFittedBoundsRef.current) {
             map.fitBounds(boundsAll as L.LatLngBoundsExpression, { padding: [50, 50], maxZoom: 15 });
+            hasFittedBoundsRef.current = true;
         }
 
         // Force a resize after a short delay to fix rendering issues
