@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { Network, Options } from 'vis-network/standalone';
+import 'vis-network/styles/vis-network.css';
 import { PlusIcon, EditIcon, TrashIcon, SearchIcon, XMarkIcon, CogIcon, ServerIcon, ShareIcon, CheckCircleIcon, ExclamationTriangleIcon } from '../constants';
 import type { ElectricPole, FiberCable, SpliceClosure, PoleMaterial, PoleFunction, PoleCondition, CableType, DeploymentMethod, ClosureType } from '../types';
 
 const authHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` });
 
-type Tab = 'dashboard' | 'map' | 'poles' | 'cables' | 'splices';
+type Tab = 'dashboard' | 'map' | 'poles' | 'cables' | 'splices' | 'topology';
 
 const POLE_MATERIALS: PoleMaterial[] = ['wood', 'concrete', 'steel', 'fiberglass', 'ductile_iron'];
 const POLE_FUNCTIONS: PoleFunction[] = ['intermediate', 'corner', 'anchor', 'end', 'branch', 'a_frame', 'h_frame'];
@@ -97,6 +99,10 @@ export const FtthPlanner: React.FC = () => {
     const [showCableLayer, setShowCableLayer] = useState(true);
     const [showClosureLayer, setShowClosureLayer] = useState(true);
     const [placingPole, setPlacingPole] = useState(false);
+
+    // Topology
+    const topologyRef = useRef<HTMLDivElement>(null);
+    const networkRef = useRef<Network | null>(null);
 
     // Fetch all data
     const fetchData = useCallback(async () => {
@@ -322,6 +328,124 @@ export const FtthPlanner: React.FC = () => {
         }
     }, [poles, cables, closures, showPoleLayer, showCableLayer, showClosureLayer, activeTab]);
 
+    // Topology visualization
+    useEffect(() => {
+        if (activeTab !== 'topology' || !topologyRef.current) return;
+
+        // Destroy existing network
+        if (networkRef.current) {
+            networkRef.current.destroy();
+            networkRef.current = null;
+        }
+
+        if (poles.length === 0 && closures.length === 0) return;
+
+        const nodes: any[] = [];
+        const edges: any[] = [];
+
+        // Add poles as nodes
+        poles.forEach(pole => {
+            nodes.push({
+                id: `pole_${pole.id}`,
+                label: pole.pole_tag,
+                shape: 'box',
+                color: {
+                    background: POLE_MATERIAL_COLORS[pole.material] || '#808080',
+                    border: '#333',
+                    highlight: { background: POLE_MATERIAL_COLORS[pole.material] || '#808080', border: '#000' }
+                },
+                font: { color: '#fff', size: 10 },
+                size: 20,
+                title: `<b>${pole.pole_tag}</b><br/>Serial: ${pole.serial_number || 'N/A'}<br/>Material: ${pole.material}<br/>Type: ${pole.function_type}<br/>Condition: ${pole.condition}`
+            });
+        });
+
+        // Add closures as nodes
+        closures.forEach(closure => {
+            nodes.push({
+                id: `closure_${closure.id}`,
+                label: closure.closure_tag,
+                shape: 'dot',
+                color: {
+                    background: '#FBBF24',
+                    border: '#92400E',
+                    highlight: { background: '#FCD34D', border: '#92400E' }
+                },
+                size: 15,
+                title: `<b>${closure.closure_tag}</b><br/>Type: ${closure.closure_type}<br/>Fibers: ${closure.fiber_count}`
+            });
+        });
+
+        // Add cables as edges
+        cables.forEach(cable => {
+            const fromId = `${cable.from_element_type === 'splice_closure' ? 'closure' : 'pole'}_${cable.from_element_id}`;
+            const toId = `${cable.to_element_type === 'splice_closure' ? 'closure' : 'pole'}_${cable.to_element_id}`;
+            
+            // Only add edge if both nodes exist
+            const fromNode = nodes.find(n => n.id === fromId);
+            const toNode = nodes.find(n => n.id === toId);
+            
+            if (fromNode && toNode) {
+                edges.push({
+                    from: fromId,
+                    to: toId,
+                    color: {
+                        color: CABLE_TYPE_COLORS[cable.cable_type] || '#3B82F6',
+                        highlight: CABLE_TYPE_COLORS[cable.cable_type] || '#3B82F6',
+                        hover: CABLE_TYPE_COLORS[cable.cable_type] || '#3B82F6'
+                    },
+                    width: cable.cable_type === 'feeder' ? 3 : cable.cable_type === 'distribution' ? 2 : 1,
+                    dashes: cable.deployment_method === 'underground',
+                    title: `<b>${cable.cable_tag}</b><br/>Type: ${cable.cable_type}<br/>Method: ${cable.deployment_method}<br/>Fibers: ${cable.fiber_count} (${cable.fibers_used} used)<br/>Length: ${cable.length_meters ? cable.length_meters.toFixed(0) + 'm' : 'N/A'}`,
+                    label: cable.cable_tag
+                });
+            }
+        });
+
+        const options: Options = {
+            nodes: {
+                borderWidth: 2,
+                shadow: true
+            },
+            edges: {
+                smooth: {
+                    type: 'continuous',
+                    roundness: 0.5
+                },
+                shadow: true
+            },
+            physics: {
+                enabled: true,
+                barnesHut: {
+                    gravitationalConstant: -3000,
+                    centralGravity: 0.3,
+                    springLength: 150,
+                    springConstant: 0.04,
+                    damping: 0.09
+                },
+                stabilization: {
+                    iterations: 200
+                }
+            },
+            interaction: {
+                hover: true,
+                tooltipDelay: 200,
+                navigationButtons: true,
+                keyboard: true
+            }
+        };
+
+        const data = { nodes: new (window as any).vis.DataSet(nodes), edges: new (window as any).vis.DataSet(edges) };
+        networkRef.current = new Network(topologyRef.current, data, options);
+
+        return () => {
+            if (networkRef.current) {
+                networkRef.current.destroy();
+                networkRef.current = null;
+            }
+        };
+    }, [poles, cables, closures, activeTab]);
+
     const openNewPoleModal = () => {
         setEditingPole(null);
         setPoleForm({
@@ -443,6 +567,7 @@ export const FtthPlanner: React.FC = () => {
                 {([
                     { id: 'dashboard', label: 'Dashboard', icon: <ServerIcon className="w-4 h-4" /> },
                     { id: 'map', label: 'Map', icon: <ShareIcon className="w-4 h-4" /> },
+                    { id: 'topology', label: 'Topology', icon: <ShareIcon className="w-4 h-4" /> },
                     { id: 'poles', label: 'Poles', icon: <CogIcon className="w-4 h-4" /> },
                     { id: 'cables', label: 'Cables', icon: <ShareIcon className="w-4 h-4" /> },
                     { id: 'splices', label: 'Splices', icon: <ShareIcon className="w-4 h-4" /> }
@@ -765,6 +890,25 @@ export const FtthPlanner: React.FC = () => {
                                 )}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Topology Tab */}
+            {activeTab === 'topology' && (
+                <div className="space-y-4">
+                    <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Network Topology</h3>
+                            <div className="flex gap-4 text-sm">
+                                <span className="flex items-center gap-2"><span className="w-3 h-3 rounded" style={{ background: '#808080' }}></span> Pole</span>
+                                <span className="flex items-center gap-2"><span className="w-3 h-3 rounded-full" style={{ background: '#FBBF24' }}></span> Closure</span>
+                                <span className="flex items-center gap-2"><span className="w-3 h-1" style={{ background: '#3B82F6' }}></span> Feeder</span>
+                                <span className="flex items-center gap-2"><span className="w-3 h-1" style={{ background: '#10B981' }}></span> Distribution</span>
+                                <span className="flex items-center gap-2"><span className="w-3 h-1" style={{ background: '#EF4444' }}></span> Drop</span>
+                            </div>
+                        </div>
+                        <div ref={topologyRef} className="w-full h-[600px] border border-gray-200 dark:border-slate-700 rounded-lg"></div>
                     </div>
                 </div>
             )}
