@@ -601,9 +601,9 @@ const NapMap: React.FC<{ naps: OltNap[]; equipment: NetworkEquipment[]; splitter
                     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
                     maxZoom: 19
                 }),
-                satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                    attribution: 'Tiles &copy; Esri',
-                    maxZoom: 19
+                satellite: L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                    attribution: 'Tiles &copy; Google',
+                    maxZoom: 20
                 }),
                 terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
                     attribution: '&copy; OpenTopoMap contributors',
