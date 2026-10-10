@@ -13753,13 +13753,13 @@ WantedBy=multi-user.target`;
 
     // Add electric pole
     app.post('/api/electric-poles', protect, async (req, res) => {
-        const { pole_tag, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url } = req.body;
+        const { pole_tag, serial_number, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url } = req.body;
         if (!pole_tag || !gps) return res.status(400).json({ message: 'pole_tag and gps are required' });
         try {
             const id = genId('pole');
             await db.run(
-                `INSERT INTO electric_poles (id, pole_tag, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-                [id, pole_tag, material || 'concrete', function_type || 'intermediate', height_meters || 10, burial_depth_m || 1.6, condition || 'good', load_capacity_kg || null, gps, elevation_m || null, location || null, router_id || null, has_power_lines ? 1 : 0, has_fiber_attachment ? 1 : 0, notes || null, photo_url || null]
+                `INSERT INTO electric_poles (id, pole_tag, serial_number, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                [id, pole_tag, serial_number || null, material || 'concrete', function_type || 'intermediate', height_meters || 10, burial_depth_m || 1.6, condition || 'good', load_capacity_kg || null, gps, elevation_m || null, location || null, router_id || null, has_power_lines ? 1 : 0, has_fiber_attachment ? 1 : 0, notes || null, photo_url || null]
             );
             const row = await db.get('SELECT * FROM electric_poles WHERE id = ?', [id]);
             res.json(row);
@@ -13773,11 +13773,11 @@ WantedBy=multi-user.target`;
 
     // Update electric pole
     app.put('/api/electric-poles/:id', protect, async (req, res) => {
-        const { pole_tag, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url } = req.body;
+        const { pole_tag, serial_number, material, function_type, height_meters, burial_depth_m, condition, load_capacity_kg, gps, elevation_m, location, router_id, has_power_lines, has_fiber_attachment, notes, photo_url } = req.body;
         try {
             await db.run(
-                `UPDATE electric_poles SET pole_tag=?, material=?, function_type=?, height_meters=?, burial_depth_m=?, condition=?, load_capacity_kg=?, gps=?, elevation_m=?, location=?, router_id=?, has_power_lines=?, has_fiber_attachment=?, notes=?, photo_url=?, updated_at=datetime('now') WHERE id=?`,
-                [pole_tag, material || 'concrete', function_type || 'intermediate', height_meters || 10, burial_depth_m || 1.6, condition || 'good', load_capacity_kg || null, gps, elevation_m || null, location || null, router_id || null, has_power_lines ? 1 : 0, has_fiber_attachment ? 1 : 0, notes || null, photo_url || null, req.params.id]
+                `UPDATE electric_poles SET pole_tag=?, serial_number=?, material=?, function_type=?, height_meters=?, burial_depth_m=?, condition=?, load_capacity_kg=?, gps=?, elevation_m=?, location=?, router_id=?, has_power_lines=?, has_fiber_attachment=?, notes=?, photo_url=?, updated_at=datetime('now') WHERE id=?`,
+                [pole_tag, serial_number || null, material || 'concrete', function_type || 'intermediate', height_meters || 10, burial_depth_m || 1.6, condition || 'good', load_capacity_kg || null, gps, elevation_m || null, location || null, router_id || null, has_power_lines ? 1 : 0, has_fiber_attachment ? 1 : 0, notes || null, photo_url || null, req.params.id]
             );
             const row = await db.get('SELECT * FROM electric_poles WHERE id = ?', [req.params.id]);
             res.json(row);
