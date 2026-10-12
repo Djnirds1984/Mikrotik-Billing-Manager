@@ -84,6 +84,8 @@ export const FtthPlanner: React.FC = () => {
     const [showCableModal, setShowCableModal] = useState(false);
     const [editingCable, setEditingCable] = useState<FiberCable | null>(null);
     const [cableForm, setCableForm] = useState<Partial<FiberCable>>({});
+    const [fromElementSearch, setFromElementSearch] = useState('');
+    const [toElementSearch, setToElementSearch] = useState('');
 
     // Closure modal
     const [showClosureModal, setShowClosureModal] = useState(false);
@@ -1114,30 +1116,64 @@ export const FtthPlanner: React.FC = () => {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Element Type</label>
-                                    <select value={cableForm.from_element_type || 'pole'} onChange={e => setCableForm({ ...cableForm, from_element_type: e.target.value, from_element_id: '' })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
+                                    <select value={cableForm.from_element_type || 'pole'} onChange={e => { setCableForm({ ...cableForm, from_element_type: e.target.value, from_element_id: '' }); setFromElementSearch(''); }} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
                                         <option value="pole">Pole</option>
                                         <option value="splice_closure">Splice Closure</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Element</label>
-                                    <select value={cableForm.from_element_id || ''} onChange={e => setCableForm({ ...cableForm, from_element_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
+                                    <input
+                                        type="text"
+                                        value={fromElementSearch}
+                                        onChange={e => setFromElementSearch(e.target.value)}
+                                        placeholder="Search pole or closure..."
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white mb-1"
+                                    />
+                                    <select
+                                        value={cableForm.from_element_id || ''}
+                                        onChange={e => { setCableForm({ ...cableForm, from_element_id: e.target.value }); setFromElementSearch(''); }}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                                        size={6}
+                                    >
                                         <option value="">Select...</option>
-                                        {(cableForm.from_element_type === 'splice_closure' ? closures : poles).map(p => <option key={p.id} value={p.id}>{'pole_tag' in p ? p.pole_tag : p.closure_tag}</option>)}
+                                        {(cableForm.from_element_type === 'splice_closure' ? closures : poles)
+                                            .filter(p => {
+                                                const tag = 'pole_tag' in p ? p.pole_tag : p.closure_tag;
+                                                return tag.toLowerCase().includes(fromElementSearch.toLowerCase());
+                                            })
+                                            .map(p => <option key={p.id} value={p.id}>{'pole_tag' in p ? p.pole_tag : p.closure_tag}</option>)}
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Element Type</label>
-                                    <select value={cableForm.to_element_type || 'pole'} onChange={e => setCableForm({ ...cableForm, to_element_type: e.target.value, to_element_id: '' })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
+                                    <select value={cableForm.to_element_type || 'pole'} onChange={e => { setCableForm({ ...cableForm, to_element_type: e.target.value, to_element_id: '' }); setToElementSearch(''); }} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
                                         <option value="pole">Pole</option>
                                         <option value="splice_closure">Splice Closure</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Element</label>
-                                    <select value={cableForm.to_element_id || ''} onChange={e => setCableForm({ ...cableForm, to_element_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white">
+                                    <input
+                                        type="text"
+                                        value={toElementSearch}
+                                        onChange={e => setToElementSearch(e.target.value)}
+                                        placeholder="Search pole or closure..."
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white mb-1"
+                                    />
+                                    <select
+                                        value={cableForm.to_element_id || ''}
+                                        onChange={e => { setCableForm({ ...cableForm, to_element_id: e.target.value }); setToElementSearch(''); }}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                                        size={6}
+                                    >
                                         <option value="">Select...</option>
-                                        {(cableForm.to_element_type === 'splice_closure' ? closures : poles).map(p => <option key={p.id} value={p.id}>{'pole_tag' in p ? p.pole_tag : p.closure_tag}</option>)}
+                                        {(cableForm.to_element_type === 'splice_closure' ? closures : poles)
+                                            .filter(p => {
+                                                const tag = 'pole_tag' in p ? p.pole_tag : p.closure_tag;
+                                                return tag.toLowerCase().includes(toElementSearch.toLowerCase());
+                                            })
+                                            .map(p => <option key={p.id} value={p.id}>{'pole_tag' in p ? p.pole_tag : p.closure_tag}</option>)}
                                     </select>
                                 </div>
                             </div>
