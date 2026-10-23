@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RouterConfigWithId, SystemInfo, Interface, TrafficHistoryPoint, PanelHostStatus } from '../types.ts';
-import { getSystemInfo, getInterfaceStats, getPppActiveConnections, toggleInterfaceStatus } from '../services/mikrotikService.ts';
+import { getSystemInfo, getInterfaceStats, getInterfaces, getPppActiveConnections, toggleInterfaceStatus } from '../services/mikrotikService.ts';
 import { getPanelHostStatus } from '../services/panelService.ts';
 import { Loader } from './Loader.tsx';
 import { TrafficChart } from './chart.tsx';
@@ -194,9 +194,17 @@ export const Dashboard: React.FC<{ selectedRouter: RouterConfigWithId | null }> 
         if (!selectedRouter) return;
 
         try {
-            const [info, interfacesData, pppoeActive] = await Promise.all([
+            // Try stats endpoint first, fall back to regular interface list if not supported
+            let interfacesData: any[];
+            try {
+                interfacesData = await getInterfaceStats(selectedRouter);
+            } catch (statsError) {
+                // Some routers don't support the stats endpoint, fall back to regular interface list
+                interfacesData = await getInterfaces(selectedRouter);
+            }
+
+            const [info, pppoeActive] = await Promise.all([
                 getSystemInfo(selectedRouter),
-                getInterfaceStats(selectedRouter),
                 getPppActiveConnections(selectedRouter).catch(() => []),
             ]);
 

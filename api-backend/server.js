@@ -235,9 +235,16 @@ const getRouter = async (req, res, next) => {
         if (!routerId) return res.status(400).json({ message: 'Router ID missing' });
 
         const database = await getDb();
-        const router = await database.get('SELECT * FROM routers WHERE id = ?', [routerId]);
+        let router = await database.get('SELECT * FROM routers WHERE id = ?', [routerId]);
+
+        // Retry once after brief delay to handle WAL mode timing issues
         if (!router) {
-            console.warn(`[Backend] Router ID ${routerId} not found in DB.`);
+            await new Promise(resolve => setTimeout(resolve, 100));
+            router = await database.get('SELECT * FROM routers WHERE id = ?', [routerId]);
+        }
+
+        if (!router) {
+            // Only log at debug level to reduce spam - this is expected when routers are deleted
             return res.status(404).json({ message: 'Router not found' });
         }
 
@@ -977,7 +984,8 @@ app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
             res.json(response.data);
         }
     } catch (e) {
-        console.error("Stats Error:", e.message);
+        // Only log stats errors at debug level - some routers don't support this endpoint
+        // This reduces log spam since the endpoint is polled every 2 seconds
         res.status(500).json({ message: e.message });
     }
 });
@@ -1002,7 +1010,7 @@ app.get('/:routerId/interface/print', getRouter, async (req, res) => {
             res.json(response.data);
         }
     } catch (e) {
-        console.error("Interface Print Error:", e.message);
+        // Reduce log spam - this endpoint is polled every 2 seconds
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
         res.status(status).json({ message: msg });
@@ -1176,7 +1184,8 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
             res.json(response.data);
         }
     } catch (e) {
-        console.error("PPP Active Error:", e.message);
+        // Only log PPP errors at debug level - some routers don't have PPP configured
+        // This reduces log spam since the endpoint is polled every 2 seconds
         const status = e.response ? e.response.status : 500;
         const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
         res.status(status).json({ message: msg });
@@ -1201,7 +1210,7 @@ app.get('/:routerId/log/print', getRouter, async (req, res) => {
             res.json(response.data);
         }
     } catch (e) {
-        console.error("Log Fetch Error:", e.message);
+        // Reduce log spam
         if (req.router && req.router.api_type === 'legacy' && req.routerInstance) {
              try { await req.routerInstance.close(); } catch(_) {}
         }
@@ -1453,7 +1462,7 @@ app.post('/:routerId/ppp/active/traffic', getRouter, async (req, res) => {
         res.json(result);
 
     } catch (e) {
-        console.error("Traffic Endpoint Error:", e);
+        // Reduce log spam - this endpoint is polled every 2 seconds
         // Ensure close if legacy and error happened before inner try/finally
         if (req.router && req.router.api_type === 'legacy' && req.routerInstance) {
              try { await req.routerInstance.close(); } catch(_) {}
@@ -3208,7 +3217,7 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
             const queryParams = new URLSearchParams(req.query).toString();
             const finalUrl = queryParams ? `${restUrl}?${queryParams}` : restUrl;
 
-            console.log(`[REST Proxy] ${restMethod} ${finalUrl}`);
+            // Removed verbose logging - this fires for every polled request
 
             const doRequest = async () => {
                 try {
@@ -3249,8 +3258,11 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
         }
     } catch (e) {
         const bodyKeys = body && typeof body === 'object' ? Object.keys(body) : [];
-        console.error('[Proxy Error]', safeStringify({ endpoint, method, routerId: req.params.routerId, bodyKeys, message: e.message, status: e.response?.status, data: e.response?.data }));
         const status = e.response ? e.response.status : 500;
+        // Only log unexpected errors (5xx), not client errors (4xx) which are expected
+        if (status >= 500) {
+            console.error('[Proxy Error]', safeStringify({ endpoint, method, routerId: req.params.routerId, bodyKeys, message: e.message, status, data: e.response?.data }));
+        }
         let msg = e.response?.data?.message || e.response?.data?.detail || e.message;
         if (e.code === 'ECONNABORTED' || /timeout/i.test(String(e.message))) {
             msg = 'MikroTik router request timed out. The router may be busy or unreachable.';
