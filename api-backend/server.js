@@ -24,55 +24,10 @@ app.use(express.json());
 
 // Global timeout middleware to prevent 504 Gateway Timeout from Nginx
 app.use((req, res, next) => {
-    let responseSent = false;
-    const originalJson = res.json.bind(res);
-    const originalSend = res.send.bind(res);
-    const originalStatus = res.status.bind(res);
-    
-    // Wrap response methods to track if response has been sent
-    res.json = function(data) {
-        if (!responseSent && !res.headersSent) {
-            responseSent = true;
-            return originalJson(data);
-        }
-        return res;
-    };
-    
-    res.send = function(data) {
-        if (!responseSent && !res.headersSent) {
-            responseSent = true;
-            return originalSend(data);
-        }
-        return res;
-    };
-    
-    res.status = function(code) {
-        const statusRes = originalStatus(code);
-        // Wrap the json/send methods on the status response object too
-        const originalStatusJson = statusRes.json.bind(statusRes);
-        const originalStatusSend = statusRes.send.bind(statusRes);
-        statusRes.json = function(data) {
-            if (!responseSent && !res.headersSent) {
-                responseSent = true;
-                return originalStatusJson(data);
-            }
-            return statusRes;
-        };
-        statusRes.send = function(data) {
-            if (!responseSent && !res.headersSent) {
-                responseSent = true;
-                return originalStatusSend(data);
-            }
-            return statusRes;
-        };
-        return statusRes;
-    };
-    
     // Set default timeout for all routes (30 seconds)
     req.setTimeout(30000, () => {
         console.warn(`[Timeout] Request timed out: ${req.method} ${req.originalUrl}`);
-        if (!responseSent && !res.headersSent) {
-            responseSent = true;
+        if (!res.headersSent) {
             res.status(504).json({ 
                 message: 'Router API request timed out. The MikroTik device may be unreachable or slow to respond.',
                 code: 'ROUTER_TIMEOUT'
@@ -81,8 +36,7 @@ app.use((req, res, next) => {
     });
     res.setTimeout(30000, () => {
         console.warn(`[Timeout] Response timed out: ${req.method} ${req.originalUrl}`);
-        if (!responseSent && !res.headersSent) {
-            responseSent = true;
+        if (!res.headersSent) {
             res.status(504).json({ 
                 message: 'Router API request timed out. The MikroTik device may be unreachable or slow to respond.',
                 code: 'ROUTER_TIMEOUT'
@@ -1032,7 +986,9 @@ app.get('/:routerId/interface/stats', getRouter, async (req, res) => {
     } catch (e) {
         // Only log stats errors at debug level - some routers don't support this endpoint
         // This reduces log spam since the endpoint is polled every 2 seconds
-        res.status(500).json({ message: e.message });
+        if (!res.headersSent) {
+            res.status(500).json({ message: e.message });
+        }
     }
 });
 
@@ -1057,9 +1013,11 @@ app.get('/:routerId/interface/print', getRouter, async (req, res) => {
         }
     } catch (e) {
         // Reduce log spam - this endpoint is polled every 2 seconds
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
+        if (!res.headersSent) {
+            const status = e.response ? e.response.status : 500;
+            const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+            res.status(status).json({ message: msg });
+        }
     }
 });
 
@@ -1232,9 +1190,11 @@ app.get('/:routerId/ppp/active/print', getRouter, async (req, res) => {
     } catch (e) {
         // Only log PPP errors at debug level - some routers don't have PPP configured
         // This reduces log spam since the endpoint is polled every 2 seconds
-        const status = e.response ? e.response.status : 500;
-        const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        res.status(status).json({ message: msg });
+        if (!res.headersSent) {
+            const status = e.response ? e.response.status : 500;
+            const msg = e.response?.data?.message || e.response?.data?.detail || e.message;
+            res.status(status).json({ message: msg });
+        }
     }
 });
 
@@ -3314,12 +3274,14 @@ app.all('/:routerId/:endpoint(*)', getRouter, async (req, res) => {
             console.warn(`[Proxy Timeout] ${method} ${endpoint} for router ${req.params.routerId}: ${e.message}`);
         }
         let msg = e.response?.data?.message || e.response?.data?.detail || e.message;
-        if (e.code === 'ECONNABORTED' || /timeout/i.test(String(e.message))) {
-            msg = 'MikroTik router request timed out. The router may be busy or unreachable.';
-            res.status(504).json({ message: msg });
-            return;
+        if (!res.headersSent) {
+            if (e.code === 'ECONNABORTED' || /timeout/i.test(String(e.message))) {
+                msg = 'MikroTik router request timed out. The router may be busy or unreachable.';
+                res.status(504).json({ message: msg });
+                return;
+            }
+            res.status(status).json({ message: msg });
         }
-        res.status(status).json({ message: msg });
     }
 });
 
