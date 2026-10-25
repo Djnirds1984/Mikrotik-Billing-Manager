@@ -13,16 +13,11 @@ const axios = require('axios');
 const https = require('https');
 const si = require('systeminformation');
 require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const archiver = require('archiver');
 const tar = require('tar');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
-
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // const { RouterOSAPI } = require('node-routeros-v2'); // Not needed here anymore
 
@@ -53,41 +48,6 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 if (!fs.existsSync(APPLICATIONS_UPLOADS_DIR)) {
     fs.mkdirSync(APPLICATIONS_UPLOADS_DIR, { recursive: true });
-}
-
-async function syncCustomerToSupabase(customer) {
-    if (!customer || !customer.username) return;
-    try {
-        const payload = {
-            id: customer.id,
-            username: customer.username,
-            router_id: customer.routerId,
-            full_name: customer.fullName,
-            address: customer.address,
-            contact_number: customer.contactNumber,
-            email: customer.email,
-            account_number: customer.accountNumber,
-            gps: customer.gps,
-            application_id: customer.applicationId,
-            due_date: customer.dueDate,
-            plan_name: customer.planName,
-            plan_type: customer.planType,
-            password: customer.password
-        };
-        const { error } = await supabase.from('mikrotik_pppoe_users').upsert(payload, { onConflict: 'username' });
-        if (error) console.error('Supabase Sync Error:', error);
-    } catch (e) {
-        console.error('Supabase Sync Exception:', e);
-    }
-}
-
-async function deleteCustomerFromSupabase(id) {
-    try {
-        const { error } = await supabase.from('mikrotik_pppoe_users').delete().eq('id', id);
-        if (error) console.error('Supabase Delete Error:', error);
-    } catch (e) {
-        console.error('Supabase Delete Exception:', e);
-    }
 }
 
 let db;
@@ -1711,6 +1671,17 @@ async function startServer() {
     const dbRouter = express.Router();
     dbRouter.use(protect);
 
+    dbRouter.all([
+        '/customers/sync',
+        '/mikrotik-sales-logs',
+        '/sales/sync-to-mikrotik',
+        '/sales/bulk-sync-to-mikrotik'
+    ], (req, res) => {
+        res.status(410).json({
+            message: 'Cloud synchronization has been removed. Customer and sales records are stored locally.'
+        });
+    });
+
     // Generic CRUD handler generator
     const createCrud = (route, table) => {
         dbRouter.get(route, async (req, res) => {
@@ -1758,82 +1729,6 @@ async function startServer() {
                 const values = Object.values(req.body);
                 const placeholders = keys.map(() => '?').join(',');
                 await db.run(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${placeholders})`, values);
-                
-                // If this is a sales record, sync to mikrotik sales logs
-                if (table === 'sales_records' && supabase) {
-                    try {
-                        // Get the created record
-                        const createdId = req.body.id;
-                        const createdSale = await db.get('SELECT * FROM sales_records WHERE id = ?', [createdId]);
-                        
-                        if (createdSale) {
-                            // Get license info
-                            const settings = await db.get('SELECT * FROM settings WHERE id = 1');
-                            if (settings?.licenseKey) {
-                                // Find license in Supabase
-                                const { data: licenseData, error: licenseError } = await supabase
-                                    .from('mikrotik_licenses')
-                                    .select('id')
-                                    .eq('license_key', settings.licenseKey)
-                                    .single();
-
-                                if (!licenseError && licenseData) {
-                                    // Get router info
-                                    const router = await db.get('SELECT * FROM routers WHERE id = ?', [createdSale.routerId]);
-                                    if (router) {
-                                        // Find router in Supabase
-                                        const { data: routerData, error: routerError } = await supabase
-                                            .from('mikrotik_routers')
-                                            .select('id')
-                                            .eq('license_id', licenseData.id)
-                                            .eq('router_ip', router.host)
-                                            .single();
-
-                                        let routerId = routerData?.id;
-
-                                        // Create router if not exists
-                                        if (!routerId && !routerError) {
-                                            const { data: newRouter, error: createRouterError } = await supabase
-                                                .from('mikrotik_routers')
-                                                .insert([{
-                                                    license_id: licenseData.id,
-                                                    router_name: router.name || 'Unknown',
-                                                    router_ip: router.host || 'Unknown',
-                                                    router_model: router.model || 'Unknown',
-                                                    router_serial: router.serial || 'Unknown',
-                                                    router_version: router.version || 'Unknown',
-                                                    created_at: new Date().toISOString()
-                                                }])
-                                                .select()
-                                                .single();
-
-                                            if (!createRouterError && newRouter) {
-                                                routerId = newRouter.id;
-                                            }
-                                        }
-
-                                        // Create sales log if router exists
-                                        if (routerId) {
-                                            await supabase
-                                                .from('mikrotik_sales_logs')
-                                                .insert([{
-                                                    license_id: licenseData.id,
-                                                    router_id: routerId,
-                                                    amount: createdSale.finalAmount || 0,
-                                                    currency: createdSale.currency || 'PHP',
-                                                    transaction_type: 'sale',
-                                                    created_at: createdSale.date || new Date().toISOString()
-                                                }]);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (syncError) {
-                        console.error('Error syncing to mikrotik sales logs:', syncError);
-                        // Don't fail the main operation if sync fails
-                    }
-                }
                 
                 if (table === 'employees' && _empPlaintext) {
                     return res.json({ message: 'Created', generatedPassword: _empPlaintext });
@@ -1886,75 +1781,6 @@ async function startServer() {
                                     req.user?.username || 'admin'
                                 ]
                             );
-                            
-                            // Sync to mikrotik sales logs
-                            if (supabase) {
-                                try {
-                                    // Get license info
-                                    const settings = await db.get('SELECT * FROM settings WHERE id = 1');
-                                    if (settings?.licenseKey) {
-                                        // Find license in Supabase
-                                        const { data: licenseData, error: licenseError } = await supabase
-                                            .from('mikrotik_licenses')
-                                            .select('id')
-                                            .eq('license_key', settings.licenseKey)
-                                            .single();
-
-                                        if (!licenseError && licenseData) {
-                                            // Find router in Supabase
-                                            const { data: routerData, error: routerError } = await supabase
-                                                .from('mikrotik_routers')
-                                                .select('id')
-                                                .eq('license_id', licenseData.id)
-                                                .eq('router_ip', existing.host)
-                                                .single();
-
-                                            let routerId = routerData?.id;
-
-                                            // Create router if not exists
-                                            if (!routerId && !routerError) {
-                                                const { data: newRouter, error: createRouterError } = await supabase
-                                                    .from('mikrotik_routers')
-                                                    .insert([{
-                                                        license_id: licenseData.id,
-                                                        router_name: router?.name || 'Unknown',
-                                                        router_ip: existing.host || 'Unknown',
-                                                        router_model: 'Unknown',
-                                                        router_serial: 'Unknown',
-                                                        router_version: 'Unknown',
-                                                        created_at: new Date().toISOString()
-                                                    }])
-                                                    .select()
-                                                    .single();
-
-                                                if (!createRouterError && newRouter) {
-                                                    routerId = newRouter.id;
-                                                }
-                                            }
-
-                                            // Create sales log if router exists
-                                            if (routerId) {
-                                                // Convert currency symbol to currency code
-                                                const currencyCode = convertCurrencyToCode(existing.currency);
-
-                                                await supabase
-                                                    .from('mikrotik_sales_logs')
-                                                    .insert([{
-                                                        license_id: licenseData.id,
-                                                        router_id: routerId,
-                                                        amount: saleAmount,
-                                                        currency: currencyCode,
-                                                        transaction_type: isCustom ? 'custom_service' : 'sale',
-                                                        created_at: new Date().toISOString()
-                                                    }]);
-                                            }
-                                        }
-                                    }
-                                } catch (syncError) {
-                                    console.error('Error syncing to mikrotik sales logs:', syncError);
-                                    // Don't fail the main operation if sync fails
-                                }
-                            }
                         }
                     }
                 }
@@ -2442,510 +2268,6 @@ async function startServer() {
         return 'PHP';
     };
 
-    // Mikrotik Sales Logs API - Sync with Supabase
-    dbRouter.get('/mikrotik-sales-logs', async (req, res) => {
-        try {
-            const { routerId } = req.query;
-            
-            if (!supabase) {
-                return res.status(500).json({ message: 'Supabase not configured' });
-            }
-
-            // Get the current license key from local settings
-            const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
-            if (!settings?.licenseKey) {
-                return res.status(400).json({ message: 'No license configured' });
-            }
-
-            // Find the license in Supabase
-            const { data: licenseData, error: licenseError } = await supabase
-                .from('mikrotik_licenses')
-                .select('id')
-                .eq('license_key', settings.licenseKey)
-                .single();
-
-            if (licenseError || !licenseData) {
-                return res.status(404).json({ message: 'License not found in Supabase' });
-            }
-
-            let query = supabase
-                .from('mikrotik_sales_logs')
-                .select('*')
-                .eq('license_id', licenseData.id)
-                .order('created_at', { ascending: false });
-
-            if (routerId) {
-                // Find router in Supabase by IP from local database
-                const router = await db.get('SELECT host FROM routers WHERE id = ?', [routerId]);
-                if (router?.host) {
-                    const { data: routerData } = await supabase
-                        .from('mikrotik_routers')
-                        .select('id')
-                        .eq('license_id', licenseData.id)
-                        .eq('router_ip', router.host)
-                        .single();
-                    
-                    if (routerData?.id) {
-                        query = query.eq('router_id', routerData.id);
-                    }
-                }
-            }
-
-            const { data, error } = await query;
-            
-            if (error) {
-                console.error('Error fetching mikrotik sales logs:', error);
-                return res.status(500).json({ message: error.message });
-            }
-
-            res.json(data || []);
-        } catch (e) {
-            console.error('Failed to fetch mikrotik sales logs:', e);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
-    dbRouter.post('/mikrotik-sales-logs', async (req, res) => {
-        try {
-            const { router_id, amount, currency, transaction_type } = req.body;
-            
-            if (!supabase) {
-                return res.status(500).json({ message: 'Supabase not configured' });
-            }
-
-            if (!router_id || !amount || !transaction_type) {
-                return res.status(400).json({ message: 'Missing required fields: router_id, amount, transaction_type' });
-            }
-
-            // Get the current license key from local settings
-            const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
-            if (!settings?.licenseKey) {
-                return res.status(400).json({ message: 'No license configured' });
-            }
-
-            // Find the license in Supabase
-            const { data: licenseData, error: licenseError } = await supabase
-                .from('mikrotik_licenses')
-                .select('id')
-                .eq('license_key', settings.licenseKey)
-                .single();
-
-            if (licenseError || !licenseData) {
-                return res.status(404).json({ message: 'License not found in Supabase' });
-            }
-
-            // Convert currency symbol to currency code
-            const currencyCode = convertCurrencyToCode(currency);
-
-            const { data, error } = await supabase
-                .from('mikrotik_sales_logs')
-                .insert([{
-                    license_id: licenseData.id,
-                    router_id,
-                    amount: parseFloat(amount),
-                    currency: currencyCode,
-                    transaction_type,
-                    created_at: new Date().toISOString()
-                }])
-                .select()
-                .single();
-
-            if (error) {
-                console.error('Error creating mikrotik sales log:', error);
-                return res.status(500).json({ message: error.message });
-            }
-
-            res.json(data);
-        } catch (e) {
-            console.error('Failed to create mikrotik sales log:', e);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
-    dbRouter.post('/sales/sync-to-mikrotik', async (req, res) => {
-        try {
-            const { saleId } = req.body;
-            
-            if (!supabase) {
-                return res.status(500).json({ message: 'Supabase not configured' });
-            }
-
-            if (!saleId) {
-                return res.status(400).json({ message: 'Sale ID is required' });
-            }
-
-            // Get the sale record
-            const sale = await db.get('SELECT * FROM sales_records WHERE id = ?', [saleId]);
-            if (!sale) {
-                return res.status(404).json({ message: 'Sale record not found' });
-            }
-
-            // Get router info to find license
-            const router = await db.get('SELECT * FROM routers WHERE id = ?', [sale.routerId]);
-            if (!router) {
-                return res.status(404).json({ message: 'Router not found' });
-            }
-
-            // Get license info
-            const settings = await db.get('SELECT * FROM settings WHERE id = 1');
-            if (!settings?.licenseKey) {
-                return res.status(400).json({ message: 'No license key found' });
-            }
-
-            // Find license in Supabase
-            const { data: licenseData, error: licenseError } = await supabase
-                .from('mikrotik_licenses')
-                .select('id')
-                .eq('license_key', settings.licenseKey)
-                .single();
-
-            if (licenseError || !licenseData) {
-                return res.status(404).json({ message: 'License not found in Supabase' });
-            }
-
-            // Find router in Supabase
-            const { data: routerData, error: routerError } = await supabase
-                .from('mikrotik_routers')
-                .select('id')
-                .eq('license_id', licenseData.id)
-                .eq('router_ip', router.host)
-                .single();
-
-            let routerId = routerData?.id;
-
-            // Create router if not exists
-            if (!routerId) {
-                const { data: newRouter, error: createRouterError } = await supabase
-                    .from('mikrotik_routers')
-                    .insert([{
-                        license_id: licenseData.id,
-                        router_name: router.name,
-                        router_ip: router.host,
-                        router_model: router.model || 'Unknown',
-                        router_serial: router.serial || 'Unknown',
-                        router_version: router.version || 'Unknown',
-                        created_at: new Date().toISOString()
-                    }])
-                    .select()
-                    .single();
-
-                if (createRouterError) {
-                    return res.status(500).json({ message: 'Failed to create router in Supabase' });
-                }
-
-                routerId = newRouter.id;
-            }
-
-            // Create sales log
-            const currencyCode = convertCurrencyToCode(sale.currency);
-
-            const { data: salesLog, error: salesLogError } = await supabase
-                .from('mikrotik_sales_logs')
-                .insert([{
-                    license_id: licenseData.id,
-                    router_id: routerId,
-                    amount: sale.finalAmount,
-                    currency: currencyCode,
-                    transaction_type: 'sale',
-                    created_at: sale.date || new Date().toISOString()
-                }])
-                .select()
-                .single();
-
-            if (salesLogError) {
-                console.error('Error creating sales log:', salesLogError);
-                return res.status(500).json({ message: 'Failed to create sales log in Supabase' });
-            }
-
-            res.json({ 
-                success: true, 
-                message: 'Sale synced to Mikrotik successfully',
-                data: salesLog 
-            });
-
-        } catch (e) {
-            console.error('Failed to sync sale to mikrotik:', e);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
-    // Bulk sync all sales to mikrotik sales logs
-    dbRouter.post('/sales/bulk-sync-to-mikrotik', async (req, res) => {
-        try {
-            const { routerId } = req.body;
-            
-            if (!supabase) {
-                return res.status(500).json({ message: 'Supabase not configured' });
-            }
-
-            // Get the current license key from local settings
-            const settings = await db.get('SELECT licenseKey FROM settings WHERE id = 1');
-            if (!settings?.licenseKey) {
-                return res.status(400).json({ message: 'No license configured' });
-            }
-
-            // Find the license in Supabase
-            const { data: licenseData, error: licenseError } = await supabase
-                .from('mikrotik_licenses')
-                .select('id')
-                .eq('license_key', settings.licenseKey)
-                .single();
-
-            if (licenseError || !licenseData) {
-                return res.status(404).json({ message: 'License not found in Supabase' });
-            }
-
-            // Get all sales records that haven't been synced yet
-            let salesQuery = 'SELECT * FROM sales_records';
-            let salesParams = [];
-            
-            if (routerId) {
-                salesQuery += ' WHERE routerId = ?';
-                salesParams.push(routerId);
-            }
-            
-            salesQuery += ' ORDER BY date DESC';
-            
-            const sales = await db.all(salesQuery, salesParams);
-            
-            let syncedCount = 0;
-            let skippedCount = 0;
-            let errorCount = 0;
-            const errors = [];
-
-            // Process each sale
-            for (const sale of sales) {
-                try {
-                    // Check if this sale is already synced by looking for existing mikrotik sales log
-                    // We'll use a combination of router_id, amount, and date to identify duplicates
-                    const router = await db.get('SELECT host FROM routers WHERE id = ?', [sale.routerId]);
-                    if (!router?.host) {
-                        skippedCount++;
-                        continue;
-                    }
-
-                    // Find router in Supabase
-                    const { data: routerData } = await supabase
-                        .from('mikrotik_routers')
-                        .select('id')
-                        .eq('license_id', licenseData.id)
-                        .eq('router_ip', router.host)
-                        .single();
-
-                    if (!routerData?.id) {
-                        skippedCount++;
-                        continue;
-                    }
-
-                    // Check if this sale already exists in mikrotik sales logs
-                    const { data: existingLog } = await supabase
-                        .from('mikrotik_sales_logs')
-                        .select('id')
-                        .eq('license_id', licenseData.id)
-                        .eq('router_id', routerData.id)
-                        .eq('amount', sale.finalAmount)
-                        .eq('created_at', sale.date)
-                        .single();
-
-                    if (existingLog) {
-                        skippedCount++;
-                        continue;
-                    }
-
-                    // Convert currency symbol to currency code
-                    const currencyCode = convertCurrencyToCode(sale.currency);
-
-                    // Create mikrotik sales log
-                    await supabase
-                        .from('mikrotik_sales_logs')
-                        .insert([{
-                            license_id: licenseData.id,
-                            router_id: routerData.id,
-                            amount: sale.finalAmount,
-                            currency: currencyCode,
-                            transaction_type: 'sale',
-                            created_at: sale.date || new Date().toISOString()
-                        }]);
-
-                    syncedCount++;
-                } catch (error) {
-                    errorCount++;
-                    errors.push({ saleId: sale.id, error: error.message });
-                    console.error('Error syncing sale', sale.id, ':', error);
-                }
-            }
-
-            res.json({
-                success: true,
-                message: `Bulk sync completed. Synced: ${syncedCount}, Skipped: ${skippedCount}, Errors: ${errorCount}`,
-                data: {
-                    synced: syncedCount,
-                    skipped: skippedCount,
-                    errors: errorCount,
-                    errorDetails: errors
-                }
-            });
-
-        } catch (e) {
-            console.error('Failed to bulk sync sales to mikrotik:', e);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
-    // Sync All Customers (Bi-directional)
-    dbRouter.post('/customers/sync', async (req, res) => {
-        try {
-            console.log('Starting full customer sync...');
-            
-            // 1. Fetch all local customers
-            const localCustomers = await db.all('SELECT * FROM customers');
-            const localMap = new Map(localCustomers.map(c => [c.username, c]));
-
-            // 2. Fetch all Supabase customers
-            const { data: remoteCustomers, error } = await supabase.from('mikrotik_pppoe_users').select('*');
-            if (error) throw new Error(`Supabase fetch failed: ${error.message}`);
-            const remoteMap = new Map(remoteCustomers.map(c => [c.username, c]));
-
-            let syncedToCloud = 0;
-            let syncedToLocal = 0;
-            let updatedLocal = 0;
-
-            // --- 2.5 Enrich Local Data from Mikrotik Secrets (Fix missing plan/due date) ---
-            // Group local customers by routerId to batch requests
-            const customersByRouter = {};
-            for (const c of localCustomers) {
-                if (c.routerId) {
-                    if (!customersByRouter[c.routerId]) customersByRouter[c.routerId] = [];
-                    customersByRouter[c.routerId].push(c);
-                }
-            }
-
-            // Process each router
-            for (const routerId of Object.keys(customersByRouter)) {
-                try {
-                    // Fetch all secrets for this router from Backend API
-                    // Note: This relies on the backend running on the same machine/network.
-                    // If the backend is on a different port, ensure it's correct (default 3002).
-                    // The 'node-routeros-v2' client is used internally by the backend.
-                    // We can call the backend API endpoint directly.
-                    // Assuming backend is running on port 3002 or we can use internal RouterOS client if available.
-                    // However, 'proxy/server.js' IS the backend (port 3001).
-                    // The `node-routeros-v2` logic is usually in `api-backend/server.js` (port 3002).
-                    // Let's assume we can fetch from localhost:3002.
-                    
-                    const secretsUrl = `http://localhost:3002/${routerId}/ppp/secret/print`;
-                    const response = await axios.get(secretsUrl);
-                    const secrets = Array.isArray(response.data) ? response.data : [];
-                    
-                    // Map secrets by name for quick lookup
-                    const secretMap = new Map();
-                    for (const s of secrets) {
-                        if (s.name) secretMap.set(s.name, s);
-                    }
-
-                    // Update customers with data from secrets
-                    for (const customer of customersByRouter[routerId]) {
-                        const secret = secretMap.get(customer.username);
-                        if (secret && secret.comment) {
-                            try {
-                                const commentData = JSON.parse(secret.comment);
-                                let needsUpdate = false;
-                                
-                                // Check and update fields if they are missing or different
-                                if (commentData.dueDate && commentData.dueDate !== customer.dueDate) {
-                                    customer.dueDate = commentData.dueDate;
-                                    needsUpdate = true;
-                                }
-                                
-                                // Plan Name: Fallback to profile if plan/planName is missing in comment
-                                const extractedPlanName = commentData.planName || commentData.plan || secret.profile;
-                                if (extractedPlanName && extractedPlanName !== customer.planName) {
-                                    customer.planName = extractedPlanName;
-                                    needsUpdate = true;
-                                }
-
-                                if (commentData.planType && commentData.planType !== customer.planType) {
-                                    customer.planType = commentData.planType;
-                                    needsUpdate = true;
-                                }
-                                // Check password from secret
-                                if (secret.password && secret.password !== customer.password) {
-                                    customer.password = secret.password;
-                                    needsUpdate = true;
-                                }
-
-                                if (needsUpdate) {
-                                    // Update the local database
-                                    await db.run(
-                                        `UPDATE customers SET dueDate = ?, planName = ?, planType = ?, password = ? WHERE id = ?`,
-                                        [customer.dueDate, customer.planName, customer.planType, customer.password, customer.id]
-                                    );
-                                    updatedLocal++;
-                                }
-                            } catch (parseErr) {
-                                // Ignore non-JSON comments or parsing errors
-                            }
-                        }
-                    }
-                } catch (routerErr) {
-                    console.error(`Failed to sync secrets for router ${routerId}:`, routerErr.message);
-                }
-            }
-            // -------------------------------------------------------------------------------
-
-            // 3. Local -> Supabase (Sync missing or update)
-            for (const local of localCustomers) {
-                // Always upsert to cloud to ensure latest local state is preserved
-                await syncCustomerToSupabase(local);
-                syncedToCloud++;
-            }
-
-            // 4. Supabase -> Local (Restore missing)
-            for (const remote of remoteCustomers) {
-                if (!localMap.has(remote.username)) {
-                    // Restore to local
-                    await db.run(
-                        `INSERT INTO customers (id, username, routerId, fullName, address, contactNumber, email, accountNumber, gps, applicationId, dueDate, planName, planType, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        [
-                            remote.id,
-                            remote.username,
-                            remote.router_id,
-                            remote.full_name,
-                            remote.address,
-                            remote.contact_number,
-                            remote.email,
-                            remote.account_number,
-                            remote.gps,
-                            remote.application_id,
-                            remote.due_date,
-                            remote.plan_name,
-                            remote.plan_type,
-                            remote.password
-                        ]
-                    );
-                    syncedToLocal++;
-                } else {
-                    // Optional: If local exists, we could update it if remote is newer?
-                    // For now, let's assume local is master, so we already pushed local -> cloud above.
-                    // But if local is missing fields that remote has (e.g. after a partial data loss?), maybe update?
-                    // Let's stick to "Restore missing" for safety to avoid overwriting active local changes.
-                }
-            }
-
-            res.json({
-                message: 'Sync complete',
-                stats: {
-                    toCloud: syncedToCloud,
-                    toLocal: syncedToLocal,
-                    updatedLocal: updatedLocal
-                }
-            });
-        } catch (e) {
-            console.error('Sync failed:', e);
-            res.status(500).json({ message: e.message });
-        }
-    });
-
     dbRouter.get('/customers', async (req, res) => {
         try {
             const { routerId } = req.query;
@@ -2998,10 +2320,6 @@ async function startServer() {
                     await db.run(`UPDATE customers SET ${setClause} WHERE id = ?`, [...values, existing.id]);
                     console.log(`[Customers POST] Updated existing customer id=${existing.id}`);
                 }
-                
-                // Sync to Supabase
-                const updatedCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [existing.id]);
-                await syncCustomerToSupabase(updatedCustomer);
 
                 res.json({ message: 'Updated existing customer', id: existing.id });
             } else {
@@ -3014,10 +2332,6 @@ async function startServer() {
                 const placeholders = keys.map(() => '?').join(',');
                 await db.run(`INSERT INTO customers (${keys.join(',')}) VALUES (${placeholders})`, values);
                 console.log(`[Customers POST] Inserted new customer username=${username}, routerId=${routerId}, accountNumber=${req.body.accountNumber}`);
-                
-                // Sync to Supabase
-                const newCustomer = await db.get('SELECT * FROM customers WHERE username = ? AND routerId = ?', [username, routerId]);
-                await syncCustomerToSupabase(newCustomer);
 
                 res.json({ message: 'Created new customer' });
             }
@@ -3069,10 +2383,6 @@ async function startServer() {
             // Verify the update
             const verifyCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
             console.log(`[Customers PATCH] Verified customer after update:`, verifyCustomer);
-            
-            // Sync to Supabase
-            const updatedCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
-            await syncCustomerToSupabase(updatedCustomer);
 
             res.json({ message: 'Updated' });
         } catch (e) { 
@@ -3084,7 +2394,6 @@ async function startServer() {
     dbRouter.delete('/customers/:id', async (req, res) => {
         try {
             const id = req.params.id;
-            await deleteCustomerFromSupabase(id);
             await db.run(`DELETE FROM customers WHERE id = ?`, id);
             res.json({ message: 'Deleted' });
         } catch (e) { res.status(500).json({ message: e.message }); }
@@ -3097,11 +2406,6 @@ async function startServer() {
             if (!username || !routerId) {
                 return res.status(400).json({ message: 'username and routerId are required' });
             }
-            // Get customer first for Supabase cleanup
-            try {
-                const customer = await db.get('SELECT id FROM customers WHERE username = ? AND routerId = ?', [username, routerId]);
-                if (customer) await deleteCustomerFromSupabase(customer.id);
-            } catch (e) { /* ignore supabase errors */ }
             const result = await db.run(
                 'DELETE FROM customers WHERE username = ? AND routerId = ?',
                 [username, routerId]
@@ -10443,8 +9747,6 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 await db.run('UPDATE client_users SET account_number = ? WHERE id = ?', [acc, user.id]);
                 if (cust && (!cust.accountNumber || String(cust.accountNumber).trim() === '')) {
                     await db.run('UPDATE customers SET accountNumber = ? WHERE routerId = ? AND username = ?', [acc, user.router_id, user.pppoe_username || user.username]);
-                    const updatedCustomer = await db.get('SELECT * FROM customers WHERE routerId = ? AND username = ?', [user.router_id, user.pppoe_username || user.username]);
-                    await syncCustomerToSupabase(updatedCustomer);
                 }
             }
 
@@ -11341,74 +10643,26 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     licenseRouter.use(protect);
     
     licenseRouter.get('/status', async (req, res) => {
-        // === TEMPORARY: License check disabled (Supabase restricted) ===
-        // TODO: Restore original license verification when Supabase is available
-        // Original code is in git history — revert this commit to restore.
-        const deviceId = await getDeviceId();
-        return res.json({
-            licensed: true,
-            expires: '2099-12-31T23:59:59.999Z',
-            deviceId,
-            licenseKey: 'TEMP-DISABLED',
-            plan: 'lifetime',
-            maxRouters: 999
-        });
-    });
-
-    licenseRouter.post('/activate', async (req, res) => {
-        const { licenseKey } = req.body;
-        if (!licenseKey) return res.status(400).json({ message: 'License key is required' });
-
         try {
             const deviceId = await getDeviceId();
-
-            // Check Supabase
-            const { data: license, error } = await supabase
-                .from('mikrotik_licenses')
-                .select('*')
-                .eq('license_key', licenseKey)
-                .maybeSingle();
-
-            if (error || !license) {
-                return res.status(404).json({ message: 'Invalid license key.' });
-            }
-
-            if (license.hardware_id && license.hardware_id !== deviceId) {
-                return res.status(403).json({ message: 'This license is already used on another device.' });
-            }
-
-            if (!license.is_active) {
-                 return res.status(403).json({ message: 'This license is inactive.' });
-            }
-
-             if (license.expires_at && new Date(license.expires_at) < new Date()) {
-                return res.status(403).json({ message: 'This license has expired.' });
-            }
-
-            // Bind device if not bound
-            if (!license.hardware_id) {
-                 const { error: updateError } = await supabase
-                    .from('mikrotik_licenses')
-                    .update({ hardware_id: deviceId, activated_at: new Date().toISOString() })
-                    .eq('id', license.id);
-                
-                if (updateError) throw updateError;
-            }
-
-            // Save locally
-            await db.run('UPDATE settings SET licenseKey = ?, licenseCache = NULL, licenseCacheAt = NULL WHERE id = 1', [licenseKey]);
-            
-            res.json({ success: true, message: 'License activated successfully!' });
-        } catch (err) { 
-            console.error(err);
-            res.status(500).json({ message: err.message }); 
+            return res.json({
+                licensed: true,
+                deviceId,
+                plan: 'lifetime',
+                maxRouters: 999,
+                mode: 'local',
+                message: 'Local mode: online license verification is disabled.'
+            });
+        } catch (err) {
+            res.status(500).json({ message: err.message });
         }
     });
 
-    licenseRouter.post('/revoke', async (req, res) => {
-        // Just remove local key and clear cache
-        await db.run('UPDATE settings SET licenseKey = NULL, licenseCache = NULL, licenseCacheAt = NULL WHERE id = 1');
-        res.json({ success: true, message: 'License removed from this device.' });
+    licenseRouter.post(['/activate', '/revoke'], (req, res) => {
+        res.status(410).json({
+            success: false,
+            message: 'Online licensing has been removed. This panel runs in local mode.'
+        });
     });
 
 

@@ -57,6 +57,7 @@ export interface Notification {
 
 export interface LicenseStatus {
   licensed: boolean;
+  mode?: 'local';
   expires?: string;
   deviceId?: string;
   licenseKey?: string;

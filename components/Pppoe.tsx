@@ -1483,28 +1483,6 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     </div>
                 </div>
                 <div className="flex gap-2">
-                    <button
-                        onClick={async () => {
-                            if (!confirm('This will sync all PPPoE users between Local Database and Cloud. Missing users will be restored/backed up. Continue?')) return;
-                            setIsLoading(true);
-                            try {
-                                const data = await dbApi.post<{ message: string, stats: { toCloud: number, toLocal: number, updatedLocal: number } }>('/customers/sync', {});
-                                alert(`Sync Complete!\nTo Cloud: ${data.stats.toCloud}\nTo Local: ${data.stats.toLocal}\nUpdated Local: ${data.stats.updatedLocal}`);
-                                fetchData();
-                            } catch (e) {
-                                alert(`Sync failed: ${(e as Error).message}`);
-                            } finally {
-                                setIsLoading(false);
-                            }
-                        }}
-                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2"
-                        disabled={isLoading}
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-                        </svg>
-                        Sync All
-                    </button>
                     <button onClick={() => { setSelectedSecret(null); setUserModalOpen(true); }} className="bg-[--color-primary-600] text-white font-bold py-2 px-4 rounded-lg">Add New User</button>
                 </div>
             </div>

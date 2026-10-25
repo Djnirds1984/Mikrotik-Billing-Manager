@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { SaleRecord, CompanySettings } from '../types.ts';
-import { CurrencyDollarIcon, TrashIcon, PrinterIcon, ArrowPathIcon } from '../constants.tsx';
+import { CurrencyDollarIcon, TrashIcon, PrinterIcon } from '../constants.tsx';
 import { SearchableSelect } from './SearchableSelect.tsx';
 import { PrintableReceipt } from './PrintableReceipt.tsx';
 import { PrintableThermalReceipt } from './PrintableThermalReceipt.tsx';
@@ -10,8 +10,6 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { dbApi } from '../services/databaseService.ts';
 import { getAuthHeader } from '../services/databaseService.ts';
 import type { PanelSettings } from '../types.ts';
-import { mikrotikSalesService } from '../services/mikrotikSalesService.ts';
-import { MikrotikSalesLogs } from './MikrotikSalesLogs.tsx';
 import { CustomInvoiceModal } from './CustomInvoiceModal.tsx';
 
 interface SalesReportProps {
@@ -44,7 +42,7 @@ const formatPaymentMethod = (method?: string): string => {
     return legacyLabels[method.toLowerCase()] || method;
 };
 
-export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale, clearSales, companySettings, selectedRouter }) => {
+export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale, clearSales, companySettings }) => {
     const { hasPermission } = useAuth();
     const { formatCurrency, currency: systemCurrency } = useLocalization();
     const canDelete = hasPermission('action:delete');
@@ -65,17 +63,9 @@ export const SalesReport: React.FC<SalesReportProps> = ({ salesData, deleteSale,
     const [invoiceToEdit, setInvoiceToEdit] = useState<any | null>(null);
     const [isEditOpen, setIsEditOpen] = useState<boolean>(false);
     const [panelSettings, setPanelSettings] = useState<PanelSettings | null>(null);
-    const [isSyncing, setIsSyncing] = useState<string | null>(null);
-    const [isBulkSyncing, setIsBulkSyncing] = useState<boolean>(false);
     const [isCustomInvoiceOpen, setIsCustomInvoiceOpen] = useState<boolean>(false);
     const [collectors, setCollectors] = useState<any[]>([]);
     const [collectorFilter, setCollectorFilter] = useState<string>('');
-    const [bulkSyncResult, setBulkSyncResult] = useState<{
-        synced: number;
-        skipped: number;
-        errors: number;
-        errorDetails: Array<{ saleId: string; error: string }>;
-    } | null>(null);
 
     const loadCollectors = async () => {
         try {
@@ -368,48 +358,6 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
         dbApi.get<PanelSettings>('/panel-settings').then(setPanelSettings).catch(() => setPanelSettings(null));
     }, []);
 
-    const handleSyncToMikrotik = async (saleId: string) => {
-        setIsSyncing(saleId);
-        try {
-            const result = await mikrotikSalesService.syncSaleToMikrotik(saleId);
-            if (result.success) {
-                alert('Sale synced to Mikrotik successfully!');
-            } else {
-                alert('Failed to sync sale: ' + result.message);
-            }
-        } catch (error) {
-            console.error('Error syncing sale to mikrotik:', error);
-            alert('Error syncing sale to Mikrotik: ' + (error as Error).message);
-        } finally {
-            setIsSyncing(null);
-        }
-    };
-
-    const handleBulkSyncToMikrotik = async () => {
-        if (!window.confirm(`This will sync all ${filteredSales.length} sales to Mikrotik cloud. Continue?`)) {
-            return;
-        }
-
-        setIsBulkSyncing(true);
-        setBulkSyncResult(null);
-
-        try {
-            const result = await mikrotikSalesService.bulkSyncSalesToMikrotik(selectedRouter?.id);
-            setBulkSyncResult(result.data);
-            
-            if (result.success) {
-                alert(`Bulk sync completed!\nSynced: ${result.data.synced}\nSkipped: ${result.data.skipped}\nErrors: ${result.data.errors}`);
-            } else {
-                alert('Bulk sync failed: ' + result.message);
-            }
-        } catch (error) {
-            console.error('Error bulk syncing sales to mikrotik:', error);
-            alert('Error bulk syncing sales to Mikrotik: ' + (error as Error).message);
-        } finally {
-            setIsBulkSyncing(false);
-        }
-    };
-
     return (
         <>
             <div className={receiptToPrint ? `printable-area${receiptPrintMode === 'thermal' ? ' thermal-print-area' : ''}` : 'hidden'}>
@@ -496,19 +444,6 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                             <button onClick={handlePrintReport} className="px-4 py-2 text-sm text-white bg-sky-600 hover:bg-sky-500 rounded-lg font-semibold flex items-center gap-2">
                                 <PrinterIcon className="w-5 h-5" /> Print Report
                             </button>
-                            <button 
-                                onClick={handleBulkSyncToMikrotik} 
-                                className="px-4 py-2 text-sm text-white bg-purple-600 hover:bg-purple-500 rounded-lg font-semibold flex items-center gap-2"
-                                disabled={isBulkSyncing}
-                                title="Sync all sales to Mikrotik cloud"
-                            >
-                                {isBulkSyncing ? (
-                                    <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div>
-                                ) : (
-                                    <ArrowPathIcon className="w-5 h-5" />
-                                )}
-                                Sync to Cloud
-                            </button>
                             <button onClick={() => setIsAddOpen(true)} className="px-4 py-2 text-sm text-white bg-green-600 hover:bg-green-500 rounded-lg font-semibold">
                                 Add Invoice
                             </button>
@@ -523,49 +458,6 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                         </div>
                     </div>
 
-                    {/* Bulk Sync Results */}
-                    {bulkSyncResult && (
-                        <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-                            <h3 className="text-lg font-semibold text-purple-900 dark:text-purple-100 mb-2">Bulk Sync Results</h3>
-                            <div className="grid grid-cols-3 gap-4 text-sm">
-                                <div className="text-center">
-                                    <div className="text-2xl font-bold text-green-600">{bulkSyncResult.synced}</div>
-                                    <div className="text-slate-600 dark:text-slate-400">Synced</div>
-                                </div>
-                                <div className="text-center">
-                                    <div className="text-2xl font-bold text-yellow-600">{bulkSyncResult.skipped}</div>
-                                    <div className="text-slate-600 dark:text-slate-400">Skipped</div>
-                                </div>
-                                <div className="text-center">
-                                    <div className="text-2xl font-bold text-red-600">{bulkSyncResult.errors}</div>
-                                    <div className="text-slate-600 dark:text-slate-400">Errors</div>
-                                </div>
-                            </div>
-                            {bulkSyncResult.errorDetails.length > 0 && (
-                                <div className="mt-4">
-                                    <details className="text-sm">
-                                        <summary className="cursor-pointer text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200">
-                                            View error details ({bulkSyncResult.errorDetails.length})
-                                        </summary>
-                                        <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                                            {bulkSyncResult.errorDetails.map((error, index) => (
-                                                <div key={index} className="text-red-600 dark:text-red-400 text-xs">
-                                                    Sale {error.saleId}: {error.error}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </details>
-                                </div>
-                            )}
-                            <button 
-                                onClick={() => setBulkSyncResult(null)}
-                                className="mt-3 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300"
-                            >
-                                Clear results
-                            </button>
-                        </div>
-                    )}
-                    
                     {isAddOpen && (
                         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
                             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg w-full max-w-lg">
@@ -801,18 +693,6 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                                                 <button onClick={() => handlePrintReceipt(sale, 'thermal')} className="p-2 text-slate-500 dark:text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 rounded-md" title="Print Acknowledgement Receipt (Thermal)">
                                                     <PrinterIcon className="h-5 w-5" />
                                                 </button>
-                                                <button 
-                                                    onClick={() => handleSyncToMikrotik(sale.id)} 
-                                                    className="p-2 text-slate-500 dark:text-slate-400 hover:text-purple-500 dark:hover:text-purple-400 rounded-md" 
-                                                    title="Sync to Mikrotik"
-                                                    disabled={isSyncing === sale.id}
-                                                >
-                                                    {isSyncing === sale.id ? (
-                                                        <div className="animate-spin h-5 w-5 border-2 border-purple-500 border-t-transparent rounded-full"></div>
-                                                    ) : (
-                                                        <ArrowPathIcon className="h-5 w-5" />
-                                                    )}
-                                                </button>
                                                 {canDelete && (
                                                     <button onClick={() => deleteSale(sale.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500 rounded-md" title="Delete Record">
                                                         <TrashIcon className="h-5 w-5" />
@@ -885,11 +765,6 @@ html, body { width: 58mm; font-family: 'Courier New', Courier, monospace; font-s
                             </div>
                         </div>
                     )}
-                </div>
-                
-                {/* Mikrotik Sales Logs Section */}
-                <div className="mt-8">
-                    <MikrotikSalesLogs routerId={selectedRouter?.id} />
                 </div>
             </div>
 
