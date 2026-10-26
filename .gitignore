@@ -42,6 +42,9 @@ database.sqlite-wal
 proxy/.device-id
 proxy/.device-info.json
 
+# Turso Cloud sync configuration (must persist across git pull / redeploy)
+proxy/.turso-config.json
+
 # Local environment + runtime config (never overwrite on update)
 proxy/.env
 env.js

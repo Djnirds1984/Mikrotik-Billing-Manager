@@ -5,7 +5,8 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { initializeAiClient } from '../services/geminiService.ts';
-import { getPanelSettings, savePanelSettings, getAuthHeader, factoryReset } from '../services/databaseService.ts';
+import { getPanelSettings, savePanelSettings, getAuthHeader, factoryReset, getTursoStatus, testTursoConnection, configureTurso, disableTurso, syncTursoNow } from '../services/databaseService.ts';
+import type { TursoStatus, TursoConfig } from '../services/databaseService.ts';
 import { rebootHost } from '../services/panelService.ts';
 import { Loader } from './Loader.tsx';
 import { KeyIcon, CogIcon } from '../constants.tsx';
@@ -174,7 +175,7 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
             '• All sales records\n' +
             '• All settings\n' +
             '• All uploaded files\n\n' +
-            '✓ GOOD NEWS: Your system license is stored in the cloud and will be automatically restored after reset.\n\n' +
+            '✓ GOOD NEWS: If Turso Cloud backup is configured, your data will be automatically restored after reset.\n\n' +
             'This action CANNOT be undone!\n\n' +
             'Are you sure you want to continue?'
         );
@@ -185,7 +186,7 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
             'FINAL WARNING\n\n' +
             'You are about to perform a FACTORY RESET.\n' +
             'The system will restart and return to the first-time setup page.\n' +
-            'Your license will be automatically restored from the cloud.\n\n' +
+            'If Turso Cloud backup is configured, your data will be restored.\n\n' +
             'Click OK to proceed, or Cancel to abort.'
         );
         
@@ -204,7 +205,7 @@ const PanelTab: React.FC<{ settings: PanelSettings, setSettings: React.Dispatch<
         try {
             const result = await factoryReset();
             if (result.success) {
-                alert('Factory reset completed! The system is restarting...\n\nYour license will be automatically restored from the cloud when the system restarts.');
+                alert('Factory reset completed! The system is restarting...\n\nIf Turso Cloud backup is configured, your data will be automatically restored when the system restarts.');
                 // Clear local storage and redirect to registration
                 localStorage.clear();
                 sessionStorage.clear();
@@ -1995,7 +1996,259 @@ const LandingPageTab: React.FC<{ settings: PanelSettings, setSettings: React.Dis
     );
 };
 
-type Tab = 'panel' | 'ai' | 'telegram' | 'paymongo' | 'xendit' | 'facebook' | 'landing-page' | 'wan';
+const TursoTab: React.FC = () => {
+    const [status, setStatus] = useState<TursoStatus | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [testing, setTesting] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [syncing, setSyncing] = useState(false);
+    const [disabling, setDisabling] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [message, setMessage] = useState<string | null>(null);
+    const [form, setForm] = useState<TursoConfig>({ url: '', databaseName: '', authToken: '' });
+
+    useEffect(() => {
+        const load = async () => {
+            setLoading(true);
+            try {
+                const data = await getTursoStatus();
+                setStatus(data);
+                setForm(prev => ({
+                    ...prev,
+                    url: data.url || prev.url,
+                    databaseName: data.databaseName || prev.databaseName
+                }));
+            } catch (err) {
+                setError((err as Error).message);
+            } finally {
+                setLoading(false);
+            }
+        };
+        load();
+        const interval = setInterval(load, 10000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const handleTest = async () => {
+        setTesting(true);
+        setError(null);
+        setMessage(null);
+        try {
+            const result = await testTursoConnection(form);
+            if (result.message) setMessage(result.message);
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setTesting(false);
+        }
+    };
+
+    const handleSave = async () => {
+        setSaving(true);
+        setError(null);
+        setMessage(null);
+        try {
+            const result = await configureTurso(form);
+            setStatus(result);
+            setMessage('Turso Cloud backup enabled. Synchronization will begin shortly.');
+            setForm(prev => ({ ...prev, authToken: '' }));
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSync = async () => {
+        setSyncing(true);
+        setError(null);
+        setMessage(null);
+        try {
+            const result = await syncTursoNow();
+            setStatus(result.status);
+            setMessage(result.message);
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const handleDisable = async () => {
+        if (!window.confirm('Disable Turso Cloud backup? Your local data will remain intact, and the cloud backup will be preserved for future restoration.')) return;
+        setDisabling(true);
+        setError(null);
+        setMessage(null);
+        try {
+            const result = await disableTurso();
+            setStatus(result);
+            setMessage('Turso Cloud backup disabled.');
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setDisabling(false);
+        }
+    };
+
+    const statusColor = status?.status === 'active' ? 'green' :
+                        status?.status === 'warning' ? 'yellow' :
+                        status?.status === 'failed' ? 'red' :
+                        status?.status === 'connecting' || status?.status === 'recovering' || status?.status === 'syncing' ? 'blue' : 'gray';
+
+    return (
+        <div className="space-y-6">
+            <SettingsSection title="Turso Cloud Database">
+                <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
+                        <strong>One-panel ownership:</strong> This Turso database is owned by one active panel. Multiple MikroTik routers within the panel are supported.
+                    </p>
+                    <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
+                        <strong>Synchronized data:</strong> Customers (PPPoE/DHCP), routers, billing plans, invoices, sales records, payments, balances, and client portal accounts.
+                    </p>
+                    <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
+                        <strong>Excluded:</strong> Panel admin accounts, uploaded files, and RouterOS device configurations.
+                    </p>
+                    <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
+                        <strong>Deletion behavior:</strong> Local deletions are propagated to the cloud. Cloud deletions do not affect local data.
+                    </p>
+                    <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
+                        <strong>Factory reset:</strong> Turso configuration is preserved and will restore data on a fresh installation.
+                    </p>
+                    <p className="text-sm text-amber-700 dark:text-amber-400">
+                        <strong>Reinstall note:</strong> If you reinstall the panel, ensure <code className="px-1 py-0.5 bg-amber-100 dark:bg-amber-900 rounded text-xs">proxy/.turso-config.json</code> is preserved or restored to enable automatic recovery.
+                    </p>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Status:</span>
+                        <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-${statusColor}-100 text-${statusColor}-800 dark:bg-${statusColor}-900 dark:text-${statusColor}-200`}>
+                            <span className={`w-2 h-2 rounded-full bg-${statusColor}-500`}></span>
+                            {status?.status || 'unknown'}
+                        </span>
+                        {status?.pending ? (
+                            <span className="text-sm text-slate-600 dark:text-slate-400">
+                                ({status.pending} pending)
+                            </span>
+                        ) : null}
+                    </div>
+
+                    {status?.lastSuccess && (
+                        <p className="text-sm text-slate-600 dark:text-slate-400">
+                            Last successful sync: {new Date(status.lastSuccess).toLocaleString()}
+                        </p>
+                    )}
+
+                    {status?.lastAttempt && (
+                        <p className="text-sm text-slate-600 dark:text-slate-400">
+                            Last attempt: {new Date(status.lastAttempt).toLocaleString()}
+                        </p>
+                    )}
+
+                    {status?.restored ? (
+                        <p className="text-sm text-green-600 dark:text-green-400">
+                            Restored {status.restored} records from cloud backup
+                        </p>
+                    ) : null}
+
+                    {status?.conflicts ? (
+                        <p className="text-sm text-amber-600 dark:text-amber-400">
+                            {status.conflicts} conflicts detected (local data preserved)
+                        </p>
+                    ) : null}
+                </div>
+
+                <div className="space-y-4">
+                    <TextInput
+                        label="Turso URL / Host"
+                        name="tursoUrl"
+                        value={form.url}
+                        onChange={e => setForm(prev => ({ ...prev, url: e.target.value }))}
+                        placeholder="your-db.turso.io"
+                        info="Enter the full HTTPS URL or just the hostname (e.g., your-db.turso.io)"
+                    />
+                    <TextInput
+                        label="Database Name"
+                        name="tursoDatabaseName"
+                        value={form.databaseName}
+                        onChange={e => setForm(prev => ({ ...prev, databaseName: e.target.value }))}
+                        placeholder="my-panel-backup"
+                        info="A descriptive label for this database (letters, numbers, hyphens, underscores only)"
+                    />
+                    <div>
+                        <label htmlFor="tursoAuthToken" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Auth Token</label>
+                        <input
+                            type="password"
+                            id="tursoAuthToken"
+                            name="tursoAuthToken"
+                            value={form.authToken}
+                            onChange={e => setForm(prev => ({ ...prev, authToken: e.target.value }))}
+                            placeholder="Enter token (leave blank to keep existing)"
+                            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+                        />
+                        {status?.hasAuthToken && (
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                A token is currently saved. Leave blank to retain it, or enter a new one.
+                            </p>
+                        )}
+                    </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                    <button
+                        onClick={handleTest}
+                        disabled={testing || !form.url || !form.authToken}
+                        className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                        {testing && <Loader />}
+                        {testing ? 'Testing...' : 'Test Connection'}
+                    </button>
+                    <button
+                        onClick={handleSave}
+                        disabled={saving || !form.url || !form.databaseName || (!form.authToken && !status?.hasAuthToken)}
+                        className="px-4 py-2 bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                        {saving && <Loader />}
+                        {saving ? 'Saving...' : 'Save & Enable'}
+                    </button>
+                    {status?.enabled && (
+                        <>
+                            <button
+                                onClick={handleSync}
+                                disabled={syncing}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                            >
+                                {syncing && <Loader />}
+                                {syncing ? 'Syncing...' : 'Sync Now'}
+                            </button>
+                            <button
+                                onClick={handleDisable}
+                                disabled={disabling}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                            >
+                                {disabling && <Loader />}
+                                {disabling ? 'Disabling...' : 'Disable Sync'}
+                            </button>
+                        </>
+                    )}
+                </div>
+
+                {error && (
+                    <div className="p-3 rounded-md bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                        {error}
+                    </div>
+                )}
+                {message && (
+                    <div className="p-3 rounded-md bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                        {message}
+                    </div>
+                )}
+            </SettingsSection>
+        </div>
+    );
+};
+
+type Tab = 'panel' | 'ai' | 'telegram' | 'paymongo' | 'xendit' | 'facebook' | 'landing-page' | 'wan' | 'turso';
 
 export const SystemSettings: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('panel');
@@ -2065,6 +2318,7 @@ export const SystemSettings: React.FC = () => {
         { id: 'facebook', label: 'Messenger', icon: <FacebookIcon className="w-5 h-5" /> },
         { id: 'landing-page', label: 'Landing Page', icon: <GlobeIcon className="w-5 h-5" /> },
         { id: 'wan', label: 'WAN Settings', icon: <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg> },
+        { id: 'turso', label: 'Turso Cloud', icon: <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" /></svg> },
     ];
     
     const renderContent = () => {
@@ -2080,6 +2334,7 @@ export const SystemSettings: React.FC = () => {
             case 'facebook': return <FacebookMessengerTab settings={settings} setSettings={setSettings} />;
             case 'landing-page': return <LandingPageTab settings={settings} setSettings={setSettings} />;
             case 'wan': return <SettingsSection title="System WAN Configuration"><WanSettingsPanel /></SettingsSection>;
+            case 'turso': return <TursoTab />;
             default: return null;
         }
     };

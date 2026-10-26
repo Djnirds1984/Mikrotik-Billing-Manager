@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@libsql/client": "^0.17.0",
     "archiver": "^7.0.1",
     "axios": "^1.7.2",
     "bcryptjs": "^2.4.3",

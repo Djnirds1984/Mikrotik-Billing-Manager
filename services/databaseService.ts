@@ -106,3 +106,62 @@ export const runAutoBackup = (): Promise<{ message: string }> => {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
     }).then(r => r.json());
 };
+
+// --- Turso Cloud Sync ---
+export interface TursoStatus {
+    status: 'disabled' | 'connecting' | 'active' | 'warning' | 'failed' | 'recovering' | 'syncing';
+    enabled: boolean;
+    configured: boolean;
+    url: string;
+    databaseName: string;
+    hasAuthToken: boolean;
+    lastSuccess: string | null;
+    lastAttempt: string | null;
+    error: string | null;
+    pending: number;
+    restored: number;
+    conflicts: number;
+    tables: string[];
+}
+
+export interface TursoConfig {
+    url: string;
+    databaseName: string;
+    authToken: string;
+}
+
+export const getTursoStatus = (): Promise<TursoStatus> => {
+    return fetch('/api/db/turso/status', {
+        headers: { ...getAuthHeader() }
+    }).then(r => r.json());
+};
+
+export const testTursoConnection = (config: TursoConfig): Promise<{ message: string }> => {
+    return fetch('/api/db/turso/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify(config)
+    }).then(r => r.json());
+};
+
+export const configureTurso = (config: TursoConfig): Promise<TursoStatus> => {
+    return fetch('/api/db/turso/configure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify(config)
+    }).then(r => r.json());
+};
+
+export const disableTurso = (): Promise<TursoStatus> => {
+    return fetch('/api/db/turso/disable', {
+        method: 'POST',
+        headers: { ...getAuthHeader() }
+    }).then(r => r.json());
+};
+
+export const syncTursoNow = (): Promise<{ message: string; status: TursoStatus }> => {
+    return fetch('/api/db/turso/sync', {
+        method: 'POST',
+        headers: { ...getAuthHeader() }
+    }).then(r => r.json());
+};

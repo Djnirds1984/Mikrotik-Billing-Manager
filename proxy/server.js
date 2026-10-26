@@ -2823,6 +2823,10 @@ async function startServer() {
             // Mark as shutting down BEFORE closing db so incoming requests get rejected
             isShuttingDown = true;
             console.log('[Factory Reset] Initiating factory reset...');
+            // Stop Turso sync before closing the database so pending uploads cannot race the reset.
+            if (typeof tursoService?.shutdown === 'function') {
+                try { await tursoService.shutdown(); } catch (_) {}
+            }
             
             // Step 1: Preserve deviceId and licenseKey before deleting database
             const settings = await db.get('SELECT deviceId, licenseKey FROM settings WHERE id = 1');
@@ -2920,6 +2924,40 @@ async function startServer() {
             });
         }
     });
+
+    // --- Turso Cloud Sync (admin-only) ---
+    const { TursoSyncService } = require('./tursoSyncService');
+    const { createConfigStore, publicError } = require('./tursoConfig');
+    const tursoService = new TursoSyncService({
+        db,
+        configPath: path.join(__dirname, '.turso-config.json'),
+        store: createConfigStore(path.join(__dirname, '.turso-config.json'))
+    });
+    const tursoRouter = express.Router();
+    tursoRouter.use(requireSuperadminOrAdmin);
+    tursoRouter.get('/status', async (req, res) => {
+        try { res.json(await tursoService.status()); }
+        catch (error) { res.status(error.status || 500).json({ message: publicError(error) }); }
+    });
+    tursoRouter.post('/test', async (req, res) => {
+        try { res.json(await tursoService.test(req.body || {})); }
+        catch (error) { res.status(error.status || 500).json({ message: publicError(error) }); }
+    });
+    tursoRouter.post('/configure', async (req, res) => {
+        try { res.json(await tursoService.configure(req.body || {})); }
+        catch (error) { res.status(error.status || 500).json({ message: publicError(error) }); }
+    });
+    tursoRouter.post('/disable', async (req, res) => {
+        try { res.json(await tursoService.disable()); }
+        catch (error) { res.status(error.status || 500).json({ message: publicError(error) }); }
+    });
+    tursoRouter.post('/sync', async (req, res) => {
+        try {
+            await tursoService.sync();
+            res.json({ message: 'Synchronization completed.', status: await tursoService.status() });
+        } catch (error) { res.status(error.status || 500).json({ message: publicError(error) }); }
+    });
+    dbRouter.use('/turso', tursoRouter);
 
     app.use('/api/db', dbRouter);
 
@@ -11453,6 +11491,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         'proxy/superadmin.db-wal',
         'proxy/.env',
         'proxy/.device-id',
+        'proxy/.device-info.json',
+        'proxy/.turso-config.json',
         'proxy/ngrok-config.json',
         'proxy/uploads',
         'database.sqlite',
@@ -13332,6 +13372,14 @@ WantedBy=multi-user.target`;
     // Start Facebook payment reminder scheduler
     startFacebookReminderScheduler();
 
+    // Initialize Turso Cloud sync service (non-fatal; SQLite continues independently)
+    try {
+        await tursoService.initialize();
+        console.log('[Turso] Sync service initialized.');
+    } catch (error) {
+        console.warn('[Turso] Sync service initialization failed (non-fatal):', error.message);
+    }
+
     // --- CAPTIVE PORTAL SERVER ---
     const CAPTIVE_PORT = parseInt(process.env.CAPTIVE_PORT || '8080', 10);
     const captiveApp = express();
@@ -14240,5 +14288,11 @@ async function syncPppoeMacAddresses() {
 setInterval(syncPppoeMacAddresses, 5 * 60 * 1000);
 // Run once on startup (delayed 60s to let things initialize)
 setTimeout(syncPppoeMacAddresses, 60000);
+
+// Stop Turso sync gracefully on process exit so pending uploads cannot race the shutdown.
+const shutdownTurso = () => { try { tursoService?.shutdown?.(); } catch (_) {} };
+process.on('SIGTERM', shutdownTurso);
+process.on('SIGINT', shutdownTurso);
+process.on('exit', shutdownTurso);
 
 startServer();
