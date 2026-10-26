@@ -110,6 +110,7 @@ class TursoSyncService {
             ...this.state,
             enabled: Boolean(this.config?.enabled), configured: Boolean(this.config),
             url: this.config?.url || '', databaseName: this.config?.databaseName || '',
+            authToken: this.config?.authToken || '',
             hasAuthToken: Boolean(this.config?.authToken), pending: pending.count,
             tables: TABLES
         };
@@ -170,9 +171,17 @@ class TursoSyncService {
     configure(input) {
         return this.controlled(async () => {
             const config = normalizeConfig(input, this.config || {});
-            await this.remote(config, client => client.execute('SELECT 1 AS connected'));
+            // Save credentials FIRST so they persist even if the connection test fails.
+            // This way the user doesn't have to re-enter everything when fixing errors.
             await this.store.save(config);
             this.config = config;
+            // Test connection after saving; failures are reported but don't roll back the save.
+            try {
+                await this.remote(config, client => client.execute('SELECT 1 AS connected'));
+            } catch (connectionError) {
+                this.state = { status: 'failed', lastSuccess: this.state.lastSuccess, lastAttempt: new Date().toISOString(), error: publicError(connectionError), restored: 0, conflicts: 0 };
+                return this.status();
+            }
             this.recovered = false;
             this.failures = 0;
             this.state = { status: 'connecting', lastSuccess: null, lastAttempt: null, error: null, restored: 0, conflicts: 0 };

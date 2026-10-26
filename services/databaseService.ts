@@ -114,6 +114,7 @@ export interface TursoStatus {
     configured: boolean;
     url: string;
     databaseName: string;
+    authToken: string;
     hasAuthToken: boolean;
     lastSuccess: string | null;
     lastAttempt: string | null;

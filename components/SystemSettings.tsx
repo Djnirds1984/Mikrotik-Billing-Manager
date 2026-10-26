@@ -2016,7 +2016,8 @@ const TursoTab: React.FC = () => {
                 setForm(prev => ({
                     ...prev,
                     url: data.url || prev.url,
-                    databaseName: data.databaseName || prev.databaseName
+                    databaseName: data.databaseName || prev.databaseName,
+                    authToken: data.authToken || prev.authToken
                 }));
             } catch (err) {
                 setError((err as Error).message);
@@ -2051,7 +2052,13 @@ const TursoTab: React.FC = () => {
             const result = await configureTurso(form);
             setStatus(result);
             setMessage('Turso Cloud backup enabled. Synchronization will begin shortly.');
-            setForm(prev => ({ ...prev, authToken: '' }));
+            // Repopulate form from the saved config returned by the backend
+            setForm(prev => ({
+                ...prev,
+                url: result.url || prev.url,
+                databaseName: result.databaseName || prev.databaseName,
+                authToken: result.authToken || prev.authToken
+            }));
         } catch (err) {
             setError((err as Error).message);
         } finally {
