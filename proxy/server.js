@@ -479,6 +479,12 @@ async function initDb() {
                 amount REAL NOT NULL,
                 routerId TEXT
             );
+            CREATE TABLE IF NOT EXISTS expense_categories (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                color TEXT DEFAULT '#64748b',
+                createdAt TEXT DEFAULT (datetime('now'))
+            );
             CREATE TABLE IF NOT EXISTS pisowifi_income (
                 id TEXT PRIMARY KEY,
                 resellerId TEXT,
@@ -757,6 +763,26 @@ async function initDb() {
 
         // Insert default WAN settings if not exists
         await db.run("INSERT OR IGNORE INTO wan_settings (id, connection_type, wan_interface) VALUES (1, 'dhcp', 'eth0')");
+
+        // Seed default expense categories if none exist
+        const expCatCount = await db.get("SELECT COUNT(*) as count FROM expense_categories");
+        if (expCatCount.count === 0) {
+            const defaultCategories = [
+                { id: 'ecat_fuel', name: 'Fuel', color: '#f59e0b' },
+                { id: 'ecat_office', name: 'Office Consumable Materials', color: '#3b82f6' },
+                { id: 'ecat_permits', name: 'Permits', color: '#8b5cf6' },
+                { id: 'ecat_electricity', name: 'Electricity', color: '#ef4444' },
+                { id: 'ecat_internet', name: 'Internet', color: '#06b6d4' },
+                { id: 'ecat_rent', name: 'Rent', color: '#10b981' },
+                { id: 'ecat_maintenance', name: 'Maintenance', color: '#f97316' },
+                { id: 'ecat_salary', name: 'Salary', color: '#ec4899' },
+                { id: 'ecat_other', name: 'Other', color: '#64748b' }
+            ];
+            for (const cat of defaultCategories) {
+                await db.run("INSERT OR IGNORE INTO expense_categories (id, name, color) VALUES (?, ?, ?)", [cat.id, cat.name, cat.color]);
+            }
+            console.log('[Seed] Default expense categories created.');
+        }
         
         // Ensure new columns exist (idempotent migrations)
         try {
@@ -1847,6 +1873,7 @@ async function startServer() {
     createCrud('/inventory', 'inventory');
     createCrud('/equipment-withdrawals', 'equipment_withdrawals');
     createCrud('/expenses', 'expenses');
+    createCrud('/expense-categories', 'expense_categories');
     createCrud('/pisowifi-income', 'pisowifi_income');
     createCrud('/pisowifi-resellers', 'pisowifi_resellers');
     createCrud('/employees', 'employees');

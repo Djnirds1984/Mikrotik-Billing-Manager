@@ -387,6 +387,13 @@ export interface ExpenseRecord {
     routerId?: string; // Optional: associate expense with specific router
 }
 
+export interface ExpenseCategory {
+    id: string;
+    name: string;
+    color?: string;
+    createdAt?: string;
+}
+
 export interface SalaryRecord {
     id: string;
     employeeId: string;
