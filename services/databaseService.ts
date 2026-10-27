@@ -134,7 +134,7 @@ export interface TursoConfig {
 export const getTursoStatus = (): Promise<TursoStatus> => {
     return fetch('/api/db/turso/status', {
         headers: { ...getAuthHeader() }
-    }).then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); });
+    }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(t || `Request failed (${r.status})`); } return r.json(); });
 };
 
 export const testTursoConnection = (config: TursoConfig): Promise<{ message: string }> => {
@@ -142,7 +142,7 @@ export const testTursoConnection = (config: TursoConfig): Promise<{ message: str
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify(config)
-    }).then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); });
+    }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(t || `Request failed (${r.status})`); } return r.json(); });
 };
 
 export const testTursoReach = (url: string, authToken?: string): Promise<{ status: number; ok: boolean; body: string }> => {
@@ -150,7 +150,7 @@ export const testTursoReach = (url: string, authToken?: string): Promise<{ statu
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ url, authToken })
-    }).then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); });
+    }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(t || `Request failed (${r.status})`); } return r.json(); });
 };
 
 export const configureTurso = (config: TursoConfig): Promise<TursoStatus> => {
@@ -158,19 +158,19 @@ export const configureTurso = (config: TursoConfig): Promise<TursoStatus> => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify(config)
-    }).then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); });
+    }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(t || `Request failed (${r.status})`); } return r.json(); });
 };
 
 export const disableTurso = (): Promise<TursoStatus> => {
     return fetch('/api/db/turso/disable', {
         method: 'POST',
         headers: { ...getAuthHeader() }
-    }).then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); });
+    }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(t || `Request failed (${r.status})`); } return r.json(); });
 };
 
 export const syncTursoNow = (): Promise<{ message: string; status: TursoStatus }> => {
     return fetch('/api/db/turso/sync', {
         method: 'POST',
         headers: { ...getAuthHeader() }
-    }).then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); });
+    }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(t || `Request failed (${r.status})`); } return r.json(); });
 };
