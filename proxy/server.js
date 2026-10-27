@@ -3000,7 +3000,7 @@ async function startServer() {
             const resp = await fetch(`${target}/v2/pipeline`, {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({ requests: [{ type: 'execute', sql: 'SELECT 1' }] }),
+                body: JSON.stringify({ requests: [{ type: 'execute', stmt: { sql: 'SELECT 1' } }] }),
                 signal: AbortSignal.timeout(10000)
             });
             const body = await resp.text();
