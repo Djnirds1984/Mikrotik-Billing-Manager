@@ -225,7 +225,7 @@ interface BillingProps {
 
 export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
     const { plans, addPlan, updatePlan, deletePlan, isLoading: isLoadingPlans, error: plansError } = useBillingPlans(selectedRouter?.id || null);
-    const { plans: allPlans, deletePlan: deleteAllPlan, toggleStoreEnabled, isLoading: isLoadingAllPlans } = useAllBillingPlans(false);
+    const { plans: allPlans, deletePlan: deleteAllPlan, toggleStoreEnabled, isLoading: isLoadingAllPlans, error: allPlansError, reload: reloadAllPlans } = useAllBillingPlans(false);
     const { t, formatCurrency } = useLocalization();
     const [activeTab, setActiveTab] = useState<'plans' | 'settings'>('plans');
     const [editingPlan, setEditingPlan] = useState<BillingPlanWithId | null>(null);
@@ -233,6 +233,11 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
     const [showAllPlans, setShowAllPlans] = useState(false);
+
+    // Load all plans when toggle is turned on
+    useEffect(() => {
+        if (showAllPlans) reloadAllPlans();
+    }, [showAllPlans, reloadAllPlans]);
 
     // Use all plans or current router plans based on toggle
     const displayPlans = showAllPlans ? allPlans : plans;
@@ -376,6 +381,13 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                          <div className="flex flex-col items-center justify-center h-64">
                             <Loader />
                             <p className="mt-4 text-[--color-primary-500] dark:text-[--color-primary-400]">{t('billing.loading_plans')}</p>
+                        </div>
+                    )}
+
+                    {showAllPlans && allPlansError && !displayIsLoading && (
+                        <div className="mb-4 px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-sm text-red-800 dark:text-red-300">
+                            <strong>Error loading plans:</strong> {allPlansError}
+                            <button onClick={reloadAllPlans} className="ml-3 px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700">Retry</button>
                         </div>
                     )}
 

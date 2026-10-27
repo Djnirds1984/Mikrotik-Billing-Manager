@@ -27,7 +27,7 @@ export const useAllBillingPlans = (autoLoad: boolean = true) => {
         setError(null);
         try {
             // Fetch all billing plans with router names via JOIN
-            const data = await dbApi.get<AllBillingPlan[]>('/billing-plans/all');
+            const data = await dbApi.get<AllBillingPlan[]>('/all-billing-plans');
             const dataWithFallback = data.map(plan => {
                 let cycleDays = plan.cycle_days;
                 if (!cycleDays) {

@@ -1872,8 +1872,8 @@ async function startServer() {
         }
     });
 
-    // GET all billing plans with router names (MUST be before createCrud to avoid /all being caught as :id)
-    dbRouter.get('/billing-plans/all', async (req, res) => {
+    // GET all billing plans with router names (separate path to avoid any route conflicts)
+    dbRouter.get('/all-billing-plans', async (req, res) => {
         try {
             const rows = await db.all(`
                 SELECT bp.*, r.name as routerName
