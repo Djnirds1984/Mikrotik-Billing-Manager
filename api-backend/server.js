@@ -2837,8 +2837,8 @@ app.post('/:routerId/system/backup/create', getRouter, async (req, res) => {
             }
         } else {
             const instance = req.routerInstance;
-            // Trigger backup creation (POST is the correct REST method for /system/backup)
-            await instance.post('/system/backup', { name: backupName }, { timeout: 120000 });
+            // Trigger backup creation on MikroTik via REST API
+            await instance.post('/system/backup/save', { name: backupName }, { timeout: 120000 });
             
             // Download the backup file content (GET /file/{id-or-name} on the REST API)
             try {
