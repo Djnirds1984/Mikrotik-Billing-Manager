@@ -776,6 +776,7 @@ async function initDb() {
                 { id: 'ecat_rent', name: 'Rent', color: '#10b981' },
                 { id: 'ecat_maintenance', name: 'Maintenance', color: '#f97316' },
                 { id: 'ecat_salary', name: 'Salary', color: '#ec4899' },
+                { id: 'ecat_payroll', name: 'Payroll', color: '#14b8a6' },
                 { id: 'ecat_other', name: 'Other', color: '#64748b' }
             ];
             for (const cat of defaultCategories) {
