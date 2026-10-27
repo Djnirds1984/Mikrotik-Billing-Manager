@@ -5,7 +5,7 @@ import { useLocalization } from '../contexts/LocalizationContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { initializeAiClient } from '../services/geminiService.ts';
-import { getPanelSettings, savePanelSettings, getAuthHeader, factoryReset, getTursoStatus, testTursoConnection, configureTurso, disableTurso, syncTursoNow } from '../services/databaseService.ts';
+import { getPanelSettings, savePanelSettings, getAuthHeader, factoryReset, getTursoStatus, testTursoConnection, testTursoReach, configureTurso, disableTurso, syncTursoNow } from '../services/databaseService.ts';
 import type { TursoStatus, TursoConfig } from '../services/databaseService.ts';
 import { rebootHost } from '../services/panelService.ts';
 import { Loader } from './Loader.tsx';
@@ -2044,6 +2044,24 @@ const TursoTab: React.FC = () => {
         }
     };
 
+    const handleTestReach = async () => {
+        setTesting(true);
+        setError(null);
+        setMessage(null);
+        try {
+            const result = await testTursoReach(form.url);
+            if (result.ok) {
+                setMessage(`Server can reach Turso (HTTP ${result.status}). Response: ${result.body.substring(0, 200)}`);
+            } else {
+                setError(`Server reached Turso but got HTTP ${result.status}: ${result.body.substring(0, 300)}`);
+            }
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setTesting(false);
+        }
+    };
+
     const handleSave = async () => {
         setSaving(true);
         setError(null);
@@ -2209,6 +2227,15 @@ const TursoTab: React.FC = () => {
                     >
                         {testing && <Loader />}
                         {testing ? 'Testing...' : 'Test Connection'}
+                    </button>
+                    <button
+                        onClick={handleTestReach}
+                        disabled={testing || !form.url}
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        title="Check if server can reach Turso (bypasses libsql client)"
+                    >
+                        {testing && <Loader />}
+                        {testing ? 'Testing...' : 'Test Reach'}
                     </button>
                     <button
                         onClick={handleSave}

@@ -2989,6 +2989,24 @@ async function startServer() {
         try { res.json(await tursoService.test(req.body || {})); }
         catch (error) { res.status(error.status || 500).json({ message: publicError(error) }); }
     });
+    // Simple connectivity test - bypasses libsql client, just checks if server can reach Turso
+    tursoRouter.post('/test-reach', async (req, res) => {
+        try {
+            const { url } = req.body || {};
+            if (!url) return res.status(400).json({ message: 'URL required' });
+            const target = url.startsWith('http') ? url : `https://${url}`;
+            const resp = await fetch(`${target}/v2/pipeline`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ requests: [{ type: 'execute', sql: 'SELECT 1' }] }),
+                signal: AbortSignal.timeout(10000)
+            });
+            const body = await resp.text();
+            res.json({ status: resp.status, ok: resp.ok, body: body.substring(0, 500) });
+        } catch (error) {
+            res.status(503).json({ message: `Cannot reach Turso: ${error.message}` });
+        }
+    });
     tursoRouter.post('/configure', async (req, res) => {
         try { res.json(await tursoService.configure(req.body || {})); }
         catch (error) { res.status(error.status || 500).json({ message: publicError(error) }); }

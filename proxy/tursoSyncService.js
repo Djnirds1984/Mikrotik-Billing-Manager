@@ -138,9 +138,17 @@ class TursoSyncService {
         try {
             return await Promise.race([action(client), cancelled]);
         } catch (e) {
-            // Wrap non-TursoError exceptions (e.g. libsql driver errors) as TursoError
             if (e instanceof TursoError) throw e;
-            throw new TursoError(e.message || 'Turso connection failed.', e.status || 502);
+            // Preserve the actual driver error message (e.g. "SERVER_ERROR: HTTP 401 - invalid token")
+            const msg = e.message || String(e);
+            // Map common libsql error patterns to proper HTTP statuses
+            let status = 502;
+            if (/401|unauthorized|invalid.*token|authentication/i.test(msg)) status = 401;
+            else if (/403|forbidden/i.test(msg)) status = 403;
+            else if (/404|not found/i.test(msg)) status = 404;
+            else if (/400|bad request/i.test(msg)) status = 400;
+            else if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network|fetch failed/i.test(msg)) status = 503;
+            throw new TursoError(msg, status);
         } finally {
             clearTimeout(timer);
             try { client?.close(); } catch (_) {}
