@@ -304,12 +304,34 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
         <div className="max-w-4xl mx-auto">
              <div className="flex justify-between items-center mb-6">
                 <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">{t('titles.billing')}</h2>
-                {activeTab === 'plans' && !isAdding && !editingPlan && (
-                     <button onClick={handleAddNew} className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all">
-                        {t('billing.add_new_plan')}
-                    </button>
-                )}
+                <div className="flex items-center gap-3">
+                    {activeTab === 'plans' && !isAdding && !editingPlan && (
+                        <button
+                            onClick={() => setShowAllPlans(!showAllPlans)}
+                            className={`flex items-center gap-2 font-bold py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all text-sm ${
+                                showAllPlans
+                                    ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                                    : 'bg-slate-600 hover:bg-slate-700 text-white'
+                            }`}
+                            title={showAllPlans ? 'Showing ALL plans from database' : 'Showing plans for current router only'}
+                        >
+                            <EyeIcon className="h-4 w-4" />
+                            {showAllPlans ? 'All Plans (DB)' : 'Show All Plans'}
+                        </button>
+                    )}
+                    {activeTab === 'plans' && !isAdding && !editingPlan && !showAllPlans && (
+                         <button onClick={handleAddNew} className="bg-[--color-primary-600] hover:bg-[--color-primary-700] text-white font-bold py-2 px-4 rounded-lg shadow-sm hover:shadow-md transition-all">
+                            {t('billing.add_new_plan')}
+                        </button>
+                    )}
+                </div>
             </div>
+
+            {showAllPlans && activeTab === 'plans' && (
+                <div className="mb-4 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg text-sm text-amber-800 dark:text-amber-300">
+                    <strong>Viewing ALL billing plans from database.</strong> Plans from other routers are shown with their router name. You can delete irrelevant plans or toggle their Store visibility. Edit is only available for plans belonging to the current router.
+                </div>
+            )}
 
             {/* Tab Buttons */}
             <div className="flex border-b border-slate-200 dark:border-slate-700 mb-6">
@@ -350,22 +372,28 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                         </div>
                     )}
                     
-                    {isLoadingPlans && (
+                    {displayIsLoading && (
                          <div className="flex flex-col items-center justify-center h-64">
                             <Loader />
                             <p className="mt-4 text-[--color-primary-500] dark:text-[--color-primary-400]">{t('billing.loading_plans')}</p>
                         </div>
                     )}
 
-                    {!isLoadingPlans && (
+                    {!displayIsLoading && (
                         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
                             <ul role="list" className="divide-y divide-slate-200 dark:divide-slate-700">
-                                {plans.map((plan) => (
+                                {displayPlans.length === 0 ? (
+                                    <li className="p-6 text-center text-slate-500 dark:text-slate-400">
+                                        {showAllPlans ? 'No billing plans found in database.' : 'No plans for this router. Click "Add New Plan" to create one.'}
+                                    </li>
+                                ) : displayPlans.map((plan) => {
+                                    const isCurrentRouter = !plan.routerId || plan.routerId === selectedRouter?.id;
+                                    return (
                                     <li key={plan.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50">
                                         <div className="flex items-center gap-4 mb-2 sm:mb-0">
                                             <SignalIcon className="h-8 w-8 text-[--color-primary-500] dark:text-[--color-primary-400] flex-shrink-0" />
                                             <div>
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 flex-wrap">
                                                     <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{plan.name}</p>
                                                     <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
                                                         plan.billingType === 'postpaid' 
@@ -374,6 +402,25 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                                                     }`}>
                                                         {plan.billingType === 'postpaid' ? 'Postpaid' : 'Prepaid'}
                                                     </span>
+                                                    {showAllPlans && plan.routerName && (
+                                                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                                                            isCurrentRouter
+                                                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                                                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                                                        }`}>
+                                                            <RouterIcon className="h-3 w-3 inline mr-1" />
+                                                            {plan.routerName}
+                                                        </span>
+                                                    )}
+                                                    {showAllPlans && (
+                                                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                                            plan.store_enabled
+                                                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                                                : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                                                        }`}>
+                                                            {plan.store_enabled ? 'In Store' : 'Hidden'}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <p className="text-sm text-slate-500 dark:text-slate-400">
                                                     <span className="font-bold text-slate-800 dark:text-slate-200">{formatCurrency(plan.price)}</span> / {plan.cycle_days || 30} {t('billing.days')}
@@ -383,15 +430,31 @@ export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
                                             </div>
                                         </div>
                                         <div className="flex items-center space-x-2 self-end sm:self-center">
-                                            <button onClick={() => handleEdit(plan)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400]">
-                                                <EditIcon className="h-5 w-5" />
-                                            </button>
-                                            <button onClick={() => handleDelete(plan.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500">
+                                            {showAllPlans && (
+                                                <button
+                                                    onClick={() => toggleStoreEnabled(plan)}
+                                                    className={`p-2 rounded-lg transition-colors ${
+                                                        plan.store_enabled
+                                                            ? 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                                                            : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                                    }`}
+                                                    title={plan.store_enabled ? 'Hide from Store' : 'Show in Store'}
+                                                >
+                                                    <EyeIcon className="h-5 w-5" />
+                                                </button>
+                                            )}
+                                            {isCurrentRouter && (
+                                                <button onClick={() => handleEdit(plan)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-[--color-primary-500] dark:hover:text-[--color-primary-400]">
+                                                    <EditIcon className="h-5 w-5" />
+                                                </button>
+                                            )}
+                                            <button onClick={() => handleDeletePlan(plan.id)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-red-500">
                                                 <TrashIcon className="h-5 w-5" />
                                             </button>
                                         </div>
                                     </li>
-                                ))}
+                                    );
+                                })}
                             </ul>
                         </div>
                     )}
