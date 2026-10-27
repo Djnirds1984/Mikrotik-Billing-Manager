@@ -119,10 +119,15 @@ class TursoSyncService {
     async remote(config, action) {
         const controller = new AbortController();
         this.activeRequest = controller;
-        const client = this.clientFactory({
-            url: config.url, authToken: config.authToken,
-            fetch: (input, init) => fetch(input, { ...init, signal: controller.signal, redirect: 'error' })
-        });
+        let client;
+        try {
+            client = this.clientFactory({
+                url: config.url, authToken: config.authToken,
+                fetch: (input, init) => fetch(input, { ...init, signal: controller.signal, redirect: 'error' })
+            });
+        } catch (e) {
+            throw new TursoError(`Failed to create Turso client: ${e.message}`, 500);
+        }
         let timer;
         const cancelled = new Promise((_, reject) => {
             controller.signal.addEventListener('abort', () => reject(
@@ -132,9 +137,13 @@ class TursoSyncService {
         });
         try {
             return await Promise.race([action(client), cancelled]);
+        } catch (e) {
+            // Wrap non-TursoError exceptions (e.g. libsql driver errors) as TursoError
+            if (e instanceof TursoError) throw e;
+            throw new TursoError(e.message || 'Turso connection failed.', e.status || 502);
         } finally {
             clearTimeout(timer);
-            client.close();
+            try { client?.close(); } catch (_) {}
             if (this.activeRequest === controller) this.activeRequest = null;
         }
     }
@@ -144,12 +153,12 @@ class TursoSyncService {
             return Promise.reject(new TursoError('Turso settings are busy. Try again shortly.', 409));
         }
         this.controlFlight = (async () => {
-            await this.stop();
+            try { await this.stop(); } catch (_) { /* ignore stop errors during control ops */ }
             if (this.closing) throw new TursoError('The panel is shutting down.', 503);
             return action();
         })().finally(() => {
             this.controlFlight = null;
-            this.start();
+            try { this.start(); } catch (_) { /* ignore start errors during control ops */ }
         });
         return this.controlFlight;
     }
