@@ -19,8 +19,9 @@ function normalizeConfig(input, previous = {}) {
         throw new TursoError('Enter a valid Turso Cloud URL.');
     }
     // Restrict server-side credential forwarding to official Turso Cloud endpoints.
+    // Turso hostnames can have multiple subdomain levels: {db}-{org}.{region}.turso.io
     if (!['https:', 'libsql:'].includes(url.protocol) ||
-        !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.turso\.io$/.test(url.hostname) ||
+        !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.turso\.io$/.test(url.hostname) ||
         url.username || url.password || url.port || (url.pathname && url.pathname !== '/') ||
         url.search || url.hash || /:\d+(?:\/|$)/.test(raw)) {
         throw new TursoError('Use an HTTPS or libsql Turso Cloud host (*.turso.io) without a port, path, or query.');
