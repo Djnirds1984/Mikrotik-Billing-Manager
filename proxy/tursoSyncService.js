@@ -4,7 +4,8 @@ const TABLES = Object.freeze([
     'routers', 'billing_plans', 'dhcp_billing_plans', 'customers', 'dhcp_clients',
     'client_users', 'client_invoices', 'sales_records', 'manual_payment_requests',
     'paymongo_sessions', 'xendit_sessions', 'billing_ledger', 'client_balances',
-    'expenses', 'expense_categories'
+    'expenses', 'expense_categories', 'employees', 'employee_benefits', 'time_records',
+    'holidays', 'payroll_records', 'salary_records'
 ]);
 const REMOTE_TABLE = 'mbm_sync_rows_v1';
 const PAGE_SIZE = 100;

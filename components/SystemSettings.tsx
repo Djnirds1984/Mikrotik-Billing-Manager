@@ -2128,7 +2128,7 @@ const TursoTab: React.FC = () => {
                         <strong>One-panel ownership:</strong> This Turso database is owned by one active panel. Multiple MikroTik routers within the panel are supported.
                     </p>
                     <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
-                        <strong>Synchronized data:</strong> Customers (PPPoE/DHCP), routers, billing plans, invoices, sales records, payments, balances, and client portal accounts.
+                        <strong>Synchronized data:</strong> Customers (PPPoE/DHCP), routers, billing plans, invoices, sales records, payments, balances, client portal accounts, expenses, employee records, DTR/time records, payroll records, salary payments, and holidays.
                     </p>
                     <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
                         <strong>Excluded:</strong> Panel admin accounts, uploaded files, and RouterOS device configurations.
