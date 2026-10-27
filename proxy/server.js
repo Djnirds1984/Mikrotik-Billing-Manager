@@ -1872,9 +1872,7 @@ async function startServer() {
         }
     });
 
-    createCrud('/billing-plans', 'billing_plans');
-
-    // GET all billing plans with router names (for admin to see/manage all plans across routers)
+    // GET all billing plans with router names (MUST be before createCrud to avoid /all being caught as :id)
     dbRouter.get('/billing-plans/all', async (req, res) => {
         try {
             const rows = await db.all(`
@@ -1888,6 +1886,8 @@ async function startServer() {
             res.status(500).json({ message: e.message });
         }
     });
+
+    createCrud('/billing-plans', 'billing_plans');
 
     createCrud('/inventory', 'inventory');
     createCrud('/equipment-withdrawals', 'equipment_withdrawals');
