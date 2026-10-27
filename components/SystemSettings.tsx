@@ -2049,7 +2049,7 @@ const TursoTab: React.FC = () => {
         setError(null);
         setMessage(null);
         try {
-            const result = await testTursoReach(form.url);
+            const result = await testTursoReach(form.url, form.authToken);
             if (result.ok) {
                 setMessage(`Server can reach Turso (HTTP ${result.status}). Response: ${result.body.substring(0, 200)}`);
             } else {

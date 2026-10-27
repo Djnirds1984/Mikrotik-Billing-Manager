@@ -145,11 +145,11 @@ export const testTursoConnection = (config: TursoConfig): Promise<{ message: str
     }).then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); });
 };
 
-export const testTursoReach = (url: string): Promise<{ status: number; ok: boolean; body: string }> => {
+export const testTursoReach = (url: string, authToken?: string): Promise<{ status: number; ok: boolean; body: string }> => {
     return fetch('/api/db/turso/test-reach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url, authToken })
     }).then(r => { if (!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); });
 };
 

@@ -2992,12 +2992,14 @@ async function startServer() {
     // Simple connectivity test - bypasses libsql client, just checks if server can reach Turso
     tursoRouter.post('/test-reach', async (req, res) => {
         try {
-            const { url } = req.body || {};
+            const { url, authToken } = req.body || {};
             if (!url) return res.status(400).json({ message: 'URL required' });
             const target = url.startsWith('http') ? url : `https://${url}`;
+            const headers = { 'Content-Type': 'application/json' };
+            if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
             const resp = await fetch(`${target}/v2/pipeline`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({ requests: [{ type: 'execute', sql: 'SELECT 1' }] }),
                 signal: AbortSignal.timeout(10000)
             });
