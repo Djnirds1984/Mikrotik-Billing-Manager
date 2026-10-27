@@ -1717,7 +1717,9 @@ async function startServer() {
                 let query = `SELECT * FROM ${table}`;
                 let params = [];
                 if (routerId) {
-                    query += ` WHERE routerId = ?`;
+                    // Include router-specific rows AND global rows (routerId IS NULL)
+                    // so company-wide expenses like Payroll always appear.
+                    query += ` WHERE routerId = ? OR routerId IS NULL`;
                     params.push(routerId);
                 }
                 let rows = await db.all(query, params);
