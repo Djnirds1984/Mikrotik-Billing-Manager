@@ -123,7 +123,19 @@ class TursoSyncService {
         try {
             client = this.clientFactory({
                 url: config.url, authToken: config.authToken,
-                fetch: (input, init) => fetch(input, { ...init, signal: controller.signal, redirect: 'error' })
+                fetch: async (input, init) => {
+                    if (input && typeof input === 'object' && input.url && !init) {
+                        const headers = {};
+                        if (input.headers && typeof input.headers.entries === 'function') {
+                            for (const [k, v] of input.headers.entries()) headers[k] = v;
+                        }
+                        return fetch(input.url, {
+                            method: input.method || 'GET', headers, body: input.body ?? null,
+                            signal: controller.signal, redirect: 'error'
+                        });
+                    }
+                    return fetch(input, { ...init, signal: controller.signal, redirect: 'error' });
+                }
             });
         } catch (e) {
             throw new TursoError(`Failed to create Turso client: ${e.message}`, 500);
