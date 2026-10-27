@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import type { BillingPlan, BillingPlanWithId, BillingSettings, PppProfile, RouterConfigWithId } from '../types.ts';
 import { useBillingPlans } from '../hooks/useBillingPlans.ts';
+import { useAllBillingPlans } from '../hooks/useAllBillingPlans.ts';
 import { useBillingSettings } from '../hooks/useBillingSettings.ts';
 import { getPppProfiles } from '../services/mikrotikService.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
-import { EditIcon, TrashIcon, SignalIcon, RouterIcon, CogIcon } from '../constants.tsx';
+import { EditIcon, TrashIcon, SignalIcon, RouterIcon, CogIcon, EyeIcon } from '../constants.tsx';
 import { Loader } from './Loader.tsx';
 
 // Form component for adding/editing plans
@@ -224,12 +225,28 @@ interface BillingProps {
 
 export const Billing: React.FC<BillingProps> = ({ selectedRouter }) => {
     const { plans, addPlan, updatePlan, deletePlan, isLoading: isLoadingPlans, error: plansError } = useBillingPlans(selectedRouter?.id || null);
+    const { plans: allPlans, deletePlan: deleteAllPlan, toggleStoreEnabled, isLoading: isLoadingAllPlans } = useAllBillingPlans(false);
     const { t, formatCurrency } = useLocalization();
     const [activeTab, setActiveTab] = useState<'plans' | 'settings'>('plans');
     const [editingPlan, setEditingPlan] = useState<BillingPlanWithId | null>(null);
     const [isAdding, setIsAdding] = useState(false);
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
+    const [showAllPlans, setShowAllPlans] = useState(false);
+
+    // Use all plans or current router plans based on toggle
+    const displayPlans = showAllPlans ? allPlans : plans;
+    const displayIsLoading = showAllPlans ? isLoadingAllPlans : isLoadingPlans;
+
+    const handleDeletePlan = async (planId: string) => {
+        if (window.confirm(t('billing.delete_confirm'))) {
+            if (showAllPlans) {
+                await deleteAllPlan(planId);
+            } else {
+                deletePlan(planId);
+            }
+        }
+    };
 
     useEffect(() => {
         if ((isAdding || editingPlan) && selectedRouter) {

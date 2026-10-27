@@ -1873,6 +1873,22 @@ async function startServer() {
     });
 
     createCrud('/billing-plans', 'billing_plans');
+
+    // GET all billing plans with router names (for admin to see/manage all plans across routers)
+    dbRouter.get('/billing-plans/all', async (req, res) => {
+        try {
+            const rows = await db.all(`
+                SELECT bp.*, r.name as routerName
+                FROM billing_plans bp
+                LEFT JOIN routers r ON bp.routerId = r.id
+                ORDER BY r.name, bp.name
+            `);
+            res.json(rows);
+        } catch (e) {
+            res.status(500).json({ message: e.message });
+        }
+    });
+
     createCrud('/inventory', 'inventory');
     createCrud('/equipment-withdrawals', 'equipment_withdrawals');
     createCrud('/expenses', 'expenses');
