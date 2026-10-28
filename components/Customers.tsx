@@ -606,9 +606,17 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
         if (!selectedRouter) return;
         try {
             const secrets = await getPppSecrets(selectedRouter);
-            const secret = secrets.find((s: PppSecret) => s.name === customer.username);
+            const uname = customer.username || '';
+            // Try multiple matching strategies: exact, prefix, contains
+            let secret = secrets.find((s: PppSecret) => s.name === uname);
+            if (!secret && uname) {
+                secret = secrets.find((s: PppSecret) => uname.startsWith(s.name));
+            }
+            if (!secret && uname) {
+                secret = secrets.find((s: PppSecret) => s.name.startsWith(uname));
+            }
             if (!secret) {
-                alert(`No PPPoE user found with username "${customer.username}". Please link a PPPoE user first.`);
+                alert(`No PPPoE user found for customer "${customer.fullName || uname}". Please link a PPPoE user first.`);
                 return;
             }
             let subscription: any = { plan: 'N/A', dueDate: 'No Info', planType: 'prepaid' };
