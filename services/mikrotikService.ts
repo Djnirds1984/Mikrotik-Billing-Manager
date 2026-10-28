@@ -161,6 +161,7 @@ export const runDhcpCaptivePortalUninstall = (router: RouterConfigWithId) => {
 // --- PPPoE ---
 
 export const getPppSecrets = (router: RouterConfigWithId, signal: AbortSignal = AbortSignal.timeout(30000)) => apiCall<PppSecret[]>(router, 'ppp/secret/print', 'GET', undefined, signal);
+export const getPppSecret = (router: RouterConfigWithId, name: string, signal: AbortSignal = AbortSignal.timeout(30000)) => apiCall<PppSecret[]>(router, `ppp/secret/lookup?name=${encodeURIComponent(name)}`, 'GET', undefined, signal);
 export const addPppSecret = (router: RouterConfigWithId, data: PppSecretData) => apiCall(router, 'ppp/secret/add', 'POST', data);
 export const updatePppSecret = (router: RouterConfigWithId, id: string, data: Partial<PppSecretData>) => apiCall(router, 'ppp/secret/set', 'POST', { ...data, '.id': id });
 export const deletePppSecret = (router: RouterConfigWithId, id: string) => apiCall(router, 'ppp/secret/remove', 'POST', { '.id': id });

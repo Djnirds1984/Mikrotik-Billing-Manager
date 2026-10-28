@@ -2318,10 +2318,14 @@ async function startServer() {
 
     dbRouter.get('/customers', async (req, res) => {
         try {
-            const { routerId } = req.query;
+            const { routerId, pppoeName } = req.query;
             let query = `SELECT * FROM customers`;
             let params = [];
-            if (routerId) {
+            if (pppoeName !== undefined) {
+                if (typeof pppoeName !== 'string' || !pppoeName || typeof routerId !== 'string' || !routerId) return res.status(400).json({ message: 'Router and exact PPPoE name are required.' });
+                query += ` WHERE (routerId = ? AND COALESCE(NULLIF(pppoeSecret, ''), username) = ?) OR username = ?`;
+                params.push(routerId, pppoeName, pppoeName);
+            } else if (routerId) {
                 query += ` WHERE routerId = ?`;
                 params.push(routerId);
             }
@@ -2371,10 +2375,9 @@ async function startServer() {
                 if (keys.length > 0) {
                     const setClause = keys.map(k => `${k} = ?`).join(',');
                     await db.run(`UPDATE customers SET ${setClause} WHERE id = ?`, [...values, existing.id]);
-                    console.log(`[Customers POST] Updated existing customer id=${existing.id}`);
                 }
 
-                res.json({ message: 'Updated existing customer', id: existing.id });
+                res.json({ message: 'Updated existing customer', id: existing.id, customer: { ...existing, ...req.body, id: existing.id, username: existing.username } });
             } else {
                 // Insert new
                 if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
@@ -2384,9 +2387,8 @@ async function startServer() {
                 const values = Object.values(req.body);
                 const placeholders = keys.map(() => '?').join(',');
                 await db.run(`INSERT INTO customers (${keys.join(',')}) VALUES (${placeholders})`, values);
-                console.log(`[Customers POST] Inserted new customer username=${username}, routerId=${routerId}, accountNumber=${req.body.accountNumber}`);
 
-                res.json({ message: 'Created new customer' });
+                res.json({ message: 'Created new customer', customer: req.body });
             }
         } catch (e) {
             console.error(`[Customers POST] Error:`, e.message);
@@ -2424,11 +2426,8 @@ async function startServer() {
             }
 
             if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
-                const current = await db.get('SELECT accountNumber FROM customers WHERE id = ?', [id]);
-                if (!current?.accountNumber) {
-                    req.body.accountNumber = await generateAccountNumber();
-                    console.log(`[Customers PATCH] Generated account number: ${req.body.accountNumber}`);
-                }
+                if (existingCustomer.accountNumber) delete req.body.accountNumber;
+                else req.body.accountNumber = await generateAccountNumber();
             }
             
             // Get actual table columns to filter out non-existent fields
@@ -2438,8 +2437,7 @@ async function startServer() {
             // Only update fields that are actual columns in the table, exclude 'id'
             const fieldsToUpdate = Object.keys(req.body).filter(k => validColNames.includes(k) && k !== 'id');
             if (fieldsToUpdate.length === 0) {
-                console.log(`[Customers PATCH] No valid fields to update`);
-                return res.json({ message: 'No fields to update' });
+                return res.json({ message: 'No fields to update', customer: existingCustomer });
             }
             
             const updates = fieldsToUpdate.map(k => `${k} = ?`).join(',');
@@ -2449,7 +2447,8 @@ async function startServer() {
             if (expectedLink !== undefined) values.push(req.query.routerId, expectedLink);
             const result = await db.run(`UPDATE customers SET ${updates} WHERE id = ?${condition}`, values);
             if (expectedLink !== undefined && result.changes === 0) return res.status(409).json({ message: 'The customer link changed. Refresh the customer before saving.' });
-            res.json({ message: 'Updated' });
+            const savedFields = Object.fromEntries(fieldsToUpdate.map(key => [key, req.body[key]]));
+            res.json({ message: 'Updated', customer: { ...existingCustomer, ...savedFields } });
         } catch (e) { 
             console.error(`[Customers PATCH] Error:`, e.message);
             res.status(500).json({ message: e.message }); 

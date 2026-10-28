@@ -1659,6 +1659,38 @@ app.post('/:routerId/dhcp-client/update', getRouter, async (req, res) => {
     }
 });
 
+// Fresh, exact-name lookup for mutation workflows; never use the polling read cache.
+app.get('/:routerId/ppp/secret/lookup', getRouter, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const name = req.query.name;
+    if (typeof name !== 'string' || name.length === 0) {
+        return res.status(400).json({ message: 'Invalid input: name must be a non-empty string.' });
+    }
+    try {
+        let secrets;
+        if (req.router.api_type === 'legacy') {
+            const client = req.routerInstance;
+            try {
+                await client.connect();
+                secrets = await writeLegacySafe(client, ['/ppp/secret/print', `?name=${name}`]);
+            } finally {
+                try { await client.close(); } catch (_) {}
+            }
+        } else {
+            const result = await req.routerInstance.get(`/ppp/secret?name=${encodeURIComponent(name)}`);
+            secrets = result.data;
+        }
+        const matches = Array.isArray(secrets) ? secrets.filter(secret => secret?.name === name) : [];
+        res.json(req.router.api_type === 'legacy' ? matches.map(normalizeLegacyObject) : matches);
+    } catch (e) {
+        const isTimeout = e.code === 'ECONNABORTED' || /timeout/i.test(String(e.message));
+        const status = isTimeout ? 504 : (e.response?.status || 500);
+        const message = isTimeout ? 'MikroTik router request timed out. The router may be busy or unreachable.'
+            : (e.response?.data?.message || e.response?.data?.detail || e.message);
+        if (!res.headersSent) res.status(status).json({ message });
+    }
+});
+
 // 4. PPP User Save
 app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
     const { initialSecret, secretData, subscriptionData } = req.body;
@@ -1688,37 +1720,31 @@ app.post('/:routerId/ppp/user/save', getRouter, async (req, res) => {
         const onEventProfile = subscriptionData?.nonPaymentProfile ? `\n/ppp secret set [find name="${String(secretData.name)}"] profile="${String(subscriptionData.nonPaymentProfile)}"` : '';
 const onEvent = `/log info message="PPPoE auto-kick: ${String(secretData.name)}"\n:do { /ppp active remove [find name="${String(secretData.name)}"] } on-error={}${onEventProfile}`;
         if (req.router.api_type === 'legacy') {
-            const client = req.routerInstance; await client.connect();
+            const client = req.routerInstance;
             try {
-                let targetId = initialSecret?.id || null;
-                try {
-                    if (!targetId) {
-                        const existing = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
-                        if (Array.isArray(existing) && existing.length > 0) targetId = existing[0]['.id'];
-                    }
-                } catch (_) {}
+                await client.connect();
+                // Read once before writing; an edit may be renaming the existing secret.
+                const lookup = initialSecret?.id ? '?.id=' + String(initialSecret.id) : '?name=' + String(secretData.name);
+                const secrets = await writeLegacySafe(client, ['/ppp/secret/print', lookup]);
+                const existing = Array.isArray(secrets) && secrets.length > 0 ? secrets[0] : null;
+                const targetId = existing?.['.id'] || initialSecret?.id || null;
                 const payload = {};
                 if (targetId) payload['.id'] = targetId;
                 if (secretData.name != null) payload['name'] = String(secretData.name);
                 if (secretData.password != null) payload['password'] = String(secretData.password);
                 const isGrace = subscriptionData && Number(subscriptionData.graceDays) > 0;
-                let originalProfileVal = initialSecret?.profile;
-                try {
-                    const cur = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
-                    if (Array.isArray(cur) && cur.length > 0) originalProfileVal = cur[0]['profile'] || originalProfileVal;
-                } catch (_) {}
+                const originalProfileVal = existing?.profile || initialSecret?.profile;
                 if (isGrace) payload['profile'] = String(secretData.profile || originalProfileVal || '');
                 else if (secretData.profile != null) payload['profile'] = String(secretData.profile);
                 if (secretData.service != null) payload['service'] = String(secretData.service); else if (!targetId) payload['service'] = 'pppoe';
                 if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
                 else if (typeof secretData.disabled === 'string') payload['disabled'] = secretData.disabled === 'true' ? 'yes' : 'no';
                 if (subscriptionData != null) {
-                    const meta = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secretData.name)]);
                     let preservedPlanType = '';
-                    try { const c = JSON.parse(meta[0]?.comment || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
+                    try { const c = JSON.parse(existing?.comment || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
                     const db = await getDb(); const row = await db.get('SELECT original_plan_type FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secretData.name)]);
                     if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
-                    let base = {}; try { base = JSON.parse(meta[0]?.comment || '{}'); } catch (_) {}
+                    let base = {}; try { base = JSON.parse(existing?.comment || '{}'); } catch (_) {}
                     const merged = { ...base, ...subscriptionData, planType: (subscriptionData.planType || '').toLowerCase() || preservedPlanType };
                     delete merged.graceDays; delete merged.graceTime; delete merged.nonPaymentProfile;
                     if (subscriptionData?.dueDate) { const s = String(subscriptionData.dueDate); const datePart = s.split('T')[0]; merged.dueDate = datePart; merged.dueDateTime = s; }
@@ -1805,23 +1831,18 @@ const onEvent = `/log info message="PPPoE auto-kick: ${String(secretData.name)}"
             if (secretData.name != null) payload['name'] = String(secretData.name);
             if (secretData.password != null) payload['password'] = String(secretData.password);
             const isGrace = subscriptionData && Number(subscriptionData.graceDays) > 0;
-            let originalProfileVal = initialSecret?.profile || (existing && existing['profile']);
-            if (!originalProfileVal) {
-                try { const s2 = await instance.get(`/ppp/secret?name=${name}`); if (Array.isArray(s2.data) && s2.data.length > 0) originalProfileVal = s2.data[0]['profile']; } catch (_) {}
-            }
+            const originalProfileVal = existing?.profile || initialSecret?.profile;
             if (isGrace) payload['profile'] = String(secretData.profile || originalProfileVal || '');
             else if (secretData.profile != null) payload['profile'] = String(secretData.profile);
             if (secretData.service != null) payload['service'] = String(secretData.service); else if (!existing) payload['service'] = 'pppoe';
             if (typeof secretData.disabled === 'boolean') payload['disabled'] = secretData.disabled ? 'yes' : 'no';
             else if (typeof secretData.disabled === 'string') payload['disabled'] = secretData.disabled === 'true' ? 'yes' : 'no';
             if (subscriptionData != null) {
-                const encName = encodeURIComponent(String(secretData.name));
-                const s = await instance.get(`/ppp/secret?name=${encName}`);
                 let preservedPlanType = '';
-                try { const c = JSON.parse((Array.isArray(s.data) && s.data[0]?.comment) || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
+                try { const c = JSON.parse(existing?.comment || '{}'); preservedPlanType = (c.planType || '').toLowerCase(); } catch (_) {}
                 const db = await getDb(); const row = await db.get('SELECT original_plan_type FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secretData.name)]);
                 if (row?.original_plan_type) preservedPlanType = (row.original_plan_type || '').toLowerCase();
-                let base = {}; try { base = JSON.parse((Array.isArray(s.data) && s.data[0]?.comment) || '{}'); } catch (_) {}
+                let base = {}; try { base = JSON.parse(existing?.comment || '{}'); } catch (_) {}
                 const merged = { ...base, ...subscriptionData, planType: (subscriptionData.planType || '').toLowerCase() || preservedPlanType };
                 delete merged.graceDays; delete merged.graceTime; delete merged.nonPaymentProfile;
                 if (subscriptionData?.dueDate) { const sVal = String(subscriptionData.dueDate); const datePart = sVal.split('T')[0]; merged.dueDate = datePart; merged.dueDateTime = sVal; }

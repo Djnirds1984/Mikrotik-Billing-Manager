@@ -7,7 +7,7 @@ import { useBillingSettings } from '../hooks/useBillingSettings.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import type { Customer, RouterConfigWithId, PppSecret, SaleRecord, BillingPlanWithId } from '../types.ts';
 import { dbApi } from '../services/databaseService.ts';
-import { getPppSecrets, processPppPayment } from '../services/mikrotikService.ts';
+import { getPppSecret, getPppSecrets, processPppPayment } from '../services/mikrotikService.ts';
 import { CustomInvoiceModal } from './CustomInvoiceModal.tsx';
 import { BillingStatement } from './BillingStatement.tsx';
 import { PaymentModal } from './PaymentModal.tsx';
@@ -703,9 +703,15 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
         setLoadingPaymentId(customer.id);
         setPaymentMessage('');
         try {
-            const secrets = await getPppSecrets(selectedRouter, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]));
-            if (controller.signal.aborted) return;
-            if (!secrets.length) {
+            const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]);
+            const name = customer.pppoeSecret || customer.username;
+            let secrets = name ? await getPppSecret(selectedRouter, name, signal) : [];
+            if (signal.aborted) return;
+            if (!secrets.length && !customer.pppoeSecret && name) {
+                secrets = await getPppSecrets(selectedRouter, signal);
+                if (signal.aborted) return;
+            }
+            if (!secrets.length && !customer.pppoeSecret && name) {
                 setPaymentMessage(`No PPPoE secrets returned by ${selectedRouter.name}. Check the router connection; the customer record has not been changed.`);
                 return;
             }

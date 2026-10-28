@@ -736,7 +736,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         queued: new Set<string>(),
     }), [selectedRouter, fetchCustomers]);
 
-    const fetchData = useCallback((refreshCustomers = true) => {
+    const fetchData = useCallback((refreshCustomers = true, queueRefresh = true) => {
         const generation = refreshState.generation;
         const isCurrent = () => refreshState.active && refreshState.generation === generation;
         if (!isCurrent()) return Promise.resolve();
@@ -745,7 +745,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         const read = <T,>(key: string, load: () => Promise<T>, apply: (data: T) => void, fail: (err: unknown) => void, settled?: () => void): Promise<void> => {
             const pending = refreshState.pending.get(key);
             if (pending) {
-                if (refreshCustomers) refreshState.queued.add(key);
+                if (queueRefresh) refreshState.queued.add(key);
                 return pending;
             }
             const request = (async () => {
@@ -802,7 +802,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     useEffect(() => {
         refreshState.active = true;
         refreshState.generation++;
-        void fetchData(false);
+        void fetchData(false, false);
         return () => {
             refreshState.active = false;
             refreshState.generation++;
@@ -973,21 +973,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             
             // If not found in local array, try to fetch from backend directly
             if (!existingCustomer) {
-                try {
-                    console.log(`[PPPoE Save] Customer not in local array, fetching from backend for user: ${secretData.name}`);
-                    // Fetch without routerId filter since username is UNIQUE
-                    const allCustomers = await dbApi.get<any[]>(`/customers`);
-                    console.log(`[PPPoE Save] Backend returned ${allCustomers.length} customers`);
-                    existingCustomer = allCustomers.find(c => c.routerId === selectedRouter.id && c.pppoeSecret === secretData.name)
-                        || allCustomers.find(c => c.username === secretData.name);
-                    if (existingCustomer) {
-                        console.log(`[PPPoE Save] ✓ Found existing customer from backend: ${existingCustomer.id}, accountNumber: ${existingCustomer.accountNumber}`);
-                    } else {
-                        console.log(`[PPPoE Save] ✗ Customer not found in backend either`);
-                    }
-                } catch (e) {
-                    console.error('[PPPoE Save] Failed to fetch customers from backend:', e);
-                }
+                const query = new URLSearchParams({ routerId: selectedRouter.id, pppoeName: secretData.name });
+                const matches = await dbApi.get<Customer[]>(`/customers?${query}`);
+                existingCustomer = matches.find(c => c.routerId === selectedRouter.id && c.pppoeSecret === secretData.name)
+                    || matches.find(c => c.username === secretData.name);
             }
             if (existingCustomer && (existingCustomer.routerId !== selectedRouter.id || (existingCustomer.pppoeSecret && existingCustomer.pppoeSecret !== secretData.name))) {
                 throw new Error('This username belongs to a customer linked to another router or PPPoE secret. Choose a different username.');
@@ -1072,42 +1061,28 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 customerData: enrichedCustomerData,
             });
 
-            // Keep the persisted ID for the background PDF, including newly created customers.
             let savedCustomerId = existingCustomer?.id;
-            // Update local customer DB - always save even if only username exists
+            let customerSaved = false;
             try {
                 if (existingCustomer) {
-                    console.log(`[PPPoE Save] Updating existing customer: ${existingCustomer.id} with accountNumber: ${enrichedCustomerData.accountNumber}`);
                     await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
-                    console.log(`[PPPoE Save] ✓ Database updated successfully for ${existingCustomer.id}`);
                 } else {
-                    // Always create customer record with at least username and account number
-                    const alreadyExists = customers.find(c => c.username === secretData.name);
-                    if (!alreadyExists) {
-                        console.log(`[PPPoE Save] Creating new customer with accountNumber: ${enrichedCustomerData.accountNumber}`);
-                        const newCustomer = await addCustomer({
-                            routerId: selectedRouter.id,
-                            username: secretData.name,
-                            ...enrichedCustomerData
-                        });
-                        savedCustomerId = newCustomer.id;
-                        console.log(`[PPPoE Save] ✓ New customer created in database`);
-                    } else {
-                        console.log(`[PPPoE Save] Customer already exists, updating with accountNumber: ${enrichedCustomerData.accountNumber}`);
-                        await updateCustomer({ ...alreadyExists, ...enrichedCustomerData });
-                        savedCustomerId = alreadyExists.id;
-                        console.log(`[PPPoE Save] ✓ Database updated successfully for existing customer`);
-                    }
+                    const newCustomer = await addCustomer({
+                        routerId: selectedRouter.id,
+                        username: secretData.name,
+                        ...enrichedCustomerData
+                    });
+                    savedCustomerId = newCustomer.id;
                 }
+                customerSaved = true;
+                setWarnings(current => ({ ...current, save: '' }));
             } catch (dbErr) {
-                console.error(`[PPPoE Save] ✗ Database update failed:`, dbErr);
-                // Don't block the save process - MikroTik was already updated
+                setWarnings(current => ({ ...current, save: `Router changes were saved, but the customer record could not be saved: ${(dbErr as Error).message}` }));
             }
 
-            // Close modal and refresh data IMMEDIATELY — user sees result fast
             setUserModalOpen(false);
             setSelectedSecret(null);
-            fetchData(); // fire-and-forget, don't await
+            void fetchData(!customerSaved);
 
             // --- All heavy operations below run in background, don't block the UI ---
             const backgroundTasks: Promise<any>[] = [];
