@@ -696,8 +696,9 @@ export interface PanelNtpStatus {
 
 export interface Customer {
     id: string;
-    username: string; // pppoe username
+    username: string;
     routerId: string; // router this customer belongs to
+    pppoeSecret?: string | null;
     fullName?: string;
     address?: string;
     contactNumber?: string;

@@ -220,6 +220,8 @@ const createRouterInstance = (config) => {
 // renegotiate TLS sessions) on every request. Invalidate when config changes.
 const routerInstanceCache = new Map(); // routerId -> { sig, instance }
 const getRouterInstance = (router) => {
+    // Legacy handlers own connect/close; sharing a client can interrupt another request.
+    if (router.api_type === 'legacy') return createRouterInstance(router);
     const sig = `${router.host}|${router.port}|${router.user}|${router.password || ''}|${router.api_type || ''}`;
     const cached = routerInstanceCache.get(router.id);
     if (cached && cached.sig === sig) return cached.instance;
@@ -1872,10 +1874,11 @@ if (shouldKick) {
 
 // 5. PPP Payment Process
 app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
-    const { secret, plan, nonPaymentProfile, discountDays, paymentDate, coveredMonth } = req.body;
+    const { secret, plan, nonPaymentProfile, discountDays, paymentDate, coveredMonth, customerId } = req.body;
     console.log('[ppp/payment/process] router:', req.params.routerId, 'branch:', req.router.api_type, 'payload:', safeStringify(maskSensitive({ secret: secret ? { id: secret.id, name: secret.name } : null, plan, nonPaymentProfile, discountDays, paymentDate, coveredMonth })));
     if (!secret || !secret.name) return res.status(400).json({ message: 'Invalid input: secret.name is required.' });
     if (!plan || !plan.pppoeProfile) return res.status(400).json({ message: 'Invalid input: plan.pppoeProfile is required.' });
+    if (customerId !== undefined && (typeof customerId !== 'string' || !customerId)) return res.status(400).json({ message: 'Invalid input: customerId must be a non-empty string.' });
     try {
         const cycleDays = Number(plan.cycleDays ?? plan.cycle_days ?? 30);
         const discount = Number(discountDays ?? 0);
@@ -1894,24 +1897,28 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
             }
         } catch {}
 
-        // CRITICAL: Get client's existing due date from database to preserve their fixed day
-        // This ensures the due date is ALWAYS preserved regardless of when they pay
-        let clientExistingDueDate = null;
-        try {
-            const database = await getDb();
-            const customer = await database.get(
-                'SELECT dueDate FROM customers WHERE username = ? OR accountNumber = ? LIMIT 1',
-                [secret.name, secret.name]
-            );
-            if (customer && customer.dueDate) {
-                const d = new Date(customer.dueDate);
-                if (!isNaN(d.getTime())) {
-                    clientExistingDueDate = d;
-                    console.log(`[ppp/payment/process] Found client existing dueDate from DB: ${customer.dueDate}, day=${d.getDate()}`);
-                }
+        // Resolve one router-scoped identity before writes; an explicit link disables username fallback.
+        const database = await getDb();
+        const customers = await database.all(
+            "SELECT id, dueDate, pppoeSecret FROM customers WHERE (pppoeSecret = ? OR ((pppoeSecret IS NULL OR pppoeSecret = '') AND username = ?)) AND routerId = ? LIMIT 2",
+            [secret.name, secret.name, req.params.routerId]
+        );
+        if (customers.length > 1) return res.status(409).json({ message: 'Multiple customers match this PPP secret on this router.' });
+        let customer = customers[0];
+        if (customerId !== undefined) {
+            const selectedCustomer = await database.get('SELECT id, dueDate, pppoeSecret FROM customers WHERE id = ? AND routerId = ?', [customerId, req.params.routerId]);
+            if (!selectedCustomer) return res.status(409).json({ message: 'The selected customer is no longer available on this router.' });
+            if ((selectedCustomer.pppoeSecret && selectedCustomer.pppoeSecret !== secret.name) || (customer && customer.id !== selectedCustomer.id)) {
+                return res.status(409).json({ message: 'The customer PPPoE link has changed or belongs to another customer. Reopen the payment form.' });
             }
-        } catch (e) {
-            console.log('[ppp/payment/process] Could not fetch customer dueDate from DB:', e.message);
+            customer = selectedCustomer;
+        }
+        let clientExistingDueDate = null;
+        if (customer && customer.dueDate) {
+            const d = new Date(customer.dueDate);
+            if (!isNaN(d.getTime())) {
+                clientExistingDueDate = d;
+            }
         }
 
         // Smart Due Date Logic - Priority: 1) Client DB dueDate, 2) Secret comment fixedDay/dueDate, 3) Payment date
@@ -2073,19 +2080,7 @@ app.post('/:routerId/ppp/payment/process', getRouter, async (req, res) => {
         const onEventProfile = nonPaymentProfile ? `\n/ppp secret set [find name="${String(secret.name)}"] profile="${String(nonPaymentProfile)}"` : '';
 const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:do { /ppp active remove [find name="${String(secret.name)}"] } on-error={}${onEventProfile}`;
 
-        // CRITICAL: Update customers table with new due date so it reflects in the UI
-        try {
-            const customerDb = await getDb();
-            const dueDateStr = expires.toISOString().split('T')[0];
-            await customerDb.run(
-                'UPDATE customers SET dueDate = ? WHERE username = ? OR accountNumber = ?',
-                [dueDateStr, secret.name, secret.name]
-            );
-            console.log(`[ppp/payment/process] Updated customers table dueDate to ${dueDateStr} for ${secret.name}`);
-        } catch (dbErr) {
-            console.warn('[ppp/payment/process] Failed to update customers table:', dbErr.message);
-        }
-
+        let savedSecrets;
         if (req.router.api_type === 'legacy') {
             const client = req.routerInstance; await client.connect();
             try {
@@ -2129,7 +2124,7 @@ const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:d
                 
                 const saved = await writeLegacySafe(client, ['/ppp/secret/print', '?name=' + String(secret.name)]);
                 const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
-                res.json(saved.map(normalizeLegacyObject));
+                savedSecrets = saved.map(normalizeLegacyObject);
             } finally { await client.close(); }
         } else {
             const instance = req.routerInstance;
@@ -2162,8 +2157,18 @@ const onEvent = `/log info message="PPPoE auto-kick: ${String(secret.name)}"\n:d
             try {
                 const database = await getDb(); await database.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [req.params.routerId, String(secret.name)]);
             } catch (e) { console.warn('[ppp/payment/process] REST ppp_grace cleanup failed:', e.message); }
-            res.json(savedRes.data);
+            savedSecrets = savedRes.data;
         }
+        let warning;
+        if (customer) {
+            try {
+                const updated = await database.run("UPDATE customers SET dueDate = ? WHERE id = ? AND routerId = ? AND COALESCE(pppoeSecret, '') = ?", [commentData.dueDate, customer.id, req.params.routerId, customer.pppoeSecret || '']);
+                if (!updated.changes) warning = 'Payment succeeded, but the customer record changed. Verify the customer due date; do not pay again.';
+            } catch {
+                warning = 'Payment succeeded, but the customer due date could not be saved. Update the customer due date; do not pay again.';
+            }
+        }
+        res.json({ secrets: savedSecrets, ...(warning ? { warning } : {}) });
     } catch (e) {
         console.error('[ppp/payment/process] error:', safeStringify({ routerId: req.params.routerId, message: e.message, status: e.response?.status, data: e.response?.data }));
         const status = e.response ? e.response.status : 500; const msg = e.response?.data?.message || e.response?.data?.detail || e.message; res.status(status).json({ message: msg });

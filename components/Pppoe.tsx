@@ -360,7 +360,7 @@ const UserFormModal: React.FC<any> = ({ isOpen, onClose, onSave, initialData, pl
             setDeductFromProrate(false);
             setDeductFromMonthly(false);
         }
-    }, [isOpen, initialData, plans, customers, profiles]);
+    }, [isOpen, initialData, plans]);
 
     useEffect(() => {
         if (isOpen && !initialData && plans.length > 0 && !secret.profile) {
@@ -677,11 +677,12 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const [profiles, setProfiles] = useState<PppProfile[]>([]);
     const { plans } = useBillingPlans(selectedRouter.id);
     const { settings: billingSettings } = useBillingSettings();
-    const { customers, addCustomer, updateCustomer, fetchCustomers } = useCustomers(selectedRouter.id);
+    const { customers, addCustomer, updateCustomer, fetchCustomers, error: customerError } = useCustomers(selectedRouter.id);
     const { settings: companySettings } = useCompanySettings();
 
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [warnings, setWarnings] = useState<Record<string, string>>({});
     const [isSubmitting, setIsSubmitting] = useState(false);
     
     const [isUserModalOpen, setUserModalOpen] = useState(false);
@@ -728,106 +729,147 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         }
     }, [searchTerm]);
 
-    const fetchData = useCallback(async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const [secretsData, profilesData] = await Promise.all([
-                getPppSecrets(selectedRouter),
-                getPppProfiles(selectedRouter),
-                fetchCustomers() // from useCustomers hook
-            ]);
-            setSecrets(secretsData);
-            setProfiles(profilesData);
-            
-            // Fetch client balances (credits)
-            try {
-                const balRes = await fetch(`/api/client-balances/${encodeURIComponent(selectedRouter.id)}`, {
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
-                });
-                if (balRes.ok) {
-                    const balMap = await balRes.json();
-                    setClientBalances(balMap);
-                }
-            } catch (balErr) {
-                console.warn('[PPPoE Users] Failed to fetch client balances:', balErr);
-            }
-            
-            // Debug logging
-            console.log(`[PPPoE Users] Loaded ${secretsData.length} secrets from MikroTik`);
-            console.log(`[PPPoE Users] Loaded ${customers.length} customers from database for router ${selectedRouter.id}`);
-        } catch (err) {
-            setError(`Failed to fetch PPPoE users: ${(err as Error).message}`);
-        } finally {
-            setIsLoading(false);
-        }
-    }, [selectedRouter, fetchCustomers]);
+    const refreshState = useMemo(() => ({
+        active: false,
+        generation: 0,
+        pending: new Map<string, Promise<void>>(),
+        queued: new Set<string>(),
+    }), [selectedRouter, fetchCustomers]);
 
-    useEffect(() => { fetchData() }, [fetchData]);
+    const fetchData = useCallback((refreshCustomers = true) => {
+        const generation = refreshState.generation;
+        const isCurrent = () => refreshState.active && refreshState.generation === generation;
+        if (!isCurrent()) return Promise.resolve();
+
+        // Coalesce each resource independently so slow ancillary reads never block the user list.
+        const read = <T,>(key: string, load: () => Promise<T>, apply: (data: T) => void, fail: (err: unknown) => void, settled?: () => void): Promise<void> => {
+            const pending = refreshState.pending.get(key);
+            if (pending) {
+                if (refreshCustomers) refreshState.queued.add(key);
+                return pending;
+            }
+            const request = (async () => {
+                do {
+                    refreshState.queued.delete(key);
+                    try {
+                        const data = await load();
+                        if (isCurrent() && !refreshState.queued.has(key)) apply(data);
+                    } catch (err) {
+                        if (isCurrent() && !refreshState.queued.has(key)) fail(err);
+                    } finally {
+                        if (isCurrent()) settled?.();
+                    }
+                } while (isCurrent() && refreshState.queued.has(key));
+            })();
+            refreshState.pending.set(key, request);
+            void request.finally(() => {
+                if (refreshState.pending.get(key) === request) refreshState.pending.delete(key);
+            });
+            return request;
+        };
+        const warn = (key: string, message: string) => setWarnings(current => ({ ...current, [key]: message }));
+
+        const usersRequest = read('users', () => getPppSecrets(selectedRouter), data => {
+            setSecrets(data);
+            setError(null);
+        }, err => setError(`Failed to fetch PPPoE users: ${(err as Error).message}`), () => setIsLoading(false));
+
+        void read('profiles', () => getPppProfiles(selectedRouter), data => {
+            setProfiles(data);
+            warn('profiles', '');
+        }, err => warn('profiles', `Could not refresh PPPoE profiles: ${(err as Error).message}`));
+
+        void read('balances', async () => {
+            const response = await fetch(`/api/client-balances/${encodeURIComponent(selectedRouter.id)}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+                signal: AbortSignal.timeout(10000),
+            });
+            if (!response.ok) throw new Error(`Request failed (${response.status})`);
+            return response.json() as Promise<Record<string, number>>;
+        }, data => {
+            setClientBalances(data);
+            warn('balances', '');
+        }, err => warn('balances', `Could not refresh client balances: ${(err as Error).message}`));
+
+        // useCustomers already loads on mount; only mutations request another DB read.
+        if (refreshCustomers) {
+            void read('customers', fetchCustomers, () => warn('customers', ''),
+                err => warn('customers', `Could not refresh customers: ${(err as Error).message}`));
+        }
+        return usersRequest;
+    }, [selectedRouter, fetchCustomers, refreshState]);
+
+    useEffect(() => {
+        refreshState.active = true;
+        refreshState.generation++;
+        void fetchData(false);
+        return () => {
+            refreshState.active = false;
+            refreshState.generation++;
+            refreshState.pending.clear();
+            refreshState.queued.clear();
+        };
+    }, [fetchData, refreshState]);
     
+    const customerLookups = useMemo(() => {
+        const bySecret = new Map<string, Customer>();
+        const byUsername = new Map<string, Customer>();
+        const byAccount = new Map<string, Customer>();
+        const byFullName = new Map<string, Customer>();
+        for (const customer of customers) {
+            if (customer.routerId !== selectedRouter.id) continue;
+            if (customer.pppoeSecret) {
+                if (!bySecret.has(customer.pppoeSecret)) bySecret.set(customer.pppoeSecret, customer);
+                continue;
+            }
+            if (!byUsername.has(customer.username)) byUsername.set(customer.username, customer);
+            if (customer.accountNumber && !byAccount.has(customer.accountNumber)) byAccount.set(customer.accountNumber, customer);
+            if (customer.fullName && !byFullName.has(customer.fullName)) byFullName.set(customer.fullName, customer);
+        }
+        return { bySecret, byUsername, byAccount, byFullName };
+    }, [customers, selectedRouter.id]);
+
+    const planLookups = useMemo(() => {
+        const byId = new Map<string, { plan: BillingPlanWithId; index: number }>();
+        const byName = new Map<string, { plan: BillingPlanWithId; index: number }>();
+        plans.forEach((plan, index) => {
+            if (!byId.has(plan.id)) byId.set(plan.id, { plan, index });
+            if (!byName.has(plan.name)) byName.set(plan.name, { plan, index });
+        });
+        return { byId, byName };
+    }, [plans]);
+
     const combinedUsers = useMemo(() => {
         return secrets.map(secret => {
-            // Try multiple matching strategies to find the customer
-            let customer = customers.find(c => c.username === secret.name);
-            
-            // Fallback 1: Try matching by username AND routerId (more precise)
-            if (!customer) {
-                customer = customers.find(c => c.username === secret.name && c.routerId === selectedRouter.id);
-            }
-            
-            // Fallback 2: Try matching by parsing accountNumber from secret.comment
-            if (!customer && secret.comment) {
-                try {
-                    const parsedComment = JSON.parse(secret.comment);
-                    if (parsedComment.accountNumber) {
-                        customer = customers.find(c => c.accountNumber === parsedComment.accountNumber);
-                    }
-                } catch (e) { /* ignore parse errors */ }
-            }
-            
-            // Fallback 3: Try matching by fullName if stored in comment
-            if (!customer && secret.comment) {
-                try {
-                    const parsedComment = JSON.parse(secret.comment);
-                    if (parsedComment.customerName || parsedComment.fullName) {
-                        const nameToMatch = parsedComment.customerName || parsedComment.fullName;
-                        customer = customers.find(c => c.fullName === nameToMatch);
-                    }
-                } catch (e) { /* ignore parse errors */ }
-            }
-            
-            let subscription: { plan: string; dueDate: string; planType: 'prepaid' | 'postpaid'; planId?: string } = { plan: 'N/A', dueDate: 'No Info', planType: 'prepaid' };
-            if (secret.comment) {
-                try { 
-                    const parsedComment = JSON.parse(secret.comment);
-                    subscription.plan = parsedComment.planName || parsedComment.plan || 'N/A';
-                    subscription.planId = parsedComment.planId || subscription.planId;
-                    if (parsedComment.dueDateTime) {
-                        const s = String(parsedComment.dueDateTime);
-                        const [date, time] = s.includes('T') ? s.split('T') : [s.split(' ')[0], s.split(' ')[1] || '00:00'];
-                        const [y, m, d] = date.split('-');
-                        const [hh, mm] = (time || '00:00').split(':');
-                        subscription.dueDate = `${y}-${m}-${d} ${hh}:${mm}`;
-                    } else {
-                        subscription.dueDate = parsedComment.dueDate || 'No Info';
-                    }
-                    const pt = String(parsedComment.planType || '').toLowerCase().trim();
-                    subscription.planType = pt === 'postpaid' ? 'postpaid' : 'prepaid';
-                } catch (e) { /* ignore */ } }
-            // Resolve the panel billing plan for this user
-            const billingPlan = plans.find(p => 
-                (subscription.planId && p.id === subscription.planId) || 
-                p.name === subscription.plan
-            ) || null;
+            let parsedComment: any = {};
+            try { parsedComment = JSON.parse(secret.comment || '{}') || {}; } catch { /* ignore malformed comments */ }
+            const customer = customerLookups.bySecret.get(secret.name)
+                || customerLookups.byUsername.get(secret.name)
+                || (parsedComment.accountNumber ? customerLookups.byAccount.get(parsedComment.accountNumber) : undefined)
+                || customerLookups.byFullName.get(parsedComment.customerName || parsedComment.fullName);
 
-            return {
-                ...secret,
-                customer,
-                subscription,
-                billingPlan
+            const subscription: { plan: string; dueDate: string; planType: 'prepaid' | 'postpaid'; planId?: string } = {
+                plan: parsedComment.planName || parsedComment.plan || 'N/A',
+                planId: parsedComment.planId || undefined,
+                dueDate: parsedComment.dueDate || 'No Info',
+                planType: String(parsedComment.planType || '').toLowerCase().trim() === 'postpaid' ? 'postpaid' : 'prepaid',
             };
+            if (parsedComment.dueDateTime) {
+                const s = String(parsedComment.dueDateTime);
+                const [date, time] = s.includes('T') ? s.split('T') : [s.split(' ')[0], s.split(' ')[1] || '00:00'];
+                const [y, m, d] = date.split('-');
+                const [hh, mm] = (time || '00:00').split(':');
+                subscription.dueDate = `${y}-${m}-${d} ${hh}:${mm}`;
+            }
+            const planById = subscription.planId ? planLookups.byId.get(subscription.planId) : undefined;
+            const planByName = planLookups.byName.get(subscription.plan);
+            // Preserve the original first plan matching either ID or name, even if they disagree.
+            const billingPlan = (planById && (!planByName || planById.index < planByName.index)
+                ? planById : planByName)?.plan || null;
+
+            return { ...secret, customer, subscription, billingPlan };
         });
-    }, [secrets, customers, selectedRouter.id, plans]);
+    }, [secrets, customerLookups, planLookups]);
     
     // Sorting Logic
     const sortedUsers = useMemo(() => {
@@ -926,8 +968,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid'; installationFee?: number; deductFromProrate?: boolean; deductFromMonthly?: boolean }, portalOptions?: { createPortalAccount?: boolean }) => {
         setIsSubmitting(true);
         try {
-            // Find existing customer by username (username is UNIQUE in the customers table)
-            let existingCustomer = customers.find(c => c.username === secretData.name);
+            // Honor an explicit router-local link without changing the customer's identity.
+            let existingCustomer = customerLookups.bySecret.get(secretData.name) || customerLookups.byUsername.get(secretData.name);
             
             // If not found in local array, try to fetch from backend directly
             if (!existingCustomer) {
@@ -936,7 +978,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     // Fetch without routerId filter since username is UNIQUE
                     const allCustomers = await dbApi.get<any[]>(`/customers`);
                     console.log(`[PPPoE Save] Backend returned ${allCustomers.length} customers`);
-                    existingCustomer = allCustomers.find(c => c.username === secretData.name);
+                    existingCustomer = allCustomers.find(c => c.routerId === selectedRouter.id && c.pppoeSecret === secretData.name)
+                        || allCustomers.find(c => c.username === secretData.name);
                     if (existingCustomer) {
                         console.log(`[PPPoE Save] ✓ Found existing customer from backend: ${existingCustomer.id}, accountNumber: ${existingCustomer.accountNumber}`);
                     } else {
@@ -945,6 +988,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 } catch (e) {
                     console.error('[PPPoE Save] Failed to fetch customers from backend:', e);
                 }
+            }
+            if (existingCustomer && (existingCustomer.routerId !== selectedRouter.id || (existingCustomer.pppoeSecret && existingCustomer.pppoeSecret !== secretData.name))) {
+                throw new Error('This username belongs to a customer linked to another router or PPPoE secret. Choose a different username.');
             }
             
             const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
@@ -955,6 +1001,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             // Build enriched customer data
             let enrichedCustomerData = {
                 ...customerData,
+                ...(existingCustomer?.routerId === selectedRouter.id && existingCustomer.pppoeSecret === secretData.name
+                    ? { pppoeSecret: existingCustomer.pppoeSecret } : {}),
                 dueDate: subscriptionData.dueDate,
                 planType: subscriptionData.planType,
                 planName: selectedPlan?.name,
@@ -1024,6 +1072,8 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                 customerData: enrichedCustomerData,
             });
 
+            // Keep the persisted ID for the background PDF, including newly created customers.
+            let savedCustomerId = existingCustomer?.id;
             // Update local customer DB - always save even if only username exists
             try {
                 if (existingCustomer) {
@@ -1035,15 +1085,17 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     const alreadyExists = customers.find(c => c.username === secretData.name);
                     if (!alreadyExists) {
                         console.log(`[PPPoE Save] Creating new customer with accountNumber: ${enrichedCustomerData.accountNumber}`);
-                        await addCustomer({ 
-                            routerId: selectedRouter.id, 
-                            username: secretData.name, 
-                            ...enrichedCustomerData 
+                        const newCustomer = await addCustomer({
+                            routerId: selectedRouter.id,
+                            username: secretData.name,
+                            ...enrichedCustomerData
                         });
+                        savedCustomerId = newCustomer.id;
                         console.log(`[PPPoE Save] ✓ New customer created in database`);
                     } else {
                         console.log(`[PPPoE Save] Customer already exists, updating with accountNumber: ${enrichedCustomerData.accountNumber}`);
                         await updateCustomer({ ...alreadyExists, ...enrichedCustomerData });
+                        savedCustomerId = alreadyExists.id;
                         console.log(`[PPPoE Save] ✓ Database updated successfully for existing customer`);
                     }
                 }
@@ -1097,14 +1149,9 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     source: 'pppoe'
                 });
 
-                // Update customer with application ID
-                if (existingCustomer) {
-                    await updateCustomer({ ...existingCustomer, applicationId: applicationResult.id });
-                } else {
-                    const customer = customers.find(c => c.username === secretData.name);
-                    if (customer) {
-                        await updateCustomer({ ...customer, applicationId: applicationResult.id });
-                    }
+                // Patch only the attachment; an old customer snapshot would undo the save.
+                if (savedCustomerId) {
+                    await dbApi.patch(`/customers/${encodeURIComponent(savedCustomerId)}`, { applicationId: applicationResult.id });
                 }
             } catch (pdfError) {
                 console.error('Failed to generate PDF application form:', pdfError);
@@ -1252,10 +1299,11 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
         if (!selectedSecret) return false;
         try {
             // Step 1: Process payment on MikroTik (must be first, everything else depends on success)
-            await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
+            const result = await processPppPayment(selectedRouter, { secret: selectedSecret, ...payment });
             
             // Step 2: Record the sale
             const saleResult = await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString(), processedBy: processedByLabel });
+            setWarnings(current => ({ ...current, payment: result.warning || '' }));
 
             // Step 3: Run all post-payment updates IN PARALLEL (none depend on each other)
             const postPaymentTasks: Promise<any>[] = [];
@@ -1276,7 +1324,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
                         body: JSON.stringify({
                             routerId: selectedRouter.id,
-                            username: selectedSecret.name,
+                            username: selectedSecret.customer?.username || selectedSecret.name,
                             accountNumber: (() => { try { return JSON.parse(selectedSecret.comment || '{}').accountNumber || JSON.parse(selectedSecret.comment || '{}').customer?.accountNumber || null; } catch { return null; } })(),
                             month: payment.coveredMonth,
                             status: 'paid',
@@ -1297,7 +1345,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     fetch('/api/client-balance', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
-                        body: JSON.stringify({ routerId: selectedRouter.id, username: selectedSecret.name, amount: creditApplied })
+                        body: JSON.stringify({ routerId: selectedRouter.id, username: selectedSecret.customer?.username || selectedSecret.name, amount: creditApplied })
                     }).then(() => console.log(`[PPPoE Payment] Client credit reduced by ${creditApplied}`))
                       .catch(err => console.warn('[PPPoE Payment] Failed to update client balance:', err))
                 );
@@ -1310,7 +1358,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     fetch('/api/client-balance', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
-                        body: JSON.stringify({ routerId: selectedRouter.id, username: selectedSecret.name, amount: -overpaymentCredit })
+                        body: JSON.stringify({ routerId: selectedRouter.id, username: selectedSecret.customer?.username || selectedSecret.name, amount: -overpaymentCredit })
                     }).then(() => console.log(`[PPPoE Payment] Client credit increased by ${overpaymentCredit} (overpayment)`))
                       .catch(err => console.warn('[PPPoE Payment] Failed to add overpayment credit:', err))
                 );
@@ -1356,10 +1404,13 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     };
     
     if (isLoading) return <div className="flex justify-center p-8"><Loader /></div>;
-    if (error) return <div className="p-4 text-red-600">{error}</div>;
 
     return (
         <div>
+            {error && <div role="alert" className="mb-4 p-4 text-red-600">{error}</div>}
+            {[...Object.values(warnings), customerError].filter(Boolean).map((warning, index) => (
+                <div key={index} role="status" className="mb-4 p-4 text-amber-700 dark:text-amber-400">{warning}</div>
+            ))}
             <UserFormModal 
                 isOpen={isUserModalOpen} 
                 onClose={() => setUserModalOpen(false)} 
@@ -1378,7 +1429,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                     isOpen={isBillingLedgerOpen}
                     onClose={() => setBillingLedgerOpen(false)}
                     routerId={selectedRouter.id}
-                    username={selectedSecret.name}
+                    username={selectedSecret.customer?.username || selectedSecret.name}
                     fullName={selectedSecret.customer?.fullName || selectedSecret.name}
                     onPayMonth={(month) => {
                         setPreselectedPaymentMonth(month);
@@ -1534,10 +1585,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                             <p className="text-xs text-slate-500 truncate">
                                                 <HighlightText text={user.customer?.fullName || ''} highlight={searchTerm} />
                                             </p>
-                                            {clientBalances[user.name] && clientBalances[user.name] < 0 && (
+                                            {clientBalances[user.customer?.username || user.name] && clientBalances[user.customer?.username || user.name] < 0 && (
                                                 <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 text-[10px] font-bold rounded bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
                                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                                    Credit: {Math.abs(clientBalances[user.name]).toFixed(2)}
+                                                    Credit: {Math.abs(clientBalances[user.customer?.username || user.name]).toFixed(2)}
                                                 </span>
                                             )}
                                         </div>
@@ -1789,10 +1840,10 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
                                         <HighlightText text={user.subscription.dueDate || ''} highlight={searchTerm} />
                                     </td>
                                     <td className="text-center">
-                                        {clientBalances[user.name] && clientBalances[user.name] < 0 ? (
+                                        {clientBalances[user.customer?.username || user.name] && clientBalances[user.customer?.username || user.name] < 0 ? (
                                             <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold rounded-full bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                                {formatCurrency(Math.abs(clientBalances[user.name]))}
+                                                {formatCurrency(Math.abs(clientBalances[user.customer?.username || user.name]))}
                                             </span>
                                         ) : (
                                             <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
@@ -2957,7 +3008,7 @@ export const Pppoe: React.FC<{
                 </nav>
             </div>
 
-            {activeTab === 'users' && <UsersManager selectedRouter={selectedRouter} addSale={addSale} />}
+            {activeTab === 'users' && <UsersManager key={selectedRouter.id} selectedRouter={selectedRouter} addSale={addSale} />}
             {activeTab === 'active_users' && <ActiveUsersManager selectedRouter={selectedRouter} />}
             {activeTab === 'offline_users' && <OfflineUsersManager selectedRouter={selectedRouter} />}
             {activeTab === 'profiles' && <ProfilesManager selectedRouter={selectedRouter} />}

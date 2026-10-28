@@ -53,7 +53,7 @@ describe('Local-mode backend', () => {
     beforeEach(async () => {
         db = await open({ filename: ':memory:', driver: sqlite3.Database });
         await db.exec(`
-            CREATE TABLE customers (id TEXT PRIMARY KEY, username TEXT UNIQUE, routerId TEXT, accountNumber TEXT, fullName TEXT);
+            CREATE TABLE customers (id TEXT PRIMARY KEY, username TEXT UNIQUE, routerId TEXT, accountNumber TEXT, fullName TEXT, pppoeSecret TEXT);
             CREATE TABLE routers (id TEXT PRIMARY KEY, name TEXT);
             CREATE TABLE client_invoices (
                 id TEXT PRIMARY KEY, routerId TEXT, username TEXT, status TEXT, amount REAL,
@@ -85,6 +85,115 @@ describe('Local-mode backend', () => {
         const lock = readFileSync(resolve(process.cwd(), 'proxy/package-lock.json'), 'utf8');
         expect(manifest.dependencies).not.toHaveProperty('@supabase/supabase-js');
         expect(lock).not.toMatch(/@supabase\//);
+    });
+
+    it('migrates customer links idempotently without changing existing identities', async () => {
+        await db.exec('ALTER TABLE customers DROP COLUMN pppoeSecret');
+        await db.run('INSERT INTO customers (id, username, routerId) VALUES (?, ?, ?)', ['c1', 'LimpotDanteA.15mb8.253', 'r1']);
+        const declaration = nodes.find(node => ts.isVariableDeclaration(node) && node.name.getText(parsed) === 'customerCols')!;
+        const block = declaration.parent.parent.parent;
+        const migrate = runInNewContext(`(async () => ${block.getText(parsed)})`, context);
+        await migrate();
+        await migrate();
+        expect(await db.get('SELECT username, pppoeSecret FROM customers')).toEqual({ username: 'LimpotDanteA.15mb8.253', pppoeSecret: null });
+        await db.run('UPDATE customers SET pppoeSecret = ?', 'exact.secret');
+        await expect(db.run('INSERT INTO customers (id, username, routerId, pppoeSecret) VALUES (?, ?, ?, ?)', ['c2', 'different', 'r1', 'exact.secret'])).rejects.toThrow(/UNIQUE/);
+    });
+
+    it('persists exact links, preserves them on unrelated edits, and allows unlinking', async () => {
+        const post = routeHandler('dbRouter', 'post', '/customers', context);
+        const patch = routeHandler('dbRouter', 'patch', '/customers/:id', context);
+        const res = response();
+        await post({ body: { id: 'c1', username: 'existing-identity', routerId: 'r1', pppoeSecret: 'LimpotDanteA.15mb8.253' } }, res);
+        await post({ body: { username: 'existing-identity', fullName: 'LimpotDanteA' } }, res);
+        await patch({ params: { id: 'c1' }, body: { fullName: 'Updated name' } }, res);
+        expect(await db.get('SELECT username, pppoeSecret FROM customers WHERE id = ?', 'c1')).toEqual({ username: 'existing-identity', pppoeSecret: 'LimpotDanteA.15mb8.253' });
+        await patch({ params: { id: 'c1' }, body: { pppoeSecret: '' } }, res);
+        expect((await db.get('SELECT * FROM customers WHERE id = ?', 'c1')).pppoeSecret).toBe('');
+        expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it.each(['post', 'patch'])('allows null unlinking through %s even if the old link conflicts', async method => {
+        await db.run('INSERT INTO customers (id, username, routerId, pppoeSecret) VALUES (?, ?, ?, ?)', ['c1', 'billing-identity', 'r1', 'old.secret']);
+        await db.run('INSERT INTO customers (id, username, routerId) VALUES (?, ?, ?)', ['c2', 'old.secret', 'r1']);
+        const handler = routeHandler('dbRouter', method, method === 'post' ? '/customers' : '/customers/:id', context);
+        const res = response();
+        await handler({ params: { id: 'c1' }, body: { username: 'billing-identity', pppoeSecret: null } }, res);
+        expect(res.status).not.toHaveBeenCalled();
+        expect(await db.get('SELECT username, pppoeSecret FROM customers WHERE id = ?', 'c1'))
+            .toEqual({ username: 'billing-identity', pppoeSecret: null });
+    });
+
+    it('rejects duplicate links on one router, invalid link values and unknown SQL fields', async () => {
+        const post = routeHandler('dbRouter', 'post', '/customers', context);
+        const patch = routeHandler('dbRouter', 'patch', '/customers/:id', context);
+        await post({ body: { id: 'c1', username: 'exact.secret', routerId: 'r1' } }, response());
+        await post({ body: { id: 'c2', username: 'another', routerId: 'r1' } }, response());
+        const duplicate = response();
+        await patch({ params: { id: 'c2' }, body: { pppoeSecret: 'exact.secret' } }, duplicate);
+        expect(duplicate.status).toHaveBeenCalledWith(409);
+        const otherRouter = response();
+        await patch({ params: { id: 'c2' }, body: { routerId: 'r2', pppoeSecret: 'exact.secret' } }, otherRouter);
+        expect(otherRouter.status).not.toHaveBeenCalled();
+        const invalid = response();
+        await patch({ params: { id: 'c2' }, body: { pppoeSecret: { password: 'not-a-name' } } }, invalid);
+        expect(invalid.status).toHaveBeenCalledWith(400);
+        const injected = response();
+        await post({ body: { id: 'c3', username: 'third', 'x) VALUES (1);--': 'value' } }, injected);
+        expect(injected.status).toHaveBeenCalledWith(400);
+        expect((await db.all('SELECT * FROM customers')).length).toBe(2);
+    });
+
+    it('rejects creating a new customer over an existing username without overwriting its owner', async () => {
+        const post = routeHandler('dbRouter', 'post', '/customers', context);
+        await post({ body: { id: 'owner', username: 'exact.secret', routerId: 'r1', fullName: 'Original customer' } }, response());
+        const before = await db.all('SELECT * FROM customers');
+        const res = response();
+        await post({ body: { id: 'new', username: 'exact.secret', routerId: 'r1', pppoeSecret: 'exact.secret', fullName: 'Different customer' } }, res);
+        expect(res.status).toHaveBeenCalledWith(409);
+        expect(await db.all('SELECT * FROM customers')).toEqual(before);
+    });
+
+    it.each(['post', 'patch'])('rejects %s unlinking when the resulting username fallback belongs to another customer', async method => {
+        await db.run('INSERT INTO customers (id, username, routerId, pppoeSecret) VALUES (?, ?, ?, ?)', ['c1', 'alice', 'r1', 'other']);
+        await db.run('INSERT INTO customers (id, username, routerId, pppoeSecret) VALUES (?, ?, ?, ?)', ['c2', 'billing-user', 'r1', 'alice']);
+        const handler = routeHandler('dbRouter', method, method === 'post' ? '/customers' : '/customers/:id', context);
+        const before = await db.all('SELECT * FROM customers');
+        const res = response();
+        await handler({ params: { id: 'c1' }, body: { username: 'alice', pppoeSecret: '' } }, res);
+        expect(res.status).toHaveBeenCalledWith(409);
+        expect(await db.all('SELECT * FROM customers')).toEqual(before);
+    });
+
+    it('guards post-payment links against later edits and router changes', async () => {
+        await db.run('INSERT INTO customers (id, username, routerId, accountNumber) VALUES (?, ?, ?, ?)', ['c1', 'billing-user', 'r1', 'ACC-1']);
+        const patch = routeHandler('dbRouter', 'patch', '/customers/:id', context);
+        const req = { params: { id: 'c1' }, query: { routerId: 'r1', expectedPppoeSecret: '' }, body: { pppoeSecret: 'exact.secret' } };
+        const res = response();
+        await patch(req, res);
+        expect(res.status).not.toHaveBeenCalled();
+        const stale = response();
+        await patch({ ...req, body: { pppoeSecret: 'obsolete.secret' } }, stale);
+        expect(stale.status).toHaveBeenCalledWith(409);
+        const moved = response();
+        await patch({ ...req, query: { routerId: 'r2', expectedPppoeSecret: 'exact.secret' } }, moved);
+        expect(moved.status).toHaveBeenCalledWith(409);
+        expect(await db.get('SELECT username, pppoeSecret FROM customers WHERE id = ?', 'c1'))
+            .toEqual({ username: 'billing-user', pppoeSecret: 'exact.secret' });
+    });
+
+    it('atomically rejects a link changed between lookup and update', async () => {
+        await db.run('INSERT INTO customers (id, username, routerId, accountNumber) VALUES (?, ?, ?, ?)', ['c1', 'billing-user', 'r1', 'ACC-1']);
+        const patch = routeHandler('dbRouter', 'patch', '/customers/:id', context);
+        const run = db.run.bind(db);
+        vi.spyOn(db, 'run').mockImplementationOnce(async (sql, ...args) => {
+            await run("UPDATE customers SET pppoeSecret = 'newer.secret' WHERE id = 'c1'");
+            return run(sql, ...args);
+        });
+        const res = response();
+        await patch({ params: { id: 'c1' }, query: { routerId: 'r1', expectedPppoeSecret: '' }, body: { pppoeSecret: 'obsolete.secret' } }, res);
+        expect(res.status).toHaveBeenCalledWith(409);
+        expect((await db.get('SELECT pppoeSecret FROM customers WHERE id = ?', 'c1')).pppoeSecret).toBe('newer.secret');
     });
 
     it('creates, updates, reads, and deletes customers using only SQLite', async () => {

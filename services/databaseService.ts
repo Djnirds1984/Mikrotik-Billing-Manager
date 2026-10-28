@@ -49,7 +49,7 @@ const fetchData = async <T>(path: string, options: RequestInit = {}): Promise<T>
 };
 
 export const dbApi = {
-    get: <T>(path: string): Promise<T> => fetchData<T>(path),
+    get: <T>(path: string): Promise<T> => fetchData<T>(path, { signal: AbortSignal.timeout(30000) }),
     post: <T>(path: string, data: any): Promise<T> => fetchData<T>(path, { method: 'POST', body: JSON.stringify(data) }),
     patch: <T>(path: string, data: any): Promise<T> => fetchData<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: <T>(path: string): Promise<T> => fetchData<T>(path, { method: 'DELETE' }),

@@ -105,6 +105,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
     useEffect(() => {
         if (isOpen) {
             const secret = secretRef.current;
+            const billingUsername = secret?.customer?.username || secret?.name;
             const plans = plansRef.current;
             setDiscountDays('0');
             setPaymentDate(new Date().toISOString().split('T')[0]);
@@ -140,8 +141,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             setIsPostpaid(planType === 'postpaid');
 
             // Fetch unpaid months for postpaid
-            if (planType === 'postpaid' && routerId && secret?.name) {
-                fetch(`/api/billing-ledger/unpaid/${encodeURIComponent(routerId)}/${encodeURIComponent(secret.name)}`, {
+            if (planType === 'postpaid' && routerId && billingUsername) {
+                fetch(`/api/billing-ledger/unpaid/${encodeURIComponent(routerId)}/${encodeURIComponent(billingUsername)}`, {
                     headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
                 })
                     .then(res => res.ok ? res.json() : [])
@@ -168,8 +169,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             }
 
             // Fetch client balance (credit from installation fee deduction, etc.)
-            if (routerId && secret?.name) {
-                fetch(`/api/client-balance/${encodeURIComponent(routerId)}/${encodeURIComponent(secret.name)}`, {
+            if (routerId && secret && billingUsername) {
+                fetch(`/api/client-balance/${encodeURIComponent(routerId)}/${encodeURIComponent(billingUsername)}`, {
                     headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
                 })
                     .then(res => res.ok ? res.json() : { balance: 0 })
@@ -180,13 +181,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
             }
 
             // Fetch pending auto-invoices for this client
-            if (routerId && secret?.name) {
+            if (routerId && secret && billingUsername) {
                 let accountNumber = '';
                 try {
                     const c = JSON.parse(String(secret.comment || '{}'));
                     accountNumber = c.accountNumber || c.customer?.accountNumber || '';
                 } catch {}
-                const invParams = new URLSearchParams({ routerId, username: secret.name, status: 'PENDING' });
+                const invParams = new URLSearchParams({ routerId, username: billingUsername, status: 'PENDING' });
+                accountNumber = secret.customer?.accountNumber || accountNumber;
                 if (accountNumber) invParams.set('accountNumber', accountNumber);
                 fetch(`/api/db/client-invoices-lookup?${invParams.toString()}`, {
                     headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
@@ -210,7 +212,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, sec
         // NOTE: deps are identity keys only. Depending on the `plans`/`secret`
         // object identities re-ran all three fetches and reset the form whenever
         // the parent re-rendered with recreated props.
-    }, [isOpen, secret?.name, preselectedMonth, routerId]);
+    }, [isOpen, secret?.name, secret?.customer?.username, preselectedMonth, routerId]);
 
     // If plans finish loading after the modal is already open, sync to the
     // user's own plan (unless the cashier already picked one manually).

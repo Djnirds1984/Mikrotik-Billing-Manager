@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useCustomers } from '../hooks/useCustomers.ts';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
@@ -341,6 +341,34 @@ const SOAModal: React.FC<SOAModalProps> = ({ isOpen, onClose, customer, routerId
     );
 };
 
+export const resolveCustomerPppSecret = (customer: Customer, secrets: PppSecret[]): { secret?: PppSecret; needsConfirmation?: boolean; error?: string } => {
+    const name = customer.pppoeSecret || customer.username || '';
+    if (!name) return { error: 'Select a PPPoE secret in Edit Customer first.' };
+    const exact = secrets.filter(secret => secret.name === name);
+    if (exact.length === 1) return { secret: exact[0] };
+    if (customer.pppoeSecret) return { error: 'The linked PPPoE secret is not available on this router. Check the link in Edit Customer.' };
+
+    const normalized = name.trim().toLowerCase();
+    const similar = normalized ? secrets.filter(secret => secret.name.trim().toLowerCase() === normalized) : [];
+    if (similar.length === 1) return { secret: similar[0], needsConfirmation: true };
+    if (similar.length > 1) return { error: 'Multiple PPPoE secrets match. Select the exact secret in Edit Customer.' };
+
+    if (customer.accountNumber) {
+        const matches = secrets.filter(secret => {
+            try {
+                const comment = JSON.parse(secret.comment || '{}');
+                return (comment?.accountNumber || comment?.customer?.accountNumber) === customer.accountNumber;
+            } catch { return false; }
+        });
+        if (matches.length === 1) return { secret: matches[0], needsConfirmation: true };
+        if (matches.length > 1) return { error: 'Multiple PPPoE secrets share this account number. Select the exact secret in Edit Customer.' };
+    }
+
+    const prefixes = secrets.filter(secret => secret.name && (name.startsWith(secret.name) || secret.name.startsWith(name)));
+    if (prefixes.length === 1) return { secret: prefixes[0], needsConfirmation: true };
+    return { error: 'No unambiguous PPPoE match found. Select the exact secret in Edit Customer; the full name is not a secret name.' };
+};
+
 // --- Customer Form Modal ---
 interface CustomerFormModalProps {
     isOpen: boolean;
@@ -348,10 +376,16 @@ interface CustomerFormModalProps {
     onSave: (data: Omit<Customer, 'id'> | Customer) => void;
     initialData: Customer | null;
     isSubmitting: boolean;
-    routerId: string;
+    selectedRouter: RouterConfigWithId;
 }
 
-const CustomerFormModal: React.FC<CustomerFormModalProps> = ({ isOpen, onClose, onSave, initialData, isSubmitting, routerId }) => {
+const CustomerFormModal: React.FC<CustomerFormModalProps> = ({ isOpen, onClose, onSave, initialData, isSubmitting, selectedRouter }) => {
+    const routerId = selectedRouter.id;
+    const [secrets, setSecrets] = useState<PppSecret[]>([]);
+    const [secretSearch, setSecretSearch] = useState('');
+    const [secretsLoading, setSecretsLoading] = useState(false);
+    const [secretsError, setSecretsError] = useState('');
+    const [secretReload, setSecretReload] = useState(0);
     const [form, setForm] = React.useState({
         fullName: '',
         address: '',
@@ -360,6 +394,7 @@ const CustomerFormModal: React.FC<CustomerFormModalProps> = ({ isOpen, onClose, 
         gps: '',
         username: '',
         accountNumber: '',
+        pppoeSecret: '',
     });
 
     React.useEffect(() => {
@@ -373,6 +408,7 @@ const CustomerFormModal: React.FC<CustomerFormModalProps> = ({ isOpen, onClose, 
                 gps: initialData.gps || '',
                 username: initialData.username || '',
                 accountNumber: initialData.accountNumber || '',
+                pppoeSecret: initialData.pppoeSecret || '',
             });
         } else {
             setForm({
@@ -383,10 +419,26 @@ const CustomerFormModal: React.FC<CustomerFormModalProps> = ({ isOpen, onClose, 
                 gps: '',
                 username: '',
                 accountNumber: '',
+                pppoeSecret: '',
             });
         }
+        setSecretSearch('');
     }, [isOpen, initialData]);
 
+    React.useEffect(() => {
+        if (!isOpen) return;
+        const controller = new AbortController();
+        setSecrets([]);
+        setSecretsError('');
+        setSecretsLoading(true);
+        getPppSecrets(selectedRouter, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]))
+            .then(data => { if (!controller.signal.aborted) setSecrets(data); })
+            .catch(err => { if (!controller.signal.aborted) setSecretsError(`Unable to load PPPoE secrets: ${err.message}`); })
+            .finally(() => { if (!controller.signal.aborted) setSecretsLoading(false); });
+        return () => controller.abort();
+    }, [isOpen, selectedRouter.id, secretReload]);
+
+    const visibleSecrets = secrets.filter(secret => secret.name === form.pppoeSecret || secret.name.toLowerCase().includes(secretSearch.toLowerCase()));
     if (!isOpen) return null;
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -431,6 +483,34 @@ const CustomerFormModal: React.FC<CustomerFormModalProps> = ({ isOpen, onClose, 
                                     placeholder="pppoe_username"
                                 />
                                 {!initialData && <p className="text-xs text-slate-500 mt-1">Optional. If linked to a PPPoE user.</p>}
+                            </div>
+                            <div className="space-y-2">
+                                <label htmlFor="customer-pppoe-secret" className="block text-sm font-medium text-slate-700 dark:text-slate-300">PPPoE Secret</label>
+                                <input
+                                    aria-label="Search PPPoE secrets"
+                                    placeholder="Search actual secret names..."
+                                    value={secretSearch}
+                                    onChange={e => setSecretSearch(e.target.value)}
+                                    className="w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600"
+                                />
+                                <select
+                                    id="customer-pppoe-secret"
+                                    value={form.pppoeSecret}
+                                    disabled={secretsLoading || !!secretsError || isSubmitting}
+                                    onChange={e => {
+                                        const name = e.target.value;
+                                        setForm(f => ({ ...f, pppoeSecret: name, username: !initialData && name ? name : f.username }));
+                                    }}
+                                    className="w-full p-2 rounded-md bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 disabled:opacity-50"
+                                >
+                                    <option value="">— Not linked —</option>
+                                    {form.pppoeSecret && !secrets.some(secret => secret.name === form.pppoeSecret) && <option value={form.pppoeSecret}>{form.pppoeSecret} (unavailable)</option>}
+                                    {visibleSecrets.map(secret => <option key={secret.id || secret.name} value={secret.name}>{secret.name}</option>)}
+                                </select>
+                                <p className="text-xs text-slate-500">Exact name on {selectedRouter.name}. Existing username and payment history stay unchanged.</p>
+                                {secretsLoading && <p role="status" className="text-xs text-slate-500">Loading PPPoE secrets...</p>}
+                                {secretsError && <p role="alert" className="text-xs text-red-500">{secretsError} <button type="button" onClick={() => setSecretReload(value => value + 1)} className="underline">Retry</button></p>}
+                                {!secretsLoading && !secretsError && visibleSecrets.length === 0 && <p className="text-xs text-slate-500">No secrets match on this router.</p>}
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Full Address</label>
@@ -509,7 +589,7 @@ interface CustomersProps {
 
 export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale }) => {
     const routerId = selectedRouter?.id || null;
-    const { customers, addCustomer, updateCustomer, deleteCustomer, isLoading, error } = useCustomers(routerId);
+    const { customers, addCustomer, updateCustomer, deleteCustomer, fetchCustomers, isLoading, error } = useCustomers(routerId);
     const { settings: companySettings } = useCompanySettings();
     const { plans } = useBillingPlans(routerId);
     const { settings: billingSettings } = useBillingSettings();
@@ -532,8 +612,22 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
 
     // Payment modal state
     const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
-    const [paymentSecret, setPaymentSecret] = useState<any>(null);
+    const [paymentSecret, setPaymentSecret] = useState<React.ComponentProps<typeof PaymentModal>['secret']>(null);
+    const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
+    const [loadingPaymentId, setLoadingPaymentId] = useState<string | null>(null);
+    const [paymentMessage, setPaymentMessage] = useState('');
+    const paymentLookup = useRef<AbortController | null>(null);
     const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
+
+    React.useEffect(() => {
+        setPaymentModalOpen(false);
+        setPaymentSecret(null);
+        setPaymentCustomer(null);
+        setLoadingPaymentId(null);
+        setPaymentMessage('');
+        setModalOpen(false);
+        return () => { paymentLookup.current?.abort(); paymentLookup.current = null; };
+    }, [routerId]);
 
     const filteredCustomers = useMemo(() => {
         if (!searchTerm.trim()) return customers;
@@ -603,27 +697,28 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
     };
 
     const handleOpenPayment = useCallback(async (customer: Customer) => {
-        if (!selectedRouter) return;
+        if (!selectedRouter || customer.routerId !== selectedRouter.id || paymentLookup.current) return;
+        const controller = new AbortController();
+        paymentLookup.current = controller;
+        setLoadingPaymentId(customer.id);
+        setPaymentMessage('');
         try {
-            const secrets = await getPppSecrets(selectedRouter);
-            const uname = customer.username || '';
-            if (!secrets || secrets.length === 0) {
-                alert(`No PPPoE secrets found on router "${selectedRouter.name}". Please check the router connection.`);
+            const secrets = await getPppSecrets(selectedRouter, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]));
+            if (controller.signal.aborted) return;
+            if (!secrets.length) {
+                setPaymentMessage(`No PPPoE secrets returned by ${selectedRouter.name}. Check the router connection; the customer record has not been changed.`);
                 return;
             }
-            // Try multiple matching strategies: exact, prefix, contains
-            let secret = secrets.find((s: PppSecret) => s.name === uname);
-            if (!secret && uname) {
-                secret = secrets.find((s: PppSecret) => uname.startsWith(s.name));
-            }
-            if (!secret && uname) {
-                secret = secrets.find((s: PppSecret) => s.name.startsWith(uname));
-            }
+            const { secret, error, needsConfirmation } = resolveCustomerPppSecret(customer, secrets);
             if (!secret) {
-                const availableNames = secrets.map((s: PppSecret) => s.name).join(', ');
-                alert(`No PPPoE user found for "${uname}" on router "${selectedRouter.name}".\n\nAvailable secrets: ${availableNames}`);
+                setPaymentMessage(error || 'Select a PPPoE secret in Edit Customer.');
                 return;
             }
+            if (customers.some(other => other.id !== customer.id && other.routerId === selectedRouter.id && (other.pppoeSecret || other.username) === secret.name)) {
+                setPaymentMessage('This PPPoE secret belongs to another customer record. Resolve the duplicate link before paying.');
+                return;
+            }
+            if (needsConfirmation && !window.confirm(`Confirm payment account for ${customer.fullName || customer.username}:\n\nCustomer username: ${customer.username}\nRouter: ${selectedRouter.name}\nPPPoE secret: ${secret.name}\n\nUse this exact secret?`)) return;
             let subscription: any = { plan: 'N/A', dueDate: 'No Info', planType: 'prepaid' };
             if (secret.comment) {
                 try {
@@ -647,19 +742,34 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
                 (subscription.planId && p.id === subscription.planId) ||
                 p.name === subscription.plan
             ) || null;
-            setPaymentSecret({ ...secret, subscription, billingPlan });
+            setPaymentSecret({ ...secret, customer, subscription, billingPlan });
+            setPaymentCustomer(customer);
             setPaymentModalOpen(true);
         } catch (err) {
-            alert(`Failed to load PPPoE user: ${(err as Error).message}`);
+            if (!controller.signal.aborted) setPaymentMessage(`Failed to load PPPoE user: ${(err as Error).message}`);
+        } finally {
+            if (paymentLookup.current === controller) {
+                paymentLookup.current = null;
+                setLoadingPaymentId(null);
+            }
         }
-    }, [selectedRouter, plans]);
+    }, [selectedRouter, plans, customers]);
 
     const handlePayment = useCallback(async ({ sale, payment }: any) => {
-        if (!paymentSecret || !selectedRouter) return false;
+        if (!paymentSecret || !paymentCustomer || !selectedRouter) return false;
         try {
-            await processPppPayment(selectedRouter, { secret: paymentSecret, ...payment });
+            const result = await processPppPayment(selectedRouter, { ...payment, secret: paymentSecret, customerId: paymentCustomer.id });
             const saleResult = await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString(), processedBy: processedByLabel });
+            if (result.warning) setPaymentMessage(result.warning);
             const postPaymentTasks: Promise<any>[] = [];
+            if (paymentCustomer.pppoeSecret !== paymentSecret.name) {
+                const linkGuard = new URLSearchParams({ routerId: selectedRouter.id, expectedPppoeSecret: paymentCustomer.pppoeSecret || '' });
+                postPaymentTasks.push(
+                    dbApi.patch(`/customers/${encodeURIComponent(paymentCustomer.id)}?${linkGuard}`, { pppoeSecret: paymentSecret.name })
+                        .then(() => fetchCustomers())
+                        .catch(() => setPaymentMessage('Payment succeeded, but the PPPoE link could not be saved. Save the link in Edit Customer; do not pay again.'))
+                );
+            }
             if (sale.invoiceId) {
                 postPaymentTasks.push(
                     dbApi.patch(`/client-invoices/${encodeURIComponent(sale.invoiceId)}`, { status: 'PAID' })
@@ -673,7 +783,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
                         body: JSON.stringify({
                             routerId: selectedRouter.id,
-                            username: paymentSecret.name,
+                            username: paymentCustomer?.username || paymentSecret.name,
                             accountNumber: (() => { try { return JSON.parse(paymentSecret.comment || '{}').accountNumber || JSON.parse(paymentSecret.comment || '{}').customer?.accountNumber || null; } catch { return null; } })(),
                             month: payment.coveredMonth,
                             status: 'paid',
@@ -692,7 +802,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
                     fetch('/api/client-balance', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
-                        body: JSON.stringify({ routerId: selectedRouter.id, username: paymentSecret.name, amount: creditApplied })
+                        body: JSON.stringify({ routerId: selectedRouter.id, username: paymentCustomer?.username || paymentSecret.name, amount: creditApplied })
                     }).catch(() => {})
                 );
             }
@@ -702,7 +812,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
                     fetch('/api/client-balance', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
-                        body: JSON.stringify({ routerId: selectedRouter.id, username: paymentSecret.name, amount: -overpaymentCredit })
+                        body: JSON.stringify({ routerId: selectedRouter.id, username: paymentCustomer?.username || paymentSecret.name, amount: -overpaymentCredit })
                     }).catch(() => {})
                 );
             }
@@ -715,7 +825,7 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
             alert(`Payment failed: ${(err as Error).message}`);
             return false;
         }
-    }, [paymentSecret, selectedRouter, addSale, processedByLabel]);
+    }, [paymentSecret, paymentCustomer, selectedRouter, addSale, processedByLabel, fetchCustomers]);
 
     if (!selectedRouter) {
         return (
@@ -762,6 +872,9 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
                     {error}
                 </div>
             )}
+
+            {paymentMessage && <div role="alert" className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-sm text-amber-800 dark:text-amber-200">{paymentMessage}</div>}
+            {loadingPaymentId && <div role="status" className="text-sm text-slate-500">Loading payment account... <button type="button" className="underline" onClick={() => { paymentLookup.current?.abort(); paymentLookup.current = null; setLoadingPaymentId(null); }}>Cancel</button></div>}
 
             {/* Loading */}
             {isLoading ? (
@@ -814,10 +927,12 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
                                     <td className="px-4 py-3 text-right whitespace-nowrap">
                                         <button
                                             onClick={() => handleOpenPayment(customer)}
-                                            className="inline-flex items-center p-1.5 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-md transition"
+                                            disabled={!!loadingPaymentId}
+                                            className="inline-flex items-center gap-1 p-1.5 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-md transition disabled:opacity-50"
                                             title="Pay"
                                         >
                                             <BanknotesIcon className="w-4 h-4" />
+                                            {loadingPaymentId === customer.id ? 'Loading...' : 'Pay'}
                                         </button>
                                         <button
                                             onClick={() => handleOpenCustomInvoice(customer)}
@@ -870,9 +985,10 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale })
                 isOpen={isModalOpen}
                 onClose={() => setModalOpen(false)}
                 onSave={handleSave}
+                key={`${routerId}:${editingCustomer?.id || 'new'}`}
                 initialData={editingCustomer}
                 isSubmitting={isSubmitting}
-                routerId={routerId || ''}
+                selectedRouter={selectedRouter}
             />
 
             {/* Statement of Account Modal */}

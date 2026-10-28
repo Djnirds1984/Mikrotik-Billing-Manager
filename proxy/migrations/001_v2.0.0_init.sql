@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS expenses (
 CREATE TABLE IF NOT EXISTS customers (
     id TEXT PRIMARY KEY,
     username TEXT UNIQUE,
+    pppoeSecret TEXT,
     routerId TEXT,
     fullName TEXT,
     address TEXT,

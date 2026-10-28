@@ -5,10 +5,11 @@ import type { RouterConfigWithId, SystemInfo, Interface, DhcpClient, PppSecret, 
 const BASE_URL = '/mt-api';
 
 // Helper for API Calls
-const apiCall = async <T>(router: RouterConfigWithId, endpoint: string, method: string = 'GET', body?: any): Promise<T> => {
+const apiCall = async <T>(router: RouterConfigWithId, endpoint: string, method: string = 'GET', body?: any, signal?: AbortSignal): Promise<T> => {
     const url = `${BASE_URL}/${router.id}/${endpoint.replace(/^\//, '')}`;
     const response = await fetch(url, {
         method,
+        signal,
         headers: {
             'Content-Type': 'application/json',
             ...getAuthHeader()
@@ -159,7 +160,7 @@ export const runDhcpCaptivePortalUninstall = (router: RouterConfigWithId) => {
 
 // --- PPPoE ---
 
-export const getPppSecrets = (router: RouterConfigWithId) => apiCall<PppSecret[]>(router, 'ppp/secret/print');
+export const getPppSecrets = (router: RouterConfigWithId, signal: AbortSignal = AbortSignal.timeout(30000)) => apiCall<PppSecret[]>(router, 'ppp/secret/print', 'GET', undefined, signal);
 export const addPppSecret = (router: RouterConfigWithId, data: PppSecretData) => apiCall(router, 'ppp/secret/add', 'POST', data);
 export const updatePppSecret = (router: RouterConfigWithId, id: string, data: Partial<PppSecretData>) => apiCall(router, 'ppp/secret/set', 'POST', { ...data, '.id': id });
 export const deletePppSecret = (router: RouterConfigWithId, id: string) => apiCall(router, 'ppp/secret/remove', 'POST', { '.id': id });
@@ -168,7 +169,7 @@ export const getPppActiveConnections = (router: RouterConfigWithId) => apiCall<P
 export const getPppActiveTraffic = (router: RouterConfigWithId, names: string[]) => apiCall<Record<string, { rx: number, tx: number }>>(router, 'ppp/active/traffic', 'POST', { names });
 export const deletePppActiveConnection = (router: RouterConfigWithId, id: string) => apiCall(router, 'ppp/active/remove', 'POST', { '.id': id });
 
-export const getPppProfiles = (router: RouterConfigWithId) => apiCall<PppProfile[]>(router, 'ppp/profile/print');
+export const getPppProfiles = (router: RouterConfigWithId) => apiCall<PppProfile[]>(router, 'ppp/profile/print', 'GET', undefined, AbortSignal.timeout(30000));
 export const addPppProfile = (router: RouterConfigWithId, data: PppProfileData) => apiCall(router, 'ppp/profile/add', 'POST', data);
 export const updatePppProfile = (router: RouterConfigWithId, data: PppProfile | PppProfileData) => {
     const { id, ...rest } = data as any; 
@@ -181,12 +182,8 @@ export const addPppServer = (router: RouterConfigWithId, data: PppServerData) =>
 export const updatePppServer = (router: RouterConfigWithId, id: string, data: Partial<PppServerData>) => apiCall(router, 'interface/pppoe-server/server/set', 'POST', { ...data, '.id': id });
 export const deletePppServer = (router: RouterConfigWithId, id: string) => apiCall(router, 'interface/pppoe-server/server/remove', 'POST', { '.id': id });
 
-export const processPppPayment = (router: RouterConfigWithId, paymentData: any) => {
-    // Logic to enable secret, set comment, etc.
-    // This might be a custom script runner or a sequence of updates
-    // For simplicity, assuming a backend endpoint handles the logic or we update secret directly
-    return apiCall(router, 'ppp/payment/process', 'POST', paymentData); // Hypothetical backend helper
-};
+export const processPppPayment = (router: RouterConfigWithId, paymentData: any) =>
+    apiCall<{ secrets: PppSecret[]; warning?: string }>(router, 'ppp/payment/process', 'POST', paymentData);
 
 export const savePppUser = (router: RouterConfigWithId, data: any) => {
     // Wrapper for complex user saving logic

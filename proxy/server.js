@@ -573,6 +573,7 @@ async function initDb() {
              CREATE TABLE IF NOT EXISTS customers (
                 id TEXT PRIMARY KEY,
                 username TEXT UNIQUE,
+                pppoeSecret TEXT,
                 routerId TEXT,
                 fullName TEXT,
                 address TEXT,
@@ -792,7 +793,7 @@ async function initDb() {
             console.log('[Migration] Customers table columns:', customerColNames);
             
             // Add missing columns for billing and authentication
-            const missingColumns = ['dueDate', 'planType', 'planName', 'password', 'facebook_psid', 'lastKnownMac'];
+            const missingColumns = ['dueDate', 'planType', 'planName', 'password', 'facebook_psid', 'lastKnownMac', 'pppoeSecret'];
             for (const col of missingColumns) {
                 if (!customerColNames.includes(col)) {
                     console.log(`[Migration] Adding ${col} column to customers table...`);
@@ -801,6 +802,7 @@ async function initDb() {
                     console.log(`[Migration] ✓ ${col} column added`);
                 }
             }
+            await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS customers_pppoe_secret ON customers(routerId, COALESCE(NULLIF(pppoeSecret, ''), username))");
         } catch (err) {
             console.error('[Migration] Customer table migration error:', err.message);
         }
@@ -2323,20 +2325,7 @@ async function startServer() {
                 query += ` WHERE routerId = ?`;
                 params.push(routerId);
             }
-            console.log(`[Customers GET] Query: ${query}`);
-            console.log(`[Customers GET] Params:`, params);
-            console.log(`[Customers GET] Database file: ${DB_PATH}`);
-            
             const rows = await db.all(query, params);
-            console.log(`[Customers GET] Found ${rows.length} customers`);
-            if (rows.length > 0) {
-                console.log(`[Customers GET] First customer:`, rows[0]);
-            }
-            
-            // Diagnostic: Count all customers regardless of routerId
-            const totalCount = await db.get('SELECT COUNT(*) as count FROM customers');
-            console.log(`[Customers GET] Total customers in database (all routers): ${totalCount.count}`);
-            
             res.json(rows);
         } catch (e) { 
             console.error(`[Customers GET] Error:`, e.message);
@@ -2355,8 +2344,26 @@ async function startServer() {
                 [username]
             );
             
-            console.log(`[Customers POST] username=${username}, routerId=${routerId}, existing=${!!existing}`);
-            
+            if (existing && req.body.id && req.body.id !== existing.id) {
+                return res.status(409).json({ message: 'A customer with this username already exists. Edit that customer instead.' });
+            }
+            if (req.body.pppoeSecret != null && typeof req.body.pppoeSecret !== 'string') {
+                return res.status(400).json({ message: 'PPPoE secret must be a name, not credentials or an object.' });
+            }
+            const linkedName = (req.body.pppoeSecret !== undefined ? req.body.pppoeSecret : existing?.pppoeSecret) || username;
+            if (linkedName) {
+                const conflict = await db.get(
+                    "SELECT id FROM customers WHERE routerId = ? AND id <> ? AND COALESCE(NULLIF(pppoeSecret, ''), username) = ?",
+                    [routerId || existing?.routerId, existing?.id || req.body.id || '', linkedName]
+                );
+                if (conflict) return res.status(409).json({ message: 'This PPPoE secret is already linked to another customer on this router.' });
+            }
+            const columns = await db.all('PRAGMA table_info(customers)');
+            const allowed = new Set(columns.map(column => column.name));
+            if (Object.keys(req.body).some(key => !allowed.has(key))) {
+                return res.status(400).json({ message: 'Unknown customer field.' });
+            }
+
             if (existing) {
                 // Update existing
                 const keys = Object.keys(req.body).filter(k => k !== 'id' && k !== 'username'); // don't update id or username
@@ -2390,16 +2397,32 @@ async function startServer() {
     dbRouter.patch('/customers/:id', async (req, res) => {
         try {
             const { id } = req.params;
-            console.log(`[Customers PATCH] Updating customer id=${id}`, req.body);
-            
+
             // First, check if customer exists
             const existingCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
             if (!existingCustomer) {
                 console.error(`[Customers PATCH] Customer id=${id} NOT FOUND in database!`);
                 return res.status(404).json({ message: 'Customer not found' });
             }
-            console.log(`[Customers PATCH] Found existing customer:`, existingCustomer);
-            
+            if (req.body.pppoeSecret != null && typeof req.body.pppoeSecret !== 'string') {
+                return res.status(400).json({ message: 'PPPoE secret must be a name, not credentials or an object.' });
+            }
+            const expectedLink = req.query?.expectedPppoeSecret;
+            if (expectedLink !== undefined) {
+                if (typeof expectedLink !== 'string' || typeof req.query.routerId !== 'string') return res.status(400).json({ message: 'Invalid customer link condition.' });
+                if (existingCustomer.routerId !== req.query.routerId || (existingCustomer.pppoeSecret || '') !== expectedLink) {
+                    return res.status(409).json({ message: 'The customer link changed. Refresh the customer before saving.' });
+                }
+            }
+            const linkedName = (req.body.pppoeSecret !== undefined ? req.body.pppoeSecret : existingCustomer.pppoeSecret) || req.body.username || existingCustomer.username;
+            if (linkedName) {
+                const conflict = await db.get(
+                    "SELECT id FROM customers WHERE routerId = ? AND id <> ? AND COALESCE(NULLIF(pppoeSecret, ''), username) = ?",
+                    [req.body.routerId || existingCustomer.routerId, id, linkedName]
+                );
+                if (conflict) return res.status(409).json({ message: 'This PPPoE secret is already linked to another customer on this router.' });
+            }
+
             if (!req.body.accountNumber || String(req.body.accountNumber).trim() === '') {
                 const current = await db.get('SELECT accountNumber FROM customers WHERE id = ?', [id]);
                 if (!current?.accountNumber) {
@@ -2422,14 +2445,10 @@ async function startServer() {
             const updates = fieldsToUpdate.map(k => `${k} = ?`).join(',');
             const values = fieldsToUpdate.map(k => req.body[k]);
             values.push(id);
-            console.log(`[Customers PATCH] Executing: UPDATE customers SET ${updates} WHERE id = ?`, values);
-            await db.run(`UPDATE customers SET ${updates} WHERE id = ?`, values);
-            console.log(`[Customers PATCH] Successfully updated customer id=${id}`);
-            
-            // Verify the update
-            const verifyCustomer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
-            console.log(`[Customers PATCH] Verified customer after update:`, verifyCustomer);
-
+            const condition = expectedLink !== undefined ? " AND routerId = ? AND COALESCE(pppoeSecret, '') = ?" : '';
+            if (expectedLink !== undefined) values.push(req.query.routerId, expectedLink);
+            const result = await db.run(`UPDATE customers SET ${updates} WHERE id = ?${condition}`, values);
+            if (expectedLink !== undefined && result.changes === 0) return res.status(409).json({ message: 'The customer link changed. Refresh the customer before saving.' });
             res.json({ message: 'Updated' });
         } catch (e) { 
             console.error(`[Customers PATCH] Error:`, e.message);
