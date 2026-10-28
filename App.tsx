@@ -347,7 +347,7 @@ const AppContent: React.FC<AppContentProps> = ({ licenseStatus, onLicenseChange 
                   case 'job_orders':
                     return <JobOrders />;
                   case 'customers':
-                    return <Customers selectedRouter={selectedRouter} />;
+                    return <Customers selectedRouter={selectedRouter} addSale={addSale} />;
                   case 'collectibles':
                     return <Collectibles selectedRouter={selectedRouter} />;
                   case 'sms_admin':

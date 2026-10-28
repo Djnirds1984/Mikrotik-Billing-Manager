@@ -1,12 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useCustomers } from '../hooks/useCustomers.ts';
 import { useCompanySettings } from '../hooks/useCompanySettings.ts';
 import { useLocalization } from '../contexts/LocalizationContext.tsx';
-import type { Customer } from '../types.ts';
-import type { RouterConfigWithId } from '../types.ts';
+import { useBillingPlans } from '../hooks/useBillingPlans.ts';
+import { useBillingSettings } from '../hooks/useBillingSettings.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
+import type { Customer, RouterConfigWithId, PppSecret, SaleRecord, BillingPlanWithId } from '../types.ts';
+import { dbApi } from '../services/databaseService.ts';
+import { getPppSecrets, processPppPayment } from '../services/mikrotikService.ts';
 import { CustomInvoiceModal } from './CustomInvoiceModal.tsx';
 import { BillingStatement } from './BillingStatement.tsx';
-import { dbApi } from '../services/databaseService.ts';
+import { PaymentModal } from './PaymentModal.tsx';
+import { PrintableReceipt } from './PrintableReceipt.tsx';
 
 // Icons
 const PlusIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -48,6 +53,12 @@ const XMarkIcon: React.FC<{ className?: string }> = ({ className }) => (
 const ReceiptInvoiceIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 14.25l3-3m0 0l3 3m-3-3v8.25M3.75 9.75V21h16.5V9.75M3.75 3h16.5M3.75 3L2.25 9.75M20.25 3l1.5 6.75M3.75 9.75h16.5" />
+    </svg>
+);
+
+const BanknotesIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5V21a.75.75 0 00.75.75h.75M3.75 18.75h16.5" />
     </svg>
 );
 
@@ -493,12 +504,21 @@ const CustomerFormModal: React.FC<CustomerFormModalProps> = ({ isOpen, onClose, 
 // --- Main Customers Component ---
 interface CustomersProps {
     selectedRouter: RouterConfigWithId | null;
+    addSale: (saleData: Omit<SaleRecord, 'id'>) => Promise<void>;
 }
 
-export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
+export const Customers: React.FC<CustomersProps> = ({ selectedRouter, addSale }) => {
     const routerId = selectedRouter?.id || null;
     const { customers, addCustomer, updateCustomer, deleteCustomer, isLoading, error } = useCustomers(routerId);
     const { settings: companySettings } = useCompanySettings();
+    const { plans } = useBillingPlans(routerId);
+    const { settings: billingSettings } = useBillingSettings();
+    const { hasPermission, user } = useAuth();
+    const { t, formatCurrency } = useLocalization();
+
+    const processedByLabel = user?.role?.name?.toLowerCase() === 'administrator' || user?.role?.name?.toLowerCase() === 'superadmin'
+        ? 'admin'
+        : user?.username || 'admin';
 
     const [isModalOpen, setModalOpen] = useState(false);
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -509,6 +529,11 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
     const [isCustomInvoiceOpen, setIsCustomInvoiceOpen] = useState(false);
     const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null);
     const [routers, setRouters] = useState<any[]>([]);
+
+    // Payment modal state
+    const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
+    const [paymentSecret, setPaymentSecret] = useState<any>(null);
+    const [receiptToPrint, setReceiptToPrint] = useState<SaleRecord | null>(null);
 
     const filteredCustomers = useMemo(() => {
         if (!searchTerm.trim()) return customers;
@@ -576,6 +601,108 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
         setInvoiceCustomer(customer);
         setIsCustomInvoiceOpen(true);
     };
+
+    const handleOpenPayment = useCallback(async (customer: Customer) => {
+        if (!selectedRouter) return;
+        try {
+            const secrets = await getPppSecrets(selectedRouter);
+            const secret = secrets.find((s: PppSecret) => s.name === customer.username);
+            if (!secret) {
+                alert(`No PPPoE user found with username "${customer.username}". Please link a PPPoE user first.`);
+                return;
+            }
+            let subscription: any = { plan: 'N/A', dueDate: 'No Info', planType: 'prepaid' };
+            if (secret.comment) {
+                try {
+                    const parsed = JSON.parse(secret.comment);
+                    subscription.plan = parsed.planName || parsed.plan || 'N/A';
+                    subscription.planId = parsed.planId;
+                    if (parsed.dueDateTime) {
+                        const s = String(parsed.dueDateTime);
+                        const [date, time] = s.includes('T') ? s.split('T') : [s.split(' ')[0], s.split(' ')[1] || '00:00'];
+                        const [y, m, d] = date.split('-');
+                        const [hh, mm] = (time || '00:00').split(':');
+                        subscription.dueDate = `${y}-${m}-${d} ${hh}:${mm}`;
+                    } else {
+                        subscription.dueDate = parsed.dueDate || 'No Info';
+                    }
+                    const pt = String(parsed.planType || '').toLowerCase().trim();
+                    subscription.planType = pt === 'postpaid' ? 'postpaid' : 'prepaid';
+                } catch { /* ignore */ }
+            }
+            const billingPlan = plans.find(p =>
+                (subscription.planId && p.id === subscription.planId) ||
+                p.name === subscription.plan
+            ) || null;
+            setPaymentSecret({ ...secret, subscription, billingPlan });
+            setPaymentModalOpen(true);
+        } catch (err) {
+            alert(`Failed to load PPPoE user: ${(err as Error).message}`);
+        }
+    }, [selectedRouter, plans]);
+
+    const handlePayment = useCallback(async ({ sale, payment }: any) => {
+        if (!paymentSecret || !selectedRouter) return false;
+        try {
+            await processPppPayment(selectedRouter, { secret: paymentSecret, ...payment });
+            const saleResult = await addSale({ ...sale, routerName: selectedRouter.name, date: new Date().toISOString(), processedBy: processedByLabel });
+            const postPaymentTasks: Promise<any>[] = [];
+            if (sale.invoiceId) {
+                postPaymentTasks.push(
+                    dbApi.patch(`/client-invoices/${encodeURIComponent(sale.invoiceId)}`, { status: 'PAID' })
+                        .catch(() => {})
+                );
+            }
+            if (payment.coveredMonth) {
+                postPaymentTasks.push(
+                    fetch('/api/billing-ledger', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+                        body: JSON.stringify({
+                            routerId: selectedRouter.id,
+                            username: paymentSecret.name,
+                            accountNumber: (() => { try { return JSON.parse(paymentSecret.comment || '{}').accountNumber || JSON.parse(paymentSecret.comment || '{}').customer?.accountNumber || null; } catch { return null; } })(),
+                            month: payment.coveredMonth,
+                            status: 'paid',
+                            planName: sale.planName,
+                            planPrice: sale.planPrice,
+                            paidAmount: sale.finalAmount,
+                            saleId: saleResult?.id || null,
+                            paymentDate: payment.paymentDate || new Date().toISOString()
+                        })
+                    }).catch(() => {})
+                );
+            }
+            const creditApplied = payment.creditApplied || 0;
+            if (creditApplied > 0) {
+                postPaymentTasks.push(
+                    fetch('/api/client-balance', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+                        body: JSON.stringify({ routerId: selectedRouter.id, username: paymentSecret.name, amount: creditApplied })
+                    }).catch(() => {})
+                );
+            }
+            const overpaymentCredit = payment.overpaymentCredit || 0;
+            if (overpaymentCredit > 0) {
+                postPaymentTasks.push(
+                    fetch('/api/client-balance', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+                        body: JSON.stringify({ routerId: selectedRouter.id, username: paymentSecret.name, amount: -overpaymentCredit })
+                    }).catch(() => {})
+                );
+            }
+            Promise.all(postPaymentTasks).catch(() => {});
+            if (saleResult) {
+                setReceiptToPrint(saleResult as SaleRecord);
+            }
+            return true;
+        } catch (err) {
+            alert(`Payment failed: ${(err as Error).message}`);
+            return false;
+        }
+    }, [paymentSecret, selectedRouter, addSale, processedByLabel]);
 
     if (!selectedRouter) {
         return (
@@ -673,8 +800,15 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
                                     </td>
                                     <td className="px-4 py-3 text-right whitespace-nowrap">
                                         <button
+                                            onClick={() => handleOpenPayment(customer)}
+                                            className="inline-flex items-center p-1.5 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-md transition"
+                                            title="Pay"
+                                        >
+                                            <BanknotesIcon className="w-4 h-4" />
+                                        </button>
+                                        <button
                                             onClick={() => handleOpenCustomInvoice(customer)}
-                                            className="inline-flex items-center p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-md transition"
+                                            className="inline-flex items-center p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-md transition ml-1"
                                             title="Custom Invoice"
                                         >
                                             <ReceiptInvoiceIcon className="w-4 h-4" />
@@ -759,6 +893,83 @@ export const Customers: React.FC<CustomersProps> = ({ selectedRouter }) => {
                     accountNumber: invoiceCustomer.accountNumber,
                 } : null}
             />
+
+            {/* Payment Modal */}
+            <PaymentModal
+                isOpen={isPaymentModalOpen}
+                onClose={() => { setPaymentModalOpen(false); setPaymentSecret(null); }}
+                secret={paymentSecret}
+                plans={plans}
+                nonPaymentProfile={billingSettings.nonPaymentProfile}
+                onSave={handlePayment}
+                companySettings={companySettings}
+                routerId={routerId || ''}
+            />
+
+            {/* Invoice Print Dialog */}
+            {receiptToPrint && (
+                <>
+                    <div className="printable-area">
+                        <PrintableReceipt sale={receiptToPrint} companySettings={companySettings} />
+                    </div>
+                    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-2xl w-full">
+                            <div className="p-6 border-b border-slate-200 dark:border-slate-700">
+                                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-200">Invoice Generated</h3>
+                            </div>
+                            <div className="p-6">
+                                <p className="text-slate-600 dark:text-slate-400 mb-4">
+                                    Invoice has been created for <strong>{receiptToPrint.clientName}</strong>
+                                </p>
+                                <div className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-lg mb-4">
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                        <div>
+                                            <span className="text-slate-500">Amount:</span>
+                                            <div className="font-semibold text-lg">₱{receiptToPrint.finalAmount.toFixed(2)}</div>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-500">Plan:</span>
+                                            <div>{receiptToPrint.planName}</div>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-500">Date:</span>
+                                            <div>{new Date(receiptToPrint.date).toLocaleDateString()}</div>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-500">Status:</span>
+                                            <div className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">PENDING</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                                    Click "Print Invoice" to print the invoice now. You can also print it later from the Sales Report section.
+                                </p>
+                            </div>
+                            <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-3 flex justify-end gap-3 rounded-b-lg">
+                                <button
+                                    type="button"
+                                    onClick={() => setReceiptToPrint(null)}
+                                    className="px-4 py-2 text-sm font-medium rounded-md text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600"
+                                >
+                                    Close
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const timer = setTimeout(() => {
+                                            window.print();
+                                            setReceiptToPrint(null);
+                                        }, 100);
+                                    }}
+                                    className="px-4 py-2 text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                                >
+                                    Print Invoice
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </>
+            )}
         </div>
     );
 };
