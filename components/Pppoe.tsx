@@ -968,20 +968,29 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
     const handleSaveUser = async (secretData: PppSecretData, customerData: Partial<Customer>, subscriptionData: { dueDate: string; planId: string; planType?: 'prepaid' | 'postpaid'; installationFee?: number; deductFromProrate?: boolean; deductFromMonthly?: boolean }, portalOptions?: { createPortalAccount?: boolean }) => {
         setIsSubmitting(true);
         try {
-            // Honor an explicit router-local link without changing the customer's identity.
+            // Customer sync must not prevent editing an existing router secret.
+            let customerSyncWarning = '';
             let existingCustomer = customerLookups.bySecret.get(secretData.name) || customerLookups.byUsername.get(secretData.name);
-            
-            // If not found in local array, try to fetch from backend directly
+
             if (!existingCustomer) {
-                const query = new URLSearchParams({ routerId: selectedRouter.id, pppoeName: secretData.name });
-                const matches = await dbApi.get<Customer[]>(`/customers?${query}`);
-                existingCustomer = matches.find(c => c.routerId === selectedRouter.id && c.pppoeSecret === secretData.name)
-                    || matches.find(c => c.username === secretData.name);
+                try {
+                    const query = new URLSearchParams({ routerId: selectedRouter.id, pppoeName: secretData.name });
+                    const matches = await dbApi.get<Customer[]>(`/customers?${query}`);
+                    existingCustomer = matches.find(c => c.routerId === selectedRouter.id && c.pppoeSecret === secretData.name)
+                        || matches.find(c => c.username === secretData.name);
+                } catch (err) {
+                    if (!selectedSecret) throw err;
+                    customerSyncWarning = `Customer sync was skipped because the customer lookup failed: ${(err as Error).message}`;
+                }
             }
             if (existingCustomer && (existingCustomer.routerId !== selectedRouter.id || (existingCustomer.pppoeSecret && existingCustomer.pppoeSecret !== secretData.name))) {
-                throw new Error('This username belongs to a customer linked to another router or PPPoE secret. Choose a different username.');
+                if (!selectedSecret) {
+                    throw new Error('This username belongs to a customer linked to another router or PPPoE secret. Choose a different username.');
+                }
+                existingCustomer = undefined;
+                customerSyncWarning = 'Customer sync was skipped because this username belongs to a customer linked to another router or PPPoE secret. That customer record was not changed.';
             }
-            
+
             const selectedPlan = plans.find(p => p.id === subscriptionData.planId);
 
             // CRITICAL: Preserve existing account number - NEVER generate new one if customer exists
@@ -1063,21 +1072,25 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
 
             let savedCustomerId = existingCustomer?.id;
             let customerSaved = false;
-            try {
-                if (existingCustomer) {
-                    await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
-                } else {
-                    const newCustomer = await addCustomer({
-                        routerId: selectedRouter.id,
-                        username: secretData.name,
-                        ...enrichedCustomerData
-                    });
-                    savedCustomerId = newCustomer.id;
+            if (customerSyncWarning) {
+                setWarnings(current => ({ ...current, save: `Router changes were saved. ${customerSyncWarning}` }));
+            } else {
+                try {
+                    if (existingCustomer) {
+                        await updateCustomer({ ...existingCustomer, ...enrichedCustomerData });
+                    } else {
+                        const newCustomer = await addCustomer({
+                            routerId: selectedRouter.id,
+                            username: secretData.name,
+                            ...enrichedCustomerData
+                        });
+                        savedCustomerId = newCustomer.id;
+                    }
+                    customerSaved = true;
+                    setWarnings(current => ({ ...current, save: '' }));
+                } catch (dbErr) {
+                    setWarnings(current => ({ ...current, save: `Router changes were saved, but the customer record could not be saved: ${(dbErr as Error).message}` }));
                 }
-                customerSaved = true;
-                setWarnings(current => ({ ...current, save: '' }));
-            } catch (dbErr) {
-                setWarnings(current => ({ ...current, save: `Router changes were saved, but the customer record could not be saved: ${(dbErr as Error).message}` }));
             }
 
             setUserModalOpen(false);
@@ -1088,7 +1101,7 @@ const UsersManager: React.FC<{ selectedRouter: RouterConfigWithId, addSale: (sal
             const backgroundTasks: Promise<any>[] = [];
 
             // Generate PDF application form (heavy, non-critical)
-            backgroundTasks.push((async () => {
+            if (!customerSyncWarning) backgroundTasks.push((async () => {
             try {
                 const planData = selectedPlan ? {
                     name: selectedPlan.name,
