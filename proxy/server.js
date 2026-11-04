@@ -1,4 +1,4 @@
-
+﻿
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -799,7 +799,7 @@ async function initDb() {
                     console.log(`[Migration] Adding ${col} column to customers table...`);
                     const defaultVal = col === 'planType' ? "'Inactive'" : 'NULL';
                     await db.exec(`ALTER TABLE customers ADD COLUMN ${col} TEXT DEFAULT ${defaultVal}`);
-                    console.log(`[Migration] ✓ ${col} column added`);
+                    console.log(`[Migration] âœ“ ${col} column added`);
                 }
             }
             await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS customers_pppoe_secret ON customers(routerId, COALESCE(NULLIF(pppoeSecret, ''), username))");
@@ -814,7 +814,7 @@ async function initDb() {
             if (!billingPlanColNames.includes('store_enabled')) {
                 console.log('[Migration] Adding store_enabled column to billing_plans...');
                 await db.exec("ALTER TABLE billing_plans ADD COLUMN store_enabled INTEGER DEFAULT 1");
-                console.log('[Migration] ✓ store_enabled column added to billing_plans');
+                console.log('[Migration] âœ“ store_enabled column added to billing_plans');
             }
         } catch (err) {
             console.error('[Migration] billing_plans migration error:', err.message);
@@ -827,7 +827,7 @@ async function initDb() {
             if (!billingPlanCycleDaysColNames.includes('cycle_days')) {
                 console.log('[Migration] Adding cycle_days column to billing_plans...');
                 await db.exec("ALTER TABLE billing_plans ADD COLUMN cycle_days INTEGER DEFAULT 30");
-                console.log('[Migration] ✓ cycle_days column added to billing_plans');
+                console.log('[Migration] âœ“ cycle_days column added to billing_plans');
             }
         } catch (err) {
             console.error('[Migration] billing_plans cycle_days migration error:', err.message);
@@ -840,7 +840,7 @@ async function initDb() {
             if (!billingPlanTypeColNames.includes('billingType')) {
                 console.log('[Migration] Adding billingType column to billing_plans...');
                 await db.exec("ALTER TABLE billing_plans ADD COLUMN billingType TEXT DEFAULT 'prepaid'");
-                console.log('[Migration] ✓ billingType column added to billing_plans');
+                console.log('[Migration] âœ“ billingType column added to billing_plans');
             }
         } catch (err) {
             console.error('[Migration] billing_plans billingType migration error:', err.message);
@@ -853,7 +853,7 @@ async function initDb() {
             if (!dhcpPlanTypeColNames.includes('billingType')) {
                 console.log('[Migration] Adding billingType column to dhcp_billing_plans...');
                 await db.exec("ALTER TABLE dhcp_billing_plans ADD COLUMN billingType TEXT DEFAULT 'prepaid'");
-                console.log('[Migration] ✓ billingType column added to dhcp_billing_plans');
+                console.log('[Migration] âœ“ billingType column added to dhcp_billing_plans');
             }
         } catch (err) {
             console.error('[Migration] dhcp_billing_plans billingType migration error:', err.message);
@@ -868,7 +868,7 @@ async function initDb() {
                 if (!xenditSessionColNames.includes(col)) {
                     console.log(`[Migration] Adding ${col} column to xendit_sessions table...`);
                     await db.exec(`ALTER TABLE xendit_sessions ADD COLUMN ${col} REAL DEFAULT NULL`);
-                    console.log(`[Migration] ✓ ${col} column added to xendit_sessions`);
+                    console.log(`[Migration] âœ“ ${col} column added to xendit_sessions`);
                 }
             }
         } catch (err) {
@@ -882,7 +882,7 @@ async function initDb() {
             if (!dhcpPlanColNames.includes('store_enabled')) {
                 console.log('[Migration] Adding store_enabled column to dhcp_billing_plans...');
                 await db.exec("ALTER TABLE dhcp_billing_plans ADD COLUMN store_enabled INTEGER DEFAULT 1");
-                console.log('[Migration] ✓ store_enabled column added to dhcp_billing_plans');
+                console.log('[Migration] âœ“ store_enabled column added to dhcp_billing_plans');
             }
         } catch (err) {
             console.error('[Migration] dhcp_billing_plans migration error:', err.message);
@@ -909,7 +909,7 @@ async function initDb() {
             for (const col of securityCols) {
                 if (!clientUserColNames.includes(col.name)) {
                     await db.exec(col.sql);
-                    console.log(`[Migration] ✓ ${col.name} column added to client_users`);
+                    console.log(`[Migration] âœ“ ${col.name} column added to client_users`);
                 }
             }
         } catch (_) {}
@@ -920,7 +920,7 @@ async function initDb() {
             for (const col of dhcpMissing) {
                 if (!dhcpClientColNames.includes(col)) {
                     await db.exec(`ALTER TABLE dhcp_clients ADD COLUMN ${col} TEXT`);
-                    console.log(`[Migration] ✓ ${col} column added to dhcp_clients`);
+                    console.log(`[Migration] âœ“ ${col} column added to dhcp_clients`);
                 }
             }
         } catch (_) {}
@@ -979,7 +979,7 @@ async function initDb() {
             for (const col of ewExpected) {
                 if (!ewColNames.includes(col.name)) {
                     await db.exec(col.sql);
-                    console.log(`[Migration] ✓ ${col.name} column added to equipment_withdrawals`);
+                    console.log(`[Migration] âœ“ ${col.name} column added to equipment_withdrawals`);
                 }
             }
         } catch (_) {}
@@ -1030,7 +1030,7 @@ async function initDb() {
             const splColNames2 = splCols2.map(c => c.name);
             if (!splColNames2.includes('pole_id')) {
                 await db.exec("ALTER TABLE olt_splitters ADD COLUMN pole_id TEXT");
-                console.log('[Migration] ✓ pole_id column added to olt_splitters');
+                console.log('[Migration] âœ“ pole_id column added to olt_splitters');
             }
         } catch (_) {}
         try {
@@ -1038,7 +1038,7 @@ async function initDb() {
             const napColNames = napCols.map(c => c.name);
             if (!napColNames.includes('pole_id')) {
                 await db.exec("ALTER TABLE olt_naps ADD COLUMN pole_id TEXT");
-                console.log('[Migration] ✓ pole_id column added to olt_naps');
+                console.log('[Migration] âœ“ pole_id column added to olt_naps');
             }
         } catch (_) {}
 
@@ -1048,7 +1048,7 @@ async function initDb() {
             const poleColNames = poleCols.map(c => c.name);
             if (!poleColNames.includes('serial_number')) {
                 await db.exec("ALTER TABLE electric_poles ADD COLUMN serial_number TEXT");
-                console.log('[Migration] ✓ serial_number column added to electric_poles');
+                console.log('[Migration] âœ“ serial_number column added to electric_poles');
             }
         } catch (_) {}
 
@@ -1071,7 +1071,7 @@ async function initDb() {
             if (!invColNames.includes('invoiceType')) {
                 await db.exec("ALTER TABLE client_invoices ADD COLUMN invoiceType TEXT DEFAULT 'subscription'");
             }
-            console.log('[Migration] ✓ client_invoices custom invoice columns ensured');
+            console.log('[Migration] âœ“ client_invoices custom invoice columns ensured');
         } catch (err) {
             console.error('[Migration] client_invoices custom columns migration error:', err.message);
         }
@@ -1103,7 +1103,7 @@ async function initDb() {
             await runMigrations(db);
         } catch (migrationErr) {
             console.error('[Migration] Migration runner error:', migrationErr.message);
-            // Don't throw — log and continue so the server can still start
+            // Don't throw â€” log and continue so the server can still start
         }
 
         console.log('Database initialized successfully');
@@ -1178,7 +1178,7 @@ const getDeviceId = async () => {
 
         let rawId = null;
 
-        // Use CPU brand + cores only — speed is excluded because it fluctuates with CPU frequency scaling
+        // Use CPU brand + cores only â€” speed is excluded because it fluctuates with CPU frequency scaling
         if (cpu && cpu.brand && cpu.cores) {
             rawId = `${cpu.brand}-${cpu.cores}-${cpu.physicalCores || cpu.cores}`;
         }
@@ -1328,7 +1328,7 @@ async function startServer() {
     // --- CORS FOR PUBLIC ENDPOINTS ONLY ---
     // Android WebView (Capacitor APK) sends origin: null; each operator also has
     // their own tunnel domain (*.trycloudflare.com, *.cloudflare.app, custom), so
-    // all origins are allowed — but ONLY on public + payment routes. Admin routes
+    // all origins are allowed â€” but ONLY on public + payment routes. Admin routes
     // (/api/admin, /api/auth, /api/db) intentionally have NO CORS.
     const corsOptions = {
         origin: function (origin, callback) {
@@ -1745,7 +1745,7 @@ async function startServer() {
                 let _empPlaintext = null;
                 if (table === 'employees') {
                     if (req.body.password) {
-                        // Password provided from UI — use it directly (hash it)
+                        // Password provided from UI â€” use it directly (hash it)
                         _empPlaintext = req.body.password;
                     } else {
                         // Fallback: auto-generate password
@@ -1852,7 +1852,7 @@ async function startServer() {
     });
 
     // Flexible pending-invoice lookup by username/accountNumber/macAddress (used by admin Pay modals).
-    // Lives behind the authenticated dbRouter — never expose identifier-based lookup publicly.
+    // Lives behind the authenticated dbRouter â€” never expose identifier-based lookup publicly.
     dbRouter.get('/client-invoices-lookup', async (req, res) => {
         try {
             const { routerId, username, accountNumber, macAddress, status } = req.query;
@@ -2235,7 +2235,7 @@ async function startServer() {
     });
 
     // POST /api/client-balance - Create or update client balance
-    // body: { routerId, username, accountNumber?, amount } — amount is added to existing balance
+    // body: { routerId, username, accountNumber?, amount } â€” amount is added to existing balance
     app.post('/api/client-balance', async (req, res) => {
         try {
             const { routerId, username, accountNumber, amount } = req.body;
@@ -2302,9 +2302,9 @@ async function startServer() {
         if (!currency) return 'PHP';
         
         // Check for symbols (order matters - check longer symbols first)
-        if (currency === '₱' || currency.includes('₱')) return 'PHP';
+        if (currency === 'â‚±' || currency.includes('â‚±')) return 'PHP';
         if (currency === 'R$' || currency.includes('R$')) return 'BRL';
-        if (currency === '€' || currency.includes('€')) return 'EUR';
+        if (currency === 'â‚¬' || currency.includes('â‚¬')) return 'EUR';
         if (currency === '$' || currency.includes('$')) return 'USD';
         
         // If it's already a valid currency code, return it
@@ -2342,7 +2342,7 @@ async function startServer() {
             const { username, routerId } = req.body;
             if (!username) return res.status(400).json({ message: 'Username required' });
 
-            // Check existence by username ONLY — the UNIQUE constraint is on username alone
+            // Check existence by username ONLY â€” the UNIQUE constraint is on username alone
             const existing = await db.get(
                 'SELECT * FROM customers WHERE username = ?',
                 [username]
@@ -3046,7 +3046,7 @@ async function startServer() {
     app.use('/api/db', dbRouter);
 
     // --- Employee Login & DTR API ---
-    // Employee auth (public — no admin JWT required)
+    // Employee auth (public â€” no admin JWT required)
     const employeeAuthRouter = express.Router();
 
     // Employee login
@@ -3137,7 +3137,7 @@ async function startServer() {
 
     app.use('/api/employee-auth', employeeAuthRouter);
 
-    // Employee DTR endpoints (protected — employee JWT required)
+    // Employee DTR endpoints (protected â€” employee JWT required)
     const employeeDtrRouter = express.Router();
     employeeDtrRouter.use(protectEmployee);
 
@@ -3172,7 +3172,7 @@ async function startServer() {
                 if (existing.timeOutPM || existing.timeOut) {
                     return res.status(400).json({ message: 'You have already completed your DTR for today.', record: existing });
                 }
-                // Already timed in but not yet out — return existing record
+                // Already timed in but not yet out â€” return existing record
                 if (existing.timeInAM || existing.timeIn) {
                     return res.json({ message: 'Already timed in today.', record: existing });
                 }
@@ -3293,11 +3293,11 @@ async function startServer() {
         createdAt: row.created_at || null
     });
 
-    // A missing table means the v2.2.0 migration has not been applied yet —
+    // A missing table means the v2.2.0 migration has not been applied yet â€”
     // degrade to empty results instead of breaking the admin UI.
     const isMissingSmsTable = (e) => /no such table/i.test((e && e.message) || '');
 
-    // GET /api/sms/templates?routerId= — router-scoped templates plus global defaults
+    // GET /api/sms/templates?routerId= â€” router-scoped templates plus global defaults
     smsRouter.get('/templates', async (req, res) => {
         try {
             const { routerId } = req.query;
@@ -3317,7 +3317,7 @@ async function startServer() {
         }
     });
 
-    // POST /api/sms/templates — create a template (id generated when absent)
+    // POST /api/sms/templates â€” create a template (id generated when absent)
     smsRouter.post('/templates', async (req, res) => {
         try {
             const { id, name, type, body, routerId } = req.body || {};
@@ -3341,7 +3341,7 @@ async function startServer() {
         }
     });
 
-    // PUT /api/sms/templates/:id — update name/type/body
+    // PUT /api/sms/templates/:id â€” update name/type/body
     smsRouter.put('/templates/:id', async (req, res) => {
         try {
             const { id } = req.params;
@@ -3379,7 +3379,7 @@ async function startServer() {
         }
     });
 
-    // GET /api/sms/logs?routerId=&limit=&offset=&status= — newest first
+    // GET /api/sms/logs?routerId=&limit=&offset=&status= â€” newest first
     smsRouter.get('/logs', async (req, res) => {
         try {
             const { routerId, status } = req.query;
@@ -3408,7 +3408,7 @@ async function startServer() {
         }
     });
 
-    // POST /api/sms/logs — accepts a single log object or an array (batch insert)
+    // POST /api/sms/logs â€” accepts a single log object or an array (batch insert)
     smsRouter.post('/logs', async (req, res) => {
         try {
             const payload = req.body;
@@ -3739,7 +3739,7 @@ async function startServer() {
                             );
                             
                             if (foundSecret) {
-                                console.log(`[Manual Payments] ✓ Found matching secret: "${foundSecret.name}" (matched by account number or comment)`);
+                                console.log(`[Manual Payments] âœ“ Found matching secret: "${foundSecret.name}" (matched by account number or comment)`);
                                 // Use this secret instead - create new object if secret is undefined
                                 if (!secret) {
                                     secret = { ...foundSecret };
@@ -3747,7 +3747,7 @@ async function startServer() {
                                     Object.assign(secret, foundSecret);
                                 }
                             } else {
-                                console.error(`[Manual Payments] ✗ No matching secret found in ${allSecrets.length} total secrets`);
+                                console.error(`[Manual Payments] âœ— No matching secret found in ${allSecrets.length} total secrets`);
                                 console.error(`[Manual Payments] Looking for: "${payment.customer_username}" or "${accountNumber}"`);
                                 // Log first 5 secret names for debugging
                                 const sampleNames = allSecrets.slice(0, 5).map(s => s.name).join(', ');
@@ -3807,8 +3807,8 @@ async function startServer() {
                             timeout: 10000
                         });
                         
-                        console.log('[Manual Payments] ✓ PPP secret updated with new due date:', newDueDateTimeStr);
-                        console.log('[Manual Payments] ✓ Profile set to:', activeProfile);
+                        console.log('[Manual Payments] âœ“ PPP secret updated with new due date:', newDueDateTimeStr);
+                        console.log('[Manual Payments] âœ“ Profile set to:', activeProfile);
                         
                         // Kick active session for reconnection
                         try {
@@ -3825,7 +3825,7 @@ async function startServer() {
                                         headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                                         timeout: 5000
                                     });
-                                    console.log('[Manual Payments] ✓ Kicked active session');
+                                    console.log('[Manual Payments] âœ“ Kicked active session');
                                 }
                             }
                         } catch (kickErr) {
@@ -3875,7 +3875,7 @@ async function startServer() {
                                 headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                                 timeout: 10000
                             });
-                            console.log('[Manual Payments] ✓ Scheduler created: Non-Payment on', dueDateStr);
+                            console.log('[Manual Payments] âœ“ Scheduler created: Non-Payment on', dueDateStr);
                         } catch (schedErr) {
                             console.error('[Manual Payments] Scheduler creation error:', schedErr.message);
                             console.error('[Manual Payments] Scheduler error stack:', schedErr.stack);
@@ -3885,7 +3885,7 @@ async function startServer() {
                         // the ppp-grace-expire scheduler so they can't downgrade the paid client (best effort)
                         try {
                             await db.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [payment.customer_router_id, secret.name]);
-                            console.log('[Manual Payments] ✓ Cleared ppp_grace record for', secret.name);
+                            console.log('[Manual Payments] âœ“ Cleared ppp_grace record for', secret.name);
                         } catch (graceDbErr) {
                             console.error('[Manual Payments] Grace record cleanup error:', graceDbErr.message);
                         }
@@ -3902,7 +3902,7 @@ async function startServer() {
                                         headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                                         timeout: 10000
                                     });
-                                    console.log('[Manual Payments] ✓ Removed grace scheduler:', sched['.id']);
+                                    console.log('[Manual Payments] âœ“ Removed grace scheduler:', sched['.id']);
                                 }
                             }
                         } catch (graceErr) {
@@ -3930,7 +3930,7 @@ async function startServer() {
                     const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
                     
                     if (fbConfig.enabled && fbConfig.pageAccessToken) {
-                        const message = `✅ Payment Approved!\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentId.split('_')[2].toUpperCase()}\n💰 Amount: ₱${payment.plan_price.toFixed(2)}\n\n✅ Your payment has been verified!\n\n📊 Account Status: ACTIVE\n📅 New Due Date: ${dueDateStr}\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Thank you for your payment!\n\n📞 Need help? Contact our support.`;
+                        const message = `âœ… Payment Approved!\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸŽ« Request #: ${paymentId.split('_')[2].toUpperCase()}\nðŸ’° Amount: â‚±${payment.plan_price.toFixed(2)}\n\nâœ… Your payment has been verified!\n\nðŸ“Š Account Status: ACTIVE\nðŸ“… New Due Date: ${dueDateStr}\n\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ’¡ Thank you for your payment!\n\nðŸ“ž Need help? Contact our support.`;
                         
                         await sendFacebookMessage(payment.customer_facebook_psid, message, fbConfig.pageAccessToken);
                         console.log(`[Manual Payments] Facebook notification sent to ${payment.customer_account_number}`);
@@ -3964,6 +3964,12 @@ async function startServer() {
             
             const now = new Date().toISOString();
             
+            // Delete any sales record that was created when this payment was approved
+            // salesId format: sale_${Date.now()}_${random}
+            // paymentId format: manual_pay_${Date.now()}_${random}
+            const saleIdPattern = `sale_${paymentId.replace('manual_pay_', '')}`;
+            await db.run('DELETE FROM sales_records WHERE id LIKE ?', [saleIdPattern]);
+
             await db.run(
                 'UPDATE manual_payment_requests SET status = ?, admin_notes = ?, rejected_at = ?, updated_at = ? WHERE id = ?',
                 ['rejected', admin_notes || '', now, now, paymentId]
@@ -3978,7 +3984,7 @@ async function startServer() {
                     const fbConfig = JSON.parse(fbSettings?.facebookSettings || '{}');
                     
                     if (fbConfig.enabled && fbConfig.pageAccessToken) {
-                        const message = `❌ Payment Request Rejected\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentId.split('_')[2].toUpperCase()}\n\n❌ Your payment could not be verified.\n\nReason: ${admin_notes || 'Payment not found in our GCash account'}\n\n━━━━━━━━━━━━━━━━━━\n\n📋 What to do:\n• Verify your GCash transaction\n• Ensure correct amount was sent\n• Contact support with your GCash receipt\n\n📞 Need help? Contact our support.`;
+                        const message = `âŒ Payment Request Rejected\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸŽ« Request #: ${paymentId.split('_')[2].toUpperCase()}\n\nâŒ Your payment could not be verified.\n\nReason: ${admin_notes || 'Payment not found in our GCash account'}\n\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ What to do:\nâ€¢ Verify your GCash transaction\nâ€¢ Ensure correct amount was sent\nâ€¢ Contact support with your GCash receipt\n\nðŸ“ž Need help? Contact our support.`;
                         
                         await sendFacebookMessage(payment.customer_facebook_psid, message, fbConfig.pageAccessToken);
                         console.log(`[Manual Payments] Rejection notification sent to ${payment.customer_account_number}`);
@@ -4039,7 +4045,7 @@ async function startServer() {
         }
     });
 
-    // Public PayMongo config — exposes only safe fields needed by Client Portal UI
+    // Public PayMongo config â€” exposes only safe fields needed by Client Portal UI
     app.get('/api/public/paymongo-config', async (req, res) => {
         try {
             const s = await db.get('SELECT paymongoSettings FROM settings WHERE id = 1');
@@ -4054,7 +4060,7 @@ async function startServer() {
         }
     });
 
-    // Public Xendit config — exposes only safe fields needed by Client Portal UI
+    // Public Xendit config â€” exposes only safe fields needed by Client Portal UI
     app.get('/api/public/xendit-config', async (req, res) => {
         try {
             const s = await db.get('SELECT xenditSettings FROM settings WHERE id = 1');
@@ -4154,7 +4160,7 @@ async function startServer() {
                 );
             }
 
-            // Lookup by IP address (for auto-detection from network) — only DHCP clients have stored IPs
+            // Lookup by IP address (for auto-detection from network) â€” only DHCP clients have stored IPs
             if (!customer && ip) {
                 // Try dhcp_clients table by IP
                 if (!customer) {
@@ -4710,7 +4716,7 @@ async function startServer() {
             }
 
             // Fallback: If still not found and IP is from non-payment pool,
-            // try matching via ARP table MAC → PPP secret caller-id
+            // try matching via ARP table MAC â†’ PPP secret caller-id
             // This works even when PPPoE session is terminated (secret disabled/expired)
             if (!customer && ip && (await isInNonPaymentPool(ip))) {
                 console.log(`[Expired Portal] Active session lookup failed for ${ip}, trying ARP+Secret matching...`);
@@ -5134,7 +5140,7 @@ async function startServer() {
             let planName = '';
             try {
                 const c = JSON.parse(comment || '{}');
-                // Do NOT overwrite profile from comment — keep the live MikroTik profile
+                // Do NOT overwrite profile from comment â€” keep the live MikroTik profile
                 due = c.dueDateTime || c.dueDate || '';
                 planName = c.planName || c.plan || '';
             } catch (_) {}
@@ -6484,7 +6490,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         && requiredEvents.length === (attrs.events || []).length;
 
                     if (!eventsMatch) {
-                        // Wrong events — disable old webhook and create new one
+                        // Wrong events â€” disable old webhook and create new one
                         console.log(`[PayMongo Webhook] Webhook ${urlMatch.id} has wrong events, disabling and recreating.`);
                         try {
                             await axios.post(`https://api.paymongo.com/v1/webhooks/${urlMatch.id}/disable`, {}, {
@@ -6495,7 +6501,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             console.warn('[PayMongo Webhook] Could not disable old webhook:', disableErr.response?.data || disableErr.message);
                         }
                     } else if (attrs.status === 'disabled') {
-                        // Right events, just disabled — enable it
+                        // Right events, just disabled â€” enable it
                         console.log(`[PayMongo Webhook] Webhook ${urlMatch.id} is disabled, enabling it.`);
                         const enableResp = await axios.post(`https://api.paymongo.com/v1/webhooks/${urlMatch.id}/enable`, {}, {
                             headers: { 'Authorization': authHeader },
@@ -6678,7 +6684,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         console.log('[PayMongo Webhook] Content-Type:', req.headers['content-type']);
         console.log('[PayMongo Webhook] Has rawBody:', !!req.rawBody);
 
-        // ALWAYS return 200 to PayMongo — never let this endpoint crash the process
+        // ALWAYS return 200 to PayMongo â€” never let this endpoint crash the process
         try {
             // === STAGE 1: Fetch webhook secret from database ===
             console.log('[PayMongo Webhook] STAGE 1: Fetching settings from database...');
@@ -6855,7 +6861,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                 'UPDATE customers SET dueDate = ?, planName = ? WHERE username = ? AND routerId = ?',
                                 [newDueStr, planName || customer.planName, username, routerId]
                             );
-                            console.log('[PayMongo Webhook] ✓ Customer due date updated to:', newDueStr);
+                            console.log('[PayMongo Webhook] âœ“ Customer due date updated to:', newDueStr);
                         } catch (updateErr) {
                             console.error('[PayMongo Webhook] Customer update error:', updateErr.message);
                         }
@@ -6982,8 +6988,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                 headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                                 timeout: 10000
                             });
-                            console.log('[PayMongo Webhook] ✓ Profile set to:', activeProfile);
-                            console.log('[PayMongo Webhook] ✓ Due date extended to:', newDueStr);
+                            console.log('[PayMongo Webhook] âœ“ Profile set to:', activeProfile);
+                            console.log('[PayMongo Webhook] âœ“ Due date extended to:', newDueStr);
                         } catch (updateErr) {
                             console.error('[PayMongo Webhook] PPP secret update error:', updateErr.message);
                         }
@@ -7002,7 +7008,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                         headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                                         timeout: 5000
                                     });
-                                    console.log('[PayMongo Webhook] ✓ Kicked session:', session['.id']);
+                                    console.log('[PayMongo Webhook] âœ“ Kicked session:', session['.id']);
                                 }
                             }
                         } catch (kickErr) {
@@ -7052,7 +7058,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                             timeout: 10000
                           });
-                          console.log('[PayMongo Webhook] ✓ Scheduler created: Non-Payment on', newDueStr);
+                          console.log('[PayMongo Webhook] âœ“ Scheduler created: Non-Payment on', newDueStr);
                         } catch (schedErr) {
                           console.error('[PayMongo Webhook] Scheduler creation error:', schedErr.message);
                         }
@@ -7061,7 +7067,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         // the ppp-grace-expire scheduler so they can't downgrade the paid client (best effort)
                         try {
                           await db.run('DELETE FROM ppp_grace WHERE router_id = ? AND name = ?', [routerId, username]);
-                          console.log('[PayMongo Webhook] ✓ Cleared ppp_grace record for', username);
+                          console.log('[PayMongo Webhook] âœ“ Cleared ppp_grace record for', username);
                         } catch (graceDbErr) {
                           console.error('[PayMongo Webhook] Grace record cleanup error:', graceDbErr.message);
                         }
@@ -7078,7 +7084,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                 headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
                                 timeout: 10000
                               });
-                              console.log('[PayMongo Webhook] ✓ Removed grace scheduler:', sched['.id']);
+                              console.log('[PayMongo Webhook] âœ“ Removed grace scheduler:', sched['.id']);
                             }
                           }
                         } catch (graceErr) {
@@ -7100,7 +7106,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     `INSERT INTO sales_records (id, routerId, date, clientName, planName, planPrice, discountAmount, finalAmount, invoiceId, payment_method, processedBy) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
                     [saleId, routerId, saleDate, username, planName || 'Unknown', amountPaid, amountPaid, invoiceNo || null, 'paymongo', 'paymongo']
                 );
-                console.log('[PayMongo Webhook] ✓ Sale recorded, amount:', amountPaid);
+                console.log('[PayMongo Webhook] âœ“ Sale recorded, amount:', amountPaid);
             } catch (saleErr) {
                 console.error('[PayMongo Webhook] Sale record error:', saleErr.message);
             }
@@ -7109,7 +7115,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             if (invoiceNo) {
                 try {
                     await db.run("UPDATE client_invoices SET status = 'PAID' WHERE id = ?", [invoiceNo]);
-                    console.log('[PayMongo Webhook] ✓ Invoice marked PAID:', invoiceNo);
+                    console.log('[PayMongo Webhook] âœ“ Invoice marked PAID:', invoiceNo);
                 } catch (invErr) {
                     console.error('[PayMongo Webhook] Invoice update error:', invErr.message);
                 }
@@ -7391,15 +7397,15 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             
             let message;
             if (daysUntilDue === null) {
-                message = `📅 PAYMENT NOTIFICATION\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: Not set\n\n💳 Pay via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+                message = `ðŸ“… PAYMENT NOTIFICATION\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ‘¤ Name: ${customer.fullName || 'Valued Customer'}\nðŸ’° Amount Due: â‚±${(customer.planPrice || 0).toFixed(2)}\nðŸ“… Due Date: Not set\n\nðŸ’³ Pay via:\nâ€¢ PAY ONLINE - Online payment\nâ€¢ PAY MANUAL - GCash payment\n\nðŸ“ž Contact us if you need assistance.`;
             } else if (daysUntilDue < 0) {
-                message = `⚠️ OVERDUE PAYMENT NOTICE\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\n⚠️ Your internet service may be suspended.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+                message = `âš ï¸ OVERDUE PAYMENT NOTICE\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ‘¤ Name: ${customer.fullName || 'Valued Customer'}\nðŸ’° Amount Due: â‚±${(customer.planPrice || 0).toFixed(2)}\nðŸ“… Due Date: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\nâš ï¸ Your internet service may be suspended.\n\nðŸ’³ Pay now via:\nâ€¢ PAY ONLINE - Online payment\nâ€¢ PAY MANUAL - GCash payment\n\nðŸ“ž Contact us if you need assistance.`;
             } else if (daysUntilDue === 0) {
-                message = `🔴 PAYMENT DUE TODAY\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: TODAY\n\n⏰ Please make your payment today to avoid service interruption.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+                message = `ðŸ”´ PAYMENT DUE TODAY\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ‘¤ Name: ${customer.fullName || 'Valued Customer'}\nðŸ’° Amount Due: â‚±${(customer.planPrice || 0).toFixed(2)}\nðŸ“… Due Date: TODAY\n\nâ° Please make your payment today to avoid service interruption.\n\nðŸ’³ Pay now via:\nâ€¢ PAY ONLINE - Online payment\nâ€¢ PAY MANUAL - GCash payment\n\nðŸ“ž Contact us if you need assistance.`;
             } else if (daysUntilDue <= 3) {
-                message = `⏰ PAYMENT REMINDER\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''})\n\n💡 This is a friendly reminder to make your payment on time.\n\n💳 Pay now via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+                message = `â° PAYMENT REMINDER\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ‘¤ Name: ${customer.fullName || 'Valued Customer'}\nðŸ’° Amount Due: â‚±${(customer.planPrice || 0).toFixed(2)}\nðŸ“… Due Date: ${customer.dueDate} (${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''})\n\nðŸ’¡ This is a friendly reminder to make your payment on time.\n\nðŸ’³ Pay now via:\nâ€¢ PAY ONLINE - Online payment\nâ€¢ PAY MANUAL - GCash payment\n\nðŸ“ž Contact us if you need assistance.`;
             } else {
-                message = `📅 PAYMENT NOTIFICATION\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount Due: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due Date: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Pay via:\n• PAY ONLINE - Online payment\n• PAY MANUAL - GCash payment\n\n📞 Contact us if you need assistance.`;
+                message = `ðŸ“… PAYMENT NOTIFICATION\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ‘¤ Name: ${customer.fullName || 'Valued Customer'}\nðŸ’° Amount Due: â‚±${(customer.planPrice || 0).toFixed(2)}\nðŸ“… Due Date: ${customer.dueDate} (${daysUntilDue} days)\n\nðŸ’³ Pay via:\nâ€¢ PAY ONLINE - Online payment\nâ€¢ PAY MANUAL - GCash payment\n\nðŸ“ž Contact us if you need assistance.`;
             }
             
             // Send Facebook message
@@ -7512,13 +7518,13 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     
                     let message;
                     if (daysUntilDue === null) {
-                        message = `📅 PAYMENT NOTIFICATION\nAccount: ${customer.accountNumber || 'N/A'}\nAmount: ₱${(customer.planPrice || 0).toFixed(2)}\n\nSend PAY to this bot to pay.`;
+                        message = `ðŸ“… PAYMENT NOTIFICATION\nAccount: ${customer.accountNumber || 'N/A'}\nAmount: â‚±${(customer.planPrice || 0).toFixed(2)}\n\nSend PAY to this bot to pay.`;
                     } else if (daysUntilDue < 0) {
-                        message = `⚠️ OVERDUE: ₱${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber || 'N/A'}\nDue: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\nPay now to avoid suspension!\nSend PAY to this bot to pay.`;
+                        message = `âš ï¸ OVERDUE: â‚±${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber || 'N/A'}\nDue: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\nPay now to avoid suspension!\nSend PAY to this bot to pay.`;
                     } else if (daysUntilDue === 0) {
-                        message = `🔴 DUE TODAY: ₱${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber || 'N/A'}\n\nPlease pay today to avoid service interruption.\nSend PAY to this bot.`;
+                        message = `ðŸ”´ DUE TODAY: â‚±${(customer.planPrice || 0).toFixed(2)}\nAccount: ${customer.accountNumber || 'N/A'}\n\nPlease pay today to avoid service interruption.\nSend PAY to this bot.`;
                     } else {
-                        message = `⏰ Reminder: ₱${(customer.planPrice || 0).toFixed(2)} due in ${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''}\nAccount: ${customer.accountNumber || 'N/A'}\nDue: ${customer.dueDate}\n\nSend PAY to this bot to pay.`;
+                        message = `â° Reminder: â‚±${(customer.planPrice || 0).toFixed(2)} due in ${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''}\nAccount: ${customer.accountNumber || 'N/A'}\nDue: ${customer.dueDate}\n\nSend PAY to this bot to pay.`;
                     }
                     
                     // Try RESPONSE first (within 24h window), fallback to UPDATE
@@ -7682,7 +7688,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     }
                     
                     sentCount++;
-                    console.log(`[Facebook Broadcast] ✓ Sent to ${client.accountNumber} (${client.fullName})`);
+                    console.log(`[Facebook Broadcast] âœ“ Sent to ${client.accountNumber} (${client.fullName})`);
                     results.push({
                         accountNumber: client.accountNumber,
                         facebook_psid: client.facebook_psid,
@@ -7691,7 +7697,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 } catch (err) {
                     failedCount++;
                     const errData = err.response?.data?.error;
-                    console.error(`[Facebook Broadcast] ✗ Failed for ${client.accountNumber}:`, errData?.message || err.message);
+                    console.error(`[Facebook Broadcast] âœ— Failed for ${client.accountNumber}:`, errData?.message || err.message);
                     results.push({
                         accountNumber: client.accountNumber,
                         facebook_psid: client.facebook_psid,
@@ -7884,7 +7890,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                 } catch (pbErr) {
                                     console.error('[Facebook Bot] Postback handler error:', pbErr.message);
                                     console.error('[Facebook Bot] Postback error stack:', pbErr.stack);
-                                    await sendFacebookMessage(senderId, '⚠️ Sorry, an error occurred. Please try again.', fbSettings.pageAccessToken);
+                                    await sendFacebookMessage(senderId, 'âš ï¸ Sorry, an error occurred. Please try again.', fbSettings.pageAccessToken);
                                 }
                                 continue; // Skip text message handling for postback events
                             }
@@ -7922,11 +7928,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                             );
                                             
                                             await sendFacebookButtonMessage(senderId,
-                                                '✅ Your message has been sent to the admin. They will get back to you soon!\n\nIs there anything else I can help you with?',
+                                                'âœ… Your message has been sent to the admin. They will get back to you soon!\n\nIs there anything else I can help you with?',
                                                 [
-                                                    { type: 'postback', title: '📊 Check Bill', payload: 'CHECK_BILL' },
-                                                    { type: 'postback', title: '🔧 Report Issue', payload: 'REPORT_ISSUE' },
-                                                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                                                    { type: 'postback', title: 'ðŸ“Š Check Bill', payload: 'CHECK_BILL' },
+                                                    { type: 'postback', title: 'ðŸ”§ Report Issue', payload: 'REPORT_ISSUE' },
+                                                    { type: 'postback', title: 'ðŸ  Main Menu', payload: 'MAIN_MENU' }
                                                 ],
                                                 fbSettings.pageAccessToken
                                             );
@@ -7965,9 +7971,9 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                             const response = await handleRepairTicketCommand(senderId, `${prefix} ${userMessage}`);
                                             await sendFacebookButtonMessage(senderId, response,
                                                 [
-                                                    { type: 'postback', title: '📋 My Tickets', payload: 'MY_TICKETS' },
-                                                    { type: 'postback', title: '📢 Notify Admin', payload: 'NOTIFY_ADMIN' },
-                                                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                                                    { type: 'postback', title: 'ðŸ“‹ My Tickets', payload: 'MY_TICKETS' },
+                                                    { type: 'postback', title: 'ðŸ“¢ Notify Admin', payload: 'NOTIFY_ADMIN' },
+                                                    { type: 'postback', title: 'ðŸ  Main Menu', payload: 'MAIN_MENU' }
                                                 ],
                                                 fbSettings.pageAccessToken
                                             );
@@ -8042,18 +8048,18 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             case 'CHECK_BILL': {
                 const response = await handleBillingCommand(senderId, routerId);
                 await sendFacebookButtonMessage(senderId, response, [
-                    { type: 'postback', title: '💳 Pay Now', payload: 'PAY_NOW' },
-                    { type: 'postback', title: '📋 My Tickets', payload: 'MY_TICKETS' },
-                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                    { type: 'postback', title: 'ðŸ’³ Pay Now', payload: 'PAY_NOW' },
+                    { type: 'postback', title: 'ðŸ“‹ My Tickets', payload: 'MY_TICKETS' },
+                    { type: 'postback', title: 'ðŸ  Main Menu', payload: 'MAIN_MENU' }
                 ], pageAccessToken);
                 break;
             }
             case 'PAY_NOW': {
                 const response = await handlePaymentCommand(senderId, routerId);
                 await sendFacebookButtonMessage(senderId, response, [
-                    { type: 'postback', title: '💳 Pay Online', payload: 'PAY_ONLINE' },
-                    { type: 'postback', title: '🏦 Pay Manual (GCash)', payload: 'PAY_MANUAL' },
-                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                    { type: 'postback', title: 'ðŸ’³ Pay Online', payload: 'PAY_ONLINE' },
+                    { type: 'postback', title: 'ðŸ¦ Pay Manual (GCash)', payload: 'PAY_MANUAL' },
+                    { type: 'postback', title: 'ðŸ  Main Menu', payload: 'MAIN_MENU' }
                 ], pageAccessToken);
                 break;
             }
@@ -8070,8 +8076,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             case 'MY_TICKETS': {
                 const response = await handleTicketStatusCommand(senderId);
                 await sendFacebookButtonMessage(senderId, response, [
-                    { type: 'postback', title: '🔧 Report Issue', payload: 'REPORT_ISSUE' },
-                    { type: 'postback', title: '🏠 Main Menu', payload: 'MAIN_MENU' }
+                    { type: 'postback', title: 'ðŸ”§ Report Issue', payload: 'REPORT_ISSUE' },
+                    { type: 'postback', title: 'ðŸ  Main Menu', payload: 'MAIN_MENU' }
                 ], pageAccessToken);
                 break;
             }
@@ -8079,11 +8085,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 // Set conversation state to collect repair description
                 conversationStates.set(senderId, { step: 'awaiting_repair_description' });
                 await sendFacebookButtonMessage(senderId, 
-                    '🔧 Please describe your issue. What seems to be the problem with your internet connection?',
+                    'ðŸ”§ Please describe your issue. What seems to be the problem with your internet connection?',
                     [
-                        { type: 'postback', title: '📡 No Internet', payload: 'ISSUE_NO_INTERNET' },
-                        { type: 'postback', title: '🐢 Slow Connection', payload: 'ISSUE_SLOW' },
-                        { type: 'postback', title: '📶 Intermittent', payload: 'ISSUE_INTERMITTENT' }
+                        { type: 'postback', title: 'ðŸ“¡ No Internet', payload: 'ISSUE_NO_INTERNET' },
+                        { type: 'postback', title: 'ðŸ¢ Slow Connection', payload: 'ISSUE_SLOW' },
+                        { type: 'postback', title: 'ðŸ“¶ Intermittent', payload: 'ISSUE_INTERMITTENT' }
                     ],
                     pageAccessToken
                 );
@@ -8091,24 +8097,24 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
             case 'ISSUE_NO_INTERNET': {
                 conversationStates.set(senderId, { step: 'awaiting_repair_detail', category: 'no_internet' });
-                await sendFacebookMessage(senderId, '📡 No Internet - Please provide more details about your issue (e.g., "Red light blinking on modem", "No lights at all"):');
+                await sendFacebookMessage(senderId, 'ðŸ“¡ No Internet - Please provide more details about your issue (e.g., "Red light blinking on modem", "No lights at all"):');
                 break;
             }
             case 'ISSUE_SLOW': {
                 conversationStates.set(senderId, { step: 'awaiting_repair_detail', category: 'slow_connection' });
-                await sendFacebookMessage(senderId, '🐢 Slow Connection - Please describe the issue (e.g., "Very slow during evening", "Buffering on YouTube"):');
+                await sendFacebookMessage(senderId, 'ðŸ¢ Slow Connection - Please describe the issue (e.g., "Very slow during evening", "Buffering on YouTube"):');
                 break;
             }
             case 'ISSUE_INTERMITTENT': {
                 conversationStates.set(senderId, { step: 'awaiting_repair_detail', category: 'intermittent' });
-                await sendFacebookMessage(senderId, '📶 Intermittent - Please describe the issue (e.g., "Disconnects every 30 minutes", "Cuts when it rains"):');
+                await sendFacebookMessage(senderId, 'ðŸ“¶ Intermittent - Please describe the issue (e.g., "Disconnects every 30 minutes", "Cuts when it rains"):');
                 break;
             }
             case 'NOTIFY_ADMIN': {
                 // Set conversation state to collect message
                 conversationStates.set(senderId, { step: 'awaiting_admin_message' });
                 await sendFacebookMessage(senderId, 
-                    '📢 Please type your message below and our admin will be notified.\n\nWhat would you like to tell the admin?'
+                    'ðŸ“¢ Please type your message below and our admin will be notified.\n\nWhat would you like to tell the admin?'
                 );
                 break;
             }
@@ -8116,7 +8122,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 console.log(`[Facebook Bot] REGISTER_ACCOUNT postback from ${senderId}`);
                 conversationStates.set(senderId, { step: 'awaiting_account_number' });
                 await sendFacebookMessage(senderId, 
-                    '📝 Please send your account number to link your Facebook account.\n\nExample: 20240001\n\nYou can find your account number on your billing statement.'
+                    'ðŸ“ Please send your account number to link your Facebook account.\n\nExample: 20240001\n\nYou can find your account number on your billing statement.'
                 );
                 console.log(`[Facebook Bot] REGISTER_ACCOUNT: Sent prompt to ${senderId}`);
                 break;
@@ -8156,17 +8162,17 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             let buttons;
             
             if (customer) {
-                welcomeText = `👋 Welcome back, ${customer.fullName || 'Customer'}!\n\n📋 Account: ${customer.accountNumber}\n📦 Plan: ${customer.planName || 'N/A'}\n\nWhat would you like to do?`;
+                welcomeText = `ðŸ‘‹ Welcome back, ${customer.fullName || 'Customer'}!\n\nðŸ“‹ Account: ${customer.accountNumber}\nðŸ“¦ Plan: ${customer.planName || 'N/A'}\n\nWhat would you like to do?`;
                 buttons = [
-                    { type: 'postback', title: '📊 Check Bill', payload: 'CHECK_BILL' },
-                    { type: 'postback', title: '💳 Pay Now', payload: 'PAY_NOW' },
-                    { type: 'postback', title: '📢 Notify Admin', payload: 'NOTIFY_ADMIN' }
+                    { type: 'postback', title: 'ðŸ“Š Check Bill', payload: 'CHECK_BILL' },
+                    { type: 'postback', title: 'ðŸ’³ Pay Now', payload: 'PAY_NOW' },
+                    { type: 'postback', title: 'ðŸ“¢ Notify Admin', payload: 'NOTIFY_ADMIN' }
                 ];
             } else {
-                welcomeText = `👋 Welcome to CityConnect Billing Bot!\n\n🤖 I can help you with:\n• Check your billing\n• Make payments\n• Report internet issues\n• Contact admin\n\nTo get started, please link your account first.`;
+                welcomeText = `ðŸ‘‹ Welcome to CityConnect Billing Bot!\n\nðŸ¤– I can help you with:\nâ€¢ Check your billing\nâ€¢ Make payments\nâ€¢ Report internet issues\nâ€¢ Contact admin\n\nTo get started, please link your account first.`;
                 buttons = [
-                    { type: 'postback', title: '📝 Register Account', payload: 'REGISTER_ACCOUNT' },
-                    { type: 'postback', title: '📢 Notify Admin', payload: 'NOTIFY_ADMIN' }
+                    { type: 'postback', title: 'ðŸ“ Register Account', payload: 'REGISTER_ACCOUNT' },
+                    { type: 'postback', title: 'ðŸ“¢ Notify Admin', payload: 'NOTIFY_ADMIN' }
                 ];
             }
             
@@ -8249,7 +8255,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         } catch (err) {
             console.error('[Facebook Bot] processFacebookBotMessage error:', err.message);
             console.error('[Facebook Bot] Error stack:', err.stack);
-            return `⚠️ Sorry, an error occurred. Please try again or contact support.`;
+            return `âš ï¸ Sorry, an error occurred. Please try again or contact support.`;
         }
     }
 
@@ -8263,7 +8269,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const accountNumber = parts.slice(1).join(' ').trim();
 
             if (!accountNumber) {
-                return "⚠️ Please provide your account number.\n\nUsage: `REGISTER <account_number>`\nExample: `REGISTER 20240001`";
+                return "âš ï¸ Please provide your account number.\n\nUsage: `REGISTER <account_number>`\nExample: `REGISTER 20240001`";
             }
 
             console.log(`[Facebook Bot] Registration attempt for account: ${accountNumber} (router: ${routerId || 'ALL'})`);
@@ -8279,7 +8285,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 );
                 
                 if (customer) {
-                    console.log(`[Facebook Bot] ✅ Found by EXACT accountNumber: ${customer.accountNumber}`);
+                    console.log(`[Facebook Bot] âœ… Found by EXACT accountNumber: ${customer.accountNumber}`);
                 }
             }
             
@@ -8291,7 +8297,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 );
                 
                 if (customer) {
-                    console.log(`[Facebook Bot] ✅ Found by EXACT username: ${customer.username}`);
+                    console.log(`[Facebook Bot] âœ… Found by EXACT username: ${customer.username}`);
                 }
             }
             
@@ -8304,7 +8310,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 );
                 
                 if (customer) {
-                    console.log(`[Facebook Bot] ✅ Found by partial match: ${customer.accountNumber}`);
+                    console.log(`[Facebook Bot] âœ… Found by partial match: ${customer.accountNumber}`);
                 }
             }
             
@@ -8316,13 +8322,13 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 );
                 
                 if (customer) {
-                    console.log(`[Facebook Bot] ✅ Found by fullName: ${customer.fullName}`);
+                    console.log(`[Facebook Bot] âœ… Found by fullName: ${customer.fullName}`);
                 }
             }
             
             // Fallback: If NO routerId configured, search without router scope
             if (!customer && !routerId) {
-                console.warn('[Facebook Bot] ⚠️ No routerId! Searching ALL routers (may find wrong accounts)');
+                console.warn('[Facebook Bot] âš ï¸ No routerId! Searching ALL routers (may find wrong accounts)');
                 customer = await db.get(
                     'SELECT * FROM customers WHERE accountNumber = ? LIMIT 1',
                     [accountNumber]
@@ -8330,8 +8336,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             if (!customer) {
-                console.log(`[Facebook Bot] ❌ Account lookup failed for: ${accountNumber}`);
-                return `❌ Account "${accountNumber}" not found in our system.\n\nPlease check your account number and try again.\n\nIf you don't have an account yet, please visit our office or contact support.`;
+                console.log(`[Facebook Bot] âŒ Account lookup failed for: ${accountNumber}`);
+                return `âŒ Account "${accountNumber}" not found in our system.\n\nPlease check your account number and try again.\n\nIf you don't have an account yet, please visit our office or contact support.`;
             }
             
             // CRITICAL: Check if this Facebook account is already linked to ANY customer (across all routers)
@@ -8343,22 +8349,22 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             if (existingLink) {
                 // Already linked - check if it's the SAME account
                 if (existingLink.accountNumber === customer.accountNumber || existingLink.username === customer.username) {
-                    return `ℹ️ Your Facebook account is already linked to ${existingLink.accountNumber}.\n\n📋 Current Account:\n• Account #: ${existingLink.accountNumber}\n• Name: ${existingLink.fullName || 'N/A'}\n• Plan: ${existingLink.planName || 'N/A'}\n\nTo register a different account, first send:\nUNREGISTER\n\nThen register your new account.`;
+                    return `â„¹ï¸ Your Facebook account is already linked to ${existingLink.accountNumber}.\n\nðŸ“‹ Current Account:\nâ€¢ Account #: ${existingLink.accountNumber}\nâ€¢ Name: ${existingLink.fullName || 'N/A'}\nâ€¢ Plan: ${existingLink.planName || 'N/A'}\n\nTo register a different account, first send:\nUNREGISTER\n\nThen register your new account.`;
                 } else {
                     // Linked to DIFFERENT account - clear the old linkage automatically
-                    console.log(`[Facebook Bot] ⚠️ Facebook account was linked to ${existingLink.accountNumber}, clearing old linkage...`);
+                    console.log(`[Facebook Bot] âš ï¸ Facebook account was linked to ${existingLink.accountNumber}, clearing old linkage...`);
                     await db.run(
                         'UPDATE customers SET facebook_psid = NULL WHERE id = ?',
                         [existingLink.id]
                     );
-                    console.log(`[Facebook Bot] ✅ Cleared old linkage from ${existingLink.accountNumber}`);
+                    console.log(`[Facebook Bot] âœ… Cleared old linkage from ${existingLink.accountNumber}`);
                     // Continue with new registration below
                 }
             }
 
             // Check if this account number is already linked to ANOTHER Facebook account
             if (customer.facebook_psid && customer.facebook_psid !== senderId) {
-                return `⚠️ This account (${accountNumber}) is already linked to another Facebook account.\n\nPlease contact our support if you need to transfer the account to your Facebook.`;
+                return `âš ï¸ This account (${accountNumber}) is already linked to another Facebook account.\n\nPlease contact our support if you need to transfer the account to your Facebook.`;
             }
 
             // Link Facebook PSID to customer account
@@ -8373,10 +8379,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const planName = customer.planName || 'Not specified';
             const dueDate = customer.dueDate || 'Not set';
 
-            return `✅ Success! Your Facebook account is now linked!\n\n📋 Account Details:\n• Account #: ${customer.accountNumber}\n• Name: ${customer.fullName || 'N/A'}\n• Plan: ${planName}\n• Due Date: ${dueDate}\n\n💡 You can now check your billing status by sending:\n• BILL - View your current bill\n• STATUS - Check your account status\n• PAY - Make a payment\n• HELP - Show all commands\n\nTo unlink this account, send: UNREGISTER`;
+            return `âœ… Success! Your Facebook account is now linked!\n\nðŸ“‹ Account Details:\nâ€¢ Account #: ${customer.accountNumber}\nâ€¢ Name: ${customer.fullName || 'N/A'}\nâ€¢ Plan: ${planName}\nâ€¢ Due Date: ${dueDate}\n\nðŸ’¡ You can now check your billing status by sending:\nâ€¢ BILL - View your current bill\nâ€¢ STATUS - Check your account status\nâ€¢ PAY - Make a payment\nâ€¢ HELP - Show all commands\n\nTo unlink this account, send: UNREGISTER`;
         } catch (err) {
             console.error('[Facebook Bot] Registration error:', err.message);
-            return "❌ Sorry, an error occurred while processing your registration. Please try again later or contact support.";
+            return "âŒ Sorry, an error occurred while processing your registration. Please try again later or contact support.";
         }
     }
 
@@ -8393,10 +8399,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             
             console.log(`[Facebook Bot] Cleared conversation state for ${senderId}`);
             
-            return `👋 Conversation Ended\n\nYou have returned to the main menu.\n\n📋 Available Commands:\n\n🔍 Account:\n• REGISTER <acct#> - Link your account\n• UNREGISTER - Unlink account\n• BILL - View billing\n• STATUS - Check status\n\n💳 Payments:\n• PAY - Payment options\n• PAY ONLINE - Online payment\n• PAY MANUAL - Manual/GCash\n\n🔧 Support:\n• REPAIR - Create ticket\n• TICKET STATUS - Check tickets\n• HELP - Show all commands\n\n💡 Type END anytime to return here.`;
+            return `ðŸ‘‹ Conversation Ended\n\nYou have returned to the main menu.\n\nðŸ“‹ Available Commands:\n\nðŸ” Account:\nâ€¢ REGISTER <acct#> - Link your account\nâ€¢ UNREGISTER - Unlink account\nâ€¢ BILL - View billing\nâ€¢ STATUS - Check status\n\nðŸ’³ Payments:\nâ€¢ PAY - Payment options\nâ€¢ PAY ONLINE - Online payment\nâ€¢ PAY MANUAL - Manual/GCash\n\nðŸ”§ Support:\nâ€¢ REPAIR - Create ticket\nâ€¢ TICKET STATUS - Check tickets\nâ€¢ HELP - Show all commands\n\nðŸ’¡ Type END anytime to return here.`;
         } catch (err) {
             console.error('[Facebook Bot] End command error:', err.message);
-            return "❌ Error occurred. Please try again or contact support.";
+            return "âŒ Error occurred. Please try again or contact support.";
         }
     }
 
@@ -8413,7 +8419,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 : await db.get('SELECT * FROM customers WHERE facebook_psid = ?', [senderId]);
 
             if (!customer) {
-                return `ℹ️ Your Facebook account is not currently linked to any account.\n\nTo register, send:\n📝 REGISTER <your_account_number>\nExample: REGISTER 20240001`;
+                return `â„¹ï¸ Your Facebook account is not currently linked to any account.\n\nTo register, send:\nðŸ“ REGISTER <your_account_number>\nExample: REGISTER 20240001`;
             }
 
             // Remove Facebook PSID from customer
@@ -8424,10 +8430,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             console.log(`[Facebook Bot] Unlinked Facebook user ${senderId} from account ${customer.accountNumber}`);
 
-            return `✅ Account Unlinked Successfully\n\n📋 Unlinked Account:\n• Account #: ${customer.accountNumber}\n• Name: ${customer.fullName || 'N/A'}\n\nYour Facebook account is no longer linked to this account.\n\nTo register a new account, send:\n📝 REGISTER <your_account_number>`;
+            return `âœ… Account Unlinked Successfully\n\nðŸ“‹ Unlinked Account:\nâ€¢ Account #: ${customer.accountNumber}\nâ€¢ Name: ${customer.fullName || 'N/A'}\n\nYour Facebook account is no longer linked to this account.\n\nTo register a new account, send:\nðŸ“ REGISTER <your_account_number>`;
         } catch (err) {
             console.error('[Facebook Bot] Unregister error:', err.message);
-            return "❌ Sorry, an error occurred while processing your request. Please try again later or contact support.";
+            return "âŒ Sorry, an error occurred while processing your request. Please try again later or contact support.";
         }
     }
 
@@ -8453,7 +8459,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             if (!customer) {
-                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo check your billing information, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nYou can find your account number on your billing statement or contact our support for assistance.`;
+                return `ðŸ‘‹ Welcome! It looks like you haven't linked your account yet.\n\nTo check your billing information, please register first:\n\nðŸ“ Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nYou can find your account number on your billing statement or contact our support for assistance.`;
             }
 
             // Customer found - prepare billing details
@@ -8472,20 +8478,20 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                 
                 if (diffDays < 0) {
-                    daysRemaining = `\n⚠️ OVERDUE by ${Math.abs(diffDays)} days`;
+                    daysRemaining = `\nâš ï¸ OVERDUE by ${Math.abs(diffDays)} days`;
                 } else if (diffDays === 0) {
-                    daysRemaining = `\n⚠️ DUE TODAY!`;
+                    daysRemaining = `\nâš ï¸ DUE TODAY!`;
                 } else {
-                    daysRemaining = `\n⏰ ${diffDays} days remaining`;
+                    daysRemaining = `\nâ° ${diffDays} days remaining`;
                 }
             }
 
-            const receipt = `📊 Billing Statement\n━━━━━━━━━━━━━━━━━━\n\n👤 Account Information:\n• Name: ${fullName}\n• Account #: ${customer.accountNumber}\n• Address: ${address}\n\n💰 Plan Details:\n• Plan: ${planName}\n• Status: ${status}\n• Due Date: ${dueDate}${daysRemaining}\n\n━━━━━━━━━━━━━━━━━━\n\n💳 To pay your bill, send: PAY\n\nNeed help? Send HELP for all commands.\nTo update your info, visit our office or contact support.`;
+            const receipt = `ðŸ“Š Billing Statement\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ‘¤ Account Information:\nâ€¢ Name: ${fullName}\nâ€¢ Account #: ${customer.accountNumber}\nâ€¢ Address: ${address}\n\nðŸ’° Plan Details:\nâ€¢ Plan: ${planName}\nâ€¢ Status: ${status}\nâ€¢ Due Date: ${dueDate}${daysRemaining}\n\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ’³ To pay your bill, send: PAY\n\nNeed help? Send HELP for all commands.\nTo update your info, visit our office or contact support.`;
 
             return receipt;
         } catch (err) {
             console.error('[Facebook Bot] Billing inquiry error:', err.message);
-            return "❌ Sorry, an error occurred while retrieving your billing information. Please try again later or contact support.";
+            return "âŒ Sorry, an error occurred while retrieving your billing information. Please try again later or contact support.";
         }
     }
 
@@ -8511,7 +8517,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             if (!customer) {
-                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can pay your subscription via Facebook Messenger.`;
+                return `ðŸ‘‹ Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\nðŸ“ Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can pay your subscription via Facebook Messenger.`;
             }
 
             // Get customer's plan details
@@ -8552,12 +8558,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                     // Use plan from comment if available
                                     if (commentData.planName) {
                                         planName = commentData.planName;
-                                        console.log(`[Facebook Bot] ✅ Got planName from MikroTik secret: "${planName}"`);
+                                        console.log(`[Facebook Bot] âœ… Got planName from MikroTik secret: "${planName}"`);
                                     }
                                     
                                     if (commentData.planPrice) {
                                         planPrice = commentData.planPrice;
-                                        console.log(`[Facebook Bot] ✅ Got planPrice from MikroTik secret: ₱${planPrice}`);
+                                        console.log(`[Facebook Bot] âœ… Got planPrice from MikroTik secret: â‚±${planPrice}`);
                                     }
                                     
                                     // If we have plan name but no price, lookup in billing_plans
@@ -8568,7 +8574,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                                         );
                                         if (plan && plan.price) {
                                             planPrice = plan.price;
-                                            console.log(`[Facebook Bot] ✅ Got price from billing_plans: ₱${planPrice}`);
+                                            console.log(`[Facebook Bot] âœ… Got price from billing_plans: â‚±${planPrice}`);
                                         }
                                     }
                                 } catch (e) {
@@ -8601,7 +8607,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     
                     if (plan && plan.price) {
                         planPrice = plan.price;
-                        console.log(`[Facebook Bot] ✅ Got price from billing_plans: ₱${planPrice}`);
+                        console.log(`[Facebook Bot] âœ… Got price from billing_plans: â‚±${planPrice}`);
                     }
                 } catch (err) {
                     console.warn('[Facebook Bot] Failed billing_plans lookup:', err.message);
@@ -8617,7 +8623,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     ? await db.all('SELECT name, price FROM billing_plans WHERE routerId = ?', [routerId])
                     : await db.all('SELECT name, price FROM billing_plans LIMIT 10');
                 
-                return `⚠️ Unable to determine your plan price.\n\nYour account shows: "${planName}"\nBut this plan doesn't exist in our system.\n\n📋 Available plans:\n${allPlans.map(p => `• ${p.name} (₱${p.price})`).join('\n')}\n\n📞 Please contact support to update your plan.`;
+                return `âš ï¸ Unable to determine your plan price.\n\nYour account shows: "${planName}"\nBut this plan doesn't exist in our system.\n\nðŸ“‹ Available plans:\n${allPlans.map(p => `â€¢ ${p.name} (â‚±${p.price})`).join('\n')}\n\nðŸ“ž Please contact support to update your plan.`;
             }
 
             // Check PayMongo availability
@@ -8636,27 +8642,27 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 companyInfo = JSON.parse(companySettings?.companySettings || '{}');
             } catch (_) {}
 
-            let message = `💳 Payment Options\n━━━━━━━━━━━━━━━━━━\n\n👤 Account: ${customer.accountNumber}\n📛 Name: ${customer.fullName || 'N/A'}\n💰 Amount: ₱${planPrice.toFixed(2)}\n\nChoose your payment method:\n\n`;
+            let message = `ðŸ’³ Payment Options\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ‘¤ Account: ${customer.accountNumber}\nðŸ“› Name: ${customer.fullName || 'N/A'}\nðŸ’° Amount: â‚±${planPrice.toFixed(2)}\n\nChoose your payment method:\n\n`;
 
             if (paymongoAvailable) {
-                message += `1️⃣ ONLINE PAYMENT (PayMongo)\n   • GCash, PayMaya, Cards\n   • Automatic activation\n   • Send: PAY ONLINE\n\n`;
+                message += `1ï¸âƒ£ ONLINE PAYMENT (PayMongo)\n   â€¢ GCash, PayMaya, Cards\n   â€¢ Automatic activation\n   â€¢ Send: PAY ONLINE\n\n`;
             }
 
             if (companyInfo.gcashNumber) {
-                message += `2️⃣ MANUAL GCASH PAYMENT\n   • Send directly to our GCash\n   • Admin verification required\n   • Send: PAY MANUAL\n\n`;
+                message += `2ï¸âƒ£ MANUAL GCASH PAYMENT\n   â€¢ Send directly to our GCash\n   â€¢ Admin verification required\n   â€¢ Send: PAY MANUAL\n\n`;
             }
 
             if (!paymongoAvailable && !companyInfo.gcashNumber) {
-                message += `⚠️ No payment methods available.\n\nPlease visit our office or contact support.\n\n📞 Support: [Your number]`;
+                message += `âš ï¸ No payment methods available.\n\nPlease visit our office or contact support.\n\nðŸ“ž Support: [Your number]`;
                 return message;
             }
 
-            message += `💡 Reply with option number (1 or 2)`;
+            message += `ðŸ’¡ Reply with option number (1 or 2)`;
 
             return message;
         } catch (err) {
             console.error('[Facebook Bot] Payment options error:', err.message);
-            return "❌ Sorry, an error occurred. Please try again later or contact support.";
+            return "âŒ Sorry, an error occurred. Please try again later or contact support.";
         }
     }
 
@@ -8682,7 +8688,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             if (!customer) {
-                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001`;
+                return `ðŸ‘‹ Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\nðŸ“ Send: REGISTER <your_account_number>\nExample: REGISTER 20240001`;
             }
 
             // Check if PayMongo is configured
@@ -8693,7 +8699,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             } catch (_) {}
 
             if (!paymongoSettings.enabled || !paymongoSettings.secretKey) {
-                return `⚠️ Online payment is currently unavailable.\n\nPlease try Manual GCash Payment instead or visit our office.`;
+                return `âš ï¸ Online payment is currently unavailable.\n\nPlease try Manual GCash Payment instead or visit our office.`;
             }
 
             // Get customer's plan details
@@ -8711,7 +8717,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         );
                         if (plan && plan.price) {
                             planPrice = plan.price;
-                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans: ₱${planPrice}`);
+                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans: â‚±${planPrice}`);
                         }
                     }
                     
@@ -8723,7 +8729,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         );
                         if (plan && plan.price) {
                             planPrice = plan.price;
-                            console.log(`[Facebook Bot] Retrieved plan price by ID: ₱${planPrice}`);
+                            console.log(`[Facebook Bot] Retrieved plan price by ID: â‚±${planPrice}`);
                         }
                     }
                 } catch (err) {
@@ -8732,7 +8738,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             if (!planPrice || planPrice <= 0) {
-                return `⚠️ Unable to determine your plan price.\n\nYour account may not have a plan assigned yet.\n\n📞 Please contact our support for assistance.`;
+                return `âš ï¸ Unable to determine your plan price.\n\nYour account may not have a plan assigned yet.\n\nðŸ“ž Please contact our support for assistance.`;
             }
 
             // Calculate amount with convenience fee if enabled
@@ -8742,7 +8748,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             if (paymongoSettings.passFeesToCustomer) {
                 const fee = Math.ceil(planPrice * 0.025) + 15;
                 totalAmount = planPrice + fee;
-                feeDescription = `\n• Convenience Fee: ₱${fee.toFixed(2)}`;
+                feeDescription = `\nâ€¢ Convenience Fee: â‚±${fee.toFixed(2)}`;
             }
 
             // Generate invoice number
@@ -8765,7 +8771,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 }
             };
 
-            console.log(`[Facebook Bot] Creating PayMongo checkout for ${customer.accountNumber}, amount: ₱${totalAmount}`);
+            console.log(`[Facebook Bot] Creating PayMongo checkout for ${customer.accountNumber}, amount: â‚±${totalAmount}`);
             console.log(`[Facebook Bot] PayMongo settings paymentMethods:`, paymongoSettings.paymentMethods);
             console.log(`[Facebook Bot] PayMongo request payload:`, JSON.stringify({
                 amount: Math.round(totalAmount * 100),
@@ -8836,7 +8842,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log(`[Facebook Bot] Payment link created for ${customer.accountNumber}: ${checkoutUrl}`);
 
             // Format payment message
-            const paymentMessage = `💳 Payment Request\n━━━━━━━━━━━━━━━━━━\n\n👤 Account Details:\n• Name: ${customer.fullName || 'Valued Customer'}\n• Account #: ${customer.accountNumber}\n• Plan: ${planName}\n\n💰 Payment Details:\n• Plan Price: ₱${planPrice.toFixed(2)}${feeDescription}\n• Total Amount: ₱${totalAmount.toFixed(2)}\n• Invoice #: ${invoiceNo}\n\n━━━━━━━━━━━━━━━━━━\n\n🔗 Click the link below to pay:\n${checkoutUrl}\n\n━━━━━━━━━━━━━━━━━━\n\n✅ Payment Methods:\n• GCash\n• PayMaya\n• GrabPay\n• Credit/Debit Card\n\n⏱️ Link expires in 24 hours.\n\n💡 After payment, your account will be activated automatically within 5 minutes.\n\n📞 Need help? Contact our support team.`;
+            const paymentMessage = `ðŸ’³ Payment Request\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ‘¤ Account Details:\nâ€¢ Name: ${customer.fullName || 'Valued Customer'}\nâ€¢ Account #: ${customer.accountNumber}\nâ€¢ Plan: ${planName}\n\nðŸ’° Payment Details:\nâ€¢ Plan Price: â‚±${planPrice.toFixed(2)}${feeDescription}\nâ€¢ Total Amount: â‚±${totalAmount.toFixed(2)}\nâ€¢ Invoice #: ${invoiceNo}\n\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ”— Click the link below to pay:\n${checkoutUrl}\n\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nâœ… Payment Methods:\nâ€¢ GCash\nâ€¢ PayMaya\nâ€¢ GrabPay\nâ€¢ Credit/Debit Card\n\nâ±ï¸ Link expires in 24 hours.\n\nðŸ’¡ After payment, your account will be activated automatically within 5 minutes.\n\nðŸ“ž Need help? Contact our support team.`;
 
             return paymentMessage;
         } catch (err) {
@@ -8845,7 +8851,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 console.error('[Facebook Bot] PayMongo error response status:', err.response.status);
                 console.error('[Facebook Bot] PayMongo error response data:', JSON.stringify(err.response.data, null, 2));
             }
-            return "❌ Sorry, an error occurred while creating your payment link. Please try again later or contact our support team.";
+            return "âŒ Sorry, an error occurred while creating your payment link. Please try again later or contact our support team.";
         }
     }
 
@@ -8876,7 +8882,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             if (!customer) {
-                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001`;
+                return `ðŸ‘‹ Welcome! It looks like you haven't linked your account yet.\n\nTo make a payment, please register first:\n\nðŸ“ Send: REGISTER <your_account_number>\nExample: REGISTER 20240001`;
             }
 
             // Get plan details
@@ -8894,7 +8900,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         );
                         if (plan && plan.price) {
                             planPrice = plan.price;
-                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans: ₱${planPrice}`);
+                            console.log(`[Facebook Bot] Retrieved plan price from billing_plans: â‚±${planPrice}`);
                         }
                     }
                     
@@ -8906,7 +8912,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         );
                         if (plan && plan.price) {
                             planPrice = plan.price;
-                            console.log(`[Facebook Bot] Retrieved plan price by ID: ₱${planPrice}`);
+                            console.log(`[Facebook Bot] Retrieved plan price by ID: â‚±${planPrice}`);
                         }
                     }
                 } catch (err) {
@@ -8915,7 +8921,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             if (!planPrice || planPrice <= 0) {
-                return `⚠️ Unable to determine your plan price.\n\nYour account may not have a plan assigned yet.\n\n📞 Please contact our support for assistance.`;
+                return `âš ï¸ Unable to determine your plan price.\n\nYour account may not have a plan assigned yet.\n\nðŸ“ž Please contact our support for assistance.`;
             }
 
             // Get company GCash settings
@@ -8926,7 +8932,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             } catch (_) {}
 
             if (!companyInfo.gcashNumber) {
-                return `⚠️ Manual GCash payment is currently unavailable.\n\nPlease try Online Payment or visit our office.`;
+                return `âš ï¸ Manual GCash payment is currently unavailable.\n\nPlease try Online Payment or visit our office.`;
             }
 
             // Initialize payment session
@@ -8942,12 +8948,12 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 createdAt: Date.now()
             });
 
-            const message = `📱 Manual GCash Payment\n━━━━━━━━━━━━━━━━━━\n\n💰 Amount to Pay: ₱${planPrice.toFixed(2)}\n\n📲 Send payment to our GCash:\nGCash Number: ${companyInfo.gcashNumber}\nName: ${companyInfo.gcashAccountName || companyInfo.companyName || 'N/A'}\n\nAfter sending payment, please provide:\n\n1️⃣ GCash Reference Number\n2️⃣ Your mobile number\n3️⃣ Name on your GCash account\n\n📝 Reply with your GCash Reference Number:\n(Example: 1234567890)`;
+            const message = `ðŸ“± Manual GCash Payment\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ’° Amount to Pay: â‚±${planPrice.toFixed(2)}\n\nðŸ“² Send payment to our GCash:\nGCash Number: ${companyInfo.gcashNumber}\nName: ${companyInfo.gcashAccountName || companyInfo.companyName || 'N/A'}\n\nAfter sending payment, please provide:\n\n1ï¸âƒ£ GCash Reference Number\n2ï¸âƒ£ Your mobile number\n3ï¸âƒ£ Name on your GCash account\n\nðŸ“ Reply with your GCash Reference Number:\n(Example: 1234567890)`;
 
             return message;
         } catch (err) {
             console.error('[Facebook Bot] Manual payment initiation error:', err.message);
-            return "❌ Sorry, an error occurred. Please try again later or contact support.";
+            return "âŒ Sorry, an error occurred. Please try again later or contact support.";
         }
     }
 
@@ -8963,7 +8969,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             // Check if session expired (5 minutes)
             if (Date.now() - session.createdAt > 5 * 60 * 1000) {
                 pendingManualPayments.delete(senderId);
-                return "⏱️ Payment session expired. Please send PAY to start again.";
+                return "â±ï¸ Payment session expired. Please send PAY to start again.";
             }
 
             if (session.step === 'awaiting_reference') {
@@ -8971,7 +8977,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 session.step = 'awaiting_mobile';
                 pendingManualPayments.set(senderId, session);
                 
-                return `✅ Reference number received.\n\n📱 Now, please send your mobile number:\n(Example: 09171234567)`;
+                return `âœ… Reference number received.\n\nðŸ“± Now, please send your mobile number:\n(Example: 09171234567)`;
             }
 
             if (session.step === 'awaiting_mobile') {
@@ -8979,7 +8985,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 session.step = 'awaiting_name';
                 pendingManualPayments.set(senderId, session);
                 
-                return `✅ Mobile number received.\n\n👤 Finally, please send the name on your GCash account:\n(Example: Juan Dela Cruz)`;
+                return `âœ… Mobile number received.\n\nðŸ‘¤ Finally, please send the name on your GCash account:\n(Example: Juan Dela Cruz)`;
             }
 
             if (session.step === 'awaiting_name') {
@@ -9003,14 +9009,14 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 const paymentNumber = paymentId.split('_')[2].toUpperCase();
                 
                 // Send confirmation
-                return `✅ Manual Payment Request Submitted!\n━━━━━━━━━━━━━━━━━━\n\n🎫 Request #: ${paymentNumber}\n💰 Amount: ₱${session.planPrice.toFixed(2)}\n📱 GCash Ref: ${session.gcashReference}\n📱 Mobile: ${session.mobileNumber}\n👤 GCash Name: ${session.gcashName}\n\n⏱️ Status: Pending Verification\n\n📋 What's Next?\n• Our admin will verify your payment\n• You'll receive confirmation via Messenger\n• Verification time: 5-30 minutes\n\n💡 Keep your GCash receipt for reference.\n\n📞 Questions? Contact our support.`;
+                return `âœ… Manual Payment Request Submitted!\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸŽ« Request #: ${paymentNumber}\nðŸ’° Amount: â‚±${session.planPrice.toFixed(2)}\nðŸ“± GCash Ref: ${session.gcashReference}\nðŸ“± Mobile: ${session.mobileNumber}\nðŸ‘¤ GCash Name: ${session.gcashName}\n\nâ±ï¸ Status: Pending Verification\n\nðŸ“‹ What's Next?\nâ€¢ Our admin will verify your payment\nâ€¢ You'll receive confirmation via Messenger\nâ€¢ Verification time: 5-30 minutes\n\nðŸ’¡ Keep your GCash receipt for reference.\n\nðŸ“ž Questions? Contact our support.`;
             }
 
             return null;
         } catch (err) {
             console.error('[Facebook Bot] Manual payment step processing error:', err.message);
             pendingManualPayments.delete(senderId);
-            return "❌ Sorry, an error occurred. Please send PAY to start again or contact support.";
+            return "âŒ Sorry, an error occurred. Please send PAY to start again or contact support.";
         }
     }
 
@@ -9028,7 +9034,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             );
 
             if (!customer) {
-                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo create a repair ticket, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can report internet issues via Facebook Messenger.`;
+                return `ðŸ‘‹ Welcome! It looks like you haven't linked your account yet.\n\nTo create a repair ticket, please register first:\n\nðŸ“ Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can report internet issues via Facebook Messenger.`;
             }
 
             // Customer found - parse the issue description
@@ -9061,7 +9067,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     category = 'other';
                 } else {
                     // No description provided - ask for it
-                    return `🔧 Repair Ticket - Describe Your Issue\n━━━━━━━━━━━━━━━━━━\n\n👤 Account: ${customer.accountNumber}\n📛 Name: ${customer.fullName || 'N/A'}\n\n📝 Please describe your internet problem in detail.\n\nExamples:\n• "My internet is not working since this morning"\n• "Connection is very slow, can't browse"\n• "Internet keeps disconnecting every few minutes"\n• "I think there's a problem with the line/cable"\n\n💡 Common Issues:\n• No Internet - Complete loss of connection\n• Slow Connection - Internet is working but very slow\n• Intermittent - Connection keeps dropping\n• Line Issue - Physical cable/line problem\n\n📞 For urgent issues, please call our support hotline.`;
+                    return `ðŸ”§ Repair Ticket - Describe Your Issue\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ‘¤ Account: ${customer.accountNumber}\nðŸ“› Name: ${customer.fullName || 'N/A'}\n\nðŸ“ Please describe your internet problem in detail.\n\nExamples:\nâ€¢ "My internet is not working since this morning"\nâ€¢ "Connection is very slow, can't browse"\nâ€¢ "Internet keeps disconnecting every few minutes"\nâ€¢ "I think there's a problem with the line/cable"\n\nðŸ’¡ Common Issues:\nâ€¢ No Internet - Complete loss of connection\nâ€¢ Slow Connection - Internet is working but very slow\nâ€¢ Intermittent - Connection keeps dropping\nâ€¢ Line Issue - Physical cable/line problem\n\nðŸ“ž For urgent issues, please call our support hotline.`;
                 }
             }
 
@@ -9078,22 +9084,22 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
             // Category display names
             const categoryNames = {
-                'no_internet': '🔴 No Internet',
-                'slow_connection': '🟡 Slow Connection',
-                'intermittent': '🟠 Intermittent Connection',
-                'line_issue': '🔵 Line/Cable Issue',
-                'other': '⚪ Other Issue'
+                'no_internet': 'ðŸ”´ No Internet',
+                'slow_connection': 'ðŸŸ¡ Slow Connection',
+                'intermittent': 'ðŸŸ  Intermittent Connection',
+                'line_issue': 'ðŸ”µ Line/Cable Issue',
+                'other': 'âšª Other Issue'
             };
 
-            const categoryName = categoryNames[category] || '⚪ Other Issue';
+            const categoryName = categoryNames[category] || 'âšª Other Issue';
 
             // Extract ticket number (short version)
             const ticketNumber = ticketId.split('_')[1];
 
-            return `✅ Repair Ticket Created Successfully!\n━━━━━━━━━━━━━━━━━━\n\n🎫 Ticket Details:\n• Ticket #: ${ticketNumber}\n• Account: ${customer.accountNumber}\n• Name: ${customer.fullName || 'N/A'}\n• Category: ${categoryName}\n• Status: 🟢 Open\n• Priority: Normal\n\n📝 Issue Description:\n${description}\n\n━━━━━━━━━━━━━━━━━━\n\n⏱️ What's Next?\n• Our technical team will review your ticket\n• You'll receive updates via this messenger\n• Typical response time: 1-4 hours\n\n📞 For urgent emergencies, please call our support hotline.\n\n💡 You can check your ticket status anytime by sending: STATUS`;
+            return `âœ… Repair Ticket Created Successfully!\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸŽ« Ticket Details:\nâ€¢ Ticket #: ${ticketNumber}\nâ€¢ Account: ${customer.accountNumber}\nâ€¢ Name: ${customer.fullName || 'N/A'}\nâ€¢ Category: ${categoryName}\nâ€¢ Status: ðŸŸ¢ Open\nâ€¢ Priority: Normal\n\nðŸ“ Issue Description:\n${description}\n\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nâ±ï¸ What's Next?\nâ€¢ Our technical team will review your ticket\nâ€¢ You'll receive updates via this messenger\nâ€¢ Typical response time: 1-4 hours\n\nðŸ“ž For urgent emergencies, please call our support hotline.\n\nðŸ’¡ You can check your ticket status anytime by sending: STATUS`;
         } catch (err) {
             console.error('[Facebook Bot] Repair ticket creation error:', err.message);
-            return "❌ Sorry, an error occurred while creating your repair ticket. Please try again later or contact our support team directly.";
+            return "âŒ Sorry, an error occurred while creating your repair ticket. Please try again later or contact our support team directly.";
         }
     }
 
@@ -9111,7 +9117,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             );
 
             if (!customer) {
-                return `👋 Welcome! It looks like you haven't linked your account yet.\n\nTo check your ticket status, please register first:\n\n📝 Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can track your repair tickets via Facebook Messenger.`;
+                return `ðŸ‘‹ Welcome! It looks like you haven't linked your account yet.\n\nTo check your ticket status, please register first:\n\nðŸ“ Send: REGISTER <your_account_number>\nExample: REGISTER 20240001\n\nOnce registered, you can track your repair tickets via Facebook Messenger.`;
             }
 
             // Get all tickets for this customer (by PPPoE username)
@@ -9121,29 +9127,29 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             );
 
             if (!tickets || tickets.length === 0) {
-                return `📋 Ticket Status\n━━━━━━━━━━━━━━━━━━\n\nYou don't have any repair tickets yet.\n\n🔧 To report an issue, send:\nREPAIR <your issue description>\n\nExample: REPAIR My internet is not working\n\n━━━━━━━━━━━━━━━━━━\n\n📞 Need help? Contact our support team.`;
+                return `ðŸ“‹ Ticket Status\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nYou don't have any repair tickets yet.\n\nðŸ”§ To report an issue, send:\nREPAIR <your issue description>\n\nExample: REPAIR My internet is not working\n\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“ž Need help? Contact our support team.`;
             }
 
             // Format ticket list
-            let message = `📋 Your Recent Tickets\n━━━━━━━━━━━━━━━━━━\n\n👤 Account: ${customer.accountNumber}\n📛 Name: ${customer.fullName || 'N/A'}\n\n`;
+            let message = `ðŸ“‹ Your Recent Tickets\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ‘¤ Account: ${customer.accountNumber}\nðŸ“› Name: ${customer.fullName || 'N/A'}\n\n`;
 
             tickets.forEach((ticket, index) => {
                 const ticketNumber = ticket.id.split('_')[1];
                 
                 // Status icons
                 const statusIcons = {
-                    'open': '🟢',
-                    'in_progress': '🔵',
-                    'resolved': '✅',
-                    'closed': '⚫'
+                    'open': 'ðŸŸ¢',
+                    'in_progress': 'ðŸ”µ',
+                    'resolved': 'âœ…',
+                    'closed': 'âš«'
                 };
                 
                 // Priority icons
                 const priorityIcons = {
-                    'low': '🟢',
-                    'normal': '🟡',
-                    'high': '🟠',
-                    'urgent': '🔴'
+                    'low': 'ðŸŸ¢',
+                    'normal': 'ðŸŸ¡',
+                    'high': 'ðŸŸ ',
+                    'urgent': 'ðŸ”´'
                 };
 
                 // Category display
@@ -9155,8 +9161,8 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     'other': 'Other'
                 };
 
-                const statusIcon = statusIcons[ticket.status] || '⚪';
-                const priorityIcon = priorityIcons[ticket.priority] || '🟡';
+                const statusIcon = statusIcons[ticket.status] || 'âšª';
+                const priorityIcon = priorityIcons[ticket.priority] || 'ðŸŸ¡';
                 const categoryName = categoryNames[ticket.category] || ticket.category;
 
                 // Format dates
@@ -9168,30 +9174,30 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                     minute: '2-digit'
                 });
 
-                message += `${index + 1}️⃣ Ticket #${ticketNumber}\n`;
+                message += `${index + 1}ï¸âƒ£ Ticket #${ticketNumber}\n`;
                 message += `${statusIcon} Status: ${ticket.status.replace('_', ' ').toUpperCase()}\n`;
                 message += `${priorityIcon} Priority: ${ticket.priority.toUpperCase()}\n`;
-                message += `📂 Category: ${categoryName}\n`;
-                message += `📝 Issue: ${ticket.description.substring(0, 50)}${ticket.description.length > 50 ? '...' : ''}\n`;
-                message += `📅 Created: ${createdDate}\n`;
+                message += `ðŸ“‚ Category: ${categoryName}\n`;
+                message += `ðŸ“ Issue: ${ticket.description.substring(0, 50)}${ticket.description.length > 50 ? '...' : ''}\n`;
+                message += `ðŸ“… Created: ${createdDate}\n`;
                 
                 if (ticket.admin_notes) {
-                    message += `💬 Admin Note: ${ticket.admin_notes.substring(0, 50)}${ticket.admin_notes.length > 50 ? '...' : ''}\n`;
+                    message += `ðŸ’¬ Admin Note: ${ticket.admin_notes.substring(0, 50)}${ticket.admin_notes.length > 50 ? '...' : ''}\n`;
                 }
                 
                 if (ticket.assigned_to) {
-                    message += `👨‍🔧 Assigned to: ${ticket.assigned_to}\n`;
+                    message += `ðŸ‘¨â€ðŸ”§ Assigned to: ${ticket.assigned_to}\n`;
                 }
                 
                 message += `\n`;
             });
 
-            message += `━━━━━━━━━━━━━━━━━━\n\n💡 Need updates?\n• Our team will notify you via Messenger\n• Or send TICKET STATUS anytime\n\n📞 For urgent issues, call our support hotline.`;
+            message += `â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ’¡ Need updates?\nâ€¢ Our team will notify you via Messenger\nâ€¢ Or send TICKET STATUS anytime\n\nðŸ“ž For urgent issues, call our support hotline.`;
 
             return message;
         } catch (err) {
             console.error('[Facebook Bot] Ticket status error:', err.message);
-            return "❌ Sorry, an error occurred while retrieving your ticket status. Please try again later or contact support.";
+            return "âŒ Sorry, an error occurred while retrieving your ticket status. Please try again later or contact support.";
         }
     }
 
@@ -9199,7 +9205,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     // Helper: Help Message
     // ========================================
     function getHelpMessage() {
-        return `🤖 CityConnect Billing Bot - Help Menu\n━━━━━━━━━━━━━━━━━━\n\n📝 Available Commands:\n\n1️⃣ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2️⃣ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3️⃣ PAY / PAYMENT / BAYAD\n   Choose payment method (Online or Manual)\n   • PAY ONLINE - PayMongo (Auto-activate)\n   • PAY MANUAL - GCash (Admin verify)\n\n4️⃣ REPAIR / TICKET\n   Report internet issues & create support ticket\n   Example: REPAIR My internet is not working\n\n5️⃣ TICKET STATUS / TICKETS\n   Check your repair ticket status\n   Shows recent tickets & updates\n\n6️⃣ HELP / MENU\n   Show this help message\n\n━━━━━━━━━━━━━━━━━━\n\n💡 Quick Start:\nSend: REGISTER <your_account_number>\n\n💳 Payment Commands:\n• PAY - Choose payment method\n• PAY ONLINE - Pay via PayMongo (GCash, Cards)\n• PAY MANUAL - Pay via GCash manual transfer\n• BAYAD - Filipino term for payment\n\n🔧 Ticket Commands:\n• TICKET STATUS - View your tickets\n• TICKETS - Same as TICKET STATUS\n• REPAIR - Report an issue\n• NO INTERNET - Complete loss of connection\n• SLOW - Internet is very slow\n• INTERMITTENT - Connection keeps dropping\n\n📞 Need assistance? Contact our support team or visit our office.\n\n🌐 Powered by CityConnect Billing Manager`;
+        return `ðŸ¤– CityConnect Billing Bot - Help Menu\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“ Available Commands:\n\n1ï¸âƒ£ REGISTER <account_no>\n   Link your Facebook to your account\n   Example: REGISTER 20240001\n\n2ï¸âƒ£ BILL / BALANCE / STATUS\n   View your billing details & status\n\n3ï¸âƒ£ PAY / PAYMENT / BAYAD\n   Choose payment method (Online or Manual)\n   â€¢ PAY ONLINE - PayMongo (Auto-activate)\n   â€¢ PAY MANUAL - GCash (Admin verify)\n\n4ï¸âƒ£ REPAIR / TICKET\n   Report internet issues & create support ticket\n   Example: REPAIR My internet is not working\n\n5ï¸âƒ£ TICKET STATUS / TICKETS\n   Check your repair ticket status\n   Shows recent tickets & updates\n\n6ï¸âƒ£ HELP / MENU\n   Show this help message\n\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ’¡ Quick Start:\nSend: REGISTER <your_account_number>\n\nðŸ’³ Payment Commands:\nâ€¢ PAY - Choose payment method\nâ€¢ PAY ONLINE - Pay via PayMongo (GCash, Cards)\nâ€¢ PAY MANUAL - Pay via GCash manual transfer\nâ€¢ BAYAD - Filipino term for payment\n\nðŸ”§ Ticket Commands:\nâ€¢ TICKET STATUS - View your tickets\nâ€¢ TICKETS - Same as TICKET STATUS\nâ€¢ REPAIR - Report an issue\nâ€¢ NO INTERNET - Complete loss of connection\nâ€¢ SLOW - Internet is very slow\nâ€¢ INTERMITTENT - Connection keeps dropping\n\nðŸ“ž Need assistance? Contact our support team or visit our office.\n\nðŸŒ Powered by CityConnect Billing Manager`;
     }
 
     // Helper function to send messages via Facebook Graph API
@@ -9275,7 +9281,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const settings = await db.get('SELECT telegramSettings FROM settings WHERE id = 1');
             const telegramSettings = JSON.parse(settings?.telegramSettings || '{}');
             
-            const notifMessage = `📢 Customer Notification Request\n━━━━━━━━━━━━━━━━━━\n\n👤 Name: ${customerName || 'Unknown'}\n📋 Account: ${customerAccount || 'Unknown'}\n💬 Message: ${message || 'No message provided'}\n\n⏰ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })}`;
+            const notifMessage = `ðŸ“¢ Customer Notification Request\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ‘¤ Name: ${customerName || 'Unknown'}\nðŸ“‹ Account: ${customerAccount || 'Unknown'}\nðŸ’¬ Message: ${message || 'No message provided'}\n\nâ° Time: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })}`;
             
             // Send Telegram notification to admin
             if (telegramSettings?.enabled && telegramSettings.botToken && telegramSettings.chatId) {
@@ -9328,21 +9334,21 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             if (!tokenFormatValid) {
                 return res.status(400).json({
                     success: false,
-                    message: '❌ Invalid token format. Access tokens should start with "EAAG" or "EAA". Please generate a new token from Facebook Developers Console.'
+                    message: 'âŒ Invalid token format. Access tokens should start with "EAAG" or "EAA". Please generate a new token from Facebook Developers Console.'
                 });
             }
 
             if (!tokenLengthValid) {
                 return res.status(400).json({
                     success: false,
-                    message: '❌ Token seems too short. Valid tokens are usually 150+ characters. Please check your token.'
+                    message: 'âŒ Token seems too short. Valid tokens are usually 150+ characters. Please check your token.'
                 });
             }
 
             // Token format looks good
             res.json({ 
                 success: true, 
-                message: `✅ Token format is valid!\n\nToken starts with: ${pageAccessToken.substring(0, 15)}...\nToken length: ${pageAccessToken.length} characters\n\nYour Facebook Messenger bot is configured. When users message your Page, the webhook at /api/facebook-webhook will receive their messages.\n\nNote: Facebook requires users to message your Page first before you can reply (24-hour messaging window).`
+                message: `âœ… Token format is valid!\n\nToken starts with: ${pageAccessToken.substring(0, 15)}...\nToken length: ${pageAccessToken.length} characters\n\nYour Facebook Messenger bot is configured. When users message your Page, the webhook at /api/facebook-webhook will receive their messages.\n\nNote: Facebook requires users to message your Page first before you can reply (24-hour messaging window).`
             });
         } catch (err) {
             console.error('[Facebook Test] Error:', err.message);
@@ -9359,9 +9365,9 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 
                 // Provide helpful hints based on error code
                 if (fbError.code === 190) {
-                    errorMessage += '\n\n💡 Hint: Your access token is invalid or expired. Generate a new one from Facebook Developers Console.';
+                    errorMessage += '\n\nðŸ’¡ Hint: Your access token is invalid or expired. Generate a new one from Facebook Developers Console.';
                 } else if (fbError.code === 200) {
-                    errorMessage += '\n\n💡 Hint: Permission denied. Make sure your app has these permissions:\n  • pages_messaging\n  • pages_manage_metadata\n  • pages_read_engagement';
+                    errorMessage += '\n\nðŸ’¡ Hint: Permission denied. Make sure your app has these permissions:\n  â€¢ pages_messaging\n  â€¢ pages_manage_metadata\n  â€¢ pages_read_engagement';
                 }
             }
             
@@ -9395,32 +9401,32 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                             call_to_actions: [
                                 {
                                     type: 'postback',
-                                    title: '📊 Check Bill',
+                                    title: 'ðŸ“Š Check Bill',
                                     payload: 'CHECK_BILL'
                                 },
                                 {
                                     type: 'postback',
-                                    title: '💳 Pay Now',
+                                    title: 'ðŸ’³ Pay Now',
                                     payload: 'PAY_NOW'
                                 },
                                 {
                                     type: 'postback',
-                                    title: '🔧 Report Issue',
+                                    title: 'ðŸ”§ Report Issue',
                                     payload: 'REPORT_ISSUE'
                                 },
                                 {
                                     type: 'postback',
-                                    title: '📋 My Tickets',
+                                    title: 'ðŸ“‹ My Tickets',
                                     payload: 'MY_TICKETS'
                                 },
                                 {
                                     type: 'postback',
-                                    title: '📢 Notify Admin',
+                                    title: 'ðŸ“¢ Notify Admin',
                                     payload: 'NOTIFY_ADMIN'
                                 },
                                 {
                                     type: 'postback',
-                                    title: '🏠 Main Menu',
+                                    title: 'ðŸ  Main Menu',
                                     payload: 'MAIN_MENU'
                                 }
                             ]
@@ -9436,7 +9442,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             console.log('[Facebook Persistent Menu] Success:', response.data);
             res.json({ 
                 success: true, 
-                message: '✅ Persistent menu set successfully!\n\nUsers will now see a floating menu (☰) in the Messenger conversation with:\n• 📊 Check Bill\n• 💳 Pay Now\n• 🔧 Report Issue\n• 📋 My Tickets\n• 📢 Notify Admin\n• 🏠 Main Menu\n\nNote: It may take a few minutes to appear in Messenger.'
+                message: 'âœ… Persistent menu set successfully!\n\nUsers will now see a floating menu (â˜°) in the Messenger conversation with:\nâ€¢ ðŸ“Š Check Bill\nâ€¢ ðŸ’³ Pay Now\nâ€¢ ðŸ”§ Report Issue\nâ€¢ ðŸ“‹ My Tickets\nâ€¢ ðŸ“¢ Notify Admin\nâ€¢ ðŸ  Main Menu\n\nNote: It may take a few minutes to appear in Messenger.'
             });
         } catch (err) {
             console.error('[Facebook Persistent Menu] Error:', err.message);
@@ -9445,7 +9451,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             if (fbError) {
                 errorMessage = `Facebook API Error: ${fbError.message || 'Unknown error'} (Code: ${fbError.code || 'N/A'})`;
                 if (fbError.code === 100) {
-                    errorMessage += '\n\n💡 Hint: Invalid parameter. Make sure your Page Access Token has pages_messaging permission.';
+                    errorMessage += '\n\nðŸ’¡ Hint: Invalid parameter. Make sure your Page Access Token has pages_messaging permission.';
                 }
             }
             res.status(500).json({ success: false, message: errorMessage });
@@ -9469,7 +9475,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             });
             
             console.log('[Facebook Persistent Menu] Deleted successfully');
-            res.json({ success: true, message: '✅ Persistent menu removed successfully.' });
+            res.json({ success: true, message: 'âœ… Persistent menu removed successfully.' });
         } catch (err) {
             console.error('[Facebook Persistent Menu] Delete error:', err.message);
             res.status(500).json({ success: false, message: err.message });
@@ -9638,10 +9644,10 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             );
             
             if (customer && customer.accountNumber) {
-                console.log(`[Client Portal Lookup] ✓ Found account number: ${customer.accountNumber}`);
+                console.log(`[Client Portal Lookup] âœ“ Found account number: ${customer.accountNumber}`);
                 res.json({ accountNumber: customer.accountNumber, found: true });
             } else {
-                console.log(`[Client Portal Lookup] ✗ Account number not found`);
+                console.log(`[Client Portal Lookup] âœ— Account number not found`);
                 res.json({ accountNumber: null, found: false, message: 'Account number not found for this PPPoE user' });
             }
         } catch (e) { 
@@ -10080,39 +10086,39 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                         if (fbConfig.enabled && fbConfig.pageAccessToken) {
                             // Build notification message
                             const statusIcons = {
-                                'open': '🟢',
-                                'in_progress': '🔵',
-                                'resolved': '✅',
-                                'closed': '⚫'
+                                'open': 'ðŸŸ¢',
+                                'in_progress': 'ðŸ”µ',
+                                'resolved': 'âœ…',
+                                'closed': 'âš«'
                             };
                             
-                            const statusIcon = statusIcons[status] || '⚪';
+                            const statusIcon = statusIcons[status] || 'âšª';
                             const ticketNumber = ticket.id.split('_')[1];
                             
-                            let notificationMessage = `${statusIcon} Ticket Update\n━━━━━━━━━━━━━━━━━━\n\n🎫 Ticket #${ticketNumber}\n\n`;
-                            notificationMessage += `📊 Status Changed:\n`;
+                            let notificationMessage = `${statusIcon} Ticket Update\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸŽ« Ticket #${ticketNumber}\n\n`;
+                            notificationMessage += `ðŸ“Š Status Changed:\n`;
                             notificationMessage += `From: ${oldStatus.replace('_', ' ').toUpperCase()}\n`;
                             notificationMessage += `To: ${status.replace('_', ' ').toUpperCase()}\n\n`;
                             
                             if (admin_notes) {
-                                notificationMessage += `💬 Admin Note:\n${admin_notes}\n\n`;
+                                notificationMessage += `ðŸ’¬ Admin Note:\n${admin_notes}\n\n`;
                             }
                             
                             if (assigned_to) {
-                                notificationMessage += `👨‍🔧 Assigned to: ${assigned_to}\n\n`;
+                                notificationMessage += `ðŸ‘¨â€ðŸ”§ Assigned to: ${assigned_to}\n\n`;
                             }
                             
-                            notificationMessage += `━━━━━━━━━━━━━━━━━━\n\n`;
+                            notificationMessage += `â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n`;
                             
                             if (status === 'resolved') {
-                                notificationMessage += `✅ Your issue has been resolved!\n`;
+                                notificationMessage += `âœ… Your issue has been resolved!\n`;
                                 notificationMessage += `If you're still experiencing problems, please contact us.\n\n`;
                             } else if (status === 'in_progress') {
-                                notificationMessage += `🔧 Our team is working on your issue.\n`;
+                                notificationMessage += `ðŸ”§ Our team is working on your issue.\n`;
                                 notificationMessage += `We'll update you once it's resolved.\n\n`;
                             }
                             
-                            notificationMessage += `📞 Need help? Contact our support team.`;
+                            notificationMessage += `ðŸ“ž Need help? Contact our support team.`;
                             
                             // Send notification via Facebook
                             await sendFacebookMessage(customer.facebook_psid, notificationMessage, fbConfig.pageAccessToken);
@@ -10273,7 +10279,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
-    // ========== Collectibles — Expiring Clients API ==========
+    // ========== Collectibles â€” Expiring Clients API ==========
 
     // GET /api/collectibles/expiring-clients - Returns PPPoE + DHCP clients with dueDate in the current month or earlier
     app.get('/api/collectibles/expiring-clients', protect, async (req, res) => {
@@ -10791,11 +10797,11 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     app.use('/api/license', licenseRouter);
 
     // --- System / Host Status ---
-    // Cache WAN IP in memory — it rarely changes, no need to hit ipify on every 5s poll
+    // Cache WAN IP in memory â€” it rarely changes, no need to hit ipify on every 5s poll
     let wanIpCache = { ip: null, fetchedAt: 0 };
     const WAN_IP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-    // Static hardware/host info (CPU model, motherboard, OS) — fetched once and cached,
+    // Static hardware/host info (CPU model, motherboard, OS) â€” fetched once and cached,
     // since these values never change while the server runs and host-status is polled frequently
     let hostHardwareCache = null;
     const sanitizeHw = (v) => {
@@ -11391,7 +11397,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             }
 
             // SNAPSHOT user data (DBs, .env, uploads, device id, etc.)
-            // BEFORE pulling — prevents git from overwriting any of
+            // BEFORE pulling â€” prevents git from overwriting any of
             // those files if they happen to be tracked in the repo.
             try {
                 if (typeof snapshotUserData === 'function') {
@@ -11473,7 +11479,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 // SNAPSHOT: capture per-install user data (DBs, .env,
                 // uploads, device-id, etc.) before pulling. Without this
                 // a `git pull` will overwrite any of those files that are
-                // tracked in the repository — producing the "factory
+                // tracked in the repository â€” producing the "factory
                 // reset" symptom (routers/customers/settings disappear).
                 try {
                     if (typeof snapshotUserData === 'function') {
@@ -11516,7 +11522,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
                 // checkout half-overwritten by git.
                 if (snapshotRoot && capturedPaths.length > 0 && typeof restoreUserData === 'function') {
                     try {
-                        send({ log: 'Pull failed — restoring user data from snapshot...' });
+                        send({ log: 'Pull failed â€” restoring user data from snapshot...' });
                         restoreUserData(send, snapshotRoot, capturedPaths);
                     } catch {}
                 }
@@ -11560,7 +11566,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
     };
 
     // ------------------------------------------------------------------
-    // PRESERVE LIST — files/dirs that hold per-install user data and must
+    // PRESERVE LIST â€” files/dirs that hold per-install user data and must
     // survive `git pull`. Even if .gitignore is incomplete on a particular
     // checkout, the updater snapshots these aside before pulling and
     // restores them afterward so an update can NEVER act like a factory
@@ -11640,7 +11646,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     };
 
-    // POST /api/update-app  (SSE) — backup DB, git pull, npm install, build, restart
+    // POST /api/update-app  (SSE) â€” backup DB, git pull, npm install, build, restart
     app.get('/api/update-app', protect, requireSuperadminOrAdmin, (req, res) => {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
@@ -11732,7 +11738,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
 
                 // 4b) RESTORE per-install user data on top of whatever git
                 //     pulled in. Anything in PRESERVE_PATHS now reflects the
-                //     pre-update state — DBs intact, routers intact,
+                //     pre-update state â€” DBs intact, routers intact,
                 //     .env intact, uploads intact, device id intact.
                 if (snapshotRoot && capturedPaths.length > 0) {
                     send({ log: 'Restoring per-install user data after pull...' });
@@ -11787,7 +11793,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         req.on('close', () => { try { res.end(); } catch {} });
     });
 
-    // GET /api/rollback-app?backupFile=xxx.db  (SSE) — restore DB then restart
+    // GET /api/rollback-app?backupFile=xxx.db  (SSE) â€” restore DB then restart
     app.get('/api/rollback-app', protect, requireSuperadminOrAdmin, (req, res) => {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
@@ -11845,7 +11851,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         req.on('close', () => { try { res.end(); } catch {} });
     });
 
-    // GET /api/rollback-update?id=xxx (SSE) — FULL rollback (code + DB + user data)
+    // GET /api/rollback-update?id=xxx (SSE) â€” FULL rollback (code + DB + user data)
     app.get('/api/rollback-update', protect, requireSuperadminOrAdmin, (req, res) => {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
@@ -11975,7 +11981,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         req.on('close', () => { try { res.end(); } catch {} });
     });
 
-    // GET /api/list-update-snapshots — enumerate rollback manifests
+    // GET /api/list-update-snapshots â€” enumerate rollback manifests
     app.get('/api/list-update-snapshots', protect, requireSuperadminOrAdmin, async (req, res) => {
         try {
             if (!fs.existsSync(BACKUP_DIR)) return res.json([]);
@@ -12008,7 +12014,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         }
     });
 
-    // POST /api/delete-update-snapshot { id } — remove snapshot dir + paired DB backup
+    // POST /api/delete-update-snapshot { id } â€” remove snapshot dir + paired DB backup
     app.post('/api/delete-update-snapshot', protect, requireSuperadminOrAdmin, async (req, res) => {
         try {
             const { id } = req.body || {};
@@ -12119,7 +12125,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
             const elapsed = Date.now() - lastActivity;
             if (elapsed >= HANG_TIMEOUT_MS) {
                 const seconds = Math.floor(elapsed / 1000);
-                send({ log: `⚠️  WARNING: No output received for ${seconds}s. Installation may be hanging...`, isWarning: true });
+                send({ log: `âš ï¸  WARNING: No output received for ${seconds}s. Installation may be hanging...`, isWarning: true });
             }
         }, 15000); // Check every 15 seconds
 
@@ -12136,7 +12142,7 @@ body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; color: #3
         child.on('close', (code) => {
             clearInterval(hangCheckInterval);
             if (code === 0) {
-                send({ status: 'success', log: '✅ ZeroTier installed successfully!' });
+                send({ status: 'success', log: 'âœ… ZeroTier installed successfully!' });
             } else {
                 send({ status: 'error', message: `Installation failed with exit code ${code}.` });
             }
@@ -12358,7 +12364,7 @@ WantedBy=multi-user.target`;
             const timestamp = new Date().toLocaleString();
             await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 chat_id: chatId,
-                text: `🔔 Test message from Mikrotik Manager Panel.\n🕐 ${timestamp}`
+                text: `ðŸ”” Test message from Mikrotik Manager Panel.\nðŸ• ${timestamp}`
             }, { timeout: 10000 });
             res.json({ success: true, message: 'Message sent successfully!' });
         } catch (err) {
@@ -12927,7 +12933,7 @@ WantedBy=multi-user.target`;
         } catch (e) { res.status(500).json({ message: e.message }); }
     });
 
-    // Network Topology — full tree as nested JSON
+    // Network Topology â€” full tree as nested JSON
     app.get('/api/network-topology', protect, async (req, res) => {
         try {
             const equipment = await db.all('SELECT * FROM network_equipment ORDER BY name');
@@ -12966,7 +12972,7 @@ WantedBy=multi-user.target`;
                 result.push({ ...eq, ponPorts: ponData });
             }
 
-            // Orphaned splitters (no PON port linked anywhere) — group under a virtual node
+            // Orphaned splitters (no PON port linked anywhere) â€” group under a virtual node
             const allSplitters = await db.all('SELECT * FROM olt_splitters ORDER BY name');
             const unlinkedSplitters = [];
             for (const spl of allSplitters) {
@@ -12989,7 +12995,7 @@ WantedBy=multi-user.target`;
             if (unlinkedSplitters.length > 0 || unassignedNaps.length > 0) {
                 result.push({
                     id: 'unlinked',
-                    name: '⚠ Unlinked Splitters / NAPs (not connected to an OLT)',
+                    name: 'âš  Unlinked Splitters / NAPs (not connected to an OLT)',
                     status: 'inactive',
                     ponPorts: [],
                     unlinkedSplitters,
@@ -13438,7 +13444,7 @@ WantedBy=multi-user.target`;
     });
 
     app.listen(PORT, () => {
-        console.log(`✅ Mikrotik Manager UI running on http://localhost:${PORT}`);
+        console.log(`âœ… Mikrotik Manager UI running on http://localhost:${PORT}`);
         console.log(`   Mode: Production (Static Files Served)`);
 
         // Auto-register PayMongo webhook on startup
@@ -13666,7 +13672,7 @@ WantedBy=multi-user.target`;
             }
 
             // Fallback: If still not found and IP is from non-payment pool,
-            // try matching via ARP table MAC → PPP secret caller-id
+            // try matching via ARP table MAC â†’ PPP secret caller-id
             if (!customer && ip && (await isInNonPaymentPool(ip))) {
                 console.log(`[Captive Expired] Active session lookup failed for ${ip}, trying ARP+Secret matching...`);
                 const arpResult = await lookupPppoeByArpAndSecret(ip);
@@ -14040,7 +14046,7 @@ WantedBy=multi-user.target`;
     });
 
     captiveApp.listen(CAPTIVE_PORT, () => {
-        console.log(`✅ Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
+        console.log(`âœ… Captive Portal UI running on http://localhost:${CAPTIVE_PORT}/captive`);
     });
 }
 
@@ -14112,15 +14118,15 @@ function startFacebookReminderScheduler() {
                     
                     let message;
                     if (daysUntilDue === null) {
-                        message = `📅 PAYMENT NOTIFICATION\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n\n💳 Send PAY to pay now.`;
+                        message = `ðŸ“… PAYMENT NOTIFICATION\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ‘¤ Name: ${customer.fullName || 'Valued Customer'}\nðŸ’° Amount: â‚±${(customer.planPrice || 0).toFixed(2)}\n\nðŸ’³ Send PAY to pay now.`;
                     } else if (daysUntilDue < 0) {
-                        message = `⚠️ OVERDUE PAYMENT\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n👤 Name: ${customer.fullName || 'Valued Customer'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\n⚠️ Service may be suspended!\n\n💳 Send PAY to pay now.`;
+                        message = `âš ï¸ OVERDUE PAYMENT\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ‘¤ Name: ${customer.fullName || 'Valued Customer'}\nðŸ’° Amount: â‚±${(customer.planPrice || 0).toFixed(2)}\nðŸ“… Due: ${customer.dueDate} (${Math.abs(daysUntilDue)} days overdue)\n\nâš ï¸ Service may be suspended!\n\nðŸ’³ Send PAY to pay now.`;
                     } else if (daysUntilDue === 0) {
-                        message = `🔴 DUE TODAY\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n\n⏰ Please pay today!\n\n💳 Send PAY to pay now.`;
+                        message = `ðŸ”´ DUE TODAY\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ’° Amount: â‚±${(customer.planPrice || 0).toFixed(2)}\n\nâ° Please pay today!\n\nðŸ’³ Send PAY to pay now.`;
                     } else if (daysUntilDue === 1) {
-                        message = `⏰ PAYMENT DUE TOMORROW\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate}\n\n💳 Send PAY to pay now.`;
+                        message = `â° PAYMENT DUE TOMORROW\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ’° Amount: â‚±${(customer.planPrice || 0).toFixed(2)}\nðŸ“… Due: ${customer.dueDate}\n\nðŸ’³ Send PAY to pay now.`;
                     } else {
-                        message = `⏰ Payment Reminder\n━━━━━━━━━━━━━━━━━━\n\n📋 Account: ${customer.accountNumber || 'N/A'}\n💰 Amount: ₱${(customer.planPrice || 0).toFixed(2)}\n📅 Due: ${customer.dueDate} (${daysUntilDue} days)\n\n💳 Send PAY to pay now.`;
+                        message = `â° Payment Reminder\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\nðŸ“‹ Account: ${customer.accountNumber || 'N/A'}\nðŸ’° Amount: â‚±${(customer.planPrice || 0).toFixed(2)}\nðŸ“… Due: ${customer.dueDate} (${daysUntilDue} days)\n\nðŸ’³ Send PAY to pay now.`;
                     }
                     
                     // Try RESPONSE first, fallback to UPDATE
@@ -14140,7 +14146,7 @@ function startFacebookReminderScheduler() {
                                                 (errData?.message || '').includes('outside of allowed window');
                         if (isOutsideWindow) {
                             skippedCount++;
-                            console.warn(`[Facebook Reminders] ⊘ Skipped ${customer.accountNumber}: outside 24h window`);
+                            console.warn(`[Facebook Reminders] âŠ˜ Skipped ${customer.accountNumber}: outside 24h window`);
                             continue;
                         }
                         // Fallback to UPDATE
@@ -14156,11 +14162,11 @@ function startFacebookReminderScheduler() {
                     }
                     
                     sentCount++;
-                    console.log(`[Facebook Reminders] ✓ Sent to ${customer.accountNumber} (${daysUntilDue} days)`);
+                    console.log(`[Facebook Reminders] âœ“ Sent to ${customer.accountNumber} (${daysUntilDue} days)`);
                 } catch (err) {
                     failedCount++;
                     const errData = err.response?.data?.error;
-                    console.error(`[Facebook Reminders] ✗ Failed for ${customer.accountNumber}:`, errData?.message || err.message);
+                    console.error(`[Facebook Reminders] âœ— Failed for ${customer.accountNumber}:`, errData?.message || err.message);
                 }
             }
             
@@ -14217,9 +14223,9 @@ async function syncExpiredClientsToAddressList() {
                 // Use date-only format to match how dueDate is stored (e.g., "2025-07-10")
                 const now = new Date().toISOString().split('T')[0];
 
-                // ─── PPPoE: No auto-disable. PPPoE secrets are managed manually by admin. ───
+                // â”€â”€â”€ PPPoE: No auto-disable. PPPoE secrets are managed manually by admin. â”€â”€â”€
 
-                // ─── DHCP: IP-based firewall address-list ───
+                // â”€â”€â”€ DHCP: IP-based firewall address-list â”€â”€â”€
                 const expiredDhcpClients = await db.all(
                     `SELECT dc.*, r.host, r.port FROM dhcp_clients dc
                      JOIN routers r ON dc.routerId = r.id
