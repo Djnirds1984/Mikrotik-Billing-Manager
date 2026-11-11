@@ -6,6 +6,9 @@ export const WanSettingsPanel: React.FC = () => {
   const [settings, setSettings] = useState<Partial<WanSettings>>({
     connectionType: 'dhcp',
     wanInterface: 'eth0',
+    vlanId: '',
+    parentInterface: '',
+    vlanAddressing: 'dhcp',
     staticIp: '',
     staticGateway: '',
     staticDns: '',
@@ -36,6 +39,9 @@ export const WanSettingsPanel: React.FC = () => {
       setSettings({
         connectionType: data.connectionType || 'dhcp',
         wanInterface: data.wanInterface || 'eth0',
+        vlanId: data.vlanId || '',
+        parentInterface: data.parentInterface || '',
+        vlanAddressing: data.vlanAddressing || 'dhcp',
         staticIp: data.staticIp || '',
         staticGateway: data.staticGateway || '',
         staticDns: data.staticDns || '',
@@ -76,7 +82,7 @@ export const WanSettingsPanel: React.FC = () => {
   };
 
   const validateSettings = (): string | null => {
-    if (!settings.connectionType || !['dhcp', 'static', 'pppoe'].includes(settings.connectionType)) {
+    if (!settings.connectionType || !['dhcp', 'static', 'pppoe', 'vlan'].includes(settings.connectionType)) {
       return 'Invalid connection type';
     }
 
@@ -108,6 +114,28 @@ export const WanSettingsPanel: React.FC = () => {
       }
       if (!settings.pppoePassword || settings.pppoePassword.trim().length === 0) {
         return 'PPPoE password is required';
+      }
+    }
+
+    if (settings.connectionType === 'vlan') {
+      if (!settings.vlanId || String(settings.vlanId).trim().length === 0) {
+        return 'VLAN ID is required';
+      }
+      if (!settings.parentInterface || settings.parentInterface.trim().length === 0) {
+        return 'Parent interface is required';
+      }
+      if (!settings.vlanAddressing || !['dhcp', 'static'].includes(settings.vlanAddressing)) {
+        return 'VLAN addressing must be dhcp or static';
+      }
+      if (settings.vlanAddressing === 'static') {
+        const cidrRegex = /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/;
+        if (!settings.staticIp || !cidrRegex.test(settings.staticIp)) {
+          return 'Invalid IP address format. Use CIDR notation (e.g., 10.0.0.5/24)';
+        }
+        const ipRegex = /^\d{1,3}(\.\d{1,3}){3}$/;
+        if (!settings.staticGateway || !ipRegex.test(settings.staticGateway)) {
+          return 'Invalid gateway IP address';
+        }
       }
     }
 
@@ -210,6 +238,7 @@ export const WanSettingsPanel: React.FC = () => {
           <option value="dhcp">DHCP Client</option>
           <option value="static">Static IP</option>
           <option value="pppoe">PPPoE Client</option>
+          <option value="vlan">VLAN Interface</option>
         </select>
       </div>
 
@@ -267,8 +296,63 @@ export const WanSettingsPanel: React.FC = () => {
         )}
       </div>
 
+      {/* VLAN Fields */}
+      {settings.connectionType === 'vlan' && (
+        <div className="space-y-4 pl-4 border-l-2 border-blue-500">
+          <div>
+            <label htmlFor="vlanId" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+              VLAN ID
+            </label>
+            <input
+              type="number"
+              id="vlanId"
+              min="1"
+              max="4094"
+              value={settings.vlanId || ''}
+              onChange={(e) => handleChange('vlanId', e.target.value)}
+              className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+              placeholder="e.g. 10"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="parentInterface" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+              Parent Interface
+            </label>
+            <select
+              id="parentInterface"
+              value={settings.parentInterface || ''}
+              onChange={(e) => handleChange('parentInterface', e.target.value)}
+              className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+            >
+              <option value="">Select parent interface</option>
+              {availableInterfaces.map(iface => (
+                <option key={iface.name} value={iface.name}>
+                  {iface.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="vlanAddressing" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+              VLAN Addressing Method
+            </label>
+            <select
+              id="vlanAddressing"
+              value={settings.vlanAddressing || 'dhcp'}
+              onChange={(e) => handleChange('vlanAddressing', e.target.value)}
+              className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md py-2 px-3 text-slate-900 dark:text-white"
+            >
+              <option value="dhcp">DHCP Client</option>
+              <option value="static">Static IP</option>
+            </select>
+          </div>
+        </div>
+      )}
+
       {/* Static IP Fields */}
-      {settings.connectionType === 'static' && (
+      {(settings.connectionType === 'static' || (settings.connectionType === 'vlan' && settings.vlanAddressing === 'static')) && (
         <div className="space-y-4 pl-4 border-l-2 border-blue-500">
           <div>
             <label htmlFor="staticIp" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -415,3 +499,4 @@ export const WanSettingsPanel: React.FC = () => {
     </div>
   );
 };
+

@@ -1054,8 +1054,11 @@ export interface NetworkStatus {
 
 export interface WanSettings {
   id?: number;
-  connectionType: 'dhcp' | 'static' | 'pppoe';
+  connectionType: 'dhcp' | 'static' | 'pppoe' | 'vlan';
   wanInterface: string;
+  vlanId?: number | string;
+  parentInterface?: string;
+  vlanAddressing?: 'dhcp' | 'static';
   staticIp?: string;
   staticGateway?: string;
   staticDns?: string;
